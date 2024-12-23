@@ -10,6 +10,8 @@ python = "^3.13"
 pyparted = { url = "https://github.com/dcantrell/pyparted/archive/v3.13.0.tar.gz" }
 archinstall = "^2.8.3"
 
+[tool.poetry.scripts]
+archinstall-zfs = "archinstall_zfs.main:main"
 
 [build-system]
 requires = ["poetry-core"]

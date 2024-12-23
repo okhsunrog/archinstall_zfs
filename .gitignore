@@ -1,0 +1,12 @@
+# Python cache files
+__pycache__/
+*.pyc
+
+# Logs and local files
+install.log
+cmd_history.txt
+
+# Poetry and virtual env
+.venv/
+dist/
+
