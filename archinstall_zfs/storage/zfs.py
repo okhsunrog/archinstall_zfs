@@ -92,10 +92,10 @@ class ZFSManager:
         SysCommand(f'zpool set bootfs=zroot/ROOT_{prefix}/default zroot')
         SysCommand('zpool export zroot')
 
-    def import_pool(self, mountpoint: Path = Path('/mnt')):
+    def import_pool(self, prefix: str, mountpoint: Path = Path('/mnt')):
         SysCommand(f'zpool import -N -R {mountpoint} zroot')
         SysCommand('zfs load-key zroot')
-        SysCommand('zfs mount zroot/ROOT/default')
+        SysCommand(f'zfs mount zroot/ROOT_{prefix}/default')
         SysCommand('zfs mount -a')
         
         # Set and copy cache file

@@ -62,7 +62,7 @@ def main():
             )
             
             # Import pool and mount for installation
-            zfs_manager.import_pool(Path('/mnt'))
+            zfs_manager.import_pool(dataset_prefix, Path('/mnt'))
 
         elif mode == "new_pool":
             # TODO: Implement partition selection and pool creation
