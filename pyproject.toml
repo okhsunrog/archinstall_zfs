@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "archinstall-zfs"
+version = "0.1.0"
+description = ""
+authors = ["okhsunrog <me@okhsunrog.dev>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.13"
+pyparted = { url = "https://github.com/dcantrell/pyparted/archive/v3.13.0.tar.gz" }
+archinstall = "^2.8.3"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
