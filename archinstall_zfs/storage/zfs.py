@@ -62,7 +62,7 @@ class ZFSManager:
     def setup_encryption(self, password: str) -> None:
         debug("Setting up encryption key file")
         self.zfs_key_path.parent.mkdir(parents=True, exist_ok=True)
-        self.zfs_key_path.write_text(password, encoding='utf-8')
+        self.zfs_key_path.write_text(password, encoding="utf-8")
         self.zfs_key_path.chmod(0o000)
         info("Encryption key file created")
 
