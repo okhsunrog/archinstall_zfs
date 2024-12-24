@@ -33,12 +33,7 @@ def get_installation_mode():
     return menu.run().item().value
 
 def main():
-    if not check_internet():
-        print("Error: No internet connection detected")
-        return False
-        
-    if not check_efi():
-        print("Error: System not booted in UEFI mode")
+    if not check_internet() or not check_efi():
         return False
 
     disk_manager = DiskManager()
@@ -46,31 +41,31 @@ def main():
 
     with Tui():
         mode = get_installation_mode()
+        dataset_prefix = disk_manager.get_dataset_prefix()
         
         if mode == "full_disk":
-            # Full disk installation flow
+            # Full disk installation
             selected_disk = disk_manager.select_disk()
-            dataset_prefix = disk_manager.get_dataset_prefix()
+            zfs_partition = disk_manager.prepare_disk(selected_disk)
             encryption_password = zfs_manager.get_encryption_password()
             
-            # Prepare disk and create ZFS pool
-            disk_manager.prepare_disk(selected_disk)
-            zfs_manager.create_pool(
-                partition="/dev/disk/by-partlabel/rootpart",
-                prefix=dataset_prefix,
-                encryption_password=encryption_password
-            )
-            
-            # Import pool and mount for installation
+            zfs_manager.create_pool(zfs_partition, dataset_prefix, encryption_password)
             zfs_manager.import_pool(dataset_prefix, Path('/mnt'))
 
         elif mode == "new_pool":
-            # TODO: Implement partition selection and pool creation
-            pass
+            # Create pool on existing partition
+            selected_disk = disk_manager.select_disk()
+            selected_partition = disk_manager.select_partition(selected_disk)
+            encryption_password = zfs_manager.get_encryption_password()
             
+            zfs_manager.create_pool(selected_partition, dataset_prefix, encryption_password)
+            zfs_manager.import_pool(dataset_prefix, Path('/mnt'))
+
         elif mode == "existing_pool":
-            # TODO: Implement existing pool handling
-            pass
+            # Use existing pool
+            selected_pool = zfs_manager.select_pool()
+            zfs_manager.import_pool(dataset_prefix, Path('/mnt'))
+            zfs_manager.create_datasets(dataset_prefix)
 
     return True
 
