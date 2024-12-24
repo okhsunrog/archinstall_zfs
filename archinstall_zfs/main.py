@@ -10,7 +10,6 @@ from typing import Literal
 from archinstall.lib.output import info, error, debug
 from archinstall.tui.curses_menu import Tui, SelectMenu, MenuItemGroup
 from archinstall.tui.menu_item import MenuItem
-from archinstall.lib.output import log_level, LOG_LEVELS
 from storage.disk import DiskManager
 from storage.zfs import ZFSManager
 
@@ -122,8 +121,6 @@ def handle_existing_pool_install(zfs_manager: ZFSManager, dataset_prefix: str) -
 
 
 def main() -> bool:
-    log_level.value = LOG_LEVELS.DEBUG
-
     info("Starting ZFS installation")
 
     if not check_internet():
