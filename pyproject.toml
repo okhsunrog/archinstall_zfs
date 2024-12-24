@@ -9,8 +9,42 @@ readme = "README.md"
 python = "^3.13"
 pyparted = { url = "https://github.com/dcantrell/pyparted/archive/v3.13.0.tar.gz" }
 
-[tool.poetry.scripts]
-archinstall-zfs = "archinstall_zfs.main:main"
+[tool.poetry.group.dev.dependencies]
+pylint = "^3.3.3"
+mypy = "^1.14.0"
+flake8 = "^7.1.1"
+black = "^24.10.0"
+
+[tool.mypy]
+exclude = ['archinstall/.*']
+ignore_missing_imports = true
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "."
+
+[tool.pylint.main]
+ignore = ['archinstall']
+disable = [
+    "C",  # Convention warnings
+    "R",  # Refactor suggestions
+    "import-error",  # E0401
+    "no-name-in-module",  # E0611
+    "broad-exception-caught",  # W0718
+    "raise-missing-from",  # W0707
+]
+
+[tool.pylint.format]
+max-line-length = 160
+
+[tool.pylint.basic]
+good-names = ["i", "j", "k", "ex", "Run", "_"]
+
+[tool.black]
+extend-exclude = '''
+(
+  archinstall/.*
+)
+'''
 
 [build-system]
 requires = ["poetry-core"]
