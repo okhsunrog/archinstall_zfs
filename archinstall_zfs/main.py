@@ -2,6 +2,7 @@
 from pathlib import Path
 import socket
 from typing import Literal
+import os
 
 # Third-party imports
 # import parted
@@ -10,6 +11,7 @@ from typing import Literal
 from archinstall import SysInfo, debug, info, error
 from archinstall.tui.curses_menu import Tui, SelectMenu, MenuItemGroup
 from archinstall.tui.menu_item import MenuItem
+from archinstall.lib.storage import storage
 from storage.disk import DiskManager
 from storage.zfs import ZFSManager
 
@@ -109,6 +111,10 @@ def handle_existing_pool_install(zfs_manager: ZFSManager, dataset_prefix: str) -
 
 
 def main() -> bool:
+    storage['LOG_PATH'] = os.path.expanduser('~')
+    storage['LOG_FILE'] = 'archinstall.log'
+    storage['LOG_LEVEL'] = 'DEBUG'
+
     info("Starting ZFS installation")
 
     if not check_internet():
