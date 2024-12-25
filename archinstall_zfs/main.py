@@ -9,7 +9,7 @@ import os
 
 # Local application imports
 from archinstall import SysInfo, debug, info, error
-from archinstall.tui.curses_menu import Tui, SelectMenu, MenuItemGroup
+from archinstall.tui.curses_menu import Tui, SelectMenu, MenuItemGroup, EditMenu
 from archinstall.tui.menu_item import MenuItem
 from archinstall.lib.storage import storage
 from storage.disk import DiskManager
@@ -49,64 +49,52 @@ def get_installation_mode() -> InstallMode:
     return selected
 
 
-def handle_full_disk_install(
-    disk_manager: DiskManager, zfs_manager: ZFSManager, dataset_prefix: str
+def prepare_installation(
+        disk_manager: DiskManager,
+        zfs_manager: ZFSManager,
+        mode: InstallMode
+) -> None:
+    prefix_menu = EditMenu(
+        "Dataset Prefix",
+        header="Enter prefix for ZFS datasets (e.g., sys, main)",
+        default_text="arch0",
+    )
+    zfs_manager.dataset_prefix = prefix_menu.input().text()
+
+    if mode == "full_disk":
+        disk_manager.select_disk()
+        disk_manager.prepare_disk()
+    elif mode == "new_pool":
+        disk_manager.select_disk()
+        disk_manager.select_partition("ZFS")
+        disk_manager.select_partition("EFI")
+    else:  # existing_pool
+        zfs_manager.select_pool()
+        disk_manager.select_disk()
+        disk_manager.select_partition("EFI")
+
+
+def perform_installation(
+        disk_manager: DiskManager,
+        zfs_manager: ZFSManager,
+        mode: InstallMode,
 ) -> bool:
-    debug("Starting full disk installation")
     try:
-        selected_disk = disk_manager.select_disk()
-        info(f"Selected disk: {selected_disk}")
+        if mode != "existing_pool":
+            zfs_manager.get_encryption_password()
+            zfs_manager.create_pool(disk_manager.zfs_partition)
+            zfs_manager.create_datasets()
+            zfs_manager.export_pool()
 
-        debug("Preparing disk partitions")
-        zfs_partition = disk_manager.prepare_disk(selected_disk)
-        info(f"Created ZFS partition: {zfs_partition}")
+        zfs_manager.import_pool(Path("/mnt"))
+        disk_manager.mount_efi_partition(Path("/mnt"))
 
-        encryption_password = zfs_manager.get_encryption_password()
-        debug("Creating ZFS pool")
-        zfs_manager.create_pool(zfs_partition, dataset_prefix, encryption_password)
+        if not zfs_manager.verify_mounts():
+            raise RuntimeError("Mount verification failed")
 
-        debug("Importing and mounting pool")
-        zfs_manager.import_pool(dataset_prefix, Path("/mnt"))
         return True
     except Exception as e:
-        error(f"Full disk installation failed: {str(e)}")
-        return False
-
-
-def handle_new_pool_install(
-    disk_manager: DiskManager, zfs_manager: ZFSManager, dataset_prefix: str
-) -> bool:
-    debug("Starting new pool installation")
-    try:
-        selected_disk = disk_manager.select_disk()
-        selected_partition = disk_manager.select_partition(selected_disk)
-        encryption_password = zfs_manager.get_encryption_password()
-
-        debug("Creating ZFS pool on existing partition")
-        zfs_manager.create_pool(selected_partition, dataset_prefix, encryption_password)
-
-        debug("Importing and mounting pool")
-        zfs_manager.import_pool(dataset_prefix, Path("/mnt"))
-        return True
-    except Exception as e:
-        error(f"New pool installation failed: {str(e)}")
-        return False
-
-
-def handle_existing_pool_install(zfs_manager: ZFSManager, dataset_prefix: str) -> bool:
-    debug("Starting existing pool installation")
-    try:
-        selected_pool = zfs_manager.select_pool()
-        debug(f"Selected pool: {selected_pool}")
-
-        debug("Importing existing pool")
-        zfs_manager.import_pool(dataset_prefix, Path("/mnt"))
-
-        debug("Creating datasets structure")
-        zfs_manager.create_datasets(dataset_prefix)
-        return True
-    except Exception as e:
-        error(f"Existing pool installation failed: {str(e)}")
+        error(f"Installation failed: {str(e)}")
         return False
 
 
@@ -131,25 +119,7 @@ def main() -> bool:
     try:
         with Tui():
             mode = get_installation_mode()
-            dataset_prefix = disk_manager.get_dataset_prefix()
-            info(f"Using dataset prefix: {dataset_prefix}")
-
-            if mode == "full_disk":
-                return handle_full_disk_install(
-                    disk_manager, zfs_manager, dataset_prefix
-                )
-            elif mode == "new_pool":
-                return handle_new_pool_install(
-                    disk_manager, zfs_manager, dataset_prefix
-                )
-            elif mode == "existing_pool":
-                return handle_existing_pool_install(zfs_manager, dataset_prefix)
+            prepare_installation(disk_manager, zfs_manager, mode)
+            perform_installation(disk_manager, zfs_manager, mode)
     except Exception as e:
         error(f"Installation failed: {str(e)}")
-        return False
-
-    return True
-
-
-if __name__ == "__main__":
-    main()

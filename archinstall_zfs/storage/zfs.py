@@ -13,33 +13,12 @@ class ZFSManager:
         self.zfs_key_path = Path("/etc/zfs/zroot.key")
         self.pool_cache_path = Path("/etc/zfs/zpool.cache")
         self.hostid_path = Path("/etc/hostid")
+        self.pool_name: str = "zroot"
+        self.encryption_password: str | None = None
+        self.dataset_prefix: str | None = None
+        self.mountpoint: Path | None = None
 
-    def get_available_pools(self) -> List[MenuItem]:
-        debug("Scanning for importable ZFS pools")
-        try:
-            output = SysCommand("zpool import").decode()
-            pools = []
-            for line in output.splitlines():
-                if line.startswith("   pool:"):
-                    pool_name = line.split(":")[1].strip()
-                    pools.append(MenuItem(pool_name, pool_name))
-                    debug(f"Found pool: {pool_name}")
-            info(f"Found {len(pools)} importable pools")
-            return pools
-        except SysCallError as e:
-            error(f"Failed to get pool list: {str(e)}")
-            return []
-
-    def select_pool(self) -> str:
-        debug("Displaying pool selection menu")
-        pool_menu = SelectMenu(
-            MenuItemGroup(self.get_available_pools()), header="Select existing ZFS pool"
-        )
-        selected = pool_menu.run().item().value
-        info(f"Selected pool: {selected}")
-        return selected
-
-    def get_encryption_password(self) -> str:
+    def get_encryption_password(self) -> None:
         debug("Requesting encryption password")
         while True:
             password_menu = EditMenu(
@@ -55,20 +34,27 @@ class ZFSManager:
             verify = verify_menu.input().text()
 
             if password == verify and password:
+                self.encryption_password = password
                 debug("Encryption password verified")
-                return password
+                return
             error("Password verification failed - retrying")
 
-    def setup_encryption(self, password: str) -> None:
+    def setup_encryption(self) -> None:
+        if not self.encryption_password:
+            raise RuntimeError("No encryption password set")
+
         debug("Setting up encryption key file")
         self.zfs_key_path.parent.mkdir(parents=True, exist_ok=True)
-        self.zfs_key_path.write_text(password, encoding="utf-8")
+        self.zfs_key_path.write_text(self.encryption_password, encoding="utf-8")
         self.zfs_key_path.chmod(0o000)
         info("Encryption key file created")
 
-    def create_pool(self, partition: str, prefix: str, encryption_password: str) -> str:
+    def create_pool(self, partition: str) -> None:
+        if not self.encryption_password:
+            raise RuntimeError("No encryption password set")
+
         debug(f"Creating ZFS pool on partition: {partition}")
-        self.setup_encryption(encryption_password)
+        self.setup_encryption()
 
         try:
             debug("Generating host ID")
@@ -95,32 +81,30 @@ class ZFSManager:
         ]
 
         try:
-            pool_cmd = f'zpool create -f {" ".join(pool_options)} zroot {partition}'
+            pool_cmd = f'zpool create -f {" ".join(pool_options)} {self.pool_name} {partition}'
             debug("Executing pool creation command")
             SysCommand(pool_cmd)
             info("ZFS pool created successfully")
-
-            self.create_datasets(prefix)
-            debug("Exporting new pool")
-            SysCommand("zpool export zroot")
-            return "zroot"
         except SysCallError as e:
             error(f"Failed to create ZFS pool: {str(e)}")
             raise
 
-    def create_datasets(self, prefix: str) -> None:
-        debug(f"Creating dataset structure with prefix: {prefix}")
+    def create_datasets(self) -> None:
+        if not self.dataset_prefix:
+            raise RuntimeError("No dataset prefix set")
+
+        debug(f"Creating dataset structure with prefix: {self.dataset_prefix}")
         datasets: List[Tuple[str, Optional[Dict[str, str]]]] = [
-            (f"zroot/data_{prefix}", {"mountpoint": "none"}),
-            (f"zroot/ROOT_{prefix}", {"mountpoint": "none"}),
-            (f"zroot/ROOT_{prefix}/default", {"mountpoint": "/", "canmount": "noauto"}),
-            (f"zroot/data_{prefix}/home", {"mountpoint": "/home"}),
-            (f"zroot/data_{prefix}/root", {"mountpoint": "/root"}),
-            (f"zroot/var_{prefix}", {"mountpoint": "/var", "canmount": "off"}),
-            (f"zroot/var_{prefix}/lib", {"mountpoint": "/var/lib", "canmount": "off"}),
-            (f"zroot/var_{prefix}/lib/libvirt", None),
-            (f"zroot/var_{prefix}/lib/docker", None),
-            (f"zroot/vm_{prefix}", {"mountpoint": "/vm"}),
+            (f"{self.pool_name}/data_{self.dataset_prefix}", {"mountpoint": "none"}),
+            (f"{self.pool_name}/ROOT_{self.dataset_prefix}", {"mountpoint": "none"}),
+            (f"{self.pool_name}/ROOT_{self.dataset_prefix}/default", {"mountpoint": "/", "canmount": "noauto"}),
+            (f"{self.pool_name}/data_{self.dataset_prefix}/home", {"mountpoint": "/home"}),
+            (f"{self.pool_name}/data_{self.dataset_prefix}/root", {"mountpoint": "/root"}),
+            (f"{self.pool_name}/var_{self.dataset_prefix}", {"mountpoint": "/var", "canmount": "off"}),
+            (f"{self.pool_name}/var_{self.dataset_prefix}/lib", {"mountpoint": "/var/lib", "canmount": "off"}),
+            (f"{self.pool_name}/var_{self.dataset_prefix}/lib/libvirt", None),
+            (f"{self.pool_name}/var_{self.dataset_prefix}/lib/docker", None),
+            (f"{self.pool_name}/vm_{self.dataset_prefix}", {"mountpoint": "/vm"}),
         ]
 
         for dataset, props in datasets:
@@ -136,19 +120,23 @@ class ZFSManager:
                 raise
 
         debug("Setting bootfs property")
-        SysCommand(f"zpool set bootfs=zroot/ROOT_{prefix}/default zroot")
+        SysCommand(f"zpool set bootfs={self.pool_name}/ROOT_{self.dataset_prefix}/default {self.pool_name}")
         info("Dataset structure created successfully")
 
-    def import_pool(self, prefix: str, mountpoint: Path) -> None:
+    def import_pool(self, mountpoint: Path) -> None:
+        if not self.dataset_prefix:
+            raise RuntimeError("No dataset prefix set")
+
+        self.mountpoint = mountpoint
         debug(f"Importing pool to mountpoint: {mountpoint}")
         try:
-            SysCommand(f"zpool import -N -R {mountpoint} zroot")
-            SysCommand("zfs load-key zroot")
-            SysCommand(f"zfs mount zroot/ROOT_{prefix}/default")
+            SysCommand(f"zpool import -N -R {mountpoint} {self.pool_name}")
+            SysCommand(f"zfs load-key {self.pool_name}")
+            SysCommand(f"zfs mount {self.pool_name}/ROOT_{self.dataset_prefix}/default")
             SysCommand("zfs mount -a")
 
             debug("Setting pool cache file")
-            SysCommand(f"zpool set cachefile={self.pool_cache_path} zroot")
+            SysCommand(f"zpool set cachefile={self.pool_cache_path} {self.pool_name}")
 
             debug("Copying ZFS configuration files")
             target_zfs = mountpoint / "etc/zfs"
@@ -162,12 +150,59 @@ class ZFSManager:
             error(f"Failed to import/mount pool: {str(e)}")
             raise
 
+    def verify_mounts(self) -> bool:
+        if not self.mountpoint or not self.dataset_prefix:
+            raise RuntimeError("Mountpoint or dataset prefix not set")
+
+        debug("Verifying dataset mounts")
+        required_mounts = [
+            self.mountpoint,
+            self.mountpoint / "home",
+            self.mountpoint / "root",
+            self.mountpoint / "var/lib/docker",
+            self.mountpoint / "var/lib/libvirt",
+            self.mountpoint / "vm",
+            self.mountpoint / "boot/efi"
+        ]
+
+        for mount in required_mounts:
+            if not mount.is_mount():
+                error(f"Required mount point not mounted: {mount}")
+                return False
+        return True
+
     def export_pool(self) -> None:
         debug("Exporting ZFS pool")
         try:
             SysCommand("zfs umount -a")
-            SysCommand("zpool export zroot")
+            SysCommand(f"zpool export {self.pool_name}")
             info("Pool exported successfully")
         except SysCallError as e:
             error(f"Failed to export pool: {str(e)}")
             raise
+
+    def get_available_pools(self) -> List[MenuItem]:
+        debug("Scanning for importable ZFS pools")
+        try:
+            output = SysCommand("zpool import").decode()
+            pools = []
+            for line in output.splitlines():
+                if line.startswith("   pool:"):
+                    pool_name = line.split(":")[1].strip()
+                    pools.append(MenuItem(pool_name, pool_name))
+                    debug(f"Found pool: {pool_name}")
+            info(f"Found {len(pools)} importable pools")
+            return pools
+        except SysCallError as e:
+            error(f"Failed to get pool list: {str(e)}")
+            return []
+
+    def select_pool(self) -> None:
+        debug("Displaying pool selection menu")
+        pool_menu = SelectMenu(
+            MenuItemGroup(self.get_available_pools()),
+            header="Select existing ZFS pool"
+        )
+        self.pool_name = pool_menu.run().item().value
+        info(f"Selected pool: {self.pool_name}")
+
