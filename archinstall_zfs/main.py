@@ -58,7 +58,7 @@ def handle_full_disk_install(
         info(f"Selected disk: {selected_disk}")
 
         debug("Preparing disk partitions")
-        zfs_partition = disk_manager.prepare_dcisk(selected_disk)
+        zfs_partition = disk_manager.prepare_disk(selected_disk)
         info(f"Created ZFS partition: {zfs_partition}")
 
         encryption_password = zfs_manager.get_encryption_password()
@@ -111,8 +111,8 @@ def handle_existing_pool_install(zfs_manager: ZFSManager, dataset_prefix: str) -
 
 
 def main() -> bool:
-    storage['LOG_PATH'] = os.path.expanduser('~')
-    storage['LOG_FILE'] = 'archinstall.log'
+    storage['LOG_PATH'] = Path(os.path.expanduser('~'))
+    storage['LOG_FILE'] = Path('archinstall.log')
     storage['LOG_LEVEL'] = 'DEBUG'
 
     info("Starting ZFS installation")
