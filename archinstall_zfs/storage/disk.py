@@ -99,7 +99,9 @@ class DiskManager:
             SysCommand("udevadm settle")
 
             debug("Formatting EFI partition")
+            debug(f"Looking for EFI partition at: /dev/disk/by-id/*{Path(drive).name}-part1")
             efi_part_path = next(Path("/dev/disk/by-id").glob(f"*{Path(drive).name}-part1"))
+            debug(f"Found EFI partition at: {efi_part_path}")
             SysCommand(f"mkfs.fat -I -F32 {efi_part_path}")
         except Exception as e:
             error(f"Failed to create partitions: {str(e)}")
