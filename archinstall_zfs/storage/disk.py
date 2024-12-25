@@ -65,19 +65,41 @@ class DiskManager:
         info(f"Using dataset prefix: {prefix}")
         return prefix
 
+    def get_disk_by_id(self, disk_path: str) -> str:
+        """Convert /dev/sdX path to /dev/disk/by-id path"""
+        debug(f"Getting by-id path for disk: {disk_path}")
+
+        disk_name = Path(disk_path).name
+        by_id_path = Path("/dev/disk/by-id")
+
+        for path in by_id_path.iterdir():
+            if path.is_symlink() and path.readlink().name == disk_name:
+                if not path.name.split('-')[-1].startswith('part'):
+                    debug(f"Found by-id path: {path}")
+                    return str(path)
+
+        error(f"No by-id path found for disk: {disk_path}")
+        raise RuntimeError(f"Could not find /dev/disk/by-id path for {disk_path}")
+
     def prepare_disk(self, drive: str) -> str:
         """Prepare disk and return ZFS partition path using by-id"""
         info(f"Preparing disk: {drive}")
 
+        # Get the by-id path first
+        drive_by_id = self.get_disk_by_id(drive)
+        debug(f"Using disk by-id path: {drive_by_id}")
+
         debug("Clearing disk signatures")
         try:
+            debug(f"Zeroing first 34 sectors of {drive_by_id}")
             SysCommand(
-                f"dd if=/dev/zero bs=512 count=34 status=progress oflag=sync of={drive}"
+                f"dd if=/dev/zero bs=512 count=34 status=progress oflag=sync of={drive_by_id}"
             )
-            sectors = int(SysCommand(f"blockdev --getsz {drive}").decode().strip())
+            sectors = int(SysCommand(f"blockdev --getsz {drive_by_id}").decode().strip())
             seek_position = sectors - 34
+            debug(f"Zeroing last 34 sectors of {drive_by_id} at position {seek_position}")
             SysCommand(
-                f"dd if=/dev/zero of={drive} bs=512 count=34 seek={seek_position}"
+                f"dd if=/dev/zero of={drive_by_id} bs=512 count=34 seek={seek_position}"
             )
         except Exception as e:
             error(f"Failed to clear disk signatures: {str(e)}")
@@ -85,36 +107,32 @@ class DiskManager:
 
         debug("Creating partition table")
         try:
-            SysCommand(f"sgdisk -Z {drive}")  # Zap all existing partitions
-            SysCommand(f"sgdisk -o {drive}")  # Create fresh GPT
+            debug(f"Zapping existing partitions on {drive_by_id}")
+            SysCommand(f"sgdisk -Z {drive_by_id}")
+            debug(f"Creating fresh GPT on {drive_by_id}")
+            SysCommand(f"sgdisk -o {drive_by_id}")
 
-            # Create EFI partition (500MB)
-            SysCommand(f"sgdisk -n 1:0:+500M -t 1:ef00 {drive}")
+            debug(f"Creating EFI partition (500MB) on {drive_by_id}")
+            SysCommand(f"sgdisk -n 1:0:+500M -t 1:ef00 {drive_by_id}")
 
-            # Create ZFS partition (rest of disk)
-            SysCommand(f"sgdisk -n 2:0:0 -t 2:bf00 {drive}")
+            debug(f"Creating ZFS partition (rest of disk) on {drive_by_id}")
+            SysCommand(f"sgdisk -n 2:0:0 -t 2:bf00 {drive_by_id}")
 
             debug("Updating kernel partition table")
-            SysCommand(f"partprobe {drive}")
+            SysCommand(f"partprobe {drive_by_id}")
+            debug("Waiting for udev to settle")
             SysCommand("udevadm settle")
 
             debug("Formatting EFI partition")
-            debug(f"Looking for EFI partition at: /dev/disk/by-id/*{Path(drive).name}-part1")
-            efi_part_path = next(Path("/dev/disk/by-id").glob(f"*{Path(drive).name}-part1"))
-            debug(f"Found EFI partition at: {efi_part_path}")
+            efi_part_path = f"{drive_by_id}-part1"
+            debug(f"Using EFI partition path: {efi_part_path}")
             SysCommand(f"mkfs.fat -I -F32 {efi_part_path}")
+            debug(f"Successfully formatted EFI partition at {efi_part_path}")
         except Exception as e:
             error(f"Failed to create partitions: {str(e)}")
             raise
 
         # Return path to ZFS partition using by-id
-        debug("Resolving ZFS partition by-id path")
-        try:
-            by_id_path = next(
-                Path("/dev/disk/by-id").glob(f"*{Path(drive).name}-part2")
-            )
-            info(f"Created ZFS partition at: {by_id_path}")
-            return str(by_id_path)
-        except StopIteration:
-            error("Failed to find ZFS partition by-id path")
-            raise RuntimeError("ZFS partition not found in /dev/disk/by-id")
+        zfs_part_path = f"{drive_by_id}-part2"
+        info(f"Created ZFS partition at: {zfs_part_path}")
+        return zfs_part_path
