@@ -7,7 +7,7 @@ from typing import Literal
 # import parted
 
 # Local application imports
-from archinstall.lib.output import info, error, debug
+from archinstall import SysInfo, debug, info, error
 from archinstall.tui.curses_menu import Tui, SelectMenu, MenuItemGroup
 from archinstall.tui.menu_item import MenuItem
 from storage.disk import DiskManager
@@ -26,18 +26,6 @@ def check_internet() -> bool:
     except OSError as e:
         error(f"No internet connection: {str(e)}")
         return False
-
-
-def check_efi() -> bool:
-    debug("Checking EFI boot mode")
-    efi_path = Path("/sys/firmware/efi/efivars")
-    result = efi_path.exists() and any(efi_path.iterdir())
-    if result:
-        info("System booted in EFI mode")
-    else:
-        error("System not booted in EFI mode")
-    return result
-
 
 def get_installation_mode() -> InstallMode:
     debug("Displaying installation mode selection menu")
@@ -68,7 +56,7 @@ def handle_full_disk_install(
         info(f"Selected disk: {selected_disk}")
 
         debug("Preparing disk partitions")
-        zfs_partition = disk_manager.prepare_disk(selected_disk)
+        zfs_partition = disk_manager.prepare_dcisk(selected_disk)
         info(f"Created ZFS partition: {zfs_partition}")
 
         encryption_password = zfs_manager.get_encryption_password()
@@ -127,7 +115,7 @@ def main() -> bool:
         error("Internet connection required")
         return False
 
-    if not check_efi():
+    if not SysInfo.has_uefi():
         error("EFI boot mode required")
         return False
 

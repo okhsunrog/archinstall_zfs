@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
-from archinstall.lib.output import info, error, debug
+from archinstall import info, error, debug
 from archinstall.lib.exceptions import SysCallError
 from archinstall.lib.general import SysCommand
 from archinstall.tui.curses_menu import EditMenu, SelectMenu, MenuItemGroup
