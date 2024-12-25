@@ -89,17 +89,18 @@ class DiskManager:
             SysCommand(f"sgdisk -o {drive}")  # Create fresh GPT
 
             # Create EFI partition (500MB)
-            SysCommand(f"sgdisk -n 1:0:+500M -t 1:ef00 -c 1:EFI {drive}")
+            SysCommand(f"sgdisk -n 1:0:+500M -t 1:ef00 {drive}")
 
             # Create ZFS partition (rest of disk)
-            SysCommand(f"sgdisk -n 2:0:0 -t 2:bf00 -c 2:rootpart {drive}")
+            SysCommand(f"sgdisk -n 2:0:0 -t 2:bf00 {drive}")
 
             debug("Updating kernel partition table")
             SysCommand(f"partprobe {drive}")
             SysCommand("udevadm settle")
 
             debug("Formatting EFI partition")
-            SysCommand("mkfs.fat -I -F32 -n EFI /dev/disk/by-partlabel/EFI")
+            efi_part_path = next(Path("/dev/disk/by-id").glob(f"*{Path(drive).name}-part1"))
+            SysCommand(f"mkfs.fat -I -F32 {efi_part_path}")
         except Exception as e:
             error(f"Failed to create partitions: {str(e)}")
             raise
