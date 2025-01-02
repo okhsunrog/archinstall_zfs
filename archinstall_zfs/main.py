@@ -274,7 +274,6 @@ def main() -> bool:
     except Exception as e:
         error(f"Installation failed: {str(e)}")
         debug(f"Full error details: {repr(e)}")  # Using string representation of the error
-        debug(f"Error type: {type(e).__name__}")  # Adding error type information
         return False
 
 

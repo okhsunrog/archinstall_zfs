@@ -1,20 +1,26 @@
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Annotated
 
-from archinstall.lib.disk import device_handler
 from archinstall.tui import MenuItem, SelectMenu, MenuItemGroup
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, BeforeValidator
 from archinstall import debug, info, error
 from archinstall.lib.exceptions import SysCallError
 from archinstall.lib.general import SysCommand
 import parted
 
+def validate_disk_path(path: Path | str) -> Path:
+    """Ensure disk path is in by-id format"""
+    path = Path(path)
+    if not path.is_relative_to("/dev/disk/by-id"):
+        raise ValueError(f"Disk path must be in /dev/disk/by-id format: {path}")
+    return path
+
+ByIdPath = Annotated[Path, BeforeValidator(validate_disk_path)]
 
 # noinspection PyMethodParameters
 class DiskConfig(BaseModel):
-    selected_disk: Path
-    efi_partition: Optional[Path] = None
-    zfs_partition: Optional[Path] = None
+    selected_disk: ByIdPath
+    efi_partition: Optional[ByIdPath] = None
 
     @field_validator('selected_disk')
     def validate_disk_path(cls, v: Path) -> Path:
@@ -125,7 +131,7 @@ class DiskManager:
             error(f"Failed to mount EFI partition: {str(e)}")
             raise
 
-    def select_zfs_partition(self) -> Path:
+    def select_zfs_partition(self) -> ByIdPath:
         debug(f"Displaying partition selection menu for ZFS")
         partition_menu = SelectMenu(
             MenuItemGroup(self.get_partitions()),
@@ -138,19 +144,8 @@ class DiskManager:
 
 class DiskManagerBuilder:
     def __init__(self):
-        self._selected_disk: Optional[Path] = None
-        self._efi_partition: Optional[Path] = None
-        self._zfs_partition: Optional[Path] = None
-
-    def select_disk(self) -> 'DiskManagerBuilder':
-        debug("Displaying disk selection menu")
-        disk_menu = SelectMenu(
-            MenuItemGroup(self._get_available_disks()),
-            header="Select disk for installation",
-        )
-        self._selected_disk = Path(disk_menu.run().item().value)
-        info(f"Selected disk: {self._selected_disk}")
-        return self
+        self._selected_disk: Optional[ByIdPath] = None
+        self._efi_partition: Optional[ByIdPath] = None
 
     def select_efi_partition(self) -> 'DiskManagerBuilder':
         if not self._selected_disk:
@@ -166,7 +161,7 @@ class DiskManagerBuilder:
         info(f"Selected EFI partition: {self._efi_partition}")
         return self
 
-    def destroying_build(self) -> Tuple[DiskManager, Path]:
+    def destroying_build(self) -> Tuple[DiskManager, ByIdPath]:
         """Builds manager for full disk installation"""
         if not self._selected_disk:
             raise ValueError("No disk selected")
@@ -182,7 +177,6 @@ class DiskManagerBuilder:
             DiskConfig(
                 selected_disk=self._selected_disk,
                 efi_partition=self._efi_partition,
-                zfs_partition=zfs_partition
             )
         ), zfs_partition
 
@@ -198,15 +192,48 @@ class DiskManagerBuilder:
             )
         )
 
+    @staticmethod
+    def get_disk_by_id(disk_path: str) -> str:
+        """Convert /dev/sdX path to /dev/disk/by-id path"""
+        debug(f"Getting by-id path for disk: {disk_path}")
+
+        disk_name = Path(disk_path).name
+        by_id_path = Path("/dev/disk/by-id")
+
+        for path in by_id_path.iterdir():
+            if path.is_symlink() and path.readlink().name == disk_name:
+                if not path.name.split('-')[-1].startswith('part'):
+                    debug(f"Found by-id path: {path}")
+                    return str(path)
+
+        error(f"No by-id path found for disk: {disk_path}")
+        raise RuntimeError(f"Could not find /dev/disk/by-id path for {disk_path}")
+
     # noinspection PyMethodMayBeStatic
     def _get_available_disks(self) -> List[MenuItem]:
-        debug("Scanning for available disks")
+        debug("Scanning for available disks using parted")
         disks = []
-        for dev in device_handler.devices:
-            by_id_path = Path("/dev/disk/by-id").glob(f"*{dev.device_info.path.name}")
-            disk_path = next(by_id_path, dev.device_info.path)
-            if disk_path.is_relative_to("/dev/disk/by-id"):
-                disks.append(MenuItem(str(disk_path), str(disk_path)))
-                debug(f"Found disk: {disk_path}")
+
+        for device in parted.getAllDevices():
+            if device.path.startswith("/dev/sd") or device.path.startswith("/dev/nvme"):
+                size_gb = device.length * device.sectorSize / (1024 ** 3)
+                disks.append(MenuItem(
+                    f"{device.path} ({size_gb:.1f}GB)",
+                    device.path
+                ))
+                debug(f"Found disk: {device.path}")
+
         info(f"Found {len(disks)} available disks")
         return disks
+
+    def select_disk(self) -> 'DiskManagerBuilder':
+        debug("Displaying disk selection menu")
+        disk_menu = SelectMenu(
+            MenuItemGroup(self._get_available_disks()),
+            header="Select disk for installation",
+        )
+        selected_path = disk_menu.run().item().value
+        by_id_path = self.get_disk_by_id(selected_path)
+        self._selected_disk = Path(by_id_path)
+        info(f"Selected disk: {self._selected_disk}")
+        return self
