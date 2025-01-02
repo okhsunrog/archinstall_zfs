@@ -6,7 +6,7 @@ import os
 
 import archinstall
 from archinstall import SysInfo, debug, info, error
-from archinstall.tui.curses_menu import SelectMenu, MenuItemGroup, EditMenu
+from archinstall.tui.curses_menu import SelectMenu, MenuItemGroup, EditMenu, Tui
 from archinstall.tui.menu_item import MenuItem
 from archinstall.lib.storage import storage
 
@@ -29,22 +29,23 @@ def check_internet() -> bool:
 
 def get_installation_mode() -> InstallMode:
     debug("Displaying installation mode selection menu")
-    modes = [
-        MenuItem("Full disk - Format and create new ZFS pool", "full_disk"),
-        MenuItem("Partition - Create new ZFS pool on existing partition", "new_pool"),
-        MenuItem(
-            "Existing pool - Install alongside existing ZFS system", "existing_pool"
-        ),
-    ]
+    with Tui():
+        modes = [
+            MenuItem("Full disk - Format and create new ZFS pool", "full_disk"),
+            MenuItem("Partition - Create new ZFS pool on existing partition", "new_pool"),
+            MenuItem(
+                "Existing pool - Install alongside existing ZFS system", "existing_pool"
+            ),
+        ]
 
-    menu = SelectMenu(
-        MenuItemGroup(modes),
-        header="Select Installation Mode\n\nWarning: Make sure you have backups!",
-    )
+        menu = SelectMenu(
+            MenuItemGroup(modes),
+            header="Select Installation Mode\n\nWarning: Make sure you have backups!",
+        )
 
-    selected = menu.run().item().value
-    info(f"Selected installation mode: {selected}")
-    return selected
+        selected = menu.run().item().value
+        info(f"Selected installation mode: {selected}")
+        return selected
 
 
 def prepare_installation() -> tuple[ZFSManager, DiskManager]:
