@@ -1,4 +1,5 @@
 import os
+import subprocess
 import time
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -94,12 +95,10 @@ class ZFSPool:
         """Exports the ZFS pool"""
         debug(f"Exporting pool {self.config.pool_name}")
         try:
-            time.sleep(5)
             os.sync()
-            time.sleep(10)
-            SysCommand(["zfs", "umount", "-af"])
-            time.sleep(1)  # Give system time to complete unmounting
-            SysCommand(["zpool", "export", "-f", self.config.pool_name])
+            subprocess.run(["zfs", "umount", "-af"], check=True)
+            time.sleep(1)
+            subprocess.run(["zpool", "export", "-f", self.config.pool_name], check=True)
             info("Pool exported successfully")
         except SysCallError as e:
             error(f"Failed to export pool: {str(e)}")
