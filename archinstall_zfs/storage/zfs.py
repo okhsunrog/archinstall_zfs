@@ -1,5 +1,4 @@
 import os
-import subprocess
 import time
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -8,7 +7,7 @@ from archinstall.tui import MenuItemGroup, SelectMenu, MenuItem, EditMenu
 from pydantic import BaseModel, Field, field_validator
 from archinstall import info, error, debug
 from archinstall.lib.exceptions import SysCallError
-from archinstall.lib.general import SysCommand, SysCommandWorker
+from archinstall.lib.general import SysCommand
 
 
 class DatasetConfig(BaseModel):
@@ -92,25 +91,24 @@ class ZFSPool:
             raise
 
     def export(self) -> None:
-        """Exports the ZFS pool"""
         debug(f"Exporting pool {self.config.pool_name}")
         try:
             os.sync()
-            with SysCommandWorker("zfs umount -af") as cmd:
-                debug(f"Command output: {cmd.decode()}")
-                debug(f"Exit code: {cmd.exit_code}")
-                debug(f"Worker state: {cmd}")
-                if cmd.exit_code != 0:
-                    raise RuntimeError(f"Failed to unmount datasets: {cmd}")
+
+            # Unmount datasets in reverse order
+            datasets = SysCommand("zfs list -H -o name").decode().splitlines()
+            for dataset in reversed(datasets):
+                if dataset.startswith(self.config.pool_name):
+                    try:
+                        SysCommand(f"zfs umount -f {dataset}")
+                    except SysCallError:
+                        continue
+
             time.sleep(1)
-            with SysCommandWorker(f"zpool export -f {self.config.pool_name}") as cmd:
-                debug(f"Command output: {cmd.decode()}")
-                debug(f"Exit code: {cmd.exit_code}")
-                debug(f"Worker state: {cmd}")
-                if cmd.exit_code != 0:
-                    raise RuntimeError(f"Failed to export pool: {cmd}")
+            SysCommand(f"zpool export -f {self.config.pool_name}")
+
             info("Pool exported successfully")
-        except Exception as e:
+        except SysCallError as e:
             error(f"Failed to export pool: {str(e)}")
             raise
 
