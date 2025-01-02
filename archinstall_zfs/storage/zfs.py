@@ -1,3 +1,4 @@
+import os
 import time
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -93,7 +94,7 @@ class ZFSPool:
         """Exports the ZFS pool"""
         debug(f"Exporting pool {self.config.pool_name}")
         try:
-            SysCommand("sync")  # Ensure all writes are committed
+            os.sync()
             SysCommand("zfs umount -af")  # Force unmount all datasets
             time.sleep(1)  # Give system time to complete unmounting
             SysCommand(f"zpool export -f {self.config.pool_name}")  # Force export
