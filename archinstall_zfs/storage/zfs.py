@@ -94,9 +94,9 @@ class ZFSPool:
         """Exports the ZFS pool"""
         debug(f"Exporting pool {self.config.pool_name}")
         try:
-            time.sleep(1)
+            time.sleep(5)
             os.sync()
-            time.sleep(1)
+            time.sleep(10)
             SysCommand(["zfs", "umount", "-af"])
             time.sleep(1)  # Give system time to complete unmounting
             SysCommand(["zpool", "export", "-f", self.config.pool_name])
