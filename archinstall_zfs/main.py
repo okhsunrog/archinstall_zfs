@@ -258,11 +258,24 @@ def main() -> bool:
         return False
 
     try:
+        debug("Starting installation preparation")
         zfs_manager, disk_manager = prepare_installation()
-        perform_installation(disk_manager, zfs_manager)
+        debug("Installation preparation completed")
+
+        debug("Starting installation execution")
+        success = perform_installation(disk_manager, zfs_manager)
+        if not success:
+            error("Installation execution failed")
+            return False
+
+        info("Installation completed successfully")
+        return True
     except Exception as e:
         error(f"Installation failed: {str(e)}")
+        debug(f"Full error details: {repr(e)}")  # Using string representation of the error
+        debug(f"Error type: {type(e).__name__}")  # Adding error type information
         return False
+
 
 if __name__ == '__main__':
     main()
