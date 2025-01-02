@@ -97,10 +97,16 @@ class ZFSPool:
         try:
             os.sync()
             with SysCommandWorker("zfs umount -af") as cmd:
+                debug(f"Command output: {cmd.decode()}")
+                debug(f"Exit code: {cmd.exit_code}")
+                debug(f"Worker state: {cmd}")
                 if cmd.exit_code != 0:
                     raise RuntimeError(f"Failed to unmount datasets: {cmd}")
             time.sleep(1)
             with SysCommandWorker(f"zpool export -f {self.config.pool_name}") as cmd:
+                debug(f"Command output: {cmd.decode()}")
+                debug(f"Exit code: {cmd.exit_code}")
+                debug(f"Worker state: {cmd}")
                 if cmd.exit_code != 0:
                     raise RuntimeError(f"Failed to export pool: {cmd}")
             info("Pool exported successfully")
