@@ -8,7 +8,7 @@ from archinstall.tui import MenuItemGroup, SelectMenu, MenuItem, EditMenu
 from pydantic import BaseModel, Field, field_validator
 from archinstall import info, error, debug
 from archinstall.lib.exceptions import SysCallError
-from archinstall.lib.general import SysCommand
+from archinstall.lib.general import SysCommand, SysCommandWorker
 
 
 class DatasetConfig(BaseModel):
@@ -96,11 +96,15 @@ class ZFSPool:
         debug(f"Exporting pool {self.config.pool_name}")
         try:
             os.sync()
-            subprocess.run(["zfs", "umount", "-af"], check=True)
+            with SysCommandWorker("zfs umount -af") as cmd:
+                if cmd.exit_code != 0:
+                    raise RuntimeError(f"Failed to unmount datasets: {cmd}")
             time.sleep(1)
-            subprocess.run(["zpool", "export", "-f", self.config.pool_name], check=True)
+            with SysCommandWorker(f"zpool export -f {self.config.pool_name}") as cmd:
+                if cmd.exit_code != 0:
+                    raise RuntimeError(f"Failed to export pool: {cmd}")
             info("Pool exported successfully")
-        except SysCallError as e:
+        except Exception as e:
             error(f"Failed to export pool: {str(e)}")
             raise
 
