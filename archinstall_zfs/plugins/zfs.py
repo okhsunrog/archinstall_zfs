@@ -1,4 +1,4 @@
-from archinstall.archinstall import SysCommand
+from archinstall import SysCommand
 
 class ZfsPlugin:
     def on_mirrors(self, mirror_config):

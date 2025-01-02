@@ -7,7 +7,7 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.13"
-pyparted = { url = "https://github.com/dcantrell/pyparted/archive/v3.13.0.tar.gz" }
+archinstall = { git = "https://github.com/archlinux/archinstall.git", tag = "3.0.1" }
 
 [tool.poetry.group.dev.dependencies]
 pylint = "^3.3.3"
