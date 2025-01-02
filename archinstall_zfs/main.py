@@ -10,7 +10,7 @@ from archinstall.tui.curses_menu import SelectMenu, MenuItemGroup, EditMenu
 from archinstall.tui.menu_item import MenuItem
 from archinstall.lib.storage import storage
 
-from archinstall_zfs.plugins.zfs import ZfsPlugin
+from plugins.zfs import ZfsPlugin
 from storage.disk import DiskManager, DiskManagerBuilder
 from storage.zfs import ZFSManager, ZFSManagerBuilder
 
