@@ -298,6 +298,7 @@ class ZFSManagerBuilder:
         return self
 
     def build(self) -> 'ZFSManager':
+        self._datasets = DEFAULT_DATASETS # add configuration here later
         config = ZFSConfig(
             pool_name=self._pool_name,
             dataset_prefix=self._dataset_prefix,
@@ -354,6 +355,12 @@ class ZFSManager:
 
     def prepare(self) -> None:
         """Main workflow for preparing ZFS setup"""
+        try:
+            debug("Generating host ID")
+            SysCommand("zgenhostid")
+        except SysCallError as e:
+            if "File exists" not in str(e):
+                raise
         self.encryption.setup()
         if self.device:  # New pool setup
             self.pool.create(self.device)
