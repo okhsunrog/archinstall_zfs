@@ -306,7 +306,7 @@ class ZFSManagerBuilder:
             compression=self._compression,
             datasets=self._datasets
         )
-        return ZFSManager(config)
+        return ZFSManager(config, device=self._device)
 
 
 class ZFSManager:
