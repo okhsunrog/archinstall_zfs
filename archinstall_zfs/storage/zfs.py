@@ -97,9 +97,9 @@ class ZFSPool:
             time.sleep(1)
             os.sync()
             time.sleep(1)
-            SysCommand("zfs umount -af")  # Force unmount all datasets
+            SysCommand(["zfs", "umount", "-af"])
             time.sleep(1)  # Give system time to complete unmounting
-            SysCommand(f"zpool export -f {self.config.pool_name}")  # Force export
+            SysCommand(["zpool", "export", "-f", self.config.pool_name])
             info("Pool exported successfully")
         except SysCallError as e:
             error(f"Failed to export pool: {str(e)}")
