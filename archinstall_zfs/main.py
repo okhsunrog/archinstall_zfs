@@ -5,7 +5,8 @@ from typing import Literal
 import os
 
 import archinstall
-from archinstall import SysInfo, debug, info, error
+from archinstall import SysInfo, debug, info, error, SysCommand
+from archinstall.lib.exceptions import SysCallError
 from archinstall.tui.curses_menu import SelectMenu, MenuItemGroup, EditMenu, Tui
 from archinstall.tui.menu_item import MenuItem
 from archinstall.lib.storage import storage
@@ -242,6 +243,24 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
 #
 #     debug(f"Disk states after installing:\n{disk.disk_layouts()}")
 
+def check_zfs_module() -> bool:
+    debug("Checking ZFS kernel module")
+    try:
+        SysCommand("modprobe zfs")
+        info("ZFS module loaded successfully")
+        return True
+    except SysCallError:
+        return False
+
+def initialize_zfs() -> bool:
+    debug("Initializing ZFS support")
+    try:
+        SysCommand("bash /root/archinstall_zfs/zfs_init.sh")
+        # Verify ZFS was initialized correctly
+        return check_zfs_module()
+    except SysCallError as e:
+        error(f"Failed to initialize ZFS: {str(e)}")
+        return False
 
 def main() -> bool:
     storage['LOG_PATH'] = Path(os.path.expanduser('~'))
@@ -257,6 +276,12 @@ def main() -> bool:
     if not SysInfo.has_uefi():
         error("EFI boot mode required")
         return False
+
+    if not check_zfs_module():
+        info("ZFS module not loaded, attempting initialization")
+        if not initialize_zfs():
+            error("Failed to initialize ZFS support")
+            return False
 
     try:
         debug("Starting installation preparation")
