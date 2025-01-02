@@ -29,55 +29,55 @@ def check_internet() -> bool:
 
 def get_installation_mode() -> InstallMode:
     debug("Displaying installation mode selection menu")
-    with Tui():
-        modes = [
-            MenuItem("Full disk - Format and create new ZFS pool", "full_disk"),
-            MenuItem("Partition - Create new ZFS pool on existing partition", "new_pool"),
-            MenuItem(
-                "Existing pool - Install alongside existing ZFS system", "existing_pool"
-            ),
-        ]
+    modes = [
+        MenuItem("Full disk - Format and create new ZFS pool", "full_disk"),
+        MenuItem("Partition - Create new ZFS pool on existing partition", "new_pool"),
+        MenuItem(
+            "Existing pool - Install alongside existing ZFS system", "existing_pool"
+        ),
+    ]
 
-        menu = SelectMenu(
-            MenuItemGroup(modes),
-            header="Select Installation Mode\n\nWarning: Make sure you have backups!",
-        )
+    menu = SelectMenu(
+        MenuItemGroup(modes),
+        header="Select Installation Mode\n\nWarning: Make sure you have backups!",
+    )
 
-        selected = menu.run().item().value
-        info(f"Selected installation mode: {selected}")
-        return selected
+    selected = menu.run().item().value
+    info(f"Selected installation mode: {selected}")
+    return selected
 
 
 def prepare_installation() -> tuple[ZFSManager, DiskManager]:
-    mode = get_installation_mode()
+    with Tui():
+        mode = get_installation_mode()
 
-    disk_builder = DiskManagerBuilder()
-    zfs_builder = ZFSManagerBuilder()
+        disk_builder = DiskManagerBuilder()
+        zfs_builder = ZFSManagerBuilder()
 
-    # Configure ZFS base settings
-    zfs_builder.with_dataset_prefix(
-        EditMenu(
-            "Dataset Prefix",
-            header="Enter prefix for ZFS datasets",
-            default_text="arch0"
-        ).input().text()
-    ).with_mountpoint(Path("/mnt"))
+        # Configure ZFS base settings
+        zfs_builder.with_dataset_prefix(
+            EditMenu(
+                "Dataset Prefix",
+                header="Enter prefix for ZFS datasets",
+                default_text="arch0"
+            ).input().text()
+        ).with_mountpoint(Path("/mnt"))
 
-    # Handle different installation modes
-    if mode == "full_disk":
-        disk_manager, zfs_partition = disk_builder.select_disk().destroying_build()
-        zfs_builder.select_pool_name().setup_encryption()
-        zfs = zfs_builder.new_pool(zfs_partition).build()
+        # Handle different installation modes
+        if mode == "full_disk":
+            disk_manager, zfs_partition = disk_builder.select_disk().destroying_build()
+            zfs_builder.select_pool_name().setup_encryption()
+            zfs = zfs_builder.new_pool(zfs_partition).build()
 
-    elif mode == "new_pool":
-        disk_manager = disk_builder.select_disk().select_efi_partition().build()
-        zfs_partition = disk_manager.select_zfs_partition()
-        zfs_builder.select_pool_name().setup_encryption()
-        zfs = zfs_builder.new_pool(zfs_partition).build()
+        elif mode == "new_pool":
+            disk_manager = disk_builder.select_disk().select_efi_partition().build()
+            zfs_partition = disk_manager.select_zfs_partition()
+            zfs_builder.select_pool_name().setup_encryption()
+            zfs = zfs_builder.new_pool(zfs_partition).build()
 
-    else:  # existing_pool
-        disk_manager = disk_builder.select_disk().select_efi_partition().build()
-        zfs = zfs_builder.select_existing_pool().build()
+        else:  # existing_pool
+            disk_manager = disk_builder.select_disk().select_efi_partition().build()
+            zfs = zfs_builder.select_existing_pool().build()
 
     return zfs, disk_manager
 
