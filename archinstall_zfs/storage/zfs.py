@@ -176,6 +176,7 @@ class ZFSEncryption:
     def setup(self) -> None:
         """Sets up encryption if enabled"""
         if not self.password:
+            debug("Encryption disabled, skipping ZFS encryption setup")
             return
 
         debug("Setting up ZFS encryption")
@@ -315,7 +316,7 @@ class ZFSManager:
         self.paths = ZFSPaths()
         self.pool = ZFSPool(config)
         self.datasets = ZFSDatasetManager(config, self.paths)
-        self.encryption = ZFSEncryption(config, self.paths)
+        self.encryption = ZFSEncryption(config.encryption, self.paths.zfs_key)
 
     def mount_datasets(self) -> None:
         """Mount all datasets in the correct order"""
