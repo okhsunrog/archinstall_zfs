@@ -22,12 +22,10 @@ class DiskConfig(BaseModel):
     selected_disk: ByIdPath
     efi_partition: Optional[ByIdPath] = None
 
-    @field_validator('selected_disk')
-    def validate_disk_path(cls, v: Path) -> Path:
-        if not v.exists():
-            raise ValueError(f'Disk path {v} does not exist')
-        if not v.is_absolute():
-            raise ValueError(f'Disk path {v} must be absolute')
+    @field_validator('selected_disk', 'efi_partition', 'zfs_partition', check_fields=False)
+    def validate_path_exists(cls, v: Optional[Path]) -> Optional[Path]:
+        if v is not None and not v.exists():
+            raise ValueError(f'Path does not exist: {v}')
         return v
 
     @field_validator('efi_partition', 'zfs_partition')
