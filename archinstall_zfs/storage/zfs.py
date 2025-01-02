@@ -157,13 +157,34 @@ class ZFSDatasetManager:
         SysCommand(f"zfs create {props_str} {self.base_dataset}")
         debug(f"Created base dataset: {self.base_dataset}")
 
+    # noinspection PyMethodMayBeStatic
+    def _get_dataset_hierarchy(self, dataset_path: str) -> list[str]:
+        """Get all parent datasets for a given dataset path"""
+        parts = dataset_path.split('/')
+        return ['/'.join(parts[:i + 1]) for i in range(len(parts))]
+
+    def _ensure_parent_datasets(self, dataset_name: str) -> None:
+        """Creates parent datasets if they don't exist"""
+        hierarchy = self._get_dataset_hierarchy(dataset_name)
+        for parent in hierarchy[:-1]:  # Exclude the dataset itself
+            full_path = f"{self.base_dataset}/{parent}"
+            try:
+                SysCommand(f"zfs list {full_path}")
+            except SysCallError:
+                debug(f"Creating parent dataset: {full_path}")
+                SysCommand(f"zfs create -o mountpoint=none {full_path}")
+
     def create_child_datasets(self) -> None:
-        """Creates all child datasets with their properties"""
-        for dataset in self.config.datasets:
+        """Creates all datasets with proper hierarchy"""
+        # Sort datasets by depth to ensure proper creation order
+        sorted_datasets = sorted(self.config.datasets, key=lambda d: len(d.name.split('/')))
+
+        for dataset in sorted_datasets:
+            self._ensure_parent_datasets(dataset.name)
             full_path = f"{self.base_dataset}/{dataset.name}"
             props_str = " ".join(f"-o {k}={v}" for k, v in dataset.properties.items())
+            debug(f"Creating dataset: {full_path}")
             SysCommand(f"zfs create {props_str} {full_path}")
-            debug(f"Created dataset: {full_path}")
 
 
 class ZFSEncryption:
