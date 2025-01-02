@@ -17,25 +17,14 @@ def validate_disk_path(path: Path | str) -> Path:
 
 ByIdPath = Annotated[Path, BeforeValidator(validate_disk_path)]
 
-# noinspection PyMethodParameters
 class DiskConfig(BaseModel):
     selected_disk: ByIdPath
     efi_partition: Optional[ByIdPath] = None
 
-    @field_validator('selected_disk', 'efi_partition', 'zfs_partition', check_fields=False)
-    def validate_path_exists(cls, v: Optional[Path]) -> Optional[Path]:
+    @field_validator('selected_disk', 'efi_partition', check_fields=False)
+    def validate_path_exists(cls, v: Optional[ByIdPath]) -> Optional[ByIdPath]:
         if v is not None and not v.exists():
             raise ValueError(f'Path does not exist: {v}')
-        return v
-
-    @field_validator('efi_partition', 'zfs_partition')
-    def validate_partition_path(cls, v: Optional[Path]) -> Optional[Path]:
-        if v is None:
-            return v
-        if not v.exists():
-            raise ValueError(f'Partition path {v} does not exist')
-        if not v.is_absolute():
-            raise ValueError(f'Partition path {v} must be absolute')
         return v
 
 
