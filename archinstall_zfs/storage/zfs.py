@@ -1,11 +1,11 @@
 from pathlib import Path
 from typing import List, Dict, Tuple
 
-from archinstall import info, error, debug
-from archinstall.lib.exceptions import SysCallError
-from archinstall.lib.general import SysCommand
-from archinstall.tui.curses_menu import EditMenu, SelectMenu, MenuItemGroup
-from archinstall.tui.menu_item import MenuItem
+from archinstall.archinstall import info, error, debug
+from archinstall.archinstall.lib.exceptions import SysCallError
+from archinstall.archinstall.lib.general import SysCommand
+from archinstall.archinstall.tui.curses_menu import EditMenu, SelectMenu, MenuItemGroup
+from archinstall.archinstall.tui.menu_item import MenuItem
 
 DEFAULT_DATASETS = [
     ("root", {"mountpoint": "/"}),

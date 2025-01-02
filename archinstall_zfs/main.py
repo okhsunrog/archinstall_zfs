@@ -4,58 +4,16 @@ import socket
 from typing import Literal
 import os
 
-import archinstall
-# Third-party imports
-# import parted
+from archinstall.archinstall import SysInfo, debug, info, error, Installer, ConfigurationOutput, GlobalMenu, SysCommand
+from archinstall.archinstall.lib import locale, plugins
+from archinstall.archinstall.tui.curses_menu import Tui, SelectMenu, MenuItemGroup, EditMenu
+from archinstall.archinstall.tui.menu_item import MenuItem
+from archinstall.archinstall.lib.storage import storage
 
-# Local application imports
-from archinstall import SysInfo, debug, info, error, Installer, ConfigurationOutput, GlobalMenu, SysCommand
-from archinstall.lib import locale, plugins
-from archinstall.tui.curses_menu import Tui, SelectMenu, MenuItemGroup, EditMenu
-from archinstall.tui.menu_item import MenuItem
-from archinstall.lib.storage import storage
-
-from lib.interactions.general_conf import ask_chroot
-from lib.models import NetworkConfiguration, AudioConfiguration
-from lib.profile import profile_handler
-from storage.disk import DiskManager
-from storage.zfs import ZFSManager
-
+from storage.disk import DiskManager, DiskManagerBuilder
+from storage.zfs import ZFSManager, ZFSManagerBuilder
 
 InstallMode = Literal["full_disk", "new_pool", "existing_pool"]
-
-
-class ZfsPlugin:
-    def on_mirrors(self, mirror_config):
-        # Add ZFS repo early in the process
-        with open('/etc/pacman.conf', 'a') as fp:
-            fp.write("\n[archzfs]\n")
-            fp.write("SigLevel = Never\n")
-            fp.write("Server = http://archzfs.com/$repo/x86_64\n")
-
-        # Sync the new repo
-        SysCommand('pacman -Sy')
-        return mirror_config
-
-    def on_pacstrap(self, packages):
-        # Add ZFS packages to initial pacstrap
-        packages.extend(['zfs-linux', 'zfs-utils'])
-        return packages
-
-    def on_install(self, installation):
-        # Add repo to target system
-        with open(f"{installation.target}/etc/pacman.conf", 'a') as fp:
-            fp.write("\n[archzfs]\n")
-            fp.write("SigLevel = Never\n")
-            fp.write("Server = http://archzfs.com/$repo/x86_64\n")
-
-        # Sync the new repo in target system
-        installation.arch_chroot('pacman -Sy')
-        return False
-
-    def on_mkinitcpio(self, installation):
-        installation._hooks.append('zfs')
-        return False
 
 
 def check_internet() -> bool:
