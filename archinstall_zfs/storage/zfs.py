@@ -419,11 +419,11 @@ class ZFSManager:
             if "File exists" not in str(e):
                 raise
         self.encryption.setup()
-        # if self.device:  # New pool setup
-        #     self.pool.create(self.device)
-        #     self.datasets.create_base_dataset()
-        #     self.datasets.create_child_datasets()
-        #     #self.pool.export()
+        if self.device:  # New pool setup
+            self.pool.create(self.device)
+            # self.datasets.create_base_dataset()
+            # self.datasets.create_child_datasets()
+            #self.pool.export()
 
     def setup_for_installation(self, mountpoint: Path) -> None:
         """Configure ZFS for system installation"""
