@@ -5,7 +5,7 @@ from typing import Literal
 import os
 
 import archinstall
-from archinstall import SysInfo, debug, info, error, SysCommand, Installer, GlobalMenu
+from archinstall import SysInfo, debug, info, error, SysCommand, Installer, GlobalMenu, ConfigurationOutput
 from archinstall.lib.disk import DiskLayoutConfiguration, DiskLayoutType
 from archinstall.lib.exceptions import SysCallError
 from archinstall.lib.profile import profile_handler
@@ -97,8 +97,20 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
         # Register ZFS plugin
         archinstall.plugins['zfs'] = ZfsPlugin()
 
-        # Configure installation parameters
         ask_user_questions()
+
+        config = ConfigurationOutput(archinstall.arguments)
+        config.write_debug()
+        config.save()
+
+        if archinstall.arguments.get('dry_run'):
+            exit(0)
+
+        if not archinstall.arguments.get('silent'):
+            with Tui():
+                if not config.confirm_config():
+                    debug('Installation aborted')
+                    return False
 
         # Perform actual installation
         info('Starting installation...')
@@ -154,6 +166,7 @@ def ask_user_questions() -> None:
         global_menu.set_enabled('audio_config', True)
         global_menu.set_enabled('network_config', True)
         global_menu.set_enabled('packages', True)
+        global_menu.set_enabled('', True) # delimiter
 
         global_menu.set_enabled('save_config', True)
         global_menu.set_enabled('install', True)
