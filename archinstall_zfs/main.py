@@ -155,6 +155,10 @@ def ask_user_questions() -> None:
         global_menu.set_enabled('network_config', True)
         global_menu.set_enabled('packages', True)
 
+        global_menu.set_enabled('save_config', True)
+        global_menu.set_enabled('install', True)
+        global_menu.set_enabled('abort', True)
+
         global_menu.run()
 
 def check_zfs_module() -> bool:
