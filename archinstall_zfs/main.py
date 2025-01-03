@@ -14,8 +14,7 @@ from archinstall.tui.menu_item import MenuItem
 from archinstall.lib.storage import storage
 from archinstall.lib.plugins import plugins
 
-from archinstall_zfs.custom_plugins.zfs_plugin import add_archzfs_repo
-from custom_plugins.zfs_plugin import ZfsPlugin
+from custom_plugins.zfs_plugin import ZfsPlugin, add_archzfs_repo
 from storage.disk import DiskManager, DiskManagerBuilder
 from storage.zfs import ZFSManager, ZFSManagerBuilder
 
