@@ -365,7 +365,13 @@ class ZFSManager:
 
             # Create target directories
             target_zfs = mountpoint / "etc/zfs"
-            target_zfs.mkdir(parents=True, exist_ok=True)
+            target_zfs_cache = target_zfs / "zfs-list.cache"
+            target_zfs_cache.mkdir(parents=True, exist_ok=True)
+
+            # Create and populate cache file
+            cache_file = target_zfs_cache / self.config.pool_name
+            cache_file.touch()
+            SysCommand(f"zfs list -H -o name,mountpoint,canmount,atime,relatime,devices,exec,readonly,setuid,nbmand > {cache_file}")
 
             # Copy configuration files
             SysCommand(f"cp {self.paths.pool_cache} {target_zfs}/")

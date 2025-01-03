@@ -14,6 +14,7 @@ from archinstall.tui.menu_item import MenuItem
 from archinstall.lib.storage import storage
 from archinstall.lib.plugins import plugins
 
+from archinstall_zfs.custom_plugins.zfs_plugin import add_archzfs_repo
 from custom_plugins.zfs_plugin import ZfsPlugin
 from storage.disk import DiskManager, DiskManagerBuilder
 from storage.zfs import ZFSManager, ZFSManagerBuilder
@@ -221,6 +222,7 @@ def main() -> bool:
         error("EFI boot mode required")
         return False
 
+    add_archzfs_repo()
     if not check_zfs_module():
         info("ZFS module not loaded, attempting initialization")
         if not initialize_zfs():
