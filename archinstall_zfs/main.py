@@ -5,8 +5,10 @@ from typing import Literal
 import os
 
 import archinstall
-from archinstall import SysInfo, debug, info, error, SysCommand
+from archinstall import SysInfo, debug, info, error, SysCommand, Installer, GlobalMenu
+from archinstall.lib.disk import DiskLayoutConfiguration, DiskLayoutType
 from archinstall.lib.exceptions import SysCallError
+from archinstall.lib.profile import profile_handler
 from archinstall.tui.curses_menu import SelectMenu, MenuItemGroup, EditMenu, Tui
 from archinstall.tui.menu_item import MenuItem
 from archinstall.lib.storage import storage
@@ -94,154 +96,72 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
 
         # Register ZFS plugin
         archinstall.plugins['zfs'] = ZfsPlugin()
+
+        # Configure installation parameters
+        ask_user_questions()
+
+        # Perform actual installation
+        info('Starting installation...')
+
+        # !TODO: use single mountpoint from single place across the whole installer
+        mountpoint = Path("/mnt")
+
+        with Installer(
+                mountpoint,
+                disk_config=DiskLayoutConfiguration(DiskLayoutType.Pre_mount),
+                disk_encryption=None,
+                kernels=archinstall.arguments.get('kernels', ['linux'])
+        ) as installation:
+            installation.minimal_installation(
+                hostname=archinstall.arguments.get('hostname', 'archlinux'),
+                locale_config=archinstall.arguments['locale_config']
+            )
+
+            if users := archinstall.arguments.get('!users', []):
+                installation.create_users(users)
+
+            if root_pw := archinstall.arguments.get('!root-password', ''):
+                installation.user_set_pw('root', root_pw)
+
+            if profile_config := archinstall.arguments.get('profile_config', None):
+                profile_handler.install_profile_config(installation, profile_config)
+
+            if packages := archinstall.arguments.get('packages', []):
+                installation.add_additional_packages(packages)
+
+            installation.genfstab()
+
         return True
     except Exception as e:
         error(f"Installation failed: {str(e)}")
         return False
 
-        # Start Arch Linux installation
-        #storage['MOUNT_POINT'] = Path('/mnt')
 
-        # Configure installation parameters
-        #ask_user_questions()
+def ask_user_questions() -> None:
+    """Get user input for installation configuration"""
+    with Tui():
+        global_menu = GlobalMenu(data_store=archinstall.arguments)
 
-        # Verify and save configuration
-        # config = ConfigurationOutput(archinstall.arguments)
-        # config.write_debug()
-        # config.save()
-        #
-        # if not config.confirm_config():
-        #     raise RuntimeError("Installation configuration not confirmed")
-        #
-        # # Perform actual installation
-        # perform_installation_next(Path("/mnt"))
+        # Disable options we handle differently for ZFS
+        global_menu.set_enabled('disk_config', False)
+        global_menu.set_enabled('disk_encryption', False)
+        global_menu.set_enabled('swap', False)
+        global_menu.set_enabled('bootloader', False)
+        global_menu.set_enabled('uki', False)
 
+        # Keep essential options enabled
+        global_menu.set_enabled('archinstall-language', True)
+        global_menu.set_enabled('locale_config', True)
+        global_menu.set_enabled('mirrors', True)
+        global_menu.set_enabled('timezone', True)
+        global_menu.set_enabled('!root-password', True)
+        global_menu.set_enabled('!users', True)
+        global_menu.set_enabled('profile_config', True)
+        global_menu.set_enabled('audio_config', True)
+        global_menu.set_enabled('network_config', True)
+        global_menu.set_enabled('packages', True)
 
-#
-# def ask_user_questions() -> None:
-#     """
-#     First, we'll ask the user for a bunch of user input.
-#     Not until we're satisfied with what we want to install
-#     will we continue with the actual installation steps.
-#     """
-#
-#     with Tui():
-#         global_menu = GlobalMenu(data_store=archinstall.arguments)
-#
-#         if not archinstall.arguments.get('advanced', False):
-#             global_menu.set_enabled('parallel downloads', False)
-#
-#         global_menu.run()
-#
-#
-# def perform_installation_next(mountpoint: Path) -> None:
-#     import archinstall.lib.disk as disk
-#     """
-#     Performs the installation steps on a block device.
-#     Only requirement is that the block devices are
-#     formatted and setup prior to entering this function.
-#     """
-#     info('Starting installation...')
-#     disk_config: disk.DiskLayoutConfiguration = archinstall.arguments['disk_config']
-#
-#     # Retrieve list of additional repositories and set boolean values appropriately
-#     enable_testing = 'testing' in archinstall.arguments.get('additional-repositories', [])
-#     enable_multilib = 'multilib' in archinstall.arguments.get('additional-repositories', [])
-#     locale_config: locale.LocaleConfiguration = archinstall.arguments['locale_config']
-#
-#     with Installer(
-#             mountpoint,
-#             disk_config,
-#             disk_encryption=None,
-#             kernels=archinstall.arguments.get('kernels', ['linux'])
-#     ) as installation:
-#
-#         installation.sanity_check()
-#
-#         if mirror_config := archinstall.arguments.get('mirror_config', None):
-#             installation.set_mirrors(mirror_config, on_target=False)
-#
-#         installation.minimal_installation(
-#             testing=enable_testing,
-#             multilib=enable_multilib,
-#             mkinitcpio=True,
-#             hostname=archinstall.arguments.get('hostname', 'archlinux'),
-#             locale_config=locale_config
-#         )
-#
-#         if mirror_config := archinstall.arguments.get('mirror_config', None):
-#             installation.set_mirrors(mirror_config, on_target=True)
-#
-#         if archinstall.arguments.get('swap'):
-#             installation.setup_swap('zram')
-#
-#         # installation.add_additional_packages("dracut")
-#
-#         # If user selected to copy the current ISO network configuration
-#         # Perform a copy of the config
-#         network_config: NetworkConfiguration | None = archinstall.arguments.get('network_config', None)
-#
-#         if network_config:
-#             network_config.install_network_config(
-#                 installation,
-#                 archinstall.arguments.get('profile_config', None)
-#             )
-#
-#         if users := archinstall.arguments.get('!users', None):
-#             installation.create_users(users)
-#
-#         audio_config: AudioConfiguration | None = archinstall.arguments.get('audio_config', None)
-#         if audio_config:
-#             audio_config.install_audio_config(installation)
-#         else:
-#             info("No audio server will be installed")
-#
-#         if archinstall.arguments.get('packages', None) and archinstall.arguments.get('packages', None)[0] != '':
-#             installation.add_additional_packages(archinstall.arguments.get('packages', None))
-#
-#         if profile_config := archinstall.arguments.get('profile_config', None):
-#             profile_handler.install_profile_config(installation, profile_config)
-#
-#         if timezone := archinstall.arguments.get('timezone', None):
-#             installation.set_timezone(timezone)
-#
-#         if archinstall.arguments.get('ntp', False):
-#             installation.activate_time_synchronization()
-#
-#         if archinstall.accessibility_tools_in_use():
-#             installation.enable_espeakup()
-#
-#         if (root_pw := archinstall.arguments.get('!root-password', None)) and len(root_pw):
-#             installation.user_set_pw('root', root_pw)
-#
-#         if profile_config := archinstall.arguments.get('profile_config', None):
-#             profile_config.profile.post_install(installation)
-#
-#         # If the user provided a list of services to be enabled, pass the list to the enable_service function.
-#         # Note that while it's called enable_service, it can actually take a list of services and iterate it.
-#         if archinstall.arguments.get('services', None):
-#             installation.enable_service(archinstall.arguments.get('services', []))
-#
-#         # If the user provided custom commands to be run post-installation, execute them now.
-#         if archinstall.arguments.get('custom-commands', None):
-#             archinstall.run_custom_user_commands(archinstall.arguments['custom-commands'], installation)
-#
-#         installation.genfstab()
-#
-#         info(
-#             "For post-installation tips, see https://wiki.archlinux.org/index.php/Installation_guide#Post-installation")
-#
-#         if not archinstall.arguments.get('silent'):
-#             with Tui():
-#                 chroot = ask_chroot()
-#
-#             if chroot:
-#                 try:
-#                     installation.drop_to_shell()
-#                 except Exception:
-#                     pass
-#
-#     debug(f"Disk states after installing:\n{disk.disk_layouts()}")
+        global_menu.run()
 
 def check_zfs_module() -> bool:
     debug("Checking ZFS kernel module")
@@ -302,7 +222,7 @@ def main() -> bool:
         return True
     except Exception as e:
         error(f"Installation failed: {str(e)}")
-        debug(f"Full error details: {repr(e)}")  # Using string representation of the error
+        debug(f"Full error details: {repr(e)}")
         return False
 
 
