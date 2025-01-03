@@ -12,12 +12,14 @@ from archinstall.lib.profile import profile_handler
 from archinstall.tui.curses_menu import SelectMenu, MenuItemGroup, EditMenu, Tui
 from archinstall.tui.menu_item import MenuItem
 from archinstall.lib.storage import storage
+from archinstall.lib.plugins import plugins
 
-from plugins.zfs import ZfsPlugin
+from custom_plugins.zfs_plugin import ZfsPlugin
 from storage.disk import DiskManager, DiskManagerBuilder
 from storage.zfs import ZFSManager, ZFSManagerBuilder
 
 InstallMode = Literal["full_disk", "new_pool", "existing_pool"]
+plugins['zfs'] = ZfsPlugin()
 
 
 def check_internet() -> bool:
@@ -98,9 +100,6 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
         # Mount EFI partition
         disk_manager.mount_efi_partition(Path("/mnt"))
 
-        # Register ZFS plugin
-        archinstall.plugins['zfs'] = ZfsPlugin()
-
         ask_user_questions()
 
         config = ConfigurationOutput(archinstall.arguments)
@@ -123,7 +122,7 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
                 mountpoint,
                 disk_config=archinstall.arguments['disk_config'],
                 disk_encryption=None,
-                kernels=archinstall.arguments.get('kernels', ['linux'])
+                kernels=archinstall.arguments.get('kernels', ['linux-lts'])
         ) as installation:
             installation.minimal_installation(
                 hostname=archinstall.arguments.get('hostname', 'archlinux'),

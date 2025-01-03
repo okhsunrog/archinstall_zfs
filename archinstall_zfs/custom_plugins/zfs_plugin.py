@@ -7,6 +7,7 @@ class ZfsPlugin:
             fp.write("\n[archzfs]\n")
             fp.write("SigLevel = Never\n")
             fp.write("Server = http://archzfs.com/$repo/x86_64\n")
+            fp.flush()
 
         # Sync the new repo
         SysCommand('pacman -Sy')
@@ -14,7 +15,7 @@ class ZfsPlugin:
 
     def on_pacstrap(self, packages):
         # Add ZFS packages to initial pacstrap
-        packages.extend(['zfs-linux', 'zfs-utils'])
+        packages.extend(['zfs-dkms', 'zfs-utils'])
         return packages
 
     def on_install(self, installation):
@@ -23,6 +24,7 @@ class ZfsPlugin:
             fp.write("\n[archzfs]\n")
             fp.write("SigLevel = Never\n")
             fp.write("Server = http://archzfs.com/$repo/x86_64\n")
+            fp.flush()
 
         # Sync the new repo in target system
         installation.arch_chroot('pacman -Sy')
