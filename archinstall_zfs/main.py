@@ -124,10 +124,20 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
                 disk_encryption=None,
                 kernels=archinstall.arguments.get('kernels', ['linux-lts'])
         ) as installation:
+
+            installation.sanity_check()
+
+            if mirror_config := archinstall.arguments.get('mirror_config', None):
+                installation.set_mirrors(mirror_config, on_target=False)
+
             installation.minimal_installation(
-                hostname=archinstall.arguments.get('hostname', 'archlinux'),
+                hostname=archinstall.arguments.get('hostname', 'archzfs'),
                 locale_config=archinstall.arguments['locale_config']
             )
+
+            # enable later
+            # if mirror_config := archinstall.arguments.get('mirror_config', None):
+            #     installation.set_mirrors(mirror_config, on_target=True)
 
             if users := archinstall.arguments.get('!users', []):
                 installation.create_users(users)

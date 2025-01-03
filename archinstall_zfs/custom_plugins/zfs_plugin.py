@@ -7,7 +7,6 @@ class ZfsPlugin:
             fp.write("\n[archzfs]\n")
             fp.write("SigLevel = Never\n")
             fp.write("Server = http://archzfs.com/$repo/x86_64\n")
-            fp.flush()
 
         # Sync the new repo
         SysCommand('pacman -Sy')
@@ -24,7 +23,6 @@ class ZfsPlugin:
             fp.write("\n[archzfs]\n")
             fp.write("SigLevel = Never\n")
             fp.write("Server = http://archzfs.com/$repo/x86_64\n")
-            fp.flush()
 
         # Sync the new repo in target system
         installation.arch_chroot('pacman -Sy')
