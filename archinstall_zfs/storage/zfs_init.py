@@ -32,7 +32,7 @@ def add_archzfs_repo(target_path: str = "/") -> None:
     SysCommand('pacman-key -r DDF7DB817396A49B2A2723F7403BD972F75D9D76')
     SysCommand('pacman-key --lsign-key DDF7DB817396A49B2A2723F7403BD972F75D9D76')
 
-    pacman_conf = f"{target_path.rstrip('/')}/etc/pacman.conf"
+    pacman_conf = f"{str(target_path).rstrip('/')}/etc/pacman.conf"
     with open(pacman_conf, "a") as f:
         f.write('\n[archzfs]\n')
         f.write('Server = http://archzfs.com/$repo/$arch\n')
