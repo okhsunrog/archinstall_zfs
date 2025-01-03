@@ -87,7 +87,9 @@ def prepare_installation() -> tuple[ZFSManager, DiskManager]:
 
 def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> bool:
     try:
-        archinstall.arguments['disk_config'] = DiskLayoutConfiguration(DiskLayoutType.Pre_mount)
+        # !TODO: use single mountpoint from single place across the whole installer
+        mountpoint = Path("/mnt")
+        archinstall.arguments['disk_config'] = DiskLayoutConfiguration(DiskLayoutType.Pre_mount, mountpoint=mountpoint)
 
         # ZFS setup
         zfs_manager.prepare()
@@ -116,9 +118,6 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
 
         # Perform actual installation
         info('Starting installation...')
-
-        # !TODO: use single mountpoint from single place across the whole installer
-        mountpoint = Path("/mnt")
 
         with Installer(
                 mountpoint,
