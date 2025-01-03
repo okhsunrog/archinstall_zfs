@@ -94,50 +94,50 @@ class ZFSPool:
             error(f"Failed to create pool: {str(e)}")
             raise
 
-    # def export(self) -> None:
-    #     """Exports the ZFS pool with retries and detailed logging"""
-    #     global cmd
-    #     debug(f"Exporting pool {self.config.pool_name}")
-    #     max_retries = 3
-    #     retry_delay = 2
-    #
-    #     for attempt in range(max_retries):
-    #         try:
-    #             debug(f"Export attempt {attempt + 1} of {max_retries}")
-    #
-    #             # Log current pool status with explicit output capture
-    #             debug("Current pool status:")
-    #             cmd = SysCommand("zpool status")
-    #             debug(f"Command output: {cmd.decode()}")
-    #             debug(f"Exit code: {cmd.exit_code}")
-    #
-    #             os.sync()
-    #
-    #             debug("Attempting unmount of all filesystems")
-    #             cmd = SysCommand("zfs umount -af", peek_output=True)
-    #             debug(f"Unmount exit code: {cmd.exit_code}")
-    #
-    #             time.sleep(retry_delay)
-    #
-    #             debug(f"Attempting pool export: {self.config.pool_name}")
-    #             cmd = SysCommand(f"zpool export -f {self.config.pool_name}", peek_output=True)
-    #             debug(f"Export exit code: {cmd.exit_code}")
-    #
-    #             info("Pool exported successfully")
-    #             return
-    #
-    #         except SysCallError as e:
-    #             debug(f"Command failed: {e}")
-    #             debug(f"Exit code from error: {e.exit_code}")
-    #             debug(f"Exit message: {e.message}")
-    #             debug(f"Command output: {cmd.decode()}")
-    #             debug(f"Raw output: {cmd.output()}")
-    #             debug(f"Exit code from cmd: {cmd.exit_code}")
-    #             if attempt < max_retries - 1:
-    #                 debug(f"Retrying in {retry_delay} seconds")
-    #                 time.sleep(retry_delay)
-    #             else:
-    #                 raise
+    def export(self) -> None:
+        """Exports the ZFS pool with retries and detailed logging"""
+        global cmd
+        debug(f"Exporting pool {self.config.pool_name}")
+        max_retries = 3
+        retry_delay = 2
+
+        for attempt in range(max_retries):
+            try:
+                debug(f"Export attempt {attempt + 1} of {max_retries}")
+
+                # Log current pool status with explicit output capture
+                debug("Current pool status:")
+                cmd = SysCommand("zpool status")
+                debug(f"Command output: {cmd.decode()}")
+                debug(f"Exit code: {cmd.exit_code}")
+
+                os.sync()
+
+                debug("Attempting unmount of all filesystems")
+                cmd = SysCommand("zfs umount -af", peek_output=True)
+                debug(f"Unmount exit code: {cmd.exit_code}")
+
+                time.sleep(retry_delay)
+
+                debug(f"Attempting pool export: {self.config.pool_name}")
+                cmd = SysCommand(f"zpool export -f {self.config.pool_name}", peek_output=True)
+                debug(f"Export exit code: {cmd.exit_code}")
+
+                info("Pool exported successfully")
+                return
+
+            except SysCallError as e:
+                debug(f"Command failed: {e}")
+                debug(f"Exit code from error: {e.exit_code}")
+                debug(f"Exit message: {e.message}")
+                debug(f"Command output: {cmd.decode()}")
+                debug(f"Raw output: {cmd.output()}")
+                debug(f"Exit code from cmd: {cmd.exit_code}")
+                if attempt < max_retries - 1:
+                    debug(f"Retrying in {retry_delay} seconds")
+                    time.sleep(retry_delay)
+                else:
+                    raise
 
     def import_pool(self, mountpoint: Path) -> None:
         """Imports the ZFS pool at specified mountpoint"""
@@ -427,7 +427,7 @@ class ZFSManager:
             self.pool.create(self.device)
             self.datasets.create_base_dataset()
             self.datasets.create_child_datasets()
-            #self.pool.export()
+            self.pool.export()
 
     def setup_for_installation(self, mountpoint: Path) -> None:
         """Configure ZFS for system installation"""
