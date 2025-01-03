@@ -1,5 +1,3 @@
-import os
-import time
 from pathlib import Path
 from typing import List, Dict, Optional
 
@@ -7,7 +5,7 @@ from archinstall.tui import MenuItemGroup, SelectMenu, MenuItem, EditMenu
 from pydantic import BaseModel, Field, field_validator
 from archinstall import info, error, debug
 from archinstall.lib.exceptions import SysCallError
-from archinstall.lib.general import SysCommand, SysCommandWorker
+from archinstall.lib.general import SysCommand
 
 
 class DatasetConfig(BaseModel):
@@ -95,49 +93,16 @@ class ZFSPool:
             raise
 
     def export(self) -> None:
-        """Exports the ZFS pool with retries and detailed logging"""
-        global cmd
+        """Exports the ZFS pool"""
         debug(f"Exporting pool {self.config.pool_name}")
-        max_retries = 3
-        retry_delay = 2
-
-        for attempt in range(max_retries):
-            try:
-                debug(f"Export attempt {attempt + 1} of {max_retries}")
-
-                # Log current pool status with explicit output capture
-                debug("Current pool status:")
-                cmd = SysCommand("zpool status")
-                debug(f"Command output: {cmd.decode()}")
-                debug(f"Exit code: {cmd.exit_code}")
-
-                os.sync()
-
-                debug("Attempting unmount of all filesystems")
-                cmd = SysCommand("zfs umount -af", peek_output=True)
-                debug(f"Unmount exit code: {cmd.exit_code}")
-
-                time.sleep(retry_delay)
-
-                debug(f"Attempting pool export: {self.config.pool_name}")
-                cmd = SysCommand(f"zpool export -f {self.config.pool_name}", peek_output=True)
-                debug(f"Export exit code: {cmd.exit_code}")
-
-                info("Pool exported successfully")
-                return
-
-            except SysCallError as e:
-                debug(f"Command failed: {e}")
-                debug(f"Exit code from error: {e.exit_code}")
-                debug(f"Exit message: {e.message}")
-                debug(f"Command output: {cmd.decode()}")
-                debug(f"Raw output: {cmd.output()}")
-                debug(f"Exit code from cmd: {cmd.exit_code}")
-                if attempt < max_retries - 1:
-                    debug(f"Retrying in {retry_delay} seconds")
-                    time.sleep(retry_delay)
-                else:
-                    raise
+        try:
+            SysCommand("sync")
+            SysCommand("zfs umount -a")
+            SysCommand(f"zpool export {self.config.pool_name}")
+            info("Pool exported successfully")
+        except SysCallError as e:
+            error(f"Failed to export pool: {str(e)}")
+            raise
 
     def import_pool(self, mountpoint: Path) -> None:
         """Imports the ZFS pool at specified mountpoint"""
@@ -359,7 +324,7 @@ class ZFSManagerBuilder:
         return self
 
     def build(self) -> 'ZFSManager':
-        self._datasets = DEFAULT_DATASETS # add configuration here later
+        self._datasets = DEFAULT_DATASETS  # add configuration here later
         config = ZFSConfig(
             pool_name=self._pool_name,
             dataset_prefix=self._dataset_prefix,
