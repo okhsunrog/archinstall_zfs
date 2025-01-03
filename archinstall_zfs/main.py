@@ -21,11 +21,6 @@ from storage.zfs import ZFSManager, ZFSManagerBuilder
 InstallMode = Literal["full_disk", "new_pool", "existing_pool"]
 
 class ZfsPlugin:
-    def on_pacstrap(self, packages):
-        # Add ZFS packages to initial pacstrap
-        packages.extend(['zfs-dkms', 'zfs-utils'])
-        return packages
-
     def on_install(self, installation):
         add_archzfs_repo(installation.target)
         return False
@@ -142,7 +137,7 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
                 disk_config=archinstall.arguments['disk_config'],
                 disk_encryption=None,
                 kernels=['linux-lts'],
-                base_packages=['base', 'base-devel', 'linux-firmware', 'linux-lts-headers'],
+                base_packages=['base', 'base-devel', 'linux-firmware', 'linux-lts-headers', 'zfs-dkms', 'zfs-utils'],
         ) as installation:
 
             installation.sanity_check()
