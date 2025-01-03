@@ -16,10 +16,13 @@ class DatasetConfig(BaseModel):
 
 
 DEFAULT_DATASETS = [
-    DatasetConfig(name="root", properties={"mountpoint": "/"}),
+    DatasetConfig(name="root", properties={"mountpoint": "/", "canmount": "noauto"}),
     DatasetConfig(name="data/home", properties={"mountpoint": "/home"}),
     DatasetConfig(name="data/root", properties={"mountpoint": "/root"}),
-    DatasetConfig(name="var", properties={"mountpoint": "/var"}),
+    DatasetConfig(name="var", properties={"mountpoint": "/var", "canmount": "off"}),
+    DatasetConfig(name="var/lib", properties={"mountpoint": "/var/lib", "canmount": "off"}),
+    DatasetConfig(name="var/lib/libvirt", properties={"mountpoint": "/var/lib/libvirt"}),
+    DatasetConfig(name="var/lib/docker", properties={"mountpoint": "/var/lib/docker"}),
     DatasetConfig(name="vm", properties={"mountpoint": "/vm"})
 ]
 
@@ -73,6 +76,7 @@ class ZFSPool:
         "-O normalization=formD",
         "-O devices=off",
         "-m none",
+        "-R /mnt"
     ]
 
     def __init__(self, config: ZFSConfig):
@@ -421,8 +425,8 @@ class ZFSManager:
         self.encryption.setup()
         if self.device:  # New pool setup
             self.pool.create(self.device)
-            # self.datasets.create_base_dataset()
-            # self.datasets.create_child_datasets()
+            self.datasets.create_base_dataset()
+            self.datasets.create_child_datasets()
             #self.pool.export()
 
     def setup_for_installation(self, mountpoint: Path) -> None:
