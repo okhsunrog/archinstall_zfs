@@ -127,6 +127,8 @@ class ZFSPool:
                 debug(f"Exit code from error: {e.exit_code}")
                 debug(f"Exit message: {e.message}")
                 debug(f"Command output: {cmd.decode()}")
+                debug(f"Raw output: {cmd.output()}")
+                debug(f"Exit code from cmd: {cmd.exit_code}")
                 if attempt < max_retries - 1:
                     debug(f"Retrying in {retry_delay} seconds")
                     time.sleep(retry_delay)
