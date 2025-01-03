@@ -87,13 +87,13 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
     try:
         # ZFS setup
         zfs_manager.prepare()
-        zfs_manager.setup_for_installation(Path("/mnt"))
+        #zfs_manager.setup_for_installation(Path("/mnt"))
 
         # Mount EFI partition
-        disk_manager.mount_efi_partition(Path("/mnt"))
+        #disk_manager.mount_efi_partition(Path("/mnt"))
 
         # Register ZFS plugin
-        archinstall.plugins['zfs'] = ZfsPlugin()
+        #archinstall.plugins['zfs'] = ZfsPlugin()
         return True
     except Exception as e:
         error(f"Installation failed: {str(e)}")
