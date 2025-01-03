@@ -256,7 +256,7 @@ def check_zfs_module() -> bool:
 def initialize_zfs() -> bool:
     debug("Initializing ZFS support")
     try:
-        with SysCommand("bash /usr/local/bin/zfs_init.sh", peek_output=True) as cmd:
+        with SysCommand("bash /root/archinstall_zfs/zfs_init.sh", peek_output=True) as cmd:
             while not cmd.ended:
                 cmd.poll()
 
