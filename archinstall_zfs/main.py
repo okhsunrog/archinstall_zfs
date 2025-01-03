@@ -141,18 +141,12 @@ def ask_user_questions() -> None:
     """Get user input for installation configuration"""
     with Tui():
         global_menu = GlobalMenu(data_store=archinstall.arguments)
-
-        # Disable options we handle differently for ZFS
-        global_menu.set_enabled('disk_config', False)
-        global_menu.set_enabled('disk_encryption', False)
-        global_menu.set_enabled('swap', False)
-        global_menu.set_enabled('bootloader', False)
-        global_menu.set_enabled('uki', False)
+        global_menu.disable_all()
 
         # Keep essential options enabled
         global_menu.set_enabled('archinstall-language', True)
         global_menu.set_enabled('locale_config', True)
-        global_menu.set_enabled('mirrors', True)
+        global_menu.set_enabled('mirror_config', True)
         global_menu.set_enabled('timezone', True)
         global_menu.set_enabled('!root-password', True)
         global_menu.set_enabled('!users', True)
