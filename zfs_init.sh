@@ -154,7 +154,7 @@ dkms_init () {
     pacman -Syyuu --noconfirm >&3 || return 1
 
     print "Install base-devel"
-    pacman -S --noconfirm base-devel linux-headers git >&3 || return 1
+    pacman -S --noconfirm --needed base-devel linux-headers git >&3 || return 1
 
     return 0
 }
