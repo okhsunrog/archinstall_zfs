@@ -39,13 +39,18 @@ init_archzfs () {
         return 0
     fi
     print "Add archzfs repo"
+
+    # Import archzfs PGP key first
+    pacman-key -r DDF7DB817396A49B2A2723F7403BD972F75D9D76
+    pacman-key --lsign-key DDF7DB817396A49B2A2723F7403BD972F75D9D76
+
     cat >> /etc/pacman.conf <<"EOF"
 [archzfs]
 Server = http://archzfs.com/archzfs/x86_64
 Server = http://mirror.sum7.eu/archlinux/archzfs/archzfs/x86_64
 Server = https://mirror.biocrafting.net/archlinux/archzfs/archzfs/x86_64
 EOF
-    pacman -Sy --noconfirm >&3 || return 1
+    pacman -Sy >&3 || return 1
     return 0
 }
 
