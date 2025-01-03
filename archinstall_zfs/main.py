@@ -154,9 +154,8 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
                 locale_config=archinstall.arguments['locale_config']
             )
 
-            # enable later
-            # if mirror_config := archinstall.arguments.get('mirror_config', None):
-            #     installation.set_mirrors(mirror_config, on_target=True)
+            if mirror_config := archinstall.arguments.get('mirror_config', None):
+                installation.set_mirrors(mirror_config, on_target=True)
 
             if users := archinstall.arguments.get('!users', []):
                 installation.create_users(users)
