@@ -74,15 +74,15 @@ class ZFSInitializer:
 
                 if utils_info:
                     utils_url = f"{utils_info[0]}{utils_info[1]}"
-                    SysCommand(f'pacman -U {utils_url} --noconfirm')
-                    SysCommand(f'pacman -U {package_url} --noconfirm')
+                    SysCommand(f'pacman -U {utils_url} --noconfirm', peek_output=True)
+                    SysCommand(f'pacman -U {package_url} --noconfirm', peek_output=True)
                     return True
 
         info("Falling back to DKMS method")
         try:
-            SysCommand('pacman -Syyuu --noconfirm')
-            SysCommand('pacman -S --noconfirm --needed base-devel linux-headers git')
-            SysCommand('pacman -S zfs-dkms --noconfirm')
+            SysCommand('pacman -Syyuu --noconfirm', peek_output=True)
+            SysCommand('pacman -S --noconfirm --needed base-devel linux-headers git', peek_output=True)
+            SysCommand('pacman -S zfs-dkms --noconfirm', peek_output=True)
             return True
         except Exception as e:
             error(f"DKMS installation failed: {str(e)}")
