@@ -371,7 +371,8 @@ class ZFSManager:
             # Create and populate cache file
             cache_file = target_zfs_cache / self.config.pool_name
             cache_file.touch()
-            SysCommand(f"zfs list -H -o name,mountpoint,canmount,atime,relatime,devices,exec,readonly,setuid,nbmand > {cache_file}")
+            output = SysCommand("zfs list -H -o name,mountpoint,canmount,atime,relatime,devices,exec,readonly,setuid,nbmand").decode()
+            cache_file.write_text(output)
 
             # Copy configuration files
             SysCommand(f"cp {self.paths.pool_cache} {target_zfs}/")
