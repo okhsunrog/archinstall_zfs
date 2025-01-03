@@ -87,6 +87,8 @@ def prepare_installation() -> tuple[ZFSManager, DiskManager]:
 
 def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> bool:
     try:
+        archinstall.arguments['disk_config'] = DiskLayoutConfiguration(DiskLayoutType.Pre_mount)
+
         # ZFS setup
         zfs_manager.prepare()
         zfs_manager.setup_for_installation(Path("/mnt"))
@@ -120,7 +122,7 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
 
         with Installer(
                 mountpoint,
-                disk_config=DiskLayoutConfiguration(DiskLayoutType.Pre_mount),
+                disk_config=archinstall.arguments['disk_config'],
                 disk_encryption=None,
                 kernels=archinstall.arguments.get('kernels', ['linux'])
         ) as installation:
