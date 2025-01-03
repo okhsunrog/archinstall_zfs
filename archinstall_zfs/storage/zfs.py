@@ -92,6 +92,7 @@ class ZFSPool:
 
     def export(self) -> None:
         """Exports the ZFS pool with retries and detailed logging"""
+        global cmd
         debug(f"Exporting pool {self.config.pool_name}")
         max_retries = 3
         retry_delay = 2
@@ -100,35 +101,36 @@ class ZFSPool:
             try:
                 debug(f"Export attempt {attempt + 1} of {max_retries}")
 
-                # Log current pool status
+                # Log current pool status with explicit output capture
                 debug("Current pool status:")
-                SysCommand("zpool status", peek_output=True)
-
-                # Log mounted datasets
-                debug("Currently mounted datasets:")
-                SysCommand("zfs list -H -o name,mountpoint", peek_output=True)
+                cmd = SysCommand("zpool status")
+                debug(f"Command output: {cmd.decode()}")
+                debug(f"Exit code: {cmd.exit_code}")
 
                 os.sync()
-                debug("Running filesystem sync")
 
                 debug("Attempting unmount of all filesystems")
-                SysCommand("zfs umount -af", peek_output=True)
-                debug(f"Waiting {retry_delay} seconds after unmount")
+                cmd = SysCommand("zfs umount -af", peek_output=True)
+                debug(f"Unmount exit code: {cmd.exit_code}")
+
                 time.sleep(retry_delay)
 
                 debug(f"Attempting pool export: {self.config.pool_name}")
-                SysCommand(f"zpool export -f {self.config.pool_name}", peek_output=True)
+                cmd = SysCommand(f"zpool export -f {self.config.pool_name}", peek_output=True)
+                debug(f"Export exit code: {cmd.exit_code}")
 
                 info("Pool exported successfully")
                 return
 
             except SysCallError as e:
-                debug(f"Detailed error on attempt {attempt + 1}: {repr(e)}")
+                debug(f"Command failed: {e}")
+                debug(f"Exit code from error: {e.exit_code}")
+                debug(f"Exit message: {e.message}")
+                debug(f"Command output: {cmd.decode()}")
                 if attempt < max_retries - 1:
                     debug(f"Retrying in {retry_delay} seconds")
                     time.sleep(retry_delay)
                 else:
-                    error(f"Export failed after {max_retries} attempts: {str(e)}")
                     raise
 
     def import_pool(self, mountpoint: Path) -> None:
