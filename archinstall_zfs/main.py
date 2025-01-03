@@ -141,7 +141,8 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
                 mountpoint,
                 disk_config=archinstall.arguments['disk_config'],
                 disk_encryption=None,
-                kernels=archinstall.arguments.get('kernels', ['linux-lts'])
+                kernels=['linux-lts'],
+                base_packages=['base', 'base-devel', 'linux-firmware', 'linux-lts-headers'],
         ) as installation:
 
             installation.sanity_check()
