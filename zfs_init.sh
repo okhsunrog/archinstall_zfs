@@ -45,7 +45,7 @@ Server = http://archzfs.com/archzfs/x86_64
 Server = http://mirror.sum7.eu/archlinux/archzfs/archzfs/x86_64
 Server = https://mirror.biocrafting.net/archlinux/archzfs/archzfs/x86_64
 EOF
-    pacman -Sy >&3 || return 1
+    pacman -Sy --noconfirm >&3 || return 1
     return 0
 }
 

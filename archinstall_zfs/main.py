@@ -252,10 +252,14 @@ def check_zfs_module() -> bool:
     except SysCallError:
         return False
 
+
 def initialize_zfs() -> bool:
     debug("Initializing ZFS support")
     try:
-        SysCommand("bash /root/archinstall_zfs/zfs_init.sh")
+        with SysCommand("bash /usr/local/bin/zfs_init.sh", peek_output=True) as cmd:
+            while not cmd.ended:
+                cmd.poll()
+
         # Verify ZFS was initialized correctly
         return check_zfs_module()
     except SysCallError as e:
