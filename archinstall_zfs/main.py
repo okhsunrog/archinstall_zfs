@@ -14,6 +14,7 @@ from archinstall.tui.menu_item import MenuItem
 from archinstall.lib.storage import storage
 from archinstall.lib.plugins import plugins
 
+from storage.zfs_init import initialize_zfs
 from custom_plugins.zfs_plugin import ZfsPlugin, add_archzfs_repo
 from storage.disk import DiskManager, DiskManagerBuilder
 from storage.zfs import ZFSManager, ZFSManagerBuilder
@@ -192,20 +193,6 @@ def check_zfs_module() -> bool:
     except SysCallError:
         return False
 
-
-def initialize_zfs() -> bool:
-    debug("Initializing ZFS support")
-    try:
-        with SysCommand("bash /root/archinstall_zfs/zfs_init.sh", peek_output=True) as cmd:
-            while not cmd.ended:
-                cmd.poll()
-
-        # Verify ZFS was initialized correctly
-        return check_zfs_module()
-    except SysCallError as e:
-        error(f"Failed to initialize ZFS: {str(e)}")
-        return False
-
 def main() -> bool:
     storage['LOG_PATH'] = Path(os.path.expanduser('~'))
     storage['LOG_FILE'] = Path('archinstall.log')
@@ -222,11 +209,7 @@ def main() -> bool:
         return False
 
     add_archzfs_repo()
-    if not check_zfs_module():
-        info("ZFS module not loaded, attempting initialization")
-        if not initialize_zfs():
-            error("Failed to initialize ZFS support")
-            return False
+    initialize_zfs()
 
     try:
         debug("Starting installation preparation")
