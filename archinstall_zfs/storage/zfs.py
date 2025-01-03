@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import List, Dict, Optional
 
@@ -30,7 +31,7 @@ class ZFSConfig(BaseModel):
     pool_name: str
     dataset_prefix: str
     mountpoint: Path
-    encryption: Optional[str] = None
+    encryption_password: Optional[str] = None
     compression: str = Field(default="lz4")
     # disabled because of PyCharm bug
     # noinspection PyDataclass
@@ -96,7 +97,7 @@ class ZFSPool:
         """Exports the ZFS pool"""
         debug(f"Exporting pool {self.config.pool_name}")
         try:
-            SysCommand("sync")
+            os.sync()
             SysCommand("zfs umount -a")
             SysCommand(f"zpool export {self.config.pool_name}")
             info("Pool exported successfully")
@@ -109,7 +110,7 @@ class ZFSPool:
         debug(f"Importing pool {self.config.pool_name} to {mountpoint}")
         try:
             SysCommand(f"zpool import -N -R {mountpoint} {self.config.pool_name}")
-            if self.config.encryption:
+            if self.config.encryption_password:
                 SysCommand(f"zfs load-key {self.config.pool_name}")
             info("Pool imported successfully")
         except SysCallError as e:
@@ -151,7 +152,7 @@ class ZFSDatasetManager:
             "compression": self.config.compression
         }
 
-        if self.config.encryption:
+        if self.config.encryption_password:
             props.update({
                 "encryption": "aes-256-gcm",
                 "keyformat": "passphrase",
@@ -263,7 +264,7 @@ class ZFSManagerBuilder:
         self._pool_name: Optional[str] = None
         self._dataset_prefix: Optional[str] = None
         self._mountpoint: Optional[Path] = None
-        self._encryption: Optional[ZFSEncryption] = None
+        self._encryption_handler: Optional[ZFSEncryption] = None
         self._compression: str = "lz4"
         self._datasets: List[DatasetConfig] = []
         self._device: Optional[str] = None
@@ -320,7 +321,7 @@ class ZFSManagerBuilder:
     def setup_encryption(self) -> 'ZFSManagerBuilder':
         password = ZFSEncryption.setup_encryption()
         if password:
-            self._encryption = ZFSEncryption(password, Path("/etc/zfs/zroot.key"))
+            self._encryption_handler = ZFSEncryption(password, Path("/etc/zfs/zroot.key"))
         return self
 
     def build(self) -> 'ZFSManager':
@@ -329,7 +330,7 @@ class ZFSManagerBuilder:
             pool_name=self._pool_name,
             dataset_prefix=self._dataset_prefix,
             mountpoint=self._mountpoint,
-            encryption=self._encryption,
+            encryption_password=self._encryption_handler.password if self._encryption_handler else None,
             compression=self._compression,
             datasets=self._datasets
         )
@@ -343,7 +344,7 @@ class ZFSManager:
         self.paths = ZFSPaths()
         self.pool = ZFSPool(config)
         self.datasets = ZFSDatasetManager(config, self.paths)
-        self.encryption = ZFSEncryption(config.encryption, self.paths.zfs_key)
+        self.encryption_handler = ZFSEncryption(config.encryption_password, self.paths.zfs_key)
 
     def mount_datasets(self) -> None:
         """Mount all datasets in the correct order"""
@@ -371,7 +372,7 @@ class ZFSManager:
             SysCommand(f"cp {self.paths.hostid} {mountpoint}/etc/")
 
             # Copy encryption key if encryption is enabled
-            if self.config.encryption:
+            if self.config.encryption_password:
                 SysCommand(f"cp {self.paths.zfs_key} {target_zfs}/")
 
             info("ZFS cache files configured successfully")
@@ -387,7 +388,7 @@ class ZFSManager:
         except SysCallError as e:
             if "File exists" not in str(e):
                 raise
-        self.encryption.setup()
+        self.encryption_handler.setup()
         if self.device:  # New pool setup
             self.pool.create(self.device)
             self.datasets.create_base_dataset()
