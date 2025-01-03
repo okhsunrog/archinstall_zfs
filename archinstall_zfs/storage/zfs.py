@@ -91,25 +91,45 @@ class ZFSPool:
             raise
 
     def export(self) -> None:
-        """Exports the ZFS pool with real-time output monitoring"""
+        """Exports the ZFS pool with retries and detailed logging"""
         debug(f"Exporting pool {self.config.pool_name}")
-        try:
-            os.sync()
+        max_retries = 3
+        retry_delay = 2
 
-            with SysCommandWorker("zfs umount -af", peek_output=True) as unmount:
-                while unmount.is_alive():
-                    unmount.poll()
+        for attempt in range(max_retries):
+            try:
+                debug(f"Export attempt {attempt + 1} of {max_retries}")
 
-            time.sleep(1)
+                # Log current pool status
+                debug("Current pool status:")
+                SysCommand("zpool status", peek_output=True)
 
-            with SysCommandWorker(f"zpool export -f {self.config.pool_name}", peek_output=True) as export:
-                while export.is_alive():
-                    export.poll()
+                # Log mounted datasets
+                debug("Currently mounted datasets:")
+                SysCommand("zfs list -H -o name,mountpoint", peek_output=True)
 
-            info("Pool exported successfully")
-        except Exception as e:
-            error(f"Failed to export pool: {str(e)}")
-            raise
+                os.sync()
+                debug("Running filesystem sync")
+
+                debug("Attempting unmount of all filesystems")
+                SysCommand("zfs umount -af", peek_output=True)
+                debug(f"Waiting {retry_delay} seconds after unmount")
+                time.sleep(retry_delay)
+
+                debug(f"Attempting pool export: {self.config.pool_name}")
+                SysCommand(f"zpool export -f {self.config.pool_name}", peek_output=True)
+
+                info("Pool exported successfully")
+                return
+
+            except SysCallError as e:
+                debug(f"Detailed error on attempt {attempt + 1}: {repr(e)}")
+                if attempt < max_retries - 1:
+                    debug(f"Retrying in {retry_delay} seconds")
+                    time.sleep(retry_delay)
+                else:
+                    error(f"Export failed after {max_retries} attempts: {str(e)}")
+                    raise
 
     def import_pool(self, mountpoint: Path) -> None:
         """Imports the ZFS pool at specified mountpoint"""
