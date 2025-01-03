@@ -29,5 +29,8 @@ class ZfsPlugin:
         return False
 
     def on_mkinitcpio(self, installation):
-        installation._hooks.append('zfs')
+        # Find the index of 'filesystems' hook
+        filesystems_index = installation._hooks.index('filesystems')
+        # Insert 'zfs' right before it
+        installation._hooks.insert(filesystems_index, 'zfs')
         return False
