@@ -25,21 +25,33 @@ def initialize_zfs() -> None:
             raise RuntimeError("Failed to initialize ZFS support")
 
 
-def add_archzfs_repo(target_path: str = "/") -> None:
+def add_archzfs_repo(target_path: Path = Path("/"), installation = None) -> None:
     """Add archzfs repository to pacman.conf"""
     info("Adding archzfs repository")
 
-    SysCommand('pacman-key -r DDF7DB817396A49B2A2723F7403BD972F75D9D76')
-    SysCommand('pacman-key --lsign-key DDF7DB817396A49B2A2723F7403BD972F75D9D76')
+    key_receive = 'pacman-key -r DDF7DB817396A49B2A2723F7403BD972F75D9D76'
+    key_sign = 'pacman-key --lsign-key DDF7DB817396A49B2A2723F7403BD972F75D9D76'
 
-    pacman_conf = f"{str(target_path).rstrip('/')}/etc/pacman.conf"
+    if installation:
+        installation.arch_chroot(key_receive)
+        installation.arch_chroot(key_sign)
+    else:
+        SysCommand(key_receive)
+        SysCommand(key_sign)
+
+    repo_config = [
+        '\n[archzfs]\n',
+        'Server = http://archzfs.com/$repo/$arch\n',
+        'Server = http://mirror.sum7.eu/archlinux/$repo/$repo/$arch\n',
+        'Server = https://mirror.biocrafting.net/archlinux/$repo/$repo/$arch\n'
+    ]
+
+    pacman_conf = target_path / "etc/pacman.conf"
     with open(pacman_conf, "a") as f:
-        f.write('\n[archzfs]\n')
-        f.write('Server = http://archzfs.com/$repo/$arch\n')
-        f.write('Server = http://mirror.sum7.eu/archlinux/$repo/$repo/$arch\n')
-        f.write('Server = https://mirror.biocrafting.net/archlinux/$repo/$repo/$arch\n')
+        f.writelines(repo_config)
 
-    SysCommand('pacman -Sy')
+    if not installation:
+        SysCommand('pacman -Sy')
 
 class ZFSInitializer:
     def __init__(self, verbose: bool = False):

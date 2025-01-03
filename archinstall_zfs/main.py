@@ -22,7 +22,7 @@ InstallMode = Literal["full_disk", "new_pool", "existing_pool"]
 
 class ZfsPlugin:
     def on_install(self, installation):
-        add_archzfs_repo(installation.target)
+        add_archzfs_repo(installation.target, installation)
         return False
 
     def on_mkinitcpio(self, installation):
