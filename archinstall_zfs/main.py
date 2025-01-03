@@ -225,7 +225,6 @@ def main() -> bool:
         error("EFI boot mode required")
         return False
 
-    add_archzfs_repo()
     initialize_zfs()
 
     try:
