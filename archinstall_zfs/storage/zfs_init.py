@@ -17,12 +17,29 @@ def check_zfs_module() -> bool:
 
 
 def initialize_zfs() -> None:
+    add_archzfs_repo()
     if not check_zfs_module():
         info("ZFS module not loaded, initializing")
         zfs_init = ZFSInitializer()
         if not zfs_init.run():
             raise RuntimeError("Failed to initialize ZFS support")
 
+
+def add_archzfs_repo(target_path: str = "/") -> None:
+    """Add archzfs repository to pacman.conf"""
+    info("Adding archzfs repository")
+
+    SysCommand('pacman-key -r DDF7DB817396A49B2A2723F7403BD972F75D9D76')
+    SysCommand('pacman-key --lsign-key DDF7DB817396A49B2A2723F7403BD972F75D9D76')
+
+    pacman_conf = f"{target_path.rstrip('/')}/etc/pacman.conf"
+    with open(pacman_conf, "a") as f:
+        f.write('\n[archzfs]\n')
+        f.write('Server = http://archzfs.com/$repo/$arch\n')
+        f.write('Server = http://mirror.sum7.eu/archlinux/$repo/$repo/$arch\n')
+        f.write('Server = https://mirror.biocrafting.net/archlinux/$repo/$repo/$arch\n')
+
+    SysCommand('pacman -Sy')
 
 class ZFSInitializer:
     def __init__(self, verbose: bool = False):
@@ -35,24 +52,6 @@ class ZFSInitializer:
     def increase_cowspace(self) -> None:
         info("Increasing cowspace to half of RAM")
         SysCommand('mount -o remount,size=50% /run/archiso/cowspace')
-
-    def init_archzfs(self) -> bool:
-        info("Adding archzfs repository")
-        try:
-            SysCommand('pacman-key -r DDF7DB817396A49B2A2723F7403BD972F75D9D76')
-            SysCommand('pacman-key --lsign-key DDF7DB817396A49B2A2723F7403BD972F75D9D76')
-
-            with open('/etc/pacman.conf', 'a') as f:
-                f.write('\n[archzfs]\n')
-                f.write('Server = http://archzfs.com/archzfs/x86_64\n')
-                f.write('Server = http://mirror.sum7.eu/archlinux/archzfs/archzfs/x86_64\n')
-                f.write('Server = https://mirror.biocrafting.net/archlinux/archzfs/archzfs/x86_64\n')
-
-            SysCommand('pacman -Sy')
-            return True
-        except Exception as e:
-            error(f"Failed to initialize archzfs: {str(e)}")
-            return False
 
     def extract_pkginfo(self, package_path: Path) -> str:
         pkginfo = SysCommand(f'bsdtar -qxO -f {package_path} .PKGINFO').decode()
@@ -104,8 +103,6 @@ class ZFSInitializer:
             return False
 
         self.increase_cowspace()
-        if not self.init_archzfs():
-            return False
 
         if not self.install_zfs():
             return False

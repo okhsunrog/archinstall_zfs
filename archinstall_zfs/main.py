@@ -14,12 +14,30 @@ from archinstall.tui.menu_item import MenuItem
 from archinstall.lib.storage import storage
 from archinstall.lib.plugins import plugins
 
-from storage.zfs_init import initialize_zfs
-from custom_plugins.zfs_plugin import ZfsPlugin, add_archzfs_repo
+from storage.zfs_init import initialize_zfs, add_archzfs_repo
 from storage.disk import DiskManager, DiskManagerBuilder
 from storage.zfs import ZFSManager, ZFSManagerBuilder
 
 InstallMode = Literal["full_disk", "new_pool", "existing_pool"]
+
+class ZfsPlugin:
+    def on_pacstrap(self, packages):
+        # Add ZFS packages to initial pacstrap
+        packages.extend(['zfs-dkms', 'zfs-utils'])
+        return packages
+
+    def on_install(self, installation):
+        add_archzfs_repo(installation.target)
+        return False
+
+    def on_mkinitcpio(self, installation):
+        # Find the index of 'filesystems' hook
+        filesystems_index = installation._hooks.index('filesystems')
+        # Insert 'zfs' right before it
+        installation._hooks.insert(filesystems_index, 'zfs')
+        return False
+
+
 plugins['zfs'] = ZfsPlugin()
 
 
