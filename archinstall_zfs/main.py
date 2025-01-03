@@ -166,7 +166,6 @@ def ask_user_questions() -> None:
         global_menu.set_enabled('audio_config', True)
         global_menu.set_enabled('network_config', True)
         global_menu.set_enabled('packages', True)
-        global_menu.set_enabled('', True) # delimiter
 
         global_menu.set_enabled('save_config', True)
         global_menu.set_enabled('install', True)
