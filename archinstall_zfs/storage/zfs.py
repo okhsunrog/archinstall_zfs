@@ -74,6 +74,16 @@ class ZFSPaths(BaseModel):
     def cache_file(self) -> Path:
         return self.cache_dir / self.pool_name
 
+    @classmethod
+    def create_mounted(cls, base_paths: 'ZFSPaths', mountpoint: Path) -> 'ZFSPaths':
+        return cls(
+            base_zfs=mountpoint / base_paths.base_zfs,
+            cache_dir=mountpoint / base_paths.cache_dir,
+            key_file=mountpoint / base_paths.key_file,
+            hostid=mountpoint / base_paths.hostid,
+            _pool_name=base_paths.pool_name
+        )
+
     # noinspection PyMethodParameters
     @field_validator('*')
     def validate_absolute_path(cls, v: Path) -> Path:
