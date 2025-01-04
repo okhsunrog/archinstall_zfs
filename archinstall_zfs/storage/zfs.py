@@ -394,12 +394,19 @@ class ZFSManager:
 
             # Read and modify cache file content
             source_cache = Path("/etc/zfs/zfs-list.cache") / self.config.pool_name
-            modified_content = source_cache.read_text().replace(str(mountpoint).rstrip('/'), '')
+            lines = source_cache.read_text().splitlines()
+            modified_lines = []
+            mount_prefix = str(mountpoint).rstrip('/')
 
-            # Write modified content to target
+            for line in lines:
+                fields = line.split('\t')
+                if len(fields) > 1 and fields[1].startswith(mount_prefix):
+                    fields[1] = '/' if fields[1] == mount_prefix else fields[1].replace(mount_prefix, '')
+                modified_lines.append('\t'.join(fields))
+
             target_cache = target_zfs / "zfs-list.cache" / self.config.pool_name
             target_cache.parent.mkdir(parents=True, exist_ok=True)
-            target_cache.write_text(modified_content)
+            target_cache.write_text('\n'.join(modified_lines))
 
             # Copy hostid
             SysCommand(f"cp {self.paths.hostid} {mountpoint}/etc/")
