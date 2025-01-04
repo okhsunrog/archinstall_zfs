@@ -456,5 +456,11 @@ class ZFSManager:
         debug("Finishing ZFS setup")
         os.sync()
         SysCommand("zfs umount -a")
+        root_dataset = next(ds for ds in self.config.datasets if ds.properties.get('mountpoint') == '/')
+        full_dataset_path = f"{self.config.pool_name}/{self.config.dataset_prefix}/{root_dataset.name}"
+        root_prefix = f"{self.config.pool_name}/{self.config.dataset_prefix}"
+        SysCommand(
+            f"zfs set org.zfsbootmenu:commandline=\"spl.spl_hostid=$(hostid) zswap.enabled=0 rw\" {root_prefix}")
+        SysCommand(f"zfs set org.zfsbootmenu:keysource=\"{full_dataset_path}\" {self.config.pool_name}")
         SysCommand(f"zpool export {self.config.pool_name}")
         info("ZFS cleanup completed")
