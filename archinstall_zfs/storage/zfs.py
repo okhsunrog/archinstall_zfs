@@ -451,15 +451,15 @@ class ZFSManager:
         self.mount_datasets()
 
     def finish(self) -> None:
-        """Clean up ZFS mounts and export pool"""
         #!!TODO: Can I simplify this?
+        """Clean up ZFS mounts and export pool"""
         debug("Finishing ZFS setup")
         os.sync()
         SysCommand("zfs umount -a")
-        root_dataset = f"{self.config.pool_name}/ROOT/default"
-        SysCommand(f"zfs umount {root_dataset}")
+        root_dataset = next(ds for ds in self.config.datasets if ds.mountpoint == '/')
+        SysCommand(f"zfs umount {root_dataset.name}")
         SysCommand("sleep 1")
-        SysCommand(f"zfs mount {root_dataset}")
-        SysCommand(f"zfs umount {root_dataset}")
+        SysCommand(f"zfs mount {root_dataset.name}")
+        SysCommand(f"zfs umount {root_dataset.name}")
         SysCommand(f"zpool export {self.config.pool_name}")
         info("ZFS cleanup completed")

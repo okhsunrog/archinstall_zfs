@@ -204,6 +204,9 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
             if archinstall.arguments.get('custom-commands', None):
                 archinstall.run_custom_user_commands(archinstall.arguments['custom-commands'], installation)
 
+            zfs_manager.genfstab()
+            zfs_manager.copy_misc_files()
+
             info(
                 "For post-installation tips, see https://wiki.archlinux.org/index.php/Installation_guide#Post-installation")
 
@@ -216,10 +219,8 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
                     except:
                         pass
 
-        zfs_manager.genfstab()
-        zfs_manager.copy_misc_files()
-        zfs_manager.finish()
         disk_manager.finish(mountpoint)
+        zfs_manager.finish()
 
         return True
     except Exception as e:
