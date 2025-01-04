@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 from archinstall import info, error, debug
 from archinstall.lib.exceptions import SysCallError
 from archinstall.lib.general import SysCommand
-from ..utils import modify_zfs_cache_mountpoints
+from archinstall_zfs.utils import modify_zfs_cache_mountpoints
 
 
 class DatasetConfig(BaseModel):

@@ -14,9 +14,9 @@ from archinstall.tui.menu_item import MenuItem
 from archinstall.lib.storage import storage
 from archinstall.lib.plugins import plugins
 
-from storage.zfs_init import initialize_zfs, add_archzfs_repo
-from storage.disk import DiskManager, DiskManagerBuilder
-from storage.zfs import ZFSManager, ZFSManagerBuilder
+from archinstall_zfs.storage.zfs_init import initialize_zfs, add_archzfs_repo
+from archinstall_zfs.storage.disk import DiskManager, DiskManagerBuilder
+from archinstall_zfs.storage.zfs import ZFSManager, ZFSManagerBuilder
 
 InstallMode = Literal["full_disk", "new_pool", "existing_pool"]
 
