@@ -28,9 +28,13 @@ class ZfsPlugin:
         return False
 
     def on_mkinitcpio(self, installation):
-        mkinitcpio_conf = """MODULES=""
+        files = []
+        if Path(f"{installation.target}/etc/zfs/zroot.key").exists():
+            files.append("/etc/zfs/zroot.key")
+
+        mkinitcpio_conf = f"""MODULES=""
 BINARIES=""
-FILES=""
+FILES="{' '.join(files)}"
 HOOKS="base udev autodetect modconf block keyboard zfs filesystems"
 COMPRESSION="zstd\""""
 

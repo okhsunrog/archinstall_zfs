@@ -325,7 +325,7 @@ class ZFSManagerBuilder:
     def setup_encryption(self) -> 'ZFSManagerBuilder':
         password = ZFSEncryption.setup_encryption()
         if password:
-            self._encryption_handler = ZFSEncryption(password, Path("/etc/zfs/zroot.key"))
+            self._encryption_handler = ZFSEncryption(password, ZFSPaths.zfs_key)
         return self
 
     def build(self) -> 'ZFSManager':
@@ -410,14 +410,17 @@ class ZFSManager:
             # Copy hostid
             SysCommand(f"cp {self.paths.hostid} {mountpoint}/etc/")
 
-            # Copy encryption key if encryption is enabled
-            if self.config.encryption_password:
-                SysCommand(f"cp {self.paths.zfs_key} {target_zfs}/")
-
             info("ZFS cache files configured successfully")
         except SysCallError as e:
             error(f"Failed to copy ZFS misc files: {str(e)}")
             raise
+
+    def copy_enc_key(self) -> None:
+        """Copy encryption key to target system"""
+        debug("Copying encryption key")
+        SysCommand(f"cp {self.paths.zfs_key} {self.config.mountpoint}/etc/zfs/")
+        info("Encryption key copied successfully")
+
 
     def genfstab(self) -> None:
         """Generate fstab entries for ZFS installation"""
@@ -450,6 +453,7 @@ class ZFSManager:
         """Configure ZFS for system installation"""
         self.pool.import_pool(self.config.mountpoint)
         self.mount_datasets()
+        self.copy_enc_key()
 
     def finish(self) -> None:
         """Clean up ZFS mounts and export pool"""
