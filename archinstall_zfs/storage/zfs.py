@@ -411,7 +411,7 @@ class ZFSManager:
 
         self.paths.base_zfs.mkdir(parents=True, exist_ok=True)
         self.paths.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.paths.get_cache_file(self.config.pool_name).touch()
+        self.paths.cache_file.touch()
 
         SysCommand("systemctl enable --now zfs-zed.service")
         info("ZFS cache prepared")
@@ -424,8 +424,7 @@ class ZFSManager:
             self.mounted_paths.base_zfs.mkdir(parents=True, exist_ok=True)
 
             # Read and modify cache file content
-            cache_file = self.paths.get_cache_file(self.config.pool_name)
-            content = cache_file.read_text()
+            content = self.paths.cache_file.read_text()
             modified_content = modify_zfs_cache_mountpoints(content, self.config.mountpoint)
 
             # Write modified content to target
