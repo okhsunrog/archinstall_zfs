@@ -114,7 +114,8 @@ class ZFSPool:
         try:
             SysCommand(f"zpool import -N -R {mountpoint} {self.config.pool_name}")
             if self.config.encryption_password:
-                SysCommand(f"zfs load-key {self.config.pool_name}")
+                base_dataset = f"{self.config.pool_name}/{self.config.dataset_prefix}"
+                SysCommand(f"zfs load-key {base_dataset}")
             info("Pool imported successfully")
         except SysCallError as e:
             error(f"Failed to import pool: {str(e)}")
