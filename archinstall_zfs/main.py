@@ -8,6 +8,7 @@ import archinstall
 from archinstall import SysInfo, debug, info, error, SysCommand, Installer, GlobalMenu, ConfigurationOutput
 from archinstall.lib.disk import DiskLayoutConfiguration, DiskLayoutType
 from archinstall.lib.exceptions import SysCallError
+from archinstall.lib.interactions.general_conf import ask_chroot
 from archinstall.lib.models import NetworkConfiguration, AudioConfiguration
 from archinstall.lib.profile import profile_handler
 from archinstall.tui.curses_menu import SelectMenu, MenuItemGroup, EditMenu, Tui
@@ -32,17 +33,6 @@ class ZfsPlugin:
         # Insert 'zfs' right before it
         installation._hooks.insert(filesystems_index, 'zfs')
         return False
-
-    def on_genfstab(self, installation):
-        # Clear any existing fstab entries
-        installation._fstab_entries = []
-
-        # Add only the root ZFS dataset entry
-        installation._fstab_entries.append("zroot/ROOT/default / zfs defaults 0 0")
-
-        # Let other plugins continue processing
-        return False
-
 
 plugins['zfs'] = ZfsPlugin()
 
@@ -215,9 +205,28 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
             if profile_config := archinstall.arguments.get('profile_config', None):
                 profile_config.profile.post_install(installation)
 
-            #!TODO: add custom commands, services, and ask_chroot
-
             installation.enable_service(ZFS_SERVICES)
+
+            # If the user provided a list of services to be enabled, pass the list to the enable_service function.
+            # Note that while it's called enable_service, it can actually take a list of services and iterate it.
+            if archinstall.arguments.get('services', None):
+                installation.enable_service(archinstall.arguments.get('services', []))
+
+            # If the user provided custom commands to be run post-installation, execute them now.
+            if archinstall.arguments.get('custom-commands', None):
+                archinstall.run_custom_user_commands(archinstall.arguments['custom-commands'], installation)
+
+            info(
+                "For post-installation tips, see https://wiki.archlinux.org/index.php/Installation_guide#Post-installation")
+
+            if not archinstall.arguments.get('silent'):
+                with Tui():
+                    chroot = ask_chroot()
+                if chroot:
+                    try:
+                        installation.drop_to_shell()
+                    except:
+                        pass
 
         zfs_manager.genfstab()
         zfs_manager.copy_misc_files()
@@ -234,23 +243,16 @@ def ask_user_questions() -> None:
     """Get user input for installation configuration"""
     with Tui():
         global_menu = GlobalMenu(data_store=archinstall.arguments)
-        global_menu.disable_all()
 
-        # Keep essential options enabled
-        global_menu.set_enabled('archinstall-language', True)
-        global_menu.set_enabled('locale_config', True)
-        global_menu.set_enabled('mirror_config', True)
-        global_menu.set_enabled('timezone', True)
-        global_menu.set_enabled('!root-password', True)
-        global_menu.set_enabled('!users', True)
-        global_menu.set_enabled('profile_config', True)
-        global_menu.set_enabled('audio_config', True)
-        global_menu.set_enabled('network_config', True)
-        global_menu.set_enabled('packages', True)
-
-        global_menu.set_enabled('save_config', True)
-        global_menu.set_enabled('install', True)
-        global_menu.set_enabled('abort', True)
+        # Disable options that conflict with ZFS installation
+        global_menu.set_enabled('disk_config', False)
+        global_menu.set_enabled('disk_encryption', False)
+        # global_menu.set_enabled('swap', False)
+        global_menu.set_enabled('bootloader', False)
+        global_menu.set_enabled('uki', False)
+        # global_menu.set_enabled('kernels', False)
+        global_menu.set_enabled('parallel downloads', False)
+        global_menu.set_enabled('additional-repositories', False)
 
         global_menu.run()
 
