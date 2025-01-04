@@ -62,12 +62,15 @@ class ZFSPaths(BaseModel):
 
     @property
     def pool_name(self) -> str:
+        info(f"Getting pool name from {self}")
+        info(f"Pool name: {self._pool_name}")
         if self._pool_name is None:
             raise ValueError("Pool name not set")
         return self._pool_name
 
     @pool_name.setter
     def pool_name(self, value: str) -> None:
+        info(f"Setting pool name to {value}")
         self._pool_name = value
 
     @property
