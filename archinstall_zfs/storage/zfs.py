@@ -58,18 +58,21 @@ class ZFSPaths(BaseModel):
     cache_dir: Path = Field(default=Path("/etc/zfs/zfs-list.cache"))
     key_file: Path = Field(default=Path("/etc/zfs/zroot.key"))
     hostid: Path = Field(default=Path("/etc/hostid"))
+    _pool_name: Optional[str] = None
 
-    def get_cache_file(self, pool_name: str) -> Path:
-        return self.cache_dir / pool_name
+    @property
+    def pool_name(self) -> str:
+        if self._pool_name is None:
+            raise ValueError("Pool name not set")
+        return self._pool_name
 
-    def get_mounted_paths(self, mountpoint: Path, pool_name: str) -> Dict[str, Path]:
-        return {
-            "base_zfs": mountpoint / self.base_zfs,
-            "cache_dir": mountpoint / self.cache_dir,
-            "key_file": mountpoint / self.key_file,
-            "hostid": mountpoint / self.hostid,
-            "cache_file": mountpoint / self.get_cache_file(pool_name)
-        }
+    @pool_name.setter
+    def pool_name(self, value: str) -> None:
+        self._pool_name = value
+
+    @property
+    def cache_file(self) -> Path:
+        return self.cache_dir / self.pool_name
 
     # noinspection PyMethodParameters
     @field_validator('*')
@@ -288,6 +291,7 @@ class ZFSManagerBuilder:
         self._datasets: List[DatasetConfig] = []
         self._device: Optional[str] = None
         self._is_new_pool: bool = True
+        self._paths: ZFSPaths = ZFSPaths()
 
     def select_pool_name(self) -> 'ZFSManagerBuilder':
         pool_menu = EditMenu(
@@ -302,6 +306,7 @@ class ZFSManagerBuilder:
     def new_pool(self, device: Path) -> 'ZFSManagerBuilder':
         self._device = str(device)  # Convert Path to str for ZFS commands
         self._is_new_pool = True
+        self._paths.pool_name = self._pool_name
         return self
 
     def select_existing_pool(self) -> 'ZFSManagerBuilder':
@@ -340,7 +345,7 @@ class ZFSManagerBuilder:
     def setup_encryption(self) -> 'ZFSManagerBuilder':
         password = ZFSEncryption.setup_encryption()
         if password:
-            self._encryption_handler = ZFSEncryption(password, ZFSPaths().key_file)
+            self._encryption_handler = ZFSEncryption(password, self._paths.key_file)
         return self
 
     def build(self) -> 'ZFSManager':
@@ -353,15 +358,18 @@ class ZFSManagerBuilder:
             compression=self._compression,
             datasets=self._datasets
         )
-        return ZFSManager(config, device=self._device)
+        mounted_paths = ZFSPaths.create_mounted(self._paths, self._mountpoint)
+        debug(f"Paths: {self._paths}")
+        debug(f"Mounted paths: {mounted_paths}")
+        return ZFSManager(config, self._paths, mounted_paths, device=self._device)
 
 
 class ZFSManager:
-    def __init__(self, config: ZFSConfig, device: str | None = None):
+    def __init__(self, config: ZFSConfig, paths: ZFSPaths, mounted_paths: ZFSPaths, device: str | None = None):
         self.config = config
         self.device = device
-        self.paths = ZFSPaths()
-        self.mounted_paths = self.paths.get_mounted_paths(config.mountpoint, config.pool_name)
+        self.paths = paths
+        self.mounted_paths = mounted_paths
         self.pool = ZFSPool(config)
         self.datasets = ZFSDatasetManager(config, self.paths)
         self.encryption_handler = ZFSEncryption(config.encryption_password, self.paths.key_file)
@@ -403,7 +411,7 @@ class ZFSManager:
         debug("Setting up ZFS cache files")
         try:
             # Create target directories
-            self.mounted_paths["base_zfs"].mkdir(parents=True, exist_ok=True)
+            self.mounted_paths.base_zfs.mkdir(parents=True, exist_ok=True)
 
             # Read and modify cache file content
             cache_file = self.paths.get_cache_file(self.config.pool_name)
@@ -411,11 +419,11 @@ class ZFSManager:
             modified_content = modify_zfs_cache_mountpoints(content, self.config.mountpoint)
 
             # Write modified content to target
-            self.mounted_paths["cache_dir"].mkdir(parents=True, exist_ok=True)
-            self.mounted_paths["cache_file"].write_text(modified_content)
+            self.mounted_paths.cache_dir.mkdir(parents=True, exist_ok=True)
+            self.mounted_paths.cache_file.write_text(modified_content)
 
             # Copy hostid
-            SysCommand(f"cp {self.paths.hostid} {self.mounted_paths['hostid']}")
+            SysCommand(f"cp {self.paths.hostid} {self.mounted_paths.hostid}")
 
             info("ZFS cache files configured successfully")
         except SysCallError as e:
@@ -426,8 +434,8 @@ class ZFSManager:
         """Copy encryption key to target system"""
         debug("Copying encryption key")
 
-        self.mounted_paths["base_zfs"].mkdir(parents=True, exist_ok=True)
-        SysCommand(f"cp {self.paths.key_file} {self.mounted_paths["key_file"]}")
+        self.mounted_paths.base_zfs.mkdir(parents=True, exist_ok=True)
+        SysCommand(f"cp {self.paths.key_file} {self.mounted_paths.key_file}")
         info("Encryption key copied successfully")
 
     def genfstab(self) -> None:
