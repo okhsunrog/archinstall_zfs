@@ -28,11 +28,17 @@ class ZfsPlugin:
         return False
 
     def on_mkinitcpio(self, installation):
-        # Find the index of 'filesystems' hook
-        filesystems_index = installation._hooks.index('filesystems')
-        # Insert 'zfs' right before it
-        installation._hooks.insert(filesystems_index, 'zfs')
-        return False
+        mkinitcpio_conf = """MODULES=""
+BINARIES=""
+FILES=""
+HOOKS="base udev autodetect modconf block keyboard zfs filesystems"
+COMPRESSION="zstd\""""
+
+        with open(f'{installation.target}/etc/mkinitcpio.conf', 'w') as f:
+            f.write(mkinitcpio_conf)
+
+        SysCommand(f'/usr/bin/arch-chroot {installation.target} mkinitcpio -P', peek_output=True)
+        return True # replacing the mkinitcpio function from the original archinstall
 
 plugins['zfs'] = ZfsPlugin()
 
