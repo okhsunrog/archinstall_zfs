@@ -399,8 +399,6 @@ class ZFSManager:
             source_cache = Path("/etc/zfs/zfs-list.cache") / self.config.pool_name
             content = source_cache.read_text()
             modified_content = modify_zfs_cache_mountpoints(content, mountpoint)
-            debug(f"Source content:\n{content}")
-            debug(f"Modified content:\n{modified_content}")
 
             # Write modified content to target
             target_cache = target_zfs / "zfs-list.cache" / self.config.pool_name
