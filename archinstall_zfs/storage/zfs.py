@@ -306,7 +306,6 @@ class ZFSManagerBuilder:
     def new_pool(self, device: Path) -> 'ZFSManagerBuilder':
         self._device = str(device)  # Convert Path to str for ZFS commands
         self._is_new_pool = True
-        self._paths.pool_name = self._pool_name
         return self
 
     def select_existing_pool(self) -> 'ZFSManagerBuilder':
@@ -332,6 +331,7 @@ class ZFSManagerBuilder:
 
     def with_pool_name(self, name: str) -> 'ZFSManagerBuilder':
         self._pool_name = name
+        self._paths.pool_name = self._pool_name
         return self
 
     def with_dataset_prefix(self, prefix: str) -> 'ZFSManagerBuilder':
