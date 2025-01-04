@@ -22,6 +22,7 @@ class DiskConfig(BaseModel):
     selected_disk: ByIdPath
     efi_partition: Optional[ByIdPath] = None
 
+    # noinspection PyMethodParameters
     @field_validator('selected_disk', 'efi_partition', check_fields=False)
     def validate_path_exists(cls, v: Optional[ByIdPath]) -> Optional[ByIdPath]:
         if v is not None and not v.exists():
