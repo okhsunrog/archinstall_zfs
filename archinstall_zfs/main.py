@@ -247,10 +247,10 @@ def ask_user_questions() -> None:
         # Disable options that conflict with ZFS installation
         global_menu.set_enabled('disk_config', False)
         global_menu.set_enabled('disk_encryption', False)
-        # global_menu.set_enabled('swap', False)
+        global_menu.set_enabled('swap', False)
         global_menu.set_enabled('bootloader', False)
         global_menu.set_enabled('uki', False)
-        # global_menu.set_enabled('kernels', False)
+        global_menu.set_enabled('kernels', False)
         global_menu.set_enabled('parallel downloads', False)
         global_menu.set_enabled('additional-repositories', False)
 
