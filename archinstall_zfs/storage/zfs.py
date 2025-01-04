@@ -349,6 +349,12 @@ class ZFSManager:
         self.pool = ZFSPool(config)
         self.datasets = ZFSDatasetManager(config, self.paths)
         self.encryption_handler = ZFSEncryption(config.encryption_password, self.paths.zfs_key)
+        self._zfs_cfg = Path("/etc/zfs")
+        self._zfs_cfg_mnt = self.config.mountpoint / self._zfs_cfg
+        self._zfs_cache_dir = self._zfs_cfg / "zfs-list.cache"
+        self._zfs_cache_file = self._zfs_cache_dir / self.config.pool_name
+        self._zfs_cache_dir_mnt = self.config.mountpoint / self._zfs_cache_dir
+        self._zfs_cache_file_mnt = self.config.mountpoint / self._zfs_cache_file
 
     def mount_datasets(self) -> None:
         """Mount all datasets in the correct order"""
@@ -371,44 +377,31 @@ class ZFSManager:
             error(f"Failed to create hostid: {str(e)}")
             raise
 
-    @staticmethod
-    def prepare_zfs_cache(pool_name: str) -> None:
+    def prepare_zfs_cache(self) -> None:
         """Prepare ZFS cache directory and files"""
         debug("Preparing ZFS cache")
-        try:
-            target_zfs = Path("/etc/zfs")
-            target_zfs_cache = target_zfs / "zfs-list.cache"
-            target_zfs_cache.mkdir(parents=True, exist_ok=True)
-            cache_file = target_zfs_cache / pool_name
-            cache_file.touch()
-            SysCommand("systemctl enable --now zfs-zed.service")
-            info("ZFS cache prepared")
-        except Exception as e:
-            error(f"Failed to prepare ZFS cache: {str(e)}")
-            raise
-
+        self._zfs_cfg.mkdir(parents=True, exist_ok=True)
+        self._zfs_cache_dir.mkdir(parents=True, exist_ok=True)
+        self._zfs_cache_file.touch()
+        SysCommand("systemctl enable --now zfs-zed.service")
+        info("ZFS cache prepared")
 
     def copy_misc_files(self) -> None:
         """Set up ZFS cache files in the target system"""
         debug("Setting up ZFS cache files")
         try:
-            mountpoint = self.config.mountpoint
             # Create target directories
-            target_zfs = mountpoint / "etc/zfs"
-            target_zfs.mkdir(parents=True, exist_ok=True)
+            self._zfs_cfg_mnt.mkdir(parents=True, exist_ok=True)
 
-            # Read and modify cache file content
-            source_cache = Path("/etc/zfs/zfs-list.cache") / self.config.pool_name
-            content = source_cache.read_text()
-            modified_content = modify_zfs_cache_mountpoints(content, mountpoint)
+            content =  self._zfs_cache_file.read_text()
+            modified_content = modify_zfs_cache_mountpoints(content, self.config.mountpoint)
 
             # Write modified content to target
-            target_cache = target_zfs / "zfs-list.cache" / self.config.pool_name
-            target_cache.parent.mkdir(parents=True, exist_ok=True)
-            target_cache.write_text(modified_content)
+            self._zfs_cache_dir_mnt.parent.mkdir(parents=True, exist_ok=True)
+            self._zfs_cache_file_mnt.write_text(modified_content)
 
             # Copy hostid
-            SysCommand(f"cp {self.paths.hostid} {mountpoint}/etc/")
+            SysCommand(f"cp {self.paths.hostid} {self._zfs_cfg_mnt}/hostid")
 
             info("ZFS cache files configured successfully")
         except SysCallError as e:
@@ -418,7 +411,9 @@ class ZFSManager:
     def copy_enc_key(self) -> None:
         """Copy encryption key to target system"""
         debug("Copying encryption key")
-        SysCommand(f"cp {self.paths.zfs_key} {self.config.mountpoint}/etc/zfs/")
+
+        self._zfs_cfg_mnt.mkdir(parents=True, exist_ok=True)
+        SysCommand(f"cp {self.paths.zfs_key} {self.config.mountpoint / self.paths.zfs_key}")
         info("Encryption key copied successfully")
 
 
@@ -441,7 +436,7 @@ class ZFSManager:
     def prepare(self) -> None:
         """Main workflow for preparing ZFS setup"""
         self.create_hostid()
-        self.prepare_zfs_cache(self.config.pool_name)
+        self.prepare_zfs_cache()
         self.encryption_handler.setup()
         if self.device:  # New pool setup
             self.pool.create(self.device)
