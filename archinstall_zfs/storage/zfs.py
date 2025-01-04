@@ -370,6 +370,8 @@ class ZFSManagerBuilder:
         )
         mounted_paths = ZFSPaths.create_mounted(self._paths, self._mountpoint)
         debug(f"Paths: {self._paths}")
+        debug(f"Mountpoint: {self._mountpoint}")
+        debug(f"Pool name: {self._paths.pool_name}")
         debug(f"Mounted paths: {mounted_paths}")
         return ZFSManager(config, self._paths, mounted_paths, device=self._device)
 
@@ -478,7 +480,8 @@ class ZFSManager:
         """Configure ZFS for system installation"""
         self.pool.import_pool(self.config.mountpoint)
         self.mount_datasets()
-        self.copy_enc_key()
+        if self.config.encryption_password:
+            self.copy_enc_key()
 
     def finish(self) -> None:
         """Clean up ZFS mounts and export pool"""
