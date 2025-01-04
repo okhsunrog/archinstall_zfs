@@ -391,7 +391,15 @@ class ZFSManager:
             # Create target directories and copy cache
             target_zfs = mountpoint / "etc/zfs"
             target_zfs.mkdir(parents=True, exist_ok=True)
-            SysCommand(f"cp -r /etc/zfs/zfs-list.cache {target_zfs}/")
+
+            # Read and modify cache file content
+            source_cache = Path("/etc/zfs/zfs-list.cache") / self.config.pool_name
+            modified_content = source_cache.read_text().replace(str(mountpoint).rstrip('/'), '')
+
+            # Write modified content to target
+            target_cache = target_zfs / "zfs-list.cache" / self.config.pool_name
+            target_cache.parent.mkdir(parents=True, exist_ok=True)
+            target_cache.write_text(modified_content)
 
             # Copy hostid
             SysCommand(f"cp {self.paths.hostid} {mountpoint}/etc/")
