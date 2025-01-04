@@ -26,6 +26,7 @@ DEFAULT_DATASETS = [
     DatasetConfig(name="vm", properties={"mountpoint": "/vm"})
 ]
 
+ZFS_SERVICES = ["zfs.target", "zfs-import.target", "zfs-volumes.target", "zfs-import-scan", "zfs-zed"]
 
 # noinspection PyMethodParameters
 class ZFSConfig(BaseModel):
@@ -417,6 +418,22 @@ class ZFSManager:
             error(f"Failed to copy ZFS misc files: {str(e)}")
             raise
 
+    def genfstab(self) -> None:
+        """Generate fstab entries for ZFS installation"""
+        debug("Generating fstab for ZFS")
+        fstab_path = self.config.mountpoint / "etc" / "fstab"
+
+        # Generate full fstab with UUIDs
+        raw_fstab = SysCommand(f'/usr/bin/genfstab -t UUID {self.config.mountpoint}').decode()
+
+        # Filter out pool-related entries and add root dataset
+        filtered_lines = [line for line in raw_fstab.splitlines() if self.config.pool_name not in line]
+        filtered_lines.append(f"zroot/ROOT/default / zfs defaults 0 0")
+
+        # Write final fstab
+        fstab_path.write_text('\n'.join(filtered_lines) + '\n')
+        info("Generated fstab successfully")
+
     def prepare(self) -> None:
         """Main workflow for preparing ZFS setup"""
         self.create_hostid()
@@ -428,7 +445,21 @@ class ZFSManager:
             self.datasets.create_child_datasets()
             self.pool.export()
 
-    def setup_for_installation(self, mountpoint: Path) -> None:
+    def setup_for_installation(self) -> None:
         """Configure ZFS for system installation"""
-        self.pool.import_pool(mountpoint)
+        self.pool.import_pool(self.config.mountpoint)
         self.mount_datasets()
+
+    def finish(self) -> None:
+        """Clean up ZFS mounts and export pool"""
+        #!!TODO: Can I simplify this?
+        debug("Finishing ZFS setup")
+        os.sync()
+        SysCommand("zfs umount -a")
+        root_dataset = f"{self.config.pool_name}/ROOT/default"
+        SysCommand(f"zfs umount {root_dataset}")
+        SysCommand("sleep 1")
+        SysCommand(f"zfs mount {root_dataset}")
+        SysCommand(f"zfs umount {root_dataset}")
+        SysCommand(f"zpool export {self.config.pool_name}")
+        info("ZFS cleanup completed")

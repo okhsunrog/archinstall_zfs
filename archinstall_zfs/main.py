@@ -8,6 +8,7 @@ import archinstall
 from archinstall import SysInfo, debug, info, error, SysCommand, Installer, GlobalMenu, ConfigurationOutput
 from archinstall.lib.disk import DiskLayoutConfiguration, DiskLayoutType
 from archinstall.lib.exceptions import SysCallError
+from archinstall.lib.models import NetworkConfiguration, AudioConfiguration
 from archinstall.lib.profile import profile_handler
 from archinstall.tui.curses_menu import SelectMenu, MenuItemGroup, EditMenu, Tui
 from archinstall.tui.menu_item import MenuItem
@@ -16,7 +17,7 @@ from archinstall.lib.plugins import plugins
 
 from archinstall_zfs.storage.zfs_init import initialize_zfs, add_archzfs_repo
 from archinstall_zfs.storage.disk import DiskManager, DiskManagerBuilder
-from archinstall_zfs.storage.zfs import ZFSManager, ZFSManagerBuilder
+from archinstall_zfs.storage.zfs import ZFSManager, ZFSManagerBuilder, ZFS_SERVICES
 
 InstallMode = Literal["full_disk", "new_pool", "existing_pool"]
 
@@ -30,6 +31,16 @@ class ZfsPlugin:
         filesystems_index = installation._hooks.index('filesystems')
         # Insert 'zfs' right before it
         installation._hooks.insert(filesystems_index, 'zfs')
+        return False
+
+    def on_genfstab(self, installation):
+        # Clear any existing fstab entries
+        installation._fstab_entries = []
+
+        # Add only the root ZFS dataset entry
+        installation._fstab_entries.append("zroot/ROOT/default / zfs defaults 0 0")
+
+        # Let other plugins continue processing
         return False
 
 
@@ -103,16 +114,15 @@ def prepare_installation() -> tuple[ZFSManager, DiskManager]:
 
 def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> bool:
     try:
-        # !TODO: use single mountpoint from single place across the whole installer
-        mountpoint = Path("/mnt")
+        mountpoint = zfs_manager.config.mountpoint
         archinstall.arguments['disk_config'] = DiskLayoutConfiguration(DiskLayoutType.Pre_mount, mountpoint=mountpoint)
 
         # ZFS setup
         zfs_manager.prepare()
-        zfs_manager.setup_for_installation(Path("/mnt"))
+        zfs_manager.setup_for_installation()
 
         # Mount EFI partition
-        disk_manager.mount_efi_partition(Path("/mnt"))
+        disk_manager.mount_efi_partition(mountpoint)
 
         ask_user_questions()
 
@@ -165,8 +175,54 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
             if packages := archinstall.arguments.get('packages', []):
                 installation.add_additional_packages(packages)
 
-            installation.genfstab()
-            zfs_manager.copy_misc_files()
+            # If user selected to copy the current ISO network configuration
+            # Perform a copy of the config
+            network_config: NetworkConfiguration | None = archinstall.arguments.get('network_config', None)
+
+            if network_config:
+                network_config.install_network_config(
+                    installation,
+                    archinstall.arguments.get('profile_config', None)
+                )
+
+            if users := archinstall.arguments.get('!users', None):
+                installation.create_users(users)
+
+            audio_config: AudioConfiguration | None = archinstall.arguments.get('audio_config', None)
+            if audio_config:
+                audio_config.install_audio_config(installation)
+            else:
+                info("No audio server will be installed")
+
+            if archinstall.arguments.get('packages', None) and archinstall.arguments.get('packages', None)[0] != '':
+                installation.add_additional_packages(archinstall.arguments.get('packages', None))
+
+            if profile_config := archinstall.arguments.get('profile_config', None):
+                profile_handler.install_profile_config(installation, profile_config)
+
+            if timezone := archinstall.arguments.get('timezone', None):
+                installation.set_timezone(timezone)
+
+            if archinstall.arguments.get('ntp', False):
+                installation.activate_time_synchronization()
+
+            if archinstall.accessibility_tools_in_use():
+                installation.enable_espeakup()
+
+            if (root_pw := archinstall.arguments.get('!root-password', None)) and len(root_pw):
+                installation.user_set_pw('root', root_pw)
+
+            if profile_config := archinstall.arguments.get('profile_config', None):
+                profile_config.profile.post_install(installation)
+
+            #!TODO: add custom commands, services, and ask_chroot
+
+            installation.enable_service(ZFS_SERVICES)
+
+        zfs_manager.genfstab()
+        zfs_manager.copy_misc_files()
+        zfs_manager.finish()
+        disk_manager.finish(mountpoint)
 
         return True
     except Exception as e:

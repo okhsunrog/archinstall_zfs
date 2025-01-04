@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import Optional, List, Tuple, Annotated
 
@@ -127,6 +128,14 @@ class DiskManager:
         selected = Path(partition_menu.run().item().value)
         info(f"Selected ZFS partition: {selected}")
         return selected
+
+    @staticmethod
+    def finish(mountpoint: Path) -> None:
+        """Clean up EFI mounts"""
+        os.sync()
+        efi_path = mountpoint / "boot/efi"
+        SysCommand(f"umount {efi_path}")
+        info("EFI partitions unmounted")
 
 
 class DiskManagerBuilder:
