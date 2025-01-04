@@ -153,18 +153,6 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
             if mirror_config := archinstall.arguments.get('mirror_config', None):
                 installation.set_mirrors(mirror_config, on_target=True)
 
-            if users := archinstall.arguments.get('!users', []):
-                installation.create_users(users)
-
-            if root_pw := archinstall.arguments.get('!root-password', ''):
-                installation.user_set_pw('root', root_pw)
-
-            if profile_config := archinstall.arguments.get('profile_config', None):
-                profile_handler.install_profile_config(installation, profile_config)
-
-            if packages := archinstall.arguments.get('packages', []):
-                installation.add_additional_packages(packages)
-
             # If user selected to copy the current ISO network configuration
             # Perform a copy of the config
             network_config: NetworkConfiguration | None = archinstall.arguments.get('network_config', None)
@@ -184,11 +172,11 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
             else:
                 info("No audio server will be installed")
 
-            if archinstall.arguments.get('packages', None) and archinstall.arguments.get('packages', None)[0] != '':
-                installation.add_additional_packages(archinstall.arguments.get('packages', None))
-
             if profile_config := archinstall.arguments.get('profile_config', None):
                 profile_handler.install_profile_config(installation, profile_config)
+
+            if packages := archinstall.arguments.get('packages', []):
+                installation.add_additional_packages(packages)
 
             if timezone := archinstall.arguments.get('timezone', None):
                 installation.set_timezone(timezone)
