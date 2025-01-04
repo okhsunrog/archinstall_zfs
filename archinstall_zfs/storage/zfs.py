@@ -309,9 +309,9 @@ class ZFSManagerBuilder:
             header="Enter name for new ZFS pool",
             default_text="zroot"
         )
-        self._pool_name = pool_menu.input().text()
-        info(f"Selected pool name: {self._pool_name}")
-        return self
+        pool_name = pool_menu.input().text()
+        info(f"Selected pool name: {pool_name}")
+        return self.with_pool_name(pool_name)
 
     def new_pool(self, device: Path) -> 'ZFSManagerBuilder':
         self._device = str(device)  # Convert Path to str for ZFS commands
