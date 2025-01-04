@@ -52,11 +52,10 @@ class ZFSConfig(BaseModel):
 
 class ZFSPaths(BaseModel):
     zfs_key: Path = Field(default=Path("/etc/zfs/zroot.key"))
-    pool_cache: Path = Field(default=Path("/etc/zfs/zpool.cache"))
     hostid: Path = Field(default=Path("/etc/hostid"))
 
     # noinspection PyMethodParameters
-    @field_validator('zfs_key', 'pool_cache', 'hostid')
+    @field_validator('zfs_key', 'hostid')
     def validate_path(cls, v: Path) -> Path:
         if not v.is_absolute():
             raise ValueError(f'Path {v} must be absolute')
@@ -88,6 +87,8 @@ class ZFSPool:
         cmd = f"zpool create -f {' '.join(self.DEFAULT_POOL_OPTIONS)} {self.config.pool_name} {device}"
         try:
             SysCommand(cmd)
+            # Set pool cache file to none, as it's deprecated
+            SysCommand(f"zpool set cachefile=none {self.config.pool_name}")
             info(f"Created pool {self.config.pool_name}")
         except SysCallError as e:
             error(f"Failed to create pool: {str(e)}")
@@ -356,26 +357,43 @@ class ZFSManager:
         except SysCallError as e:
             error(f"Failed to mount datasets: {str(e)}")
 
-    def setup_cache_files(self, mountpoint: Path) -> None:
+    @staticmethod
+    def create_hostid() -> None:
+        """Create a static hostid"""
+        debug("Creating static hostid")
+        try:
+            SysCommand("zgenhostid -f 0x00bab10c")
+            info("Created static hostid")
+        except SysCallError as e:
+            error(f"Failed to create hostid: {str(e)}")
+            raise
+
+    @staticmethod
+    def prepare_zfs_cache(pool_name: str) -> None:
+        """Prepare ZFS cache directory and files"""
+        debug("Preparing ZFS cache")
+        try:
+            target_zfs = Path("/etc/zfs")
+            target_zfs_cache = target_zfs / "zfs-list.cache"
+            target_zfs_cache.mkdir(parents=True, exist_ok=True)
+            cache_file = target_zfs_cache / pool_name
+            cache_file.touch()
+            SysCommand("systemctl enable --now zfs-zed.service")
+            info("ZFS cache prepared")
+        except Exception as e:
+            error(f"Failed to prepare ZFS cache: {str(e)}")
+            raise
+
+    def copy_misc_files(self, mountpoint: Path) -> None:
         """Set up ZFS cache files in the target system"""
         debug("Setting up ZFS cache files")
         try:
-            # Set pool cache file
-            SysCommand(f"zpool set cachefile={self.paths.pool_cache} {self.config.pool_name}")
-
-            # Create target directories
+            # Create target directories and copy cache
             target_zfs = mountpoint / "etc/zfs"
-            target_zfs_cache = target_zfs / "zfs-list.cache"
-            target_zfs_cache.mkdir(parents=True, exist_ok=True)
+            target_zfs.mkdir(parents=True, exist_ok=True)
+            SysCommand(f"cp -r /etc/zfs/zfs-list.cache {target_zfs}/")
 
-            # Create and populate cache file
-            cache_file = target_zfs_cache / self.config.pool_name
-            cache_file.touch()
-            output = SysCommand("zfs list -H -o name,mountpoint,canmount,atime,relatime,devices,exec,readonly,setuid,nbmand").decode()
-            cache_file.write_text(output)
-
-            # Copy configuration files
-            SysCommand(f"cp {self.paths.pool_cache} {target_zfs}/")
+            # Copy hostid
             SysCommand(f"cp {self.paths.hostid} {mountpoint}/etc/")
 
             # Copy encryption key if encryption is enabled
@@ -384,17 +402,13 @@ class ZFSManager:
 
             info("ZFS cache files configured successfully")
         except SysCallError as e:
-            error(f"Failed to setup cache files: {str(e)}")
+            error(f"Failed to copy ZFS misc files: {str(e)}")
             raise
 
     def prepare(self) -> None:
         """Main workflow for preparing ZFS setup"""
-        try:
-            debug("Generating host ID")
-            SysCommand("zgenhostid")
-        except SysCallError as e:
-            if "File exists" not in str(e):
-                raise
+        self.create_hostid()
+        self.prepare_zfs_cache(self.config.pool_name)
         self.encryption_handler.setup()
         if self.device:  # New pool setup
             self.pool.create(self.device)
@@ -406,4 +420,4 @@ class ZFSManager:
         """Configure ZFS for system installation"""
         self.pool.import_pool(mountpoint)
         self.mount_datasets()
-        self.setup_cache_files(mountpoint)
+        self.copy_misc_files(mountpoint)
