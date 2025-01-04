@@ -390,7 +390,7 @@ class ZFSManager:
         """Set up ZFS cache files in the target system"""
         debug("Setting up ZFS cache files")
         try:
-            # Create target directories and copy cache
+            # Create target directories
             target_zfs = mountpoint / "etc/zfs"
             target_zfs.mkdir(parents=True, exist_ok=True)
 
@@ -398,6 +398,8 @@ class ZFSManager:
             source_cache = Path("/etc/zfs/zfs-list.cache") / self.config.pool_name
             content = source_cache.read_text()
             modified_content = modify_zfs_cache_mountpoints(content, mountpoint)
+            debug(f"Source content:\n{content}")
+            debug(f"Modified content:\n{modified_content}")
 
             # Write modified content to target
             target_cache = target_zfs / "zfs-list.cache" / self.config.pool_name
