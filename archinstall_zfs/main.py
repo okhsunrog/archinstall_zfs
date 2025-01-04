@@ -132,12 +132,23 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
         # Perform actual installation
         info('Starting installation...')
 
+        BASE_PACKAGES = [
+            'base',
+            'base-devel',
+            'linux-firmware',
+            'linux-firmware-marvell',
+            'sof-firmware',
+            'linux-lts-headers',
+            'zfs-dkms',
+            'zfs-utils',
+        ]
+
         with Installer(
                 mountpoint,
                 disk_config=archinstall.arguments['disk_config'],
                 disk_encryption=None,
                 kernels=['linux-lts'],
-                base_packages=['base', 'base-devel', 'linux-firmware', 'linux-lts-headers', 'zfs-dkms', 'zfs-utils'],
+                base_packages=BASE_PACKAGES,
         ) as installation:
 
             installation.sanity_check()
