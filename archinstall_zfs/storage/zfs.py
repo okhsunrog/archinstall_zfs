@@ -77,10 +77,10 @@ class ZFSPaths(BaseModel):
     @classmethod
     def create_mounted(cls, base_paths: 'ZFSPaths', mountpoint: Path) -> 'ZFSPaths':
         return cls(
-            base_zfs=mountpoint / base_paths.base_zfs,
-            cache_dir=mountpoint / base_paths.cache_dir,
-            key_file=mountpoint / base_paths.key_file,
-            hostid=mountpoint / base_paths.hostid,
+            base_zfs=mountpoint / str(base_paths.base_zfs).lstrip('/'),
+            cache_dir=mountpoint / str(base_paths.cache_dir).lstrip('/'),
+            key_file=mountpoint / str(base_paths.key_file).lstrip('/'),
+            hostid=mountpoint / str(base_paths.hostid).lstrip('/'),
             _pool_name=base_paths.pool_name
         )
 
