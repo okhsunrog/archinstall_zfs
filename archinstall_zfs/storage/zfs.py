@@ -325,7 +325,7 @@ class ZFSManagerBuilder:
     def setup_encryption(self) -> 'ZFSManagerBuilder':
         password = ZFSEncryption.setup_encryption()
         if password:
-            self._encryption_handler = ZFSEncryption(password, ZFSPaths.zfs_key)
+            self._encryption_handler = ZFSEncryption(password, ZFSPaths().zfs_key)
         return self
 
     def build(self) -> 'ZFSManager':
