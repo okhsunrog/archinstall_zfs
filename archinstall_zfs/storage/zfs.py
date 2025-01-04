@@ -62,15 +62,12 @@ class ZFSPaths(BaseModel):
 
     @property
     def pool_name(self) -> str:
-        info(f"Getting pool name from {self}")
-        info(f"Pool name: {self._pool_name}")
         if self._pool_name is None:
             raise ValueError("Pool name not set")
         return self._pool_name
 
     @pool_name.setter
     def pool_name(self, value: str) -> None:
-        info(f"Setting pool name to {value}")
         self._pool_name = value
 
     @property
@@ -79,13 +76,13 @@ class ZFSPaths(BaseModel):
 
     @classmethod
     def create_mounted(cls, base_paths: 'ZFSPaths', mountpoint: Path) -> 'ZFSPaths':
-        return cls(
+        new_paths = cls(
             base_zfs=mountpoint / str(base_paths.base_zfs).lstrip('/'),
             cache_dir=mountpoint / str(base_paths.cache_dir).lstrip('/'),
             key_file=mountpoint / str(base_paths.key_file).lstrip('/'),
-            hostid=mountpoint / str(base_paths.hostid).lstrip('/'),
-            _pool_name=base_paths.pool_name
-        )
+            hostid=mountpoint / str(base_paths.hostid).lstrip('/'))
+        new_paths.pool_name = base_paths.pool_name
+        return new_paths
 
     # noinspection PyMethodParameters
     @field_validator('*')
@@ -372,10 +369,6 @@ class ZFSManagerBuilder:
             datasets=self._datasets
         )
         mounted_paths = ZFSPaths.create_mounted(self._paths, self._mountpoint)
-        debug(f"Paths: {self._paths}")
-        debug(f"Mountpoint: {self._mountpoint}")
-        debug(f"Pool name: {self._paths.pool_name}")
-        debug(f"Mounted paths: {mounted_paths}")
         return ZFSManager(config, self._paths, mounted_paths, device=self._device)
 
 
