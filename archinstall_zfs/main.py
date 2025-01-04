@@ -166,6 +166,7 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
                 installation.add_additional_packages(packages)
 
             installation.genfstab()
+            zfs_manager.copy_misc_files()
 
         return True
     except Exception as e:

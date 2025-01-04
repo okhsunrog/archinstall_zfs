@@ -386,10 +386,11 @@ class ZFSManager:
             raise
 
 
-    def copy_misc_files(self, mountpoint: Path) -> None:
+    def copy_misc_files(self) -> None:
         """Set up ZFS cache files in the target system"""
         debug("Setting up ZFS cache files")
         try:
+            mountpoint = self.config.mountpoint
             # Create target directories
             target_zfs = mountpoint / "etc/zfs"
             target_zfs.mkdir(parents=True, exist_ok=True)
@@ -433,4 +434,3 @@ class ZFSManager:
         """Configure ZFS for system installation"""
         self.pool.import_pool(mountpoint)
         self.mount_datasets()
-        self.copy_misc_files(mountpoint)

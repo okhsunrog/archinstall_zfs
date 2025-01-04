@@ -30,4 +30,4 @@ def modify_zfs_cache_mountpoints(content: str, mountpoint: Path) -> str:
             fields[1] = process_mountpoint(fields[1], mount_prefix)
         modified_lines.append('\t'.join(fields))
 
-    return '\n'.join(modified_lines)
+    return '\n'.join(modified_lines) + '\n'
