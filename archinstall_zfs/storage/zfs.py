@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 from archinstall import info, error, debug
 from archinstall.lib.exceptions import SysCallError
 from archinstall.lib.general import SysCommand
+from ..utils import modify_zfs_cache_mountpoints
 
 
 class DatasetConfig(BaseModel):
@@ -384,6 +385,7 @@ class ZFSManager:
             error(f"Failed to prepare ZFS cache: {str(e)}")
             raise
 
+
     def copy_misc_files(self, mountpoint: Path) -> None:
         """Set up ZFS cache files in the target system"""
         debug("Setting up ZFS cache files")
@@ -394,19 +396,13 @@ class ZFSManager:
 
             # Read and modify cache file content
             source_cache = Path("/etc/zfs/zfs-list.cache") / self.config.pool_name
-            lines = source_cache.read_text().splitlines()
-            modified_lines = []
-            mount_prefix = str(mountpoint).rstrip('/')
+            content = source_cache.read_text()
+            modified_content = modify_zfs_cache_mountpoints(content, mountpoint)
 
-            for line in lines:
-                fields = line.split('\t')
-                if len(fields) > 1 and fields[1].startswith(mount_prefix):
-                    fields[1] = '/' if fields[1] == mount_prefix else fields[1].replace(mount_prefix, '')
-                modified_lines.append('\t'.join(fields))
-
+            # Write modified content to target
             target_cache = target_zfs / "zfs-list.cache" / self.config.pool_name
             target_cache.parent.mkdir(parents=True, exist_ok=True)
-            target_cache.write_text('\n'.join(modified_lines))
+            target_cache.write_text(modified_content)
 
             # Copy hostid
             SysCommand(f"cp {self.paths.hostid} {mountpoint}/etc/")
