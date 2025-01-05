@@ -28,31 +28,24 @@ class ZfsPlugin:
             add_archzfs_repo(installation.target, installation)
             return False
 
-        def on_mkinitcpio(self, installation):
-            # Create dracut configuration
-            dracut_conf = """hostonly="no"
-    fscks="no"
-    install_items+=" /etc/zfs/zroot.key "
-    early_microcode="yes"
-    compress="zstd\""""
-
-            # Write dracut configuration
-            dracut_conf_path = f'{installation.target}/etc/dracut.conf.d/zfs.conf'
-            with open(dracut_conf_path, 'w') as f:
-                f.write(dracut_conf)
-
-            # Install dracut and required packages
-            #installation.add_additional_packages(['dracut'])
-
-            # Generate dracut initramfs for all installed kernels
-            installation.arch_chroot('/usr/bin/arch-chroot /mnt /usr/bin/dracut --force --no-hostonly', peek_output=True)
-            #SysCommand(f'/usr/bin/arch-chroot {installation.target} dracut --force --no-hostonly-cmdline',
-            #           peek_output=True)
-
-            return True
-
 
 plugins['zfs'] = ZfsPlugin()
+
+def configure_dracut(installation) -> None:
+    dracut_conf = """hostonly="no"
+fscks="no"
+install_items+=" /etc/zfs/zroot.key "
+early_microcode="yes"
+compress="zstd\""""
+
+    dracut_conf_path = f'{installation.target}/etc/dracut.conf.d/zfs.conf'
+    with open(dracut_conf_path, 'w') as f:
+        f.write(dracut_conf)
+
+    # Generate dracut initramfs for all installed kernels
+    #installation.arch_chroot('/usr/bin/arch-chroot /mnt /usr/bin/dracut --force --no-hostonly', peek_output=True)
+
+    SysCommand(f'/usr/bin/arch-chroot {installation.target} dracut --force --no-hostonly-cmdline', peek_output=True)
 
 
 def check_internet() -> bool:
@@ -169,9 +162,14 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
                 installation.set_mirrors(mirror_config, on_target=False)
 
             installation.minimal_installation(
+                testing=False,
+                multilib=True,
+                mkinitcpio=False,
                 hostname=archinstall.arguments.get('hostname', 'archzfs'),
                 locale_config=archinstall.arguments['locale_config']
             )
+
+            configure_dracut(installation)
 
             if mirror_config := archinstall.arguments.get('mirror_config', None):
                 installation.set_mirrors(mirror_config, on_target=True)
