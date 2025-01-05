@@ -195,6 +195,17 @@ class ZFSDatasetManager:
         SysCommand(f"zfs create {props_str} {self.base_dataset}")
         debug(f"Created base dataset: {self.base_dataset}")
 
+    def validate_prefix(self) -> None:
+        """Validate that dataset prefix doesn't exist on the pool"""
+        debug(f"Checking if prefix {self.base_dataset} exists")
+        try:
+            SysCommand(f"zfs list {self.base_dataset}")
+            # If command succeeds, dataset exists
+            raise ValueError(f"Dataset prefix {self.base_dataset} already exists on pool {self.config.pool_name}")
+        except SysCallError:
+            # Command failed = dataset doesn't exist, which is what we want
+            debug(f"Prefix {self.base_dataset} is available")
+
     # noinspection PyMethodMayBeStatic
     def _get_dataset_hierarchy(self, dataset_path: str) -> list[str]:
         """Get all parent datasets for a given dataset path"""
@@ -397,12 +408,9 @@ class ZFSManager:
     def mount_datasets(self) -> None:
         """Mount all datasets in the correct order"""
         debug("Mounting ZFS datasets")
-        try:
-            SysCommand(f"zfs mount {self.config.pool_name}/{self.config.dataset_prefix}/root")
-            SysCommand("zfs mount -a")
-            info("All datasets mounted successfully")
-        except SysCallError as e:
-            error(f"Failed to mount datasets: {str(e)}")
+        SysCommand(f"zfs mount {self.config.pool_name}/{self.config.dataset_prefix}/root")
+        SysCommand("zfs mount -a")
+        info("All datasets mounted successfully")
 
     @staticmethod
     def create_hostid() -> None:
@@ -473,8 +481,8 @@ class ZFSManager:
         fstab_path.write_text('\n'.join(filtered_lines) + '\n')
         info("Generated fstab successfully")
 
-    def prepare(self) -> None:
-        """Main workflow for preparing ZFS setup"""
+    def setup_for_installation(self) -> None:
+        """Configure ZFS for system installation"""
         self.create_hostid()
         self.prepare_zfs_cache()
         self.encryption_handler.setup()
@@ -483,10 +491,12 @@ class ZFSManager:
             self.datasets.create_base_dataset()
             self.datasets.create_child_datasets()
             self.pool.export()
-
-    def setup_for_installation(self) -> None:
-        """Configure ZFS for system installation"""
-        self.pool.import_pool(self.config.mountpoint)
+            self.pool.import_pool(self.config.mountpoint)
+        else:  # Existing pool setup
+            self.pool.import_pool(self.config.mountpoint)
+            self.datasets.validate_prefix()
+            self.datasets.create_base_dataset()
+            self.datasets.create_child_datasets()
         self.mount_datasets()
         if self.config.encryption_password:
             self.copy_enc_key()

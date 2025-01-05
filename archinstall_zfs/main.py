@@ -118,7 +118,6 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
         archinstall.arguments['disk_config'] = DiskLayoutConfiguration(DiskLayoutType.Pre_mount, mountpoint=mountpoint)
 
         # ZFS setup
-        zfs_manager.prepare()
         zfs_manager.setup_for_installation()
 
         # Mount EFI partition
