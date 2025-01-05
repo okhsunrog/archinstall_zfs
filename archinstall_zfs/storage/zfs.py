@@ -344,6 +344,7 @@ class ZFSManagerBuilder:
             )
             self._pool_name = pool_menu.run().item().value
             debug(f"Selected pool: {self._pool_name}")
+            self._paths.pool_name = self._pool_name
             self._is_new_pool = False
             return self
         except SysCallError as e:
