@@ -551,6 +551,7 @@ class ZFSManager:
 
         root_dataset = next(ds for ds in self.config.datasets if ds.properties.get('mountpoint') == '/')
         root_dataset = f"{self.datasets.base_dataset}/{root_dataset.name}"
+        debug(f"Root dataset: {root_dataset}")
         # noinspection PyBroadException
         try:
             SysCommand("zfs umount -a")
