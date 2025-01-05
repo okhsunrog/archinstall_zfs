@@ -567,3 +567,33 @@ class ZFSManager:
         #SysCommand(f"zfs set org.zfsbootmenu:keysource=\"{root_dataset}\" {self.config.pool_name}")
         SysCommand(f"zpool export {self.config.pool_name}")
         info("ZFS cleanup completed")
+
+    def setup_bootloader(self, efi_partition: Path) -> None:
+        """Set up ZFSBootMenu bootloader"""
+        info("Setting up ZFSBootMenu bootloader")
+
+        # Create ZBM directory
+        zbm_path = self.config.mountpoint / "boot/efi/EFI/ZBM"
+        zbm_path.mkdir(parents=True, exist_ok=True)
+
+        # Check if ZBM is already installed
+        if not (zbm_path / "VMLINUZ.EFI").exists():
+            # Download main ZBM image
+            SysCommand(f"curl -o {zbm_path}/VMLINUZ.EFI -L https://get.zfsbootmenu.org/efi")
+            # Download recovery image
+            SysCommand(f"curl -o {zbm_path}/RECOVERY.EFI -L https://get.zfsbootmenu.org/efi/recovery")
+
+            # Check for existing bootloader entries
+            existing_entries = SysCommand("efibootmgr -v").decode()
+
+            # Add main entry if not exists
+            if "ZFSBootMenu" not in existing_entries:
+                SysCommand(f"efibootmgr -c -d {efi_partition} -L 'ZFSBootMenu' -l '\\EFI\\ZBM\\VMLINUZ.EFI'")
+
+            # Add recovery entry if not exists
+            if "ZFSBootMenu-Recovery" not in existing_entries:
+                SysCommand(f"efibootmgr -c -d {efi_partition} -L 'ZFSBootMenu-Recovery' -l '\\EFI\\ZBM\\RECOVERY.EFI'")
+
+            info("ZFSBootMenu installed successfully")
+        else:
+            debug("ZFSBootMenu already installed, skipping")

@@ -212,6 +212,8 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
             zfs_manager.genfstab()
             zfs_manager.copy_misc_files()
 
+            zfs_manager.setup_bootloader(disk_manager.config.efi_partition)
+
             info(
                 "For post-installation tips, see https://wiki.archlinux.org/index.php/Installation_guide#Post-installation")
 
