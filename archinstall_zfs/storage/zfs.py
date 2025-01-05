@@ -540,6 +540,10 @@ class ZFSManager:
     def finish(self) -> None:
         """Clean up ZFS mounts and export pool"""
         debug("Finishing ZFS setup")
+        SysCommand(
+            f"zfs set org.zfsbootmenu:commandline=\"spl.spl_hostid=$(hostid) zswap.enabled=0 rw\" {self.datasets.base_dataset}")
+        #SysCommand(f"zfs set org.zfsbootmenu:keysource=\"{root_dataset}\" {self.config.pool_name}")
+
         os.sync()
 
         root_dataset = next(ds for ds in self.config.datasets if ds.properties.get('mountpoint') == '/')
@@ -562,10 +566,6 @@ class ZFSManager:
             except Exception as e:
                 debug(f"Unmount attempt: {e}")
                 continue
-
-        SysCommand(
-            f"zfs set org.zfsbootmenu:commandline=\"spl.spl_hostid=$(hostid) zswap.enabled=0 rw\" {self.datasets.base_dataset}")
-        #SysCommand(f"zfs set org.zfsbootmenu:keysource=\"{root_dataset}\" {self.config.pool_name}")
         SysCommand(f"zpool export {self.config.pool_name}")
         info("ZFS cleanup completed")
 
