@@ -23,26 +23,34 @@ from archinstall_zfs.storage.zfs import ZFSManager, ZFSManagerBuilder, ZFS_SERVI
 InstallMode = Literal["full_disk", "new_pool", "existing_pool"]
 
 class ZfsPlugin:
-    def on_install(self, installation):
-        add_archzfs_repo(installation.target, installation)
-        return False
+    class ZfsPlugin:
+        def on_install(self, installation):
+            add_archzfs_repo(installation.target, installation)
+            return False
 
-    def on_mkinitcpio(self, installation):
-        files = []
-        if Path(f"{installation.target}/etc/zfs/zroot.key").exists():
-            files.append("/etc/zfs/zroot.key")
+        def on_mkinitcpio(self, installation):
+            # Create dracut configuration
+            dracut_conf = """hostonly="no"
+    fscks="no"
+    install_items+=" /etc/zfs/zroot.key "
+    early_microcode="yes"
+    compress="zstd\""""
 
-        mkinitcpio_conf = f"""MODULES=""
-BINARIES=""
-FILES="{' '.join(files)}"
-HOOKS="base udev autodetect modconf block keyboard zfs filesystems"
-COMPRESSION="zstd\""""
+            # Write dracut configuration
+            dracut_conf_path = f'{installation.target}/etc/dracut.conf.d/zfs.conf'
+            with open(dracut_conf_path, 'w') as f:
+                f.write(dracut_conf)
 
-        with open(f'{installation.target}/etc/mkinitcpio.conf', 'w') as f:
-            f.write(mkinitcpio_conf)
+            # Install dracut and required packages
+            #installation.add_additional_packages(['dracut'])
 
-        SysCommand(f'/usr/bin/arch-chroot {installation.target} mkinitcpio -P', peek_output=True)
-        return True # replacing the mkinitcpio function from the original archinstall
+            # Generate dracut initramfs for all installed kernels
+            installation.arch_chroot('/usr/bin/arch-chroot /mnt /usr/bin/dracut --force --no-hostonly', peek_output=True)
+            #SysCommand(f'/usr/bin/arch-chroot {installation.target} dracut --force --no-hostonly-cmdline',
+            #           peek_output=True)
+
+            return True
+
 
 plugins['zfs'] = ZfsPlugin()
 
@@ -144,6 +152,7 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
             'linux-lts-headers',
             'zfs-dkms',
             'zfs-utils',
+            'dracut'
         ]
 
         with Installer(
