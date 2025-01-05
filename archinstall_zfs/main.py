@@ -16,6 +16,7 @@ from archinstall.tui.menu_item import MenuItem
 from archinstall.lib.storage import storage
 from archinstall.lib.plugins import plugins
 
+from archinstall_zfs.storage.dracut import DracutSetup
 from archinstall_zfs.storage.zfs_init import initialize_zfs, add_archzfs_repo
 from archinstall_zfs.storage.disk import DiskManager, DiskManagerBuilder
 from archinstall_zfs.storage.zfs import ZFSManager, ZFSManagerBuilder, ZFS_SERVICES
@@ -30,22 +31,6 @@ class ZfsPlugin:
 
 
 plugins['zfs'] = ZfsPlugin()
-
-def configure_dracut(installation) -> None:
-    #install_items+=" /etc/zfs/zroot.key " // after fscks
-    dracut_conf = """hostonly="no"
-fscks="no"
-early_microcode="yes"
-compress="zstd\""""
-
-    dracut_conf_path = f'{installation.target}/etc/dracut.conf.d/zfs.conf'
-    with open(dracut_conf_path, 'w') as f:
-        f.write(dracut_conf)
-
-    # Generate dracut initramfs for all installed kernels
-    #installation.arch_chroot('/usr/bin/arch-chroot /mnt /usr/bin/dracut --force --no-hostonly', peek_output=True)
-
-    SysCommand(f'/usr/bin/arch-chroot {installation.target} dracut --force --no-hostonly-cmdline', peek_output=True)
 
 
 def check_internet() -> bool:
@@ -118,6 +103,9 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
         # Mount EFI partition
         disk_manager.mount_efi_partition(mountpoint)
 
+        # Adding dracut configuration
+        dracut = DracutSetup(str(mountpoint), encryption_enabled=bool(zfs_manager.encryption_handler.password))
+        dracut.configure()
         ask_user_questions()
 
         config = ConfigurationOutput(archinstall.arguments)
@@ -168,8 +156,6 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
                 hostname=archinstall.arguments.get('hostname', 'archzfs'),
                 locale_config=archinstall.arguments['locale_config']
             )
-
-            configure_dracut(installation)
 
             if mirror_config := archinstall.arguments.get('mirror_config', None):
                 installation.set_mirrors(mirror_config, on_target=True)
