@@ -100,9 +100,11 @@ class DiskManager:
         partitions = []
 
         for p in disk_obj.partitions:
+            size_mb = (p.getLength() * device.sectorSize) / (1024 * 1024)
+            size_display = f"{size_mb:.1f}M" if size_mb < 1024 else f"{size_mb / 1024:.1f}G"
             part_name = Path(p.path).name
             by_id_part = Path(str(self.config.selected_disk) + "-part" + part_name[-1])
-            partitions.append(MenuItem(f"{by_id_part} ({p.getLength()}MB)", str(by_id_part)))
+            partitions.append(MenuItem(f"{by_id_part} ({size_display})", str(by_id_part)))
 
         info(f"Found {len(partitions)} partitions")
         return partitions
