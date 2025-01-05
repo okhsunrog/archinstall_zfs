@@ -540,11 +540,11 @@ class ZFSManager:
         if self.encryption_handler.password:
             self.copy_enc_key()
 
-            dracut_hooks_dir = self.config.mountpoint / "etc/pacman.d/hooks"
-            dracut_hooks_dir.mkdir(parents=True, exist_ok=True)
+        dracut_hooks_dir = self.config.mountpoint / "etc/pacman.d/hooks"
+        dracut_hooks_dir.mkdir(parents=True, exist_ok=True)
 
-            # Create dracut install hook
-            install_hook = """[Trigger]
+        # Create dracut install hook
+        install_hook = """[Trigger]
         Type = Path
         Operation = Install
         Operation = Upgrade

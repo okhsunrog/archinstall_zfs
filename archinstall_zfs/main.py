@@ -32,9 +32,9 @@ class ZfsPlugin:
 plugins['zfs'] = ZfsPlugin()
 
 def configure_dracut(installation) -> None:
+    #install_items+=" /etc/zfs/zroot.key " // after fscks
     dracut_conf = """hostonly="no"
 fscks="no"
-install_items+=" /etc/zfs/zroot.key "
 early_microcode="yes"
 compress="zstd\""""
 
