@@ -328,6 +328,10 @@ class ZFSManagerBuilder:
                     pool_name = line.split(":")[1].strip()
                     pools.append(MenuItem(pool_name, pool_name))
 
+            if not pools:
+                error("No importable ZFS pools found")
+                raise ValueError("No importable ZFS pools found. Make sure pools exist and are exported.")
+
             pool_menu = SelectMenu(
                 MenuItemGroup(pools),
                 header="Select existing ZFS pool"
