@@ -209,15 +209,6 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
 
             installation.enable_service(ZFS_SERVICES)
 
-            # If the user provided a list of services to be enabled, pass the list to the enable_service function.
-            # Note that while it's called enable_service, it can actually take a list of services and iterate it.
-            if archinstall.arguments.get('services', None):
-                installation.enable_service(archinstall.arguments.get('services', []))
-
-            # If the user provided custom commands to be run post-installation, execute them now.
-            if archinstall.arguments.get('custom-commands', None):
-                archinstall.run_custom_user_commands(archinstall.arguments['custom-commands'], installation)
-
             zfs_manager.genfstab()
             zfs_manager.copy_misc_files()
 
