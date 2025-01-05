@@ -25,9 +25,18 @@ def initialize_zfs() -> None:
             raise RuntimeError("Failed to initialize ZFS support")
 
 
-def add_archzfs_repo(target_path: Path = Path("/"), installation = None) -> None:
-    """Add archzfs repository to pacman.conf"""
+def add_archzfs_repo(target_path: Path = Path("/"), installation=None) -> None:
+    """Add archzfs repository to pacman.conf if not already present"""
     info("Adding archzfs repository")
+
+    pacman_conf = target_path / "etc/pacman.conf"
+
+    # Check if repo already exists
+    with open(pacman_conf, "r") as f:
+        content = f.read()
+        if "[archzfs]" in content:
+            info("archzfs repository already configured")
+            return
 
     key_receive = 'pacman-key -r DDF7DB817396A49B2A2723F7403BD972F75D9D76'
     key_sign = 'pacman-key --lsign-key DDF7DB817396A49B2A2723F7403BD972F75D9D76'
@@ -46,7 +55,6 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation = None) -> None
         'Server = https://mirror.biocrafting.net/archlinux/$repo/$repo/$arch\n'
     ]
 
-    pacman_conf = target_path / "etc/pacman.conf"
     with open(pacman_conf, "a") as f:
         f.writelines(repo_config)
 
