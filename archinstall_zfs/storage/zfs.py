@@ -2,8 +2,6 @@ import os
 from pathlib import Path
 from typing import List, Dict, Optional
 
-from archinstall.examples.auto_discovery_mounted import root_mount_dir
-from archinstall.examples.full_automated_installation import root_partition
 from archinstall.tui import MenuItemGroup, SelectMenu, MenuItem, EditMenu
 from pydantic import BaseModel, Field, field_validator
 from archinstall import info, error, debug
