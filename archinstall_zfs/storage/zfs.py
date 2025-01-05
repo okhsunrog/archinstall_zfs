@@ -487,7 +487,7 @@ class ZFSManager:
             SysCommand(f"cp {self.paths.hostid} {self.mounted_paths.hostid}")
 
             # Copy zpool cache
-            SysCommand("cp /etc/zfs/zpool.cache /etc/zfs/zpool.cache")
+            SysCommand("cp /etc/zfs/zpool.cache /mnt/etc/zfs/zpool.cache")
 
             info("ZFS misc files configured successfully")
         except SysCallError as e:
