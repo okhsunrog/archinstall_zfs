@@ -540,25 +540,6 @@ class ZFSManager:
         if self.encryption_handler.password:
             self.copy_enc_key()
 
-        dracut_hooks_dir = self.config.mountpoint / "etc/pacman.d/hooks"
-        dracut_hooks_dir.mkdir(parents=True, exist_ok=True)
-
-        # Create dracut install hook
-        install_hook = """[Trigger]
-        Type = Path
-        Operation = Install
-        Operation = Upgrade
-        Target = usr/lib/modules/*/pkgbase
-
-        [Action]
-        Description = Updating linux initcpios with dracut...
-        When = PostTransaction
-        Exec = /usr/bin/dracut --force --no-hostonly-cmdline
-        Depends = dracut
-        NeedsTargets"""
-
-        (dracut_hooks_dir / "90-dracut-install.hook").write_text(install_hook)
-
     def finish(self) -> None:
         """Clean up ZFS mounts and export pool"""
         debug("Finishing ZFS setup")
