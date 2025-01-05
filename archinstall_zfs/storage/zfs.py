@@ -568,10 +568,13 @@ class ZFSManager:
 
         root_dataset = next(ds for ds in self.config.datasets if ds.properties.get('mountpoint') == '/')
         root_dataset = f"{self.datasets.base_dataset}/{root_dataset.name}"
-        debug(f"Unmounting dataset {root_dataset}")
-        SysCommand(f"zfs unmount {root_dataset}")
+        # noinspection PyBroadException
+        try:
+            SysCommand("zfs umount -a")
+            SysCommand(f"zfs unmount {root_dataset}")
+        except Exception:
+            pass
         SysCommand("zfs umount -a")
-
         SysCommand(
             f"zfs set org.zfsbootmenu:commandline=\"spl.spl_hostid=$(hostid) zswap.enabled=0 rw\" {self.datasets.base_dataset}")
         #SysCommand(f"zfs set org.zfsbootmenu:keysource=\"{root_dataset}\" {self.config.pool_name}")
