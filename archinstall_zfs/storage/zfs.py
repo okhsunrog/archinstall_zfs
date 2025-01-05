@@ -408,8 +408,9 @@ class ZFSManager:
     def mount_datasets(self) -> None:
         """Mount all datasets in the correct order"""
         debug("Mounting ZFS datasets")
-        SysCommand(f"zfs mount {self.config.pool_name}/{self.config.dataset_prefix}/root")
-        SysCommand("zfs mount -a")
+        #SysCommand(f"zfs mount {self.config.pool_name}/{self.config.dataset_prefix}/root")
+        prefix_path = f"{self.config.pool_name}/{self.config.dataset_prefix}"
+        SysCommand(f"zfs mount -R {prefix_path}")
         info("All datasets mounted successfully")
 
     @staticmethod
