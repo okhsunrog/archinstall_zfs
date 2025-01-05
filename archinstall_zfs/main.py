@@ -80,11 +80,9 @@ def get_installation_mode() -> InstallMode:
 def prepare_installation() -> tuple[ZFSManager, DiskManager]:
     with Tui():
         mode = get_installation_mode()
-
         disk_builder = DiskManagerBuilder()
         zfs_builder = ZFSManagerBuilder()
 
-        # Configure ZFS base settings
         zfs_builder.with_dataset_prefix(
             EditMenu(
                 "Dataset Prefix",
@@ -93,24 +91,20 @@ def prepare_installation() -> tuple[ZFSManager, DiskManager]:
             ).input().text()
         ).with_mountpoint(Path("/mnt"))
 
-        # Handle different installation modes
-        if mode == "full_disk":
-            disk_manager, zfs_partition = disk_builder.select_disk().destroying_build()
-            zfs_builder.select_pool_name().setup_encryption()
-            zfs = zfs_builder.new_pool(zfs_partition).build()
-
-        elif mode == "new_pool":
+        if mode != "full_disk":
             disk_manager = disk_builder.select_disk().select_efi_partition().build()
-            zfs_partition = disk_manager.select_zfs_partition()
-            zfs_builder.select_pool_name().setup_encryption()
-            zfs = zfs_builder.new_pool(zfs_partition).build()
 
-        else:  # existing_pool
-            disk_manager = disk_builder.select_disk().select_efi_partition().build()
-            zfs = zfs_builder.select_existing_pool().build()
+        match mode:
+            case "full_disk":
+                disk_manager, zfs_partition = disk_builder.select_disk().destroying_build()
+                zfs = zfs_builder.new_pool(zfs_partition).build()
+            case "new_pool":
+                zfs_partition = disk_manager.select_zfs_partition()
+                zfs = zfs_builder.new_pool(zfs_partition).build()
+            case "existing_pool":
+                zfs = zfs_builder.select_existing_pool().build()
 
     return zfs, disk_manager
-
 
 def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> bool:
     try:

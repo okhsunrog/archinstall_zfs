@@ -361,7 +361,7 @@ class ZFSManagerBuilder:
         self._paths: ZFSPaths = ZFSPaths()
         self._encryption_handler: Optional[ZFSEncryption] = None
 
-    def select_pool_name(self) -> 'ZFSManagerBuilder':
+    def new_pool(self, device: Path) -> 'ZFSManagerBuilder':
         pool_menu = EditMenu(
             "Pool Name",
             header="Enter name for new ZFS pool",
@@ -369,10 +369,10 @@ class ZFSManagerBuilder:
         )
         pool_name = pool_menu.input().text()
         info(f"Selected pool name: {pool_name}")
-        return self.with_pool_name(pool_name)
 
-    def new_pool(self, device: Path) -> 'ZFSManagerBuilder':
         self._device = str(device)
+        self._pool_name = pool_name
+        self._paths.pool_name = pool_name
         self._is_new_pool = True
         return self
 
@@ -416,15 +416,11 @@ class ZFSManagerBuilder:
         self._mountpoint = path
         return self
 
-    def setup_encryption(self) -> 'ZFSManagerBuilder':
-        if not self._pool_name:
-            raise ValueError("Pool name must be set before encryption setup")
-
-        self._encryption_handler = ZFSEncryption(self._paths.key_file, self._is_new_pool, self._pool_name)
-        return self
-
     def build(self) -> 'ZFSManager':
+        if not self._pool_name:
+            raise ValueError("Pool name must be set before building ZFS manager")
         self._datasets = DEFAULT_DATASETS
+        self._encryption_handler = ZFSEncryption(self._paths.key_file, self._is_new_pool, self._pool_name)
         config = ZFSConfig(
             pool_name=self._pool_name,
             dataset_prefix=self._dataset_prefix,
