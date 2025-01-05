@@ -25,7 +25,7 @@ DEFAULT_DATASETS = [
     DatasetConfig(name="vm", properties={"mountpoint": "/vm"})
 ]
 
-ZFS_SERVICES = ["zfs.target", "zfs-import.target", "zfs-volumes.target", "zfs-import-scan", "zfs-zed"]
+ZFS_SERVICES = ["zfs.target", "zfs-import.target", "zfs-volumes.target", "zfs-import-cache.service", "zfs-zed.service"]
 
 
 class EncryptionMode(Enum):
@@ -229,7 +229,7 @@ class ZFSPool:
         try:
             SysCommand(cmd)
             # Set pool cache file to none, as it's deprecated
-            SysCommand(f"zpool set cachefile=none {self.config.pool_name}")
+            SysCommand(f"zpool set cachefile=/etc/zfs/zpool.cache {self.config.pool_name}")
             info(f"Created pool {self.config.pool_name}")
         except SysCallError as e:
             error(f"Failed to create pool: {str(e)}")
@@ -470,7 +470,7 @@ class ZFSManager:
 
     def copy_misc_files(self) -> None:
         """Set up ZFS cache files in the target system"""
-        debug("Setting up ZFS cache files")
+        debug("Setting up ZFS misc files")
         try:
             # Create target directories
             self.mounted_paths.base_zfs.mkdir(parents=True, exist_ok=True)
@@ -486,7 +486,10 @@ class ZFSManager:
             # Copy hostid
             SysCommand(f"cp {self.paths.hostid} {self.mounted_paths.hostid}")
 
-            info("ZFS cache files configured successfully")
+            # Copy zpool cache
+            SysCommand("cp /etc/zfs/zpool.cache /etc/zfs/zpool.cache")
+
+            info("ZFS misc files configured successfully")
         except SysCallError as e:
             error(f"Failed to copy ZFS misc files: {str(e)}")
             raise
