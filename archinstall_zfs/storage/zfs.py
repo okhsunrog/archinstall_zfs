@@ -512,7 +512,9 @@ class ZFSManager:
 
         # Filter out pool-related entries and add root dataset
         filtered_lines = [line for line in raw_fstab.splitlines() if self.config.pool_name not in line]
-        filtered_lines.append(f"zroot/ROOT/default / zfs defaults 0 0")
+        root_dataset = next(ds for ds in self.config.datasets if ds.properties.get('mountpoint') == '/')
+        full_dataset_path = f"{self.datasets.base_dataset}/{root_dataset.name}"
+        filtered_lines.append(f"{full_dataset_path} / zfs defaults 0 0")
 
         # Write final fstab
         fstab_path.write_text('\n'.join(filtered_lines) + '\n')
@@ -552,6 +554,7 @@ class ZFSManager:
         root_dataset = next(ds for ds in self.config.datasets if ds.properties.get('mountpoint') == '/')
         full_dataset_path = f"{self.datasets.base_dataset}/{root_dataset.name}"
         debug(f"Root dataset: {full_dataset_path}")
+        SysCommand(f"zpool set bootfs={full_dataset_path} {self.config.pool_name}")
 
         # Multiple unmount attempts with different strategies
         unmount_attempts = [

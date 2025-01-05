@@ -23,16 +23,6 @@ from archinstall_zfs.storage.zfs import ZFSManager, ZFSManagerBuilder, ZFS_SERVI
 
 InstallMode = Literal["full_disk", "new_pool", "existing_pool"]
 
-class ZfsPlugin:
-    class ZfsPlugin:
-        def on_install(self, installation):
-            add_archzfs_repo(installation.target, installation)
-            return False
-
-
-plugins['zfs'] = ZfsPlugin()
-
-
 def check_internet() -> bool:
     debug("Checking internet connection")
     try:
@@ -130,10 +120,15 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
             'linux-firmware',
             'linux-firmware-marvell',
             'sof-firmware',
+            'dracut'
+        ]
+
+        SECOND_STAGE = [
+            'linux-lts',
             'linux-lts-headers',
+            'linux-firmware',
             'zfs-dkms',
             'zfs-utils',
-            'dracut'
         ]
 
         with Installer(
@@ -145,6 +140,8 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
         ) as installation:
 
             installation.sanity_check()
+            # dirty hack to remove kernel packages from base_packages
+            installation.__base_packages = BASE_PACKAGES
 
             if mirror_config := archinstall.arguments.get('mirror_config', None):
                 installation.set_mirrors(mirror_config, on_target=False)
@@ -159,6 +156,13 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
 
             if mirror_config := archinstall.arguments.get('mirror_config', None):
                 installation.set_mirrors(mirror_config, on_target=True)
+
+            installation.arch_chroot("pacman-key --init")
+            installation.arch_chroot("pacman-key --populate archlinux")
+
+            add_archzfs_repo(installation.target, installation)
+
+            installation.add_additional_packages(SECOND_STAGE)
 
             # If user selected to copy the current ISO network configuration
             # Perform a copy of the config
