@@ -2,7 +2,7 @@
 import os
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Dict, Tuple, List
+from typing import Optional, Dict, List
 from pydantic import BaseModel, Field, field_validator
 
 from archinstall_zfs.utils import modify_zfs_cache_mountpoints
@@ -45,8 +45,6 @@ class ZFSConfig(BaseModel):
     pool_name: str
     dataset_prefix: str
     mountpoint: Path
-    encryption_password: Optional[str] = None
-    encryption_mode: Optional[EncryptionMode] = None
     compression: str = Field(default="lz4")
     # disabled because of PyCharm bug
     # noinspection PyDataclass
@@ -105,10 +103,48 @@ class ZFSPaths(BaseModel):
 
 
 class ZFSEncryption:
-    def __init__(self, password: Optional[str], key_path: Path, mode: Optional[EncryptionMode] = None):
-        self.password = password
-        self.key_path = key_path
-        self.mode = mode
+    def __init__(self, key_path: Path, is_new_pool: bool, pool_name: str):
+        self.key_path: Path = key_path
+        self.password: Optional[str] = None
+        self.mode: Optional[EncryptionMode] = None
+
+        if is_new_pool:
+            self._setup_new_pool_encryption()
+        else:
+            self._setup_existing_pool_encryption(pool_name)
+
+    def _setup_new_pool_encryption(self) -> None:
+        encryption_menu = SelectMenu(
+            MenuItemGroup([
+                MenuItem(EncryptionMode.NONE.value, EncryptionMode.NONE),
+                MenuItem(EncryptionMode.POOL.value, EncryptionMode.POOL),
+                MenuItem(EncryptionMode.DATASET.value, EncryptionMode.DATASET)
+            ]),
+            header="Select encryption mode"
+        )
+
+        self.mode = encryption_menu.run().item().value
+        if self.mode != EncryptionMode.NONE:
+            self.password = self._get_password()
+
+    def _setup_existing_pool_encryption(self, pool_name: str) -> None:
+        if self._is_pool_encrypted(pool_name):
+            debug("Detected encrypted pool")
+            self.password = self._get_password()
+            self.mode = EncryptionMode.POOL
+            return
+
+        encryption_menu = SelectMenu(
+            MenuItemGroup([
+                MenuItem("Yes - Encrypt new base dataset", True),
+                MenuItem("No - Skip encryption", False)
+            ]),
+            header="Do you want to encrypt the new base dataset?"
+        )
+
+        if encryption_menu.run().item().value:
+            self.password = self._get_password()
+            self.mode = EncryptionMode.DATASET
 
     def setup(self) -> None:
         if not self.password:
@@ -138,56 +174,10 @@ class ZFSEncryption:
         return self._get_encryption_properties() if self.mode == EncryptionMode.DATASET else {}
 
     @staticmethod
-    def setup_encryption(is_new_pool: bool) -> Tuple[Optional[str], Optional[EncryptionMode]]:
-        if not is_new_pool:
-            return ZFSEncryption._handle_existing_pool()
-
-        encryption_menu = SelectMenu(
-            MenuItemGroup([
-                MenuItem(EncryptionMode.NONE.value, EncryptionMode.NONE),
-                MenuItem(EncryptionMode.POOL.value, EncryptionMode.POOL),
-                MenuItem(EncryptionMode.DATASET.value, EncryptionMode.DATASET)
-            ]),
-            header="Select encryption mode"
-        )
-
-        mode = encryption_menu.run().item().value
-        if mode == EncryptionMode.NONE:
-            return None, None
-
-        password = ZFSEncryption._get_password()
-        return password, mode
-
-    @staticmethod
-    def _handle_existing_pool() -> Tuple[Optional[str], Optional[EncryptionMode]]:
+    def _is_pool_encrypted(pool_name: str) -> bool:
         try:
-            if ZFSEncryption._is_pool_encrypted():
-                debug("Detected encrypted pool")
-                password = ZFSEncryption._get_password()
-                return password, EncryptionMode.POOL
-
-            encryption_menu = SelectMenu(
-                MenuItemGroup([
-                    MenuItem("Yes - Encrypt new base dataset", True),
-                    MenuItem("No - Skip encryption", False)
-                ]),
-                header="Do you want to encrypt the new base dataset?"
-            )
-
-            if encryption_menu.run().item().value:
-                password = ZFSEncryption._get_password()
-                return password, EncryptionMode.DATASET
-
-            return None, None
-        except Exception as e:
-            error(f"Error handling existing pool encryption: {str(e)}")
-            return None, None
-
-    @staticmethod
-    def _is_pool_encrypted() -> bool:
-        try:
-            output = SysCommand("zpool get -H encryption").decode()
-            return "on" in output
+            output = SysCommand(f"zfs get -H encryption {pool_name}").decode()
+            return "aes-256-gcm" in output
         except SysCallError:
             return False
 
@@ -209,7 +199,6 @@ class ZFSEncryption:
             if password == verify and password:
                 return password
 
-
 class ZFSPool:
     """Handles ZFS pool operations"""
     DEFAULT_POOL_OPTIONS = [
@@ -226,7 +215,8 @@ class ZFSPool:
     ]
 
     def __init__(self, config: ZFSConfig):
-        self.config = config
+        self.config: ZFSConfig = config
+        self.encryption_handler: Optional[ZFSEncryption] = None
         self._validate_pool_device()
 
     def create(self, device: str, encryption_handler: ZFSEncryption) -> None:
@@ -369,6 +359,7 @@ class ZFSManagerBuilder:
         self._device: Optional[str] = None
         self._is_new_pool: bool = True
         self._paths: ZFSPaths = ZFSPaths()
+        self._encryption_handler: Optional[ZFSEncryption] = None
 
     def select_pool_name(self) -> 'ZFSManagerBuilder':
         pool_menu = EditMenu(
@@ -426,10 +417,10 @@ class ZFSManagerBuilder:
         return self
 
     def setup_encryption(self) -> 'ZFSManagerBuilder':
-        password, mode = ZFSEncryption.setup_encryption(self._is_new_pool)
-        if password:
-            self._encryption_password = password
-            self._encryption_mode = mode
+        if not self._pool_name:
+            raise ValueError("Pool name must be set before encryption setup")
+
+        self._encryption_handler = ZFSEncryption(self._paths.key_file, self._is_new_pool, self._pool_name)
         return self
 
     def build(self) -> 'ZFSManager':
@@ -438,18 +429,11 @@ class ZFSManagerBuilder:
             pool_name=self._pool_name,
             dataset_prefix=self._dataset_prefix,
             mountpoint=self._mountpoint,
-            encryption_password=self._encryption_password,
-            encryption_mode=self._encryption_mode,
             compression=self._compression,
             datasets=self._datasets
         )
         mounted_paths = ZFSPaths.create_mounted(self._paths, self._mountpoint)
-        encryption_handler = ZFSEncryption(
-            self._encryption_password,
-            self._paths.key_file,
-            self._encryption_mode
-        )
-        return ZFSManager(config, self._paths, mounted_paths, encryption_handler, device=self._device)
+        return ZFSManager(config, self._paths, mounted_paths, self._encryption_handler, device=self._device)
 
 
 class ZFSManager:
@@ -558,7 +542,7 @@ class ZFSManager:
             self.datasets.create_child_datasets()
 
         self.mount_datasets()
-        if self.config.encryption_password:
+        if self.encryption_handler.password:
             self.copy_enc_key()
 
     def finish(self) -> None:
