@@ -2,6 +2,8 @@ import os
 from pathlib import Path
 from typing import List, Dict, Optional
 
+from archinstall.examples.auto_discovery_mounted import root_mount_dir
+from archinstall.examples.full_automated_installation import root_partition
 from archinstall.tui import MenuItemGroup, SelectMenu, MenuItem, EditMenu
 from pydantic import BaseModel, Field, field_validator
 from archinstall import info, error, debug
@@ -506,12 +508,18 @@ class ZFSManager:
         """Clean up ZFS mounts and export pool"""
         debug("Finishing ZFS setup")
         os.sync()
-        SysCommand("zfs umount -a")
+
         root_dataset = next(ds for ds in self.config.datasets if ds.properties.get('mountpoint') == '/')
-        full_dataset_path = f"{self.config.pool_name}/{self.config.dataset_prefix}/{root_dataset.name}"
-        root_prefix = f"{self.config.pool_name}/{self.config.dataset_prefix}"
+        root_dataset = f"{self.datasets.base_dataset}/{root_dataset.name}"
+        try:
+            SysCommand("zfs umount -a")
+            SysCommand(f"zfs unmount {root_dataset}")
+        except Exception as e:
+            pass
+        SysCommand("zfs umount -a")
+
         SysCommand(
-            f"zfs set org.zfsbootmenu:commandline=\"spl.spl_hostid=$(hostid) zswap.enabled=0 rw\" {root_prefix}")
-        SysCommand(f"zfs set org.zfsbootmenu:keysource=\"{full_dataset_path}\" {self.config.pool_name}")
+            f"zfs set org.zfsbootmenu:commandline=\"spl.spl_hostid=$(hostid) zswap.enabled=0 rw\" {self.datasets.base_dataset}")
+        #SysCommand(f"zfs set org.zfsbootmenu:keysource=\"{root_dataset}\" {self.config.pool_name}")
         SysCommand(f"zpool export {self.config.pool_name}")
         info("ZFS cleanup completed")
