@@ -1,13 +1,18 @@
-import os
-from pathlib import Path
-from typing import List, Dict, Optional
 
-from archinstall.tui import MenuItemGroup, SelectMenu, MenuItem, EditMenu
+import os
+from enum import Enum
+from pathlib import Path
+from typing import Optional, Dict, Tuple, List
 from pydantic import BaseModel, Field, field_validator
-from archinstall import info, error, debug
+
+from archinstall_zfs.utils import modify_zfs_cache_mountpoints
+
+from archinstall import debug, info, error
 from archinstall.lib.exceptions import SysCallError
 from archinstall.lib.general import SysCommand
-from archinstall_zfs.utils import modify_zfs_cache_mountpoints
+from archinstall.tui import SelectMenu, MenuItemGroup, MenuItem, EditMenu
+
+
 
 
 class DatasetConfig(BaseModel):
@@ -29,12 +34,19 @@ DEFAULT_DATASETS = [
 ZFS_SERVICES = ["zfs.target", "zfs-import.target", "zfs-volumes.target", "zfs-import-scan", "zfs-zed"]
 
 
+class EncryptionMode(Enum):
+    NONE = "No encryption"
+    POOL = "Encrypt entire pool"
+    DATASET = "Encrypt base dataset only"
+
+
 # noinspection PyMethodParameters
 class ZFSConfig(BaseModel):
     pool_name: str
     dataset_prefix: str
     mountpoint: Path
     encryption_password: Optional[str] = None
+    encryption_mode: Optional[EncryptionMode] = None
     compression: str = Field(default="lz4")
     # disabled because of PyCharm bug
     # noinspection PyDataclass
@@ -111,10 +123,16 @@ class ZFSPool:
         self.config = config
         self._validate_pool_device()
 
-    def create(self, device: str) -> None:
+    def create(self, device: str, encryption_props: Dict[str, str] = None) -> None:
         """Creates a new ZFS pool with specified options"""
         debug(f"Creating ZFS pool {self.config.pool_name} on {device}")
-        cmd = f"zpool create -f {' '.join(self.DEFAULT_POOL_OPTIONS)} {self.config.pool_name} {device}"
+
+        options = self.DEFAULT_POOL_OPTIONS.copy()
+        if encryption_props:
+            for key, value in encryption_props.items():
+                options.append(f"-O {key}={value}")
+
+        cmd = f"zpool create -f {' '.join(options)} {self.config.pool_name} {device}"
         try:
             SysCommand(cmd)
             # Set pool cache file to none, as it's deprecated
@@ -122,6 +140,16 @@ class ZFSPool:
             info(f"Created pool {self.config.pool_name}")
         except SysCallError as e:
             error(f"Failed to create pool: {str(e)}")
+            raise
+
+    def load_key(self) -> None:
+        """Load encryption key for encrypted pools"""
+        debug(f"Loading encryption key for pool {self.config.pool_name}")
+        try:
+            SysCommand(f"zfs load-key {self.config.pool_name}")
+            info("Pool encryption key loaded successfully")
+        except SysCallError as e:
+            error(f"Failed to load pool encryption key: {str(e)}")
             raise
 
     def export(self) -> None:
@@ -141,9 +169,6 @@ class ZFSPool:
         debug(f"Importing pool {self.config.pool_name} to {mountpoint}")
         try:
             SysCommand(f"zpool import -N -R {mountpoint} {self.config.pool_name}")
-            if self.config.encryption_password:
-                base_dataset = f"{self.config.pool_name}/{self.config.dataset_prefix}"
-                SysCommand(f"zfs load-key {base_dataset}")
             info("Pool imported successfully")
         except SysCallError as e:
             error(f"Failed to import pool: {str(e)}")
@@ -153,16 +178,9 @@ class ZFSPool:
         """Validates that pool device exists and is suitable for ZFS"""
         debug("Validating pool device")
         try:
-            # Check if pool already exists
             output = SysCommand("zpool list").decode()
             if self.config.pool_name in output:
                 raise ValueError(f"Pool {self.config.pool_name} already exists")
-
-            # Additional validation can be added here:
-            # - Check device permissions
-            # - Verify device size
-            # - Check device type
-
             debug("Pool device validation successful")
         except SysCallError as e:
             error(f"Pool device validation failed: {str(e)}")
@@ -177,19 +195,15 @@ class ZFSDatasetManager:
         self.paths = paths
         self.base_dataset = f"{config.pool_name}/{config.dataset_prefix}"
 
-    def create_base_dataset(self) -> None:
-        """Creates and configures the base dataset with encryption if enabled"""
+    def create_base_dataset(self, encryption_props: Dict[str, str] = None) -> None:
+        """Creates and configures the base dataset with optional encryption"""
         props = {
             "mountpoint": "none",
             "compression": self.config.compression
         }
 
-        if self.config.encryption_password:
-            props.update({
-                "encryption": "aes-256-gcm",
-                "keyformat": "passphrase",
-                "keylocation": f"file://{self.paths.key_file}"
-            })
+        if encryption_props:
+            props.update(encryption_props)
 
         props_str = " ".join(f"-o {k}={v}" for k, v in props.items())
         SysCommand(f"zfs create {props_str} {self.base_dataset}")
@@ -237,14 +251,12 @@ class ZFSDatasetManager:
 
 
 class ZFSEncryption:
-    """Handles ZFS encryption operations"""
-
-    def __init__(self, password: Optional[str], key_path: Path):
+    def __init__(self, password: Optional[str], key_path: Path, mode: Optional[EncryptionMode] = None):
         self.password = password
         self.key_path = key_path
+        self.mode = mode
 
     def setup(self) -> None:
-        """Sets up encryption if enabled"""
         if not self.password:
             debug("Encryption disabled, skipping ZFS encryption setup")
             return
@@ -255,9 +267,18 @@ class ZFSEncryption:
         self.key_path.chmod(0o000)
         debug("Encryption key stored securely")
 
+    def get_pool_properties(self) -> Dict[str, str]:
+        if self.mode != EncryptionMode.POOL:
+            return {}
+
+        return {
+            "encryption": "aes-256-gcm",
+            "keyformat": "passphrase",
+            "keylocation": f"file://{self.key_path}"
+        }
+
     def get_dataset_properties(self) -> Dict[str, str]:
-        """Returns encryption properties for dataset creation"""
-        if not self.password:
+        if self.mode != EncryptionMode.DATASET:
             return {}
 
         return {
@@ -267,21 +288,58 @@ class ZFSEncryption:
         }
 
     @staticmethod
-    def setup_encryption() -> Optional[str]:
-        """Interactive encryption setup, returns password or None"""
+    def setup_encryption(is_new_pool: bool) -> Tuple[Optional[str], Optional[EncryptionMode]]:
+        if not is_new_pool:
+            return ZFSEncryption._handle_existing_pool()
+
         encryption_menu = SelectMenu(
             MenuItemGroup([
-                MenuItem("Yes - Enable ZFS encryption", True),
-                MenuItem("No - Skip encryption", False)
+                MenuItem(EncryptionMode.NONE.value, EncryptionMode.NONE),
+                MenuItem(EncryptionMode.POOL.value, EncryptionMode.POOL),
+                MenuItem(EncryptionMode.DATASET.value, EncryptionMode.DATASET)
             ]),
-            header="Do you want to enable ZFS encryption?"
+            header="Select encryption mode"
         )
 
-        if not encryption_menu.run().item().value:
-            debug("Encryption disabled")
-            return None
+        mode = encryption_menu.run().item().value
+        if mode == EncryptionMode.NONE:
+            return None, None
 
-        return ZFSEncryption._get_password()
+        password = ZFSEncryption._get_password()
+        return password, mode
+
+    @staticmethod
+    def _handle_existing_pool() -> Tuple[Optional[str], Optional[EncryptionMode]]:
+        try:
+            if ZFSEncryption._is_pool_encrypted():
+                debug("Detected encrypted pool")
+                password = ZFSEncryption._get_password()
+                return password, EncryptionMode.POOL
+
+            encryption_menu = SelectMenu(
+                MenuItemGroup([
+                    MenuItem("Yes - Encrypt new base dataset", True),
+                    MenuItem("No - Skip encryption", False)
+                ]),
+                header="Do you want to encrypt the new base dataset?"
+            )
+
+            if encryption_menu.run().item().value:
+                password = ZFSEncryption._get_password()
+                return password, EncryptionMode.DATASET
+
+            return None, None
+        except Exception as e:
+            error(f"Error handling existing pool encryption: {str(e)}")
+            return None, None
+
+    @staticmethod
+    def _is_pool_encrypted() -> bool:
+        try:
+            output = SysCommand("zpool get -H encryption").decode()
+            return "on" in output
+        except SysCallError:
+            return False
 
     @staticmethod
     def _get_password() -> str:
@@ -487,21 +545,37 @@ class ZFSManager:
         self.create_hostid()
         self.prepare_zfs_cache()
         self.encryption_handler.setup()
+
         if self.device:  # New pool setup
-            self.pool.create(self.device)
-            self.datasets.create_base_dataset()
+            if self.config.encryption_mode == EncryptionMode.POOL:
+                self.pool.create(self.device, self.encryption_handler.get_pool_properties())
+            else:
+                self.pool.create(self.device)
+
+            if self.config.encryption_mode == EncryptionMode.DATASET:
+                self.datasets.create_base_dataset(self.encryption_handler.get_dataset_properties())
+            else:
+                self.datasets.create_base_dataset()
+
             self.datasets.create_child_datasets()
             self.pool.export()
             self.pool.import_pool(self.config.mountpoint)
         else:  # Existing pool setup
             self.pool.import_pool(self.config.mountpoint)
+            if self.config.encryption_password:
+                self.pool.load_key()
+
             self.datasets.validate_prefix()
-            self.datasets.create_base_dataset()
+            if self.config.encryption_mode == EncryptionMode.DATASET:
+                self.datasets.create_base_dataset(self.encryption_handler.get_dataset_properties())
+            else:
+                self.datasets.create_base_dataset()
+
             self.datasets.create_child_datasets()
+
         self.mount_datasets()
         if self.config.encryption_password:
             self.copy_enc_key()
-
     def finish(self) -> None:
         """Clean up ZFS mounts and export pool"""
         debug("Finishing ZFS setup")
