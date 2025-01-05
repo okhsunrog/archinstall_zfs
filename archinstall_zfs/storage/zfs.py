@@ -1,5 +1,6 @@
 
 import os
+import time
 from enum import Enum
 from pathlib import Path
 from typing import Optional, Dict, List
@@ -554,9 +555,12 @@ class ZFSManager:
         try:
             SysCommand("zfs umount -a")
             SysCommand(f"zfs unmount {root_dataset}")
+            time.sleep(1)
+            os.sync()
+            SysCommand(f"zfs unmount {root_dataset}")
+            SysCommand("zfs umount -a")
         except Exception:
             pass
-        SysCommand("zfs umount -a")
         SysCommand(
             f"zfs set org.zfsbootmenu:commandline=\"spl.spl_hostid=$(hostid) zswap.enabled=0 rw\" {self.datasets.base_dataset}")
         #SysCommand(f"zfs set org.zfsbootmenu:keysource=\"{root_dataset}\" {self.config.pool_name}")
