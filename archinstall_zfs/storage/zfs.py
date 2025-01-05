@@ -321,13 +321,19 @@ class ZFSManagerBuilder:
     def select_existing_pool(self) -> 'ZFSManagerBuilder':
         debug("Scanning for importable ZFS pools")
         try:
+            debug("Running 'zpool import' command")
             output = SysCommand("zpool import").decode()
+            debug(f"Raw zpool import output:\n{output}")
+
             pools = []
             for line in output.splitlines():
+                debug(f"Processing line: {line}")
                 if line.startswith("   pool:"):
                     pool_name = line.split(":")[1].strip()
+                    debug(f"Found pool: {pool_name}")
                     pools.append(MenuItem(pool_name, pool_name))
 
+            debug(f"Total pools found: {len(pools)}")
             if not pools:
                 error("No importable ZFS pools found")
                 raise ValueError("No importable ZFS pools found. Make sure pools exist and are exported.")
@@ -337,6 +343,7 @@ class ZFSManagerBuilder:
                 header="Select existing ZFS pool"
             )
             self._pool_name = pool_menu.run().item().value
+            debug(f"Selected pool: {self._pool_name}")
             self._is_new_pool = False
             return self
         except SysCallError as e:
