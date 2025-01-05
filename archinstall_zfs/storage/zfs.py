@@ -328,7 +328,7 @@ class ZFSManagerBuilder:
             pools = []
             for line in output.splitlines():
                 debug(f"Processing line: {line}")
-                if line.startswith("   pool:"):
+                if line.strip().startswith("pool:"):  # Changed to handle any whitespace
                     pool_name = line.split(":")[1].strip()
                     debug(f"Found pool: {pool_name}")
                     pools.append(MenuItem(pool_name, pool_name))
