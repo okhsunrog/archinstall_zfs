@@ -1,4 +1,3 @@
-
 import os
 import time
 from enum import Enum
@@ -14,8 +13,6 @@ from archinstall.lib.general import SysCommand
 from archinstall.tui import SelectMenu, MenuItemGroup, MenuItem, EditMenu
 
 
-
-
 class DatasetConfig(BaseModel):
     name: str
     properties: Dict[str, str]
@@ -25,10 +22,6 @@ DEFAULT_DATASETS = [
     DatasetConfig(name="root", properties={"mountpoint": "/", "canmount": "noauto"}),
     DatasetConfig(name="data/home", properties={"mountpoint": "/home"}),
     DatasetConfig(name="data/root", properties={"mountpoint": "/root"}),
-    DatasetConfig(name="var", properties={"mountpoint": "/var", "canmount": "off"}),
-    DatasetConfig(name="var/lib", properties={"mountpoint": "/var/lib", "canmount": "off"}),
-    DatasetConfig(name="var/lib/libvirt", properties={"mountpoint": "/var/lib/libvirt"}),
-    DatasetConfig(name="var/lib/docker", properties={"mountpoint": "/var/lib/docker"}),
     DatasetConfig(name="vm", properties={"mountpoint": "/vm"})
 ]
 
@@ -550,18 +543,26 @@ class ZFSManager:
         os.sync()
 
         root_dataset = next(ds for ds in self.config.datasets if ds.properties.get('mountpoint') == '/')
-        root_dataset = f"{self.datasets.base_dataset}/{root_dataset.name}"
-        debug(f"Root dataset: {root_dataset}")
-        # noinspection PyBroadException
-        try:
-            SysCommand("zfs umount -a")
-            SysCommand(f"zfs unmount {root_dataset}")
-            time.sleep(1)
-            os.sync()
-            SysCommand(f"zfs unmount {root_dataset}")
-            SysCommand("zfs umount -a")
-        except Exception:
-            pass
+        full_dataset_path = f"{self.datasets.base_dataset}/{root_dataset.name}"
+        debug(f"Root dataset: {full_dataset_path}")
+
+        # Multiple unmount attempts with different strategies
+        unmount_attempts = [
+            lambda: SysCommand("zfs umount -a"),
+            lambda: SysCommand(f"zfs unmount {full_dataset_path}"),
+            lambda: SysCommand("zfs umount -af"),  # Force unmount if needed
+            lambda: SysCommand(f"zfs unmount -f {full_dataset_path}")
+        ]
+
+        for attempt in unmount_attempts:
+            try:
+                attempt()
+                time.sleep(1)
+                os.sync()
+            except Exception as e:
+                debug(f"Unmount attempt: {e}")
+                continue
+
         SysCommand(
             f"zfs set org.zfsbootmenu:commandline=\"spl.spl_hostid=$(hostid) zswap.enabled=0 rw\" {self.datasets.base_dataset}")
         #SysCommand(f"zfs set org.zfsbootmenu:keysource=\"{root_dataset}\" {self.config.pool_name}")
