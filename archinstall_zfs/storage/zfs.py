@@ -176,7 +176,9 @@ class ZFSEncryption:
     @staticmethod
     def _is_pool_encrypted(pool_name: str) -> bool:
         try:
+            SysCommand(f"zpool import -fN {pool_name}")
             output = SysCommand(f"zfs get -H encryption {pool_name}").decode()
+            SysCommand(f"zpool export {pool_name}")
             return "aes-256-gcm" in output
         except SysCallError:
             return False
