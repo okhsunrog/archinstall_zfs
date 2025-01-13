@@ -21,6 +21,8 @@ from archinstall_zfs.storage.zfs_init import initialize_zfs, add_archzfs_repo
 from archinstall_zfs.storage.disk import DiskManager, DiskManagerBuilder
 from archinstall_zfs.storage.zfs import ZFSManager, ZFSManagerBuilder, ZFS_SERVICES
 
+from archinstall_zfs.menu.installer import InstallerMenu
+
 InstallMode = Literal["full_disk", "new_pool", "existing_pool"]
 
 def check_internet() -> bool:
@@ -233,21 +235,10 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
 
 
 def ask_user_questions() -> None:
-    """Get user input for installation configuration"""
     with Tui():
-        global_menu = GlobalMenu(data_store=archinstall.arguments)
+        installer_menu = InstallerMenu(data_store=archinstall.arguments)
+        installer_menu.run()
 
-        # Disable options that conflict with ZFS installation
-        global_menu.set_enabled('disk_config', False)
-        global_menu.set_enabled('disk_encryption', False)
-        global_menu.set_enabled('swap', False)
-        global_menu.set_enabled('bootloader', False)
-        global_menu.set_enabled('uki', False)
-        global_menu.set_enabled('kernels', False)
-        global_menu.set_enabled('parallel downloads', False)
-        global_menu.set_enabled('additional-repositories', False)
-
-        global_menu.run()
 
 def check_zfs_module() -> bool:
     debug("Checking ZFS kernel module")
