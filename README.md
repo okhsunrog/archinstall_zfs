@@ -1,5 +1,7 @@
 # Archinstall-ZFS
 
+# WARNING: This is work-in-progress and doesn't work on the latest commit for now
+
 A ZFS-focused Arch Linux installer built on top of archinstall. This installer provides a streamlined way to set up Arch Linux with ZFS as the root filesystem, featuring automatic ZFSBootMenu configuration.
 
 ## Features
