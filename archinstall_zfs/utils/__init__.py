@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import List
 
 
 def modify_zfs_cache_mountpoints(content: str, mountpoint: Path) -> str:
@@ -15,19 +14,19 @@ def modify_zfs_cache_mountpoints(content: str, mountpoint: Path) -> str:
 
     def process_mountpoint(path: str, prefix: str) -> str:
         if path == prefix:
-            return '/'
-        if path.startswith(prefix + '/'):
-            return '/' + path[len(prefix) + 1:]
+            return "/"
+        if path.startswith(prefix + "/"):
+            return "/" + path[len(prefix) + 1 :]
         return path
 
-    mount_prefix = str(mountpoint).rstrip('/')
+    mount_prefix = str(mountpoint).rstrip("/")
     lines = content.splitlines()
-    modified_lines: List[str] = []
+    modified_lines: list[str] = []
 
     for line in lines:
-        fields = line.split('\t')
+        fields = line.split("\t")
         if len(fields) > 1:
             fields[1] = process_mountpoint(fields[1], mount_prefix)
-        modified_lines.append('\t'.join(fields))
+        modified_lines.append("\t".join(fields))
 
-    return '\n'.join(modified_lines) + '\n'
+    return "\n".join(modified_lines)

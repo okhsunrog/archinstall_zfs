@@ -2,27 +2,27 @@ import os
 import time
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Dict, List
+from typing import ClassVar, cast
+
+from archinstall import debug, error, info
+from archinstall.lib.exceptions import SysCallError
+from archinstall.lib.general import SysCommand
+from archinstall.tui import EditMenu, MenuItem, MenuItemGroup, SelectMenu
 from pydantic import BaseModel, Field, field_validator
 
 from archinstall_zfs.utils import modify_zfs_cache_mountpoints
 
-from archinstall import debug, info, error
-from archinstall.lib.exceptions import SysCallError
-from archinstall.lib.general import SysCommand
-from archinstall.tui import SelectMenu, MenuItemGroup, MenuItem, EditMenu
-
 
 class DatasetConfig(BaseModel):
     name: str
-    properties: Dict[str, str]
+    properties: dict[str, str]
 
 
 DEFAULT_DATASETS = [
     DatasetConfig(name="root", properties={"mountpoint": "/", "canmount": "noauto"}),
     DatasetConfig(name="data/home", properties={"mountpoint": "/home"}),
     DatasetConfig(name="data/root", properties={"mountpoint": "/root"}),
-    DatasetConfig(name="vm", properties={"mountpoint": "/vm"})
+    DatasetConfig(name="vm", properties={"mountpoint": "/vm"}),
 ]
 
 ZFS_SERVICES = ["zfs.target", "zfs-import.target", "zfs-volumes.target", "zfs-import-cache.service", "zfs-zed.service"]
@@ -42,18 +42,18 @@ class ZFSConfig(BaseModel):
     compression: str = Field(default="lz4")
     # disabled because of PyCharm bug
     # noinspection PyDataclass
-    datasets: List[DatasetConfig] = Field(default_factory=list)
+    datasets: list[DatasetConfig] = Field(default_factory=list)
 
-    @field_validator('pool_name', check_fields=False)
+    @field_validator("pool_name", check_fields=False)
     def validate_pool_name(cls, v: str) -> str:
         if not v.isalnum():
-            raise ValueError('Pool name must be alphanumeric')
+            raise ValueError("Pool name must be alphanumeric")
         return v
 
-    @field_validator('dataset_prefix', check_fields=False)
+    @field_validator("dataset_prefix", check_fields=False)
     def validate_prefix(cls, v: str) -> str:
         if not v.isalnum():
-            raise ValueError('Dataset prefix must be alphanumeric')
+            raise ValueError("Dataset prefix must be alphanumeric")
         return v
 
 
@@ -62,7 +62,7 @@ class ZFSPaths(BaseModel):
     cache_dir: Path = Field(default=Path("/etc/zfs/zfs-list.cache"))
     key_file: Path = Field(default=Path("/etc/zfs/zroot.key"))
     hostid: Path = Field(default=Path("/etc/hostid"))
-    _pool_name: Optional[str] = None
+    _pool_name: str | None = None
 
     @property
     def pool_name(self) -> str:
@@ -79,28 +79,29 @@ class ZFSPaths(BaseModel):
         return self.cache_dir / self.pool_name
 
     @classmethod
-    def create_mounted(cls, base_paths: 'ZFSPaths', mountpoint: Path) -> 'ZFSPaths':
+    def create_mounted(cls, base_paths: "ZFSPaths", mountpoint: Path) -> "ZFSPaths":
         new_paths = cls(
-            base_zfs=mountpoint / str(base_paths.base_zfs).lstrip('/'),
-            cache_dir=mountpoint / str(base_paths.cache_dir).lstrip('/'),
-            key_file=mountpoint / str(base_paths.key_file).lstrip('/'),
-            hostid=mountpoint / str(base_paths.hostid).lstrip('/'))
+            base_zfs=mountpoint / str(base_paths.base_zfs).lstrip("/"),
+            cache_dir=mountpoint / str(base_paths.cache_dir).lstrip("/"),
+            key_file=mountpoint / str(base_paths.key_file).lstrip("/"),
+            hostid=mountpoint / str(base_paths.hostid).lstrip("/"),
+        )
         new_paths.pool_name = base_paths.pool_name
         return new_paths
 
     # noinspection PyMethodParameters
-    @field_validator('*')
+    @field_validator("*")
     def validate_absolute_path(cls, v: Path) -> Path:
         if not v.is_absolute():
-            raise ValueError(f'Path {v} must be absolute')
+            raise ValueError(f"Path {v} must be absolute")
         return v
 
 
 class ZFSEncryption:
     def __init__(self, key_path: Path, is_new_pool: bool, pool_name: str):
         self.key_path: Path = key_path
-        self.password: Optional[str] = None
-        self.mode: Optional[EncryptionMode] = None
+        self.password: str | None = None
+        self.mode: EncryptionMode | None = None
 
         if is_new_pool:
             self._setup_new_pool_encryption()
@@ -109,12 +110,14 @@ class ZFSEncryption:
 
     def _setup_new_pool_encryption(self) -> None:
         encryption_menu = SelectMenu(
-            MenuItemGroup([
-                MenuItem(EncryptionMode.NONE.value, EncryptionMode.NONE),
-                MenuItem(EncryptionMode.POOL.value, EncryptionMode.POOL),
-                MenuItem(EncryptionMode.DATASET.value, EncryptionMode.DATASET)
-            ]),
-            header="Select encryption mode"
+            MenuItemGroup(
+                [
+                    MenuItem(EncryptionMode.NONE.value, EncryptionMode.NONE),
+                    MenuItem(EncryptionMode.POOL.value, EncryptionMode.POOL),
+                    MenuItem(EncryptionMode.DATASET.value, EncryptionMode.DATASET),
+                ]
+            ),
+            header="Select encryption mode",
         )
 
         self.mode = encryption_menu.run().item().value
@@ -129,11 +132,8 @@ class ZFSEncryption:
             return
 
         encryption_menu = SelectMenu(
-            MenuItemGroup([
-                MenuItem("Yes - Encrypt new base dataset", True),
-                MenuItem("No - Skip encryption", False)
-            ]),
-            header="Do you want to encrypt the new base dataset?"
+            MenuItemGroup([MenuItem("Yes - Encrypt new base dataset", True), MenuItem("No - Skip encryption", False)]),
+            header="Do you want to encrypt the new base dataset?",
         )
 
         if encryption_menu.run().item().value:
@@ -151,20 +151,16 @@ class ZFSEncryption:
         self.key_path.chmod(0o000)
         debug("Encryption key stored securely")
 
-    def _get_encryption_properties(self) -> Dict[str, str]:
+    def _get_encryption_properties(self) -> dict[str, str]:
         if not self.password:
             return {}
 
-        return {
-            "encryption": "aes-256-gcm",
-            "keyformat": "passphrase",
-            "keylocation": f"file://{self.key_path}"
-        }
+        return {"encryption": "aes-256-gcm", "keyformat": "passphrase", "keylocation": f"file://{self.key_path}"}
 
-    def get_pool_properties(self) -> Dict[str, str]:
+    def get_pool_properties(self) -> dict[str, str]:
         return self._get_encryption_properties() if self.mode == EncryptionMode.POOL else {}
 
-    def get_dataset_properties(self) -> Dict[str, str]:
+    def get_dataset_properties(self) -> dict[str, str]:
         return self._get_encryption_properties() if self.mode == EncryptionMode.DATASET else {}
 
     @staticmethod
@@ -180,24 +176,27 @@ class ZFSEncryption:
     @staticmethod
     def _get_password() -> str:
         while True:
-            password = EditMenu(
-                "ZFS Encryption Password",
-                header="Enter password for ZFS encryption",
-                hide_input=True,
-            ).input().text()
+            password = cast(
+                str,
+                EditMenu(
+                    "ZFS Encryption Password",
+                    header="Enter password for ZFS encryption",
+                    hide_input=True,
+                )
+                .input()
+                .text(),
+            )
 
-            verify = EditMenu(
-                "Verify Password",
-                header="Enter password again",
-                hide_input=True
-            ).input().text()
+            verify = cast(str, EditMenu("Verify Password", header="Enter password again", hide_input=True).input().text())
 
             if password == verify and password:
                 return password
 
+
 class ZFSPool:
     """Handles ZFS pool operations"""
-    DEFAULT_POOL_OPTIONS = [
+
+    DEFAULT_POOL_OPTIONS: ClassVar[list[str]] = [
         "-o ashift=12",
         "-O acltype=posixacl",
         "-O relatime=on",
@@ -207,12 +206,12 @@ class ZFSPool:
         "-O normalization=formD",
         "-O devices=off",
         "-m none",
-        "-R /mnt"
+        "-R /mnt",
     ]
 
     def __init__(self, config: ZFSConfig):
         self.config: ZFSConfig = config
-        self.encryption_handler: Optional[ZFSEncryption] = None
+        self.encryption_handler: ZFSEncryption | None = None
         self._validate_pool_device()
 
     def create(self, device: str, encryption_handler: ZFSEncryption) -> None:
@@ -232,7 +231,7 @@ class ZFSPool:
             SysCommand(f"zpool set cachefile=/etc/zfs/zpool.cache {self.config.pool_name}")
             info(f"Created pool {self.config.pool_name}")
         except SysCallError as e:
-            error(f"Failed to create pool: {str(e)}")
+            error(f"Failed to create pool: {e!s}")
             raise
 
     def load_key(self) -> None:
@@ -242,7 +241,7 @@ class ZFSPool:
             SysCommand(f"zfs load-key {self.config.pool_name}")
             info("Pool encryption key loaded successfully")
         except SysCallError as e:
-            error(f"Failed to load pool encryption key: {str(e)}")
+            error(f"Failed to load pool encryption key: {e!s}")
             raise
 
     def export(self) -> None:
@@ -254,7 +253,7 @@ class ZFSPool:
             SysCommand(f"zpool export {self.config.pool_name}")
             info("Pool exported successfully")
         except SysCallError as e:
-            error(f"Failed to export pool: {str(e)}")
+            error(f"Failed to export pool: {e!s}")
             raise
 
     def import_pool(self, mountpoint: Path, encryption_handler: ZFSEncryption) -> None:
@@ -266,7 +265,7 @@ class ZFSPool:
             if encryption_handler.password:
                 self.load_key()
         except SysCallError as e:
-            error(f"Failed to import pool: {str(e)}")
+            error(f"Failed to import pool: {e!s}")
             raise
 
     def _validate_pool_device(self) -> None:
@@ -278,7 +277,7 @@ class ZFSPool:
                 raise ValueError(f"Pool {self.config.pool_name} already exists")
             debug("Pool device validation successful")
         except SysCallError as e:
-            error(f"Pool device validation failed: {str(e)}")
+            error(f"Pool device validation failed: {e!s}")
             raise
 
 
@@ -292,10 +291,7 @@ class ZFSDatasetManager:
 
     def create_base_dataset(self, encryption_handler: ZFSEncryption) -> None:
         """Creates and configures the base dataset with optional encryption"""
-        props = {
-            "mountpoint": "none",
-            "compression": self.config.compression
-        }
+        props = {"mountpoint": "none", "compression": self.config.compression}
         props.update(encryption_handler.get_dataset_properties())
 
         props_str = " ".join(f"-o {k}={v}" for k, v in props.items())
@@ -316,8 +312,8 @@ class ZFSDatasetManager:
     # noinspection PyMethodMayBeStatic
     def _get_dataset_hierarchy(self, dataset_path: str) -> list[str]:
         """Get all parent datasets for a given dataset path"""
-        parts = dataset_path.split('/')
-        return ['/'.join(parts[:i + 1]) for i in range(len(parts))]
+        parts = dataset_path.split("/")
+        return ["/".join(parts[: i + 1]) for i in range(len(parts))]
 
     def _ensure_parent_datasets(self, dataset_name: str) -> None:
         """Creates parent datasets if they don't exist"""
@@ -333,7 +329,7 @@ class ZFSDatasetManager:
     def create_child_datasets(self) -> None:
         """Creates all datasets with proper hierarchy"""
         # Sort datasets by depth to ensure proper creation order
-        sorted_datasets = sorted(self.config.datasets, key=lambda d: len(d.name.split('/')))
+        sorted_datasets = sorted(self.config.datasets, key=lambda d: len(d.name.split("/")))
 
         for dataset in sorted_datasets:
             self._ensure_parent_datasets(dataset.name)
@@ -344,25 +340,21 @@ class ZFSDatasetManager:
 
 
 class ZFSManagerBuilder:
-    def __init__(self):
-        self._pool_name: Optional[str] = None
-        self._dataset_prefix: Optional[str] = None
-        self._mountpoint: Optional[Path] = None
-        self._encryption_password: Optional[str] = None
-        self._encryption_mode: Optional[EncryptionMode] = None
+    def __init__(self) -> None:
+        self._pool_name: str | None = None
+        self._dataset_prefix: str | None = None
+        self._mountpoint: Path | None = None
+        self._encryption_password: str | None = None
+        self._encryption_mode: EncryptionMode | None = None
         self._compression: str = "lz4"
-        self._datasets: List[DatasetConfig] = []
-        self._device: Optional[str] = None
+        self._datasets: list[DatasetConfig] = []
+        self._device: str | None = None
         self._is_new_pool: bool = True
         self._paths: ZFSPaths = ZFSPaths()
-        self._encryption_handler: Optional[ZFSEncryption] = None
+        self._encryption_handler: ZFSEncryption | None = None
 
-    def new_pool(self, device: Path) -> 'ZFSManagerBuilder':
-        pool_menu = EditMenu(
-            "Pool Name",
-            header="Enter name for new ZFS pool",
-            default_text="zroot"
-        )
+    def new_pool(self, device: Path) -> "ZFSManagerBuilder":
+        pool_menu = EditMenu("Pool Name", header="Enter name for new ZFS pool", default_text="zroot")
         pool_name = pool_menu.input().text()
         info(f"Selected pool name: {pool_name}")
 
@@ -372,7 +364,7 @@ class ZFSManagerBuilder:
         self._is_new_pool = True
         return self
 
-    def select_existing_pool(self) -> 'ZFSManagerBuilder':
+    def select_existing_pool(self) -> "ZFSManagerBuilder":
         debug("Scanning for importable ZFS pools")
         try:
             output = SysCommand("zpool import").decode()
@@ -387,42 +379,40 @@ class ZFSManagerBuilder:
                 error("No importable ZFS pools found")
                 raise ValueError("No importable ZFS pools found. Make sure pools exist and are exported.")
 
-            pool_menu = SelectMenu(
-                MenuItemGroup(pools),
-                header="Select existing ZFS pool"
-            )
+            pool_menu = SelectMenu(MenuItemGroup(pools), header="Select existing ZFS pool")
             self._pool_name = pool_menu.run().item().value
             self._paths.pool_name = self._pool_name
             self._is_new_pool = False
             return self
         except SysCallError as e:
-            error(f"Failed to get pool list: {str(e)}")
+            error(f"Failed to get pool list: {e!s}")
             raise
 
-    def with_pool_name(self, name: str) -> 'ZFSManagerBuilder':
+    def with_pool_name(self, name: str) -> "ZFSManagerBuilder":
         self._pool_name = name
         self._paths.pool_name = name
         return self
 
-    def with_dataset_prefix(self, prefix: str) -> 'ZFSManagerBuilder':
+    def with_dataset_prefix(self, prefix: str) -> "ZFSManagerBuilder":
         self._dataset_prefix = prefix
         return self
 
-    def with_mountpoint(self, path: Path) -> 'ZFSManagerBuilder':
+    def with_mountpoint(self, path: Path) -> "ZFSManagerBuilder":
         self._mountpoint = path
         return self
 
-    def build(self) -> 'ZFSManager':
+    def build(self) -> "ZFSManager":
         if not self._pool_name:
             raise ValueError("Pool name must be set before building ZFS manager")
+        if not self._dataset_prefix:
+            raise ValueError("Dataset prefix must be set before building ZFS manager")
+        if not self._mountpoint:
+            raise ValueError("Mountpoint must be set before building ZFS manager")
+
         self._datasets = DEFAULT_DATASETS
         self._encryption_handler = ZFSEncryption(self._paths.key_file, self._is_new_pool, self._pool_name)
         config = ZFSConfig(
-            pool_name=self._pool_name,
-            dataset_prefix=self._dataset_prefix,
-            mountpoint=self._mountpoint,
-            compression=self._compression,
-            datasets=self._datasets
+            pool_name=self._pool_name, dataset_prefix=self._dataset_prefix, mountpoint=self._mountpoint, compression=self._compression, datasets=self._datasets
         )
         mounted_paths = ZFSPaths.create_mounted(self._paths, self._mountpoint)
         return ZFSManager(config, self._paths, mounted_paths, self._encryption_handler, device=self._device)
@@ -454,7 +444,7 @@ class ZFSManager:
             SysCommand("zgenhostid -f 0x00bab10c")
             info("Created static hostid")
         except SysCallError as e:
-            error(f"Failed to create hostid: {str(e)}")
+            error(f"Failed to create hostid: {e!s}")
             raise
 
     def prepare_zfs_cache(self) -> None:
@@ -491,7 +481,7 @@ class ZFSManager:
 
             info("ZFS misc files configured successfully")
         except SysCallError as e:
-            error(f"Failed to copy ZFS misc files: {str(e)}")
+            error(f"Failed to copy ZFS misc files: {e!s}")
             raise
 
     def copy_enc_key(self) -> None:
@@ -508,16 +498,16 @@ class ZFSManager:
         fstab_path = self.config.mountpoint / "etc" / "fstab"
 
         # Generate full fstab with UUIDs
-        raw_fstab = SysCommand(f'/usr/bin/genfstab -t UUID {self.config.mountpoint}').decode()
+        raw_fstab = SysCommand(f"/usr/bin/genfstab -t UUID {self.config.mountpoint}").decode()
 
         # Filter out pool-related entries and add root dataset
         filtered_lines = [line for line in raw_fstab.splitlines() if self.config.pool_name not in line]
-        root_dataset = next(ds for ds in self.config.datasets if ds.properties.get('mountpoint') == '/')
+        root_dataset = next(ds for ds in self.config.datasets if ds.properties.get("mountpoint") == "/")
         full_dataset_path = f"{self.datasets.base_dataset}/{root_dataset.name}"
         filtered_lines.append(f"{full_dataset_path} / zfs defaults 0 0")
 
         # Write final fstab
-        fstab_path.write_text('\n'.join(filtered_lines) + '\n')
+        fstab_path.write_text("\n".join(filtered_lines) + "\n")
         info("Generated fstab successfully")
 
     def setup_for_installation(self) -> None:
@@ -545,13 +535,12 @@ class ZFSManager:
     def finish(self) -> None:
         """Clean up ZFS mounts and export pool"""
         debug("Finishing ZFS setup")
-        SysCommand(
-            f"zfs set org.zfsbootmenu:commandline=\"spl.spl_hostid=$(hostid) zswap.enabled=0 rw\" {self.datasets.base_dataset}")
-        #SysCommand(f"zfs set org.zfsbootmenu:keysource=\"{root_dataset}\" {self.config.pool_name}")
+        SysCommand(f'zfs set org.zfsbootmenu:commandline="spl.spl_hostid=$(hostid) zswap.enabled=0 rw" {self.datasets.base_dataset}')
+        # SysCommand(f"zfs set org.zfsbootmenu:keysource=\"{root_dataset}\" {self.config.pool_name}")
 
         os.sync()
 
-        root_dataset = next(ds for ds in self.config.datasets if ds.properties.get('mountpoint') == '/')
+        root_dataset = next(ds for ds in self.config.datasets if ds.properties.get("mountpoint") == "/")
         full_dataset_path = f"{self.datasets.base_dataset}/{root_dataset.name}"
         debug(f"Root dataset: {full_dataset_path}")
         SysCommand(f"zpool set bootfs={full_dataset_path} {self.config.pool_name}")
@@ -561,7 +550,7 @@ class ZFSManager:
             lambda: SysCommand("zfs umount -a"),
             lambda: SysCommand(f"zfs unmount {full_dataset_path}"),
             lambda: SysCommand("zfs umount -af"),  # Force unmount if needed
-            lambda: SysCommand(f"zfs unmount -f {full_dataset_path}")
+            lambda: SysCommand(f"zfs unmount -f {full_dataset_path}"),
         ]
 
         for attempt in unmount_attempts:

@@ -1,5 +1,6 @@
 from pathlib import Path
-from archinstall import SysCommand
+
+from archinstall.lib.general import SysCommand
 
 
 class DracutSetup:
@@ -56,7 +57,7 @@ done"""
         (self.scripts_dir / "dracut-install.sh").write_text(dracut_install_script)
         (self.scripts_dir / "dracut-remove.sh").write_text(dracut_remove_script)
 
-        SysCommand(f'chmod +x {self.scripts_dir}/dracut-install.sh {self.scripts_dir}/dracut-remove.sh')
+        SysCommand(f"chmod +x {self.scripts_dir}/dracut-install.sh {self.scripts_dir}/dracut-remove.sh")
 
     def _create_hooks(self) -> None:
         install_hook = """[Trigger]

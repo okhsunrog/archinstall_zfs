@@ -1,9 +1,11 @@
+import re
 import tempfile
 from pathlib import Path
-from typing import Optional, Tuple
-import re
-from archinstall import SysCommand, debug, info, error
+from typing import Any, cast
+
+from archinstall import debug, error, info
 from archinstall.lib.exceptions import SysCallError
+from archinstall.lib.general import SysCommand
 
 
 def check_zfs_module() -> bool:
@@ -25,21 +27,21 @@ def initialize_zfs() -> None:
             raise RuntimeError("Failed to initialize ZFS support")
 
 
-def add_archzfs_repo(target_path: Path = Path("/"), installation=None) -> None:
+def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) -> None:
     """Add archzfs repository to pacman.conf if not already present"""
     info("Adding archzfs repository")
 
     pacman_conf = target_path / "etc/pacman.conf"
 
     # Check if repo already exists
-    with open(pacman_conf, "r") as f:
+    with open(pacman_conf) as f:
         content = f.read()
         if "[archzfs]" in content:
             info("archzfs repository already configured")
             return
 
-    key_receive = 'pacman-key -r DDF7DB817396A49B2A2723F7403BD972F75D9D76'
-    key_sign = 'pacman-key --lsign-key DDF7DB817396A49B2A2723F7403BD972F75D9D76'
+    key_receive = "pacman-key -r DDF7DB817396A49B2A2723F7403BD972F75D9D76"
+    key_sign = "pacman-key --lsign-key DDF7DB817396A49B2A2723F7403BD972F75D9D76"
 
     if installation:
         installation.arch_chroot(key_receive)
@@ -49,17 +51,18 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation=None) -> None:
         SysCommand(key_sign)
 
     repo_config = [
-        '\n[archzfs]\n',
-        'Server = http://archzfs.com/$repo/$arch\n',
-        'Server = http://mirror.sum7.eu/archlinux/$repo/$repo/$arch\n',
-        'Server = https://mirror.biocrafting.net/archlinux/$repo/$repo/$arch\n'
+        "\n[archzfs]\n",
+        "Server = http://archzfs.com/$repo/$arch\n",
+        "Server = http://mirror.sum7.eu/archlinux/$repo/$repo/$arch\n",
+        "Server = https://mirror.biocrafting.net/archlinux/$repo/$repo/$arch\n",
     ]
 
     with open(pacman_conf, "a") as f:
         f.writelines(repo_config)
 
     if not installation:
-        SysCommand('pacman -Sy')
+        SysCommand("pacman -Sy")
+
 
 class ZFSInitializer:
     def __init__(self, verbose: bool = False):
@@ -67,18 +70,21 @@ class ZFSInitializer:
         self.kernel_version = self._get_running_kernel_version()
 
     def _get_running_kernel_version(self) -> str:
-        return SysCommand('uname -r').decode().strip()
+        return cast(str, SysCommand("uname -r").decode().strip())
 
     def increase_cowspace(self) -> None:
         info("Increasing cowspace to half of RAM")
-        SysCommand('mount -o remount,size=50% /run/archiso/cowspace')
+        SysCommand("mount -o remount,size=50% /run/archiso/cowspace")
 
     def extract_pkginfo(self, package_path: Path) -> str:
-        pkginfo = SysCommand(f'bsdtar -qxO -f {package_path} .PKGINFO').decode()
-        return re.search(r'depend = zfs-utils=(.*)', pkginfo).group(1)
+        pkginfo = SysCommand(f"bsdtar -qxO -f {package_path} .PKGINFO").decode()
+        match = re.search(r"depend = zfs-utils=(.*)", pkginfo)
+        if match:
+            return match.group(1)
+        raise ValueError("Could not extract zfs-utils version from package info")
 
     def install_zfs(self) -> bool:
-        kernel_version_fixed = self.kernel_version.replace('-', '.')
+        kernel_version_fixed = self.kernel_version.replace("-", ".")
 
         package_info = self.search_zfs_package("zfs-linux", kernel_version_fixed)
         if package_info:
@@ -87,38 +93,38 @@ class ZFSInitializer:
 
             with tempfile.TemporaryDirectory() as tmpdir:
                 package_path = Path(tmpdir) / package
-                SysCommand(f'curl -s -o {package_path} {package_url}')
+                SysCommand(f"curl -s -o {package_path} {package_url}")
 
                 zfs_utils_version = self.extract_pkginfo(package_path)
                 utils_info = self.search_zfs_package("zfs-utils", zfs_utils_version)
 
                 if utils_info:
                     utils_url = f"{utils_info[0]}{utils_info[1]}"
-                    SysCommand(f'pacman -U {utils_url} --noconfirm', peek_output=True)
-                    SysCommand(f'pacman -U {package_url} --noconfirm', peek_output=True)
+                    SysCommand(f"pacman -U {utils_url} --noconfirm", peek_output=True)
+                    SysCommand(f"pacman -U {package_url} --noconfirm", peek_output=True)
                     return True
 
         info("Falling back to DKMS method")
         try:
-            SysCommand('pacman -Syyuu --noconfirm', peek_output=True)
-            SysCommand('pacman -S --noconfirm --needed base-devel linux-headers git', peek_output=True)
-            SysCommand('pacman -S zfs-dkms --noconfirm', peek_output=True)
+            SysCommand("pacman -Syyuu --noconfirm", peek_output=True)
+            SysCommand("pacman -S --noconfirm --needed base-devel linux-headers git", peek_output=True)
+            SysCommand("pacman -S zfs-dkms --noconfirm", peek_output=True)
             return True
         except Exception as e:
-            error(f"DKMS installation failed: {str(e)}")
+            error(f"DKMS installation failed: {e!s}")
             return False
 
     def load_zfs_module(self) -> bool:
         try:
-            SysCommand('modprobe zfs')
+            SysCommand("modprobe zfs")
             info("ZFS module loaded successfully")
             return True
         except Exception as e:
-            error(f"Failed to load ZFS module: {str(e)}")
+            error(f"Failed to load ZFS module: {e!s}")
             return False
 
     def run(self) -> bool:
-        if not Path('/proc/cmdline').read_text().find('arch.*iso'):
+        if not Path("/proc/cmdline").read_text().find("arch.*iso"):
             error("Not running in archiso")
             return False
 
@@ -129,23 +135,20 @@ class ZFSInitializer:
 
         return self.load_zfs_module()
 
-    def search_zfs_package(self, package_name: str, version: str) -> Optional[Tuple[str, str]]:
-        urls = [
-            "http://archzfs.com/archzfs/x86_64/",
-            "http://archzfs.com/archive_archzfs/"
-        ]
+    def search_zfs_package(self, package_name: str, version: str) -> tuple[str, str] | None:
+        urls = ["http://archzfs.com/archzfs/x86_64/", "http://archzfs.com/archive_archzfs/"]
 
         pattern = f'{package_name}-[0-9][^"]*{version}[^"]*x86_64[^"]*'
 
         for url in urls:
             info(f"Searching {package_name} on {url}")
             try:
-                response = SysCommand(f'curl -s {url}').decode()
+                response = SysCommand(f"curl -s {url}").decode()
                 matches = re.findall(pattern, response)
                 if matches:
                     package = matches[-1]
                     return url, package
             except Exception as e:
-                error(f"Failed to search package: {str(e)}")
+                error(f"Failed to search package: {e!s}")
 
         return None

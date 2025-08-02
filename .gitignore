@@ -10,4 +10,13 @@ cmd_history.txt
 .venv/
 dist/
 
+# Type checking and linting cache
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Coverage reports
+htmlcov/
+.coverage
+
 archinstall
