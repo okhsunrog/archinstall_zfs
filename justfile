@@ -49,6 +49,10 @@ quick: format lint
 test-cov:
     uv run pytest --cov=archinstall_zfs --cov-report=html --cov-report=term-missing
 
+# Run tests with coverage report (XML format for CI)
+test-cov-xml:
+    uv run pytest --cov=archinstall_zfs --cov-report=xml --cov-report=html --cov-report=term-missing
+
 # Check code without making changes
 check:
     uv run ruff format --check .
