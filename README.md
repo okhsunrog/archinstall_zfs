@@ -43,7 +43,7 @@ For testing purposes, you can run the installer in QEMU using the provided scrip
    - On Arch Linux: `pacman -S qemu-desktop edk2-ovmf`
    - On Ubuntu/Debian: `apt install qemu-system-x86 ovmf`
 
-2. Download an Arch Linux ISO to `~/tmp_zfs/archlinux-2024.12.01-x86_64.iso` (or pass as first argument)
+2. Download an Arch Linux ISO to `~/tmp_zfs/archiso.iso` (or pass as first argument)
 
 3. Create a disk image: `qemu-img create -f qcow2 arch.qcow2 20G`
 
