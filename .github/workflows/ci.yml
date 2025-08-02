@@ -43,6 +43,10 @@ jobs:
       run: |
         uv sync --dev
 
+    - name: Install just
+      run: |
+        uv tool install rust-just
+
     - name: Run quality checks
       run: |
-        uv run just all 
+        just all 
