@@ -26,7 +26,75 @@ To run the installer:
 4. Run:
    ```python
     python -m archinstall_zfs
-    ``` 
+    ```
+
+## Testing with QEMU
+
+For testing purposes, you can run the installer in QEMU using the provided scripts in the `qemu_scripts` directory:
+
+- `qemu_arch_install.sh` - Boot from ISO to install Arch with GUI
+- `qemu_arch_install_serial.sh` - Boot from ISO to install Arch with serial console
+- `qemu_arch_run.sh` - Boot from existing disk image with GUI
+- `qemu_arch_run_serial.sh` - Boot from existing disk image with serial console
+
+### Prerequisites
+
+1. Install QEMU and OVMF firmware:
+   - On Arch Linux: `pacman -S qemu-desktop edk2-ovmf`
+   - On Ubuntu/Debian: `apt install qemu-system-x86 ovmf`
+
+2. Download an Arch Linux ISO to `~/tmp_zfs/archlinux-2024.12.01-x86_64.iso` (or pass as first argument)
+
+3. Create a disk image: `qemu-img create -f qcow2 arch.qcow2 20G`
+
+4. Create UEFI variables file:
+   ```bash
+   # On Arch Linux:
+   cp /usr/share/edk2-ovmf/x64/OVMF_VARS.4m.fd my_vars.fd
+   
+   # On Ubuntu/Debian:
+   cp /usr/share/OVMF/OVMF_VARS.fd my_vars.fd
+   ```
+
+### Understanding UEFI Files
+
+The QEMU scripts use UEFI boot mode, which requires two files:
+
+- **OVMF_CODE.4m.fd**: The UEFI firmware code (read-only)
+  - Contains the actual UEFI implementation
+  - Provided by the OVMF package at `/usr/share/edk2-ovmf/x64/OVMF_CODE.4m.fd`
+  - Used directly from the system installation
+
+- **my_vars.fd**: UEFI variables storage (read-write)
+  - Stores UEFI settings, boot entries, and secure boot keys
+  - Must be a writable copy of the OVMF_VARS template
+  - Created by copying from the system's OVMF_VARS file
+  - Gets modified during VM operation to persist UEFI settings
+
+### Usage
+
+```bash
+# Make scripts executable
+chmod +x qemu_scripts/*.sh
+
+# Run installer with GUI
+./qemu_scripts/qemu_arch_install.sh
+
+# Run installer with serial console
+./qemu_scripts/qemu_arch_install_serial.sh
+
+# Run existing installation with GUI
+./qemu_scripts/qemu_arch_run.sh
+
+# Run existing installation with serial console
+./qemu_scripts/qemu_arch_run_serial.sh
+```
+
+### Notes
+
+- SSH is forwarded to port 2222 on host (`ssh -p 2222 user@localhost`)
+- The scripts allocate 4GB RAM and 2 CPU cores to the VM
+- UEFI boot is enabled with secure boot support
 
 ## Why Choose This Installer?
 
@@ -60,13 +128,7 @@ This project is licensed under the GNU General Public License v3.0. See the LICE
    - Add local ZFSBootMenu building support
    - Add swap configuration options (zswap, zram, swap patition)
 
-3. Development Infrastructure
-   - Implement comprehensive linting
-   - Add CI/CD pipeline
-   - Improve code quality checks
-   - Enhance error handling
-
-4. Additional Features
+3. Additional Features
    - Expand post-installation customization options
    - Add more ZFS optimization options (configurable compression, DirectIO, etc.)
    - Install and configure zrepl for backup and replication

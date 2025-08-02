@@ -20,3 +20,8 @@ htmlcov/
 .coverage
 
 archinstall
+
+# QEMU testing files
+my_vars.fd
+arch.qcow2
+*.qcow2
