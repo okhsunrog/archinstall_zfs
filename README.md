@@ -28,9 +28,13 @@ There are two ISO profiles available:
 
 ### Prerequisites
 
-1. Install `qemu-desktop`, `edk2-ovmf`, `archiso`, and `just`.
-   - On Arch Linux: `sudo pacman -S qemu-desktop edk2-ovmf archiso just`
-   - On Ubuntu/Debian: `sudo apt install qemu-system-x86 ovmf arch-install-scripts just` (Note: `archiso` might not be directly available, you may need to find a PPA or build it from source).
+To build the ISOs, you'll need to be running Arch Linux and have the following packages installed:
+
+```bash
+sudo pacman -S qemu-desktop edk2-ovmf archiso grub just
+```
+
+**Note on `grub`:** The `grub` package is required on the host system because `mkarchiso` may fail to create a bootable image without it.
 
 ### Building the ISOs
 
