@@ -16,88 +16,80 @@ A ZFS-focused Arch Linux installer built on top of archinstall. This installer p
 - User-friendly TUI interface
 - Comprehensive error handling and logging
 
-## Installation
+## Building and Testing
 
-To run the installer:
+The `gen_iso` directory contains all the necessary tools and profiles to build custom Arch Linux ISOs and test them with QEMU. The process is managed through `just` commands for clarity and ease of use.
 
-1. Boot into the Arch Linux live environment
-2. Clone the repository
-3. Navigate to the project directory
-4. Run:
-   ```python
-    python -m archinstall_zfs
-    ```
+### ISO Profiles
 
-## Testing with QEMU
-
-For testing purposes, you can run the installer in QEMU using the provided scripts in the `qemu_scripts` directory:
-
-- `qemu_arch_install.sh` - Boot from ISO to install Arch with GUI
-- `qemu_arch_install_serial.sh` - Boot from ISO to install Arch with serial console
-- `qemu_arch_run.sh` - Boot from existing disk image with GUI
-- `qemu_arch_run_serial.sh` - Boot from existing disk image with serial console
+There are two ISO profiles available:
+- **`main_profile`**: Based on `releng`, this is for building a production-ready ISO for installation on real hardware.
+- **`testing_profile`**: Based on `baseline`, this is for building a development ISO for testing in QEMU.
 
 ### Prerequisites
 
-1. Install QEMU and OVMF firmware:
-   - On Arch Linux: `pacman -S qemu-desktop edk2-ovmf`
-   - On Ubuntu/Debian: `apt install qemu-system-x86 ovmf`
+1. Install `qemu-desktop`, `edk2-ovmf`, `archiso`, and `just`.
+   - On Arch Linux: `sudo pacman -S qemu-desktop edk2-ovmf archiso just`
+   - On Ubuntu/Debian: `sudo apt install qemu-system-x86 ovmf arch-install-scripts just` (Note: `archiso` might not be directly available, you may need to find a PPA or build it from source).
 
-2. Download an Arch Linux ISO to `~/tmp_zfs/archiso.iso` (or pass as first argument)
+### Building the ISOs
 
-3. Create a disk image in the qemu_scripts directory: `qemu-img create -f qcow2 qemu_scripts/arch.qcow2 20G`
+- **Build the main production ISO:**
+  ```bash
+  just build-main-iso
+  ```
 
-4. Create UEFI variables file in the qemu_scripts directory:
-   ```bash
-   # On Arch Linux:
-   cp /usr/share/edk2-ovmf/x64/OVMF_VARS.4m.fd qemu_scripts/my_vars.fd
-   
-   # On Ubuntu/Debian:
-   cp /usr/share/OVMF/OVMF_VARS.fd qemu_scripts/my_vars.fd
-   ```
+- **Build the testing ISO for development:**
+  ```bash
+  just build-testing-iso
+  ```
 
-### Understanding UEFI Files
+The output ISOs will be placed in the `gen_iso/out` directory.
 
-The QEMU scripts use UEFI boot mode, which requires two files:
+### Testing with QEMU
 
-- **OVMF_CODE.4m.fd**: The UEFI firmware code (read-only)
-  - Contains the actual UEFI implementation
-  - Provided by the OVMF package at `/usr/share/edk2-ovmf/x64/OVMF_CODE.4m.fd`
-  - Used directly from the system installation
+For development and testing, you should use the testing ISO.
 
-- **my_vars.fd**: UEFI variables storage (read-write)
-  - Stores UEFI settings, boot entries, and secure boot keys
-  - Must be a writable copy of the OVMF_VARS template
-  - Created by copying from the system's OVMF_VARS file
-  - Gets modified during VM operation to persist UEFI settings
+1.  **Set up the QEMU environment:**
+    ```bash
+    just qemu-setup
+    ```
+    This will create a disk image and UEFI variables file.
 
-### Usage
+2.  **Build the testing ISO:**
+    ```bash
+    just build-testing-iso
+    ```
 
-```bash
-# Navigate to qemu_scripts directory
-cd qemu_scripts
+3.  **Install in QEMU:**
+    - With a GUI:
+      ```bash
+      just qemu-install
+      ```
+    - With a serial console:
+      ```bash
+      just qemu-install-serial
+      ```
 
-# Make scripts executable
-chmod +x *.sh
+4.  **Run an existing QEMU installation:**
+    - With a GUI:
+      ```bash
+      just qemu-run
+      ```
+    - With a serial console:
+      ```bash
+      just qemu-run-serial
+      ```
 
-# Run installer with GUI
-./qemu_arch_install.sh
+### Advanced Usage
 
-# Run installer with serial console
-./qemu_arch_install_serial.sh
-
-# Run existing installation with GUI
-./qemu_arch_run.sh
-
-# Run existing installation with serial console
-./qemu_arch_run_serial.sh
-```
+The `gen_iso/run-qemu.sh` script is highly configurable via command-line options. You can run it directly for more advanced scenarios. Use `gen_iso/run-qemu.sh -h` to see all available options.
 
 ### Notes
 
-- SSH is forwarded to port 2222 on host (`ssh -p 2222 user@localhost`)
-- The scripts allocate 4GB RAM and 2 CPU cores to the VM
-- UEFI boot is enabled with secure boot support
+- SSH is forwarded to port 2222 on the host (`ssh -p 2222 root@localhost`). The root password on the ISO is empty.
+- The default VM has 4GB RAM and 2 CPU cores. These can be changed in the `justfile` or via script parameters.
+- UEFI boot is enabled by default.
 
 ## Why Choose This Installer?
 
