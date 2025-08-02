@@ -2,7 +2,8 @@ import tempfile
 from pathlib import Path
 from typing import Optional, Tuple
 import re
-from archinstall import SysCommand, debug, info, error
+from archinstall import debug, info, error
+from archinstall.lib.general import SysCommand
 from archinstall.lib.exceptions import SysCallError
 
 
@@ -75,7 +76,10 @@ class ZFSInitializer:
 
     def extract_pkginfo(self, package_path: Path) -> str:
         pkginfo = SysCommand(f'bsdtar -qxO -f {package_path} .PKGINFO').decode()
-        return re.search(r'depend = zfs-utils=(.*)', pkginfo).group(1)
+        match = re.search(r'depend = zfs-utils=(.*)', pkginfo)
+        if match:
+            return match.group(1)
+        raise ValueError("Could not extract zfs-utils version from package info")
 
     def install_zfs(self) -> bool:
         kernel_version_fixed = self.kernel_version.replace('-', '.')

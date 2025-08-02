@@ -5,22 +5,25 @@ from typing import Literal
 import os
 
 import archinstall
-from archinstall import SysInfo, debug, info, error, SysCommand, Installer, GlobalMenu, ConfigurationOutput
-from archinstall.lib.disk import DiskLayoutConfiguration, DiskLayoutType
+from archinstall import SysInfo, debug, info, error
+from archinstall.lib.general import SysCommand
+from archinstall.lib.global_menu import GlobalMenu
+from archinstall.lib.configuration import ConfigurationOutput
+from archinstall.lib.models.device import DiskLayoutConfiguration, DiskLayoutType
 from archinstall.lib.exceptions import SysCallError
-from archinstall.lib.interactions.general_conf import ask_chroot
 from archinstall.lib.models import NetworkConfiguration, AudioConfiguration
-from archinstall.lib.profile import profile_handler
+# profile_handler is no longer available in archinstall 3.0.9
 from archinstall.tui.curses_menu import SelectMenu, MenuItemGroup, EditMenu, Tui
 from archinstall.tui.menu_item import MenuItem
 from archinstall.lib.storage import storage
 from archinstall.lib.plugins import plugins
 
-from archinstall_zfs.storage.dracut import DracutSetup
-from archinstall_zfs.storage.zfs_init import initialize_zfs, add_archzfs_repo
-from archinstall_zfs.storage.disk import DiskManager, DiskManagerBuilder
-from archinstall_zfs.storage.zfs import ZFSManager, ZFSManagerBuilder, ZFS_SERVICES
+from archinstall_zfs.initramfs.dracut import DracutSetup
+from archinstall_zfs.zfs.kmod_setup import initialize_zfs, add_archzfs_repo
+from archinstall_zfs.disk import DiskManager, DiskManagerBuilder
+from archinstall_zfs.zfs import ZFSManager, ZFSManagerBuilder, ZFS_SERVICES
 
+from archinstall_zfs.installer import ZFSInstaller
 from archinstall_zfs.menu.installer import InstallerMenu
 
 InstallMode = Literal["full_disk", "new_pool", "existing_pool"]
@@ -116,15 +119,6 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
         # Perform actual installation
         info('Starting installation...')
 
-        BASE_PACKAGES = [
-            'base',
-            'base-devel',
-            'linux-firmware',
-            'linux-firmware-marvell',
-            'sof-firmware',
-            'dracut'
-        ]
-
         SECOND_STAGE = [
             'linux-lts',
             'linux-lts-headers',
@@ -133,17 +127,14 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
             'zfs-utils',
         ]
 
-        with Installer(
+        # ZFSInstaller will use its own default base packages optimized for ZFS
+        with ZFSInstaller(
                 mountpoint,
-                disk_config=archinstall.arguments['disk_config'],
-                disk_encryption=None,
-                kernels=['linux-lts'],
-                base_packages=BASE_PACKAGES,
+                disk_config=archinstall.arguments['disk_config']
         ) as installation:
 
             installation.sanity_check()
-            # dirty hack to remove kernel packages from base_packages
-            installation.__base_packages = BASE_PACKAGES
+            # No more dirty hack needed - ZFSInstaller handles base packages properly
 
             if mirror_config := archinstall.arguments.get('mirror_config', None):
                 installation.set_mirrors(mirror_config, on_target=False)
@@ -186,7 +177,10 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
                 info("No audio server will be installed")
 
             if profile_config := archinstall.arguments.get('profile_config', None):
-                profile_handler.install_profile_config(installation, profile_config)
+                # In archinstall 3.0.9, profile installation is handled differently
+                # The profile should have a post_install method that we can call
+                if hasattr(profile_config, 'profile') and hasattr(profile_config.profile, 'post_install'):
+                    profile_config.profile.post_install(installation)
 
             if packages := archinstall.arguments.get('packages', []):
                 installation.add_additional_packages(packages)
@@ -217,8 +211,17 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
                 "For post-installation tips, see https://wiki.archlinux.org/index.php/Installation_guide#Post-installation")
 
             if not archinstall.arguments.get('silent'):
+                # Simple replacement for ask_chroot functionality
+                from archinstall.tui.curses_menu import SelectMenu, MenuItemGroup, MenuItem
                 with Tui():
-                    chroot = ask_chroot()
+                    chroot_menu = SelectMenu(
+                        MenuItemGroup([
+                            MenuItem("Yes", True),
+                            MenuItem("No", False)
+                        ]),
+                        header="Would you like to chroot into the newly created installation for post-installation configuration?"
+                    )
+                    chroot = chroot_menu.run().item().value
                 if chroot:
                     try:
                         installation.drop_to_shell()

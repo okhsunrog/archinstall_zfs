@@ -1,20 +1,24 @@
-[tool.poetry]
+[project]
 name = "archinstall-zfs"
 version = "0.1.0"
 description = ""
-authors = ["okhsunrog <me@okhsunrog.dev>"]
+authors = [
+    {name = "okhsunrog", email = "me@okhsunrog.dev"}
+]
 readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "archinstall @ git+https://github.com/archlinux/archinstall.git@3.0.9",
+]
 
-[tool.poetry.dependencies]
-python = "^3.13"
-archinstall = { git = "https://github.com/archlinux/archinstall.git", tag = "3.0.1" }
-
-[tool.poetry.group.dev.dependencies]
-pylint = "^3.3.3"
-mypy = "^1.14.0"
-flake8 = "^7.1.1"
-black = "^24.10.0"
-pytest = "^7.0.0"
+[project.optional-dependencies]
+dev = [
+    "pylint>=3.3.3",
+    "mypy>=1.14.0",
+    "flake8>=7.1.1",
+    "black>=24.10.0",
+    "pytest>=7.0.0",
+]
 
 [tool.mypy]
 exclude = ['archinstall/.*']
@@ -47,6 +51,9 @@ extend-exclude = '''
 )
 '''
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"

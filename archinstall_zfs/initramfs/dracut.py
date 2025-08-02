@@ -1,5 +1,5 @@
 from pathlib import Path
-from archinstall import SysCommand
+from archinstall.lib.general import SysCommand
 
 
 class DracutSetup:
