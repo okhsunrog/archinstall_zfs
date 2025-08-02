@@ -3,7 +3,7 @@ from pathlib import Path
 from archinstall_zfs.utils import modify_zfs_cache_mountpoints
 
 
-def test_modify_zfs_cache_mountpoints():
+def test_modify_zfs_cache_mountpoints() -> None:
     input_content = """zroot\tnone\ton\ton\ton\toff\ton\toff\ton\toff\t-\tnone\t-\t-\t-\t-\t-\t-\t-\t-
 zroot/arch0/data/home\t/mnt/home\ton\ton\ton\toff\ton\toff\ton\toff\t-\tnone\t-\t-\t-\t-\t-\t-\t-\t-
 zroot/arch0/root\t/mnt\tnoauto\ton\ton\toff\ton\toff\ton\toff\t-\tnone\t-\t-\t-\t-\t-\t-\t-\t-"""
@@ -18,7 +18,7 @@ zroot/arch0/root\t/\tnoauto\ton\ton\toff\ton\toff\ton\toff\t-\tnone\t-\t-\t-\t-\
     assert result == expected_output
 
 
-def test_modify_zfs_cache_mountpoints_deep_paths():
+def test_modify_zfs_cache_mountpoints_deep_paths() -> None:
     input_content = "zroot/data\t/mnt/var/lib/docker\ton\ton\ton"
     expected = "zroot/data\t/var/lib/docker\ton\ton\ton"
     result = modify_zfs_cache_mountpoints(input_content, Path("/mnt"))
@@ -27,10 +27,10 @@ def test_modify_zfs_cache_mountpoints_deep_paths():
     assert result == expected
 
 
-def test_modify_zfs_cache_mountpoints_empty():
+def test_modify_zfs_cache_mountpoints_empty() -> None:
     assert modify_zfs_cache_mountpoints("", Path("/mnt")) == ""
 
 
-def test_modify_zfs_cache_mountpoints_no_mountpoint():
+def test_modify_zfs_cache_mountpoints_no_mountpoint() -> None:
     input_content = "zroot\tnone\ton\ton\ton"
     assert modify_zfs_cache_mountpoints(input_content, Path("/mnt")) == input_content

@@ -48,7 +48,7 @@ class InstallerMenu(GlobalMenu):
     def _select_dataset_prefix(self, preset: str) -> str:
         return EditMenu("Dataset Prefix", header="Enter prefix for ZFS datasets", default_text=preset).input().text()
 
-    def _select_init_system(self, preset: InitSystem) -> InitSystem:
+    def _select_init_system(self, _preset: InitSystem) -> InitSystem:
         menu = SelectMenu(MenuItemGroup([MenuItem("Dracut", InitSystem.DRACUT), MenuItem("Mkinitcpio", InitSystem.MKINITCPIO)]), header="Select init system")
         return menu.run().item().value
 

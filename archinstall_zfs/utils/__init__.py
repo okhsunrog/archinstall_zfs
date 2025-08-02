@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import List
 
 
 def modify_zfs_cache_mountpoints(content: str, mountpoint: Path) -> str:

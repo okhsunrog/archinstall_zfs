@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Annotated, List, Optional, Tuple
+from typing import Annotated
 
 import parted
 from archinstall import debug, error, info
@@ -102,9 +102,10 @@ class DiskManager:
         disk_obj = parted.Disk(device)
         partitions = []
 
+        MB_TO_GB_THRESHOLD = 1024
         for p in disk_obj.partitions:
             size_mb = (p.getLength() * device.sectorSize) / (1024 * 1024)
-            size_display = f"{size_mb:.1f}M" if size_mb < 1024 else f"{size_mb / 1024:.1f}G"
+            size_display = f"{size_mb:.1f}M" if size_mb < MB_TO_GB_THRESHOLD else f"{size_mb / MB_TO_GB_THRESHOLD:.1f}G"
             part_name = Path(p.path).name
             by_id_part = Path(str(self.config.selected_disk) + "-part" + part_name[-1])
             partitions.append(MenuItem(f"{by_id_part} ({size_display})", str(by_id_part)))
@@ -198,8 +199,7 @@ class DiskManagerBuilder:
         by_id_path = Path("/dev/disk/by-id")
 
         for path in by_id_path.iterdir():
-            if path.is_symlink() and path.readlink().name == disk_name:
-                if not path.name.split("-")[-1].startswith("part"):
+            if path.is_symlink() and path.readlink().name == disk_name and not path.name.split("-")[-1].startswith("part"):
                     debug(f"Found by-id path: {path}")
                     return str(path)
 

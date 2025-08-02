@@ -2,7 +2,7 @@ import os
 import time
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import ClassVar
 
 from archinstall import debug, error, info
 from archinstall.lib.exceptions import SysCallError
@@ -195,7 +195,7 @@ class ZFSEncryption:
 class ZFSPool:
     """Handles ZFS pool operations"""
 
-    DEFAULT_POOL_OPTIONS = [
+    DEFAULT_POOL_OPTIONS: ClassVar[list[str]] = [
         "-o ashift=12",
         "-O acltype=posixacl",
         "-O relatime=on",

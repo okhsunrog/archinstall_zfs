@@ -1,6 +1,8 @@
 # Standard library imports
+import contextlib
 import os
 import socket
+import sys
 from pathlib import Path
 from typing import Literal
 
@@ -103,7 +105,7 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
         config.save()
 
         if archinstall.arguments.get("dry_run"):
-            exit(0)
+            sys.exit(0)
 
         if not archinstall.arguments.get("silent"):
             with Tui():
@@ -164,11 +166,12 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
             else:
                 info("No audio server will be installed")
 
-            if profile_config := archinstall.arguments.get("profile_config", None):
+            profile_config = archinstall.arguments.get("profile_config", None)
+            if (profile_config and hasattr(profile_config, "profile")
+                and hasattr(profile_config.profile, "post_install")):
                 # In archinstall 3.0.9, profile installation is handled differently
                 # The profile should have a post_install method that we can call
-                if hasattr(profile_config, "profile") and hasattr(profile_config.profile, "post_install"):
-                    profile_config.profile.post_install(installation)
+                profile_config.profile.post_install(installation)
 
             if packages := archinstall.arguments.get("packages", []):
                 installation.add_additional_packages(packages)
@@ -199,7 +202,6 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
 
             if not archinstall.arguments.get("silent"):
                 # Simple replacement for ask_chroot functionality
-                from archinstall.tui.curses_menu import MenuItem, MenuItemGroup, SelectMenu
 
                 with Tui():
                     chroot_menu = SelectMenu(
@@ -208,10 +210,8 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
                     )
                     chroot = chroot_menu.run().item().value
                 if chroot:
-                    try:
+                    with contextlib.suppress(BaseException):
                         installation.drop_to_shell()
-                    except:
-                        pass
 
         disk_manager.finish(mountpoint)
         zfs_manager.finish()

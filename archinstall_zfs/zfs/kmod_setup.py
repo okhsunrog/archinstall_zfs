@@ -1,6 +1,7 @@
 import re
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from archinstall import debug, error, info
 from archinstall.lib.exceptions import SysCallError
@@ -26,7 +27,7 @@ def initialize_zfs() -> None:
             raise RuntimeError("Failed to initialize ZFS support")
 
 
-def add_archzfs_repo(target_path: Path = Path("/"), installation=None) -> None:
+def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) -> None:
     """Add archzfs repository to pacman.conf if not already present"""
     info("Adding archzfs repository")
 
