@@ -45,15 +45,15 @@ For testing purposes, you can run the installer in QEMU using the provided scrip
 
 2. Download an Arch Linux ISO to `~/tmp_zfs/archiso.iso` (or pass as first argument)
 
-3. Create a disk image: `qemu-img create -f qcow2 arch.qcow2 20G`
+3. Create a disk image in the qemu_scripts directory: `qemu-img create -f qcow2 qemu_scripts/arch.qcow2 20G`
 
-4. Create UEFI variables file:
+4. Create UEFI variables file in the qemu_scripts directory:
    ```bash
    # On Arch Linux:
-   cp /usr/share/edk2-ovmf/x64/OVMF_VARS.4m.fd my_vars.fd
+   cp /usr/share/edk2-ovmf/x64/OVMF_VARS.4m.fd qemu_scripts/my_vars.fd
    
    # On Ubuntu/Debian:
-   cp /usr/share/OVMF/OVMF_VARS.fd my_vars.fd
+   cp /usr/share/OVMF/OVMF_VARS.fd qemu_scripts/my_vars.fd
    ```
 
 ### Understanding UEFI Files
@@ -74,20 +74,23 @@ The QEMU scripts use UEFI boot mode, which requires two files:
 ### Usage
 
 ```bash
+# Navigate to qemu_scripts directory
+cd qemu_scripts
+
 # Make scripts executable
-chmod +x qemu_scripts/*.sh
+chmod +x *.sh
 
 # Run installer with GUI
-./qemu_scripts/qemu_arch_install.sh
+./qemu_arch_install.sh
 
 # Run installer with serial console
-./qemu_scripts/qemu_arch_install_serial.sh
+./qemu_arch_install_serial.sh
 
 # Run existing installation with GUI
-./qemu_scripts/qemu_arch_run.sh
+./qemu_arch_run.sh
 
 # Run existing installation with serial console
-./qemu_scripts/qemu_arch_run_serial.sh
+./qemu_arch_run_serial.sh
 ```
 
 ### Notes
