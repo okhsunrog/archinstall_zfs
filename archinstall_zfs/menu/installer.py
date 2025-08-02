@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 from archinstall.lib.global_menu import GlobalMenu
 from archinstall.tui import EditMenu, MenuItem, MenuItemGroup, SelectMenu
@@ -46,11 +46,11 @@ class InstallerMenu(GlobalMenu):
         self._item_group.items[0:0] = zfs_options
 
     def _select_dataset_prefix(self, preset: str) -> str:
-        return EditMenu("Dataset Prefix", header="Enter prefix for ZFS datasets", default_text=preset).input().text()
+        return cast(str, EditMenu("Dataset Prefix", header="Enter prefix for ZFS datasets", default_text=preset).input().text())
 
     def _select_init_system(self, _preset: InitSystem) -> InitSystem:
         menu = SelectMenu(MenuItemGroup([MenuItem("Dracut", InitSystem.DRACUT), MenuItem("Mkinitcpio", InitSystem.MKINITCPIO)]), header="Select init system")
-        return menu.run().item().value
+        return cast(InitSystem, menu.run().item().value)
 
     def _prev_dataset_prefix(self, item: MenuItem) -> str | None:
         if item.value:

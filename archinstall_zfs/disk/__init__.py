@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from typing import Annotated
 
-import parted
+import parted  # type: ignore[import-untyped]
 from archinstall import debug, error, info
 from archinstall.lib.exceptions import SysCallError
 from archinstall.lib.general import SysCommand
@@ -146,7 +146,7 @@ class DiskManager:
 
 
 class DiskManagerBuilder:
-    def __init__(self):
+    def __init__(self) -> None:
         self._selected_disk: ByIdPath | None = None
         self._efi_partition: ByIdPath | None = None
 
@@ -200,8 +200,8 @@ class DiskManagerBuilder:
 
         for path in by_id_path.iterdir():
             if path.is_symlink() and path.readlink().name == disk_name and not path.name.split("-")[-1].startswith("part"):
-                    debug(f"Found by-id path: {path}")
-                    return str(path)
+                debug(f"Found by-id path: {path}")
+                return str(path)
 
         error(f"No by-id path found for disk: {disk_path}")
         raise RuntimeError(f"Could not find /dev/disk/by-id path for {disk_path}")

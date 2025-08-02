@@ -4,7 +4,7 @@ import os
 import socket
 import sys
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import archinstall
 from archinstall import SysInfo, debug, error, info
@@ -14,8 +14,6 @@ from archinstall.lib.general import SysCommand
 from archinstall.lib.models import AudioConfiguration, NetworkConfiguration
 from archinstall.lib.models.device import DiskLayoutConfiguration, DiskLayoutType
 from archinstall.lib.storage import storage
-
-# profile_handler is no longer available in archinstall 3.0.9
 from archinstall.tui.curses_menu import EditMenu, MenuItemGroup, SelectMenu, Tui
 from archinstall.tui.menu_item import MenuItem
 
@@ -41,21 +39,19 @@ def check_internet() -> bool:
 
 
 def get_installation_mode() -> InstallMode:
-    debug("Displaying installation mode selection menu")
-    modes = [
-        MenuItem("Full disk - Format and create new ZFS pool", "full_disk"),
-        MenuItem("Partition - Create new ZFS pool on existing partition", "new_pool"),
-        MenuItem("Existing pool - Install alongside existing ZFS system", "existing_pool"),
-    ]
-
     menu = SelectMenu(
-        MenuItemGroup(modes),
-        header="Select Installation Mode\n\nWarning: Make sure you have backups!",
+        MenuItemGroup(
+            [
+                MenuItem("Full Disk Installation", "full_disk"),
+                MenuItem("New ZFS Pool", "new_pool"),
+                MenuItem("Existing ZFS Pool", "existing_pool"),
+            ]
+        ),
+        header="Select installation mode",
     )
-
     selected = menu.run().item().value
     info(f"Selected installation mode: {selected}")
-    return selected
+    return cast(InstallMode, selected)
 
 
 def prepare_installation() -> tuple[ZFSManager, DiskManager]:
@@ -167,8 +163,7 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
                 info("No audio server will be installed")
 
             profile_config = archinstall.arguments.get("profile_config", None)
-            if (profile_config and hasattr(profile_config, "profile")
-                and hasattr(profile_config.profile, "post_install")):
+            if profile_config and hasattr(profile_config, "profile") and hasattr(profile_config.profile, "post_install"):
                 # In archinstall 3.0.9, profile installation is handled differently
                 # The profile should have a post_install method that we can call
                 profile_config.profile.post_install(installation)
@@ -196,7 +191,10 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
             zfs_manager.genfstab()
             zfs_manager.copy_misc_files()
 
-            zfs_manager.setup_bootloader(disk_manager.config.efi_partition)
+            if disk_manager.config.efi_partition:
+                zfs_manager.setup_bootloader(disk_manager.config.efi_partition)
+            else:
+                error("EFI partition not found, skipping bootloader setup")
 
             info("For post-installation tips, see https://wiki.archlinux.org/index.php/Installation_guide#Post-installation")
 

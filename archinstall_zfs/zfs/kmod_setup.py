@@ -1,7 +1,7 @@
 import re
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from archinstall import debug, error, info
 from archinstall.lib.exceptions import SysCallError
@@ -70,7 +70,7 @@ class ZFSInitializer:
         self.kernel_version = self._get_running_kernel_version()
 
     def _get_running_kernel_version(self) -> str:
-        return SysCommand("uname -r").decode().strip()
+        return cast(str, SysCommand("uname -r").decode().strip())
 
     def increase_cowspace(self) -> None:
         info("Increasing cowspace to half of RAM")

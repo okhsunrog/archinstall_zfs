@@ -2,7 +2,7 @@ import os
 import time
 from enum import Enum
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, cast
 
 from archinstall import debug, error, info
 from archinstall.lib.exceptions import SysCallError
@@ -176,17 +176,18 @@ class ZFSEncryption:
     @staticmethod
     def _get_password() -> str:
         while True:
-            password = (
+            password = cast(
+                str,
                 EditMenu(
                     "ZFS Encryption Password",
                     header="Enter password for ZFS encryption",
                     hide_input=True,
                 )
                 .input()
-                .text()
+                .text(),
             )
 
-            verify = EditMenu("Verify Password", header="Enter password again", hide_input=True).input().text()
+            verify = cast(str, EditMenu("Verify Password", header="Enter password again", hide_input=True).input().text())
 
             if password == verify and password:
                 return password
@@ -339,7 +340,7 @@ class ZFSDatasetManager:
 
 
 class ZFSManagerBuilder:
-    def __init__(self):
+    def __init__(self) -> None:
         self._pool_name: str | None = None
         self._dataset_prefix: str | None = None
         self._mountpoint: Path | None = None
@@ -403,6 +404,11 @@ class ZFSManagerBuilder:
     def build(self) -> "ZFSManager":
         if not self._pool_name:
             raise ValueError("Pool name must be set before building ZFS manager")
+        if not self._dataset_prefix:
+            raise ValueError("Dataset prefix must be set before building ZFS manager")
+        if not self._mountpoint:
+            raise ValueError("Mountpoint must be set before building ZFS manager")
+
         self._datasets = DEFAULT_DATASETS
         self._encryption_handler = ZFSEncryption(self._paths.key_file, self._is_new_pool, self._pool_name)
         config = ZFSConfig(
