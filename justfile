@@ -58,3 +58,6 @@ check:
     uv run ruff format --check .
     uv run ruff check .
     uv run mypy .
+
+# Run all checks for CI
+ci-check: check test
