@@ -1,7 +1,7 @@
 [project]
 name = "archinstall-zfs"
 version = "0.1.0"
-description = ""
+description = "ZFS support for Arch Linux installer"
 authors = [
     {name = "okhsunrog", email = "me@okhsunrog.dev"}
 ]
@@ -13,43 +13,101 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pylint>=3.3.3",
+    "ruff>=0.8.0",
     "mypy>=1.14.0",
-    "flake8>=7.1.1",
-    "black>=24.10.0",
-    "pytest>=7.0.0",
+    "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
 ]
 
+# Ruff configuration - replaces flake8, black, isort, pyupgrade, autoflake
+[tool.ruff]
+target-version = "py313"
+line-length = 160
+src = ["archinstall_zfs", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C90",    # mccabe
+    "UP",     # pyupgrade
+    "S",      # bandit (security)
+    "T20",    # flake8-print
+    "PT",     # flake8-pytest-style
+    "RET",    # flake8-return
+    "SIM",    # flake8-simplify
+    "ARG",    # flake8-unused-arguments
+    "PL",     # Pylint
+    "RUF",    # Ruff-specific rules
+]
+
+ignore = [
+    "S101",      # Use of assert (OK in tests)
+    "PLR0913",   # Too many arguments
+    "T201",      # Print statements (OK for CLI tool)
+    "PLR0915",   # Too many statements
+    "PLR0912",   # Too many branches
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "PLR2004", "ARG001"]
+"archinstall_zfs/__main__.py" = ["T201"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+# MyPy configuration
 [tool.mypy]
-exclude = ['archinstall/.*']
-ignore_missing_imports = true
+python_version = "3.13"
+mypy_path = "."
+exclude = ['archinstall/.*']  # Exclude archinstall library
+files = ["archinstall_zfs", "tests"]
+
+# Type checking strictness
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+show_error_codes = true
+
+# Handle missing imports
+ignore_missing_imports = false
 namespace_packages = true
 explicit_package_bases = true
-mypy_path = "."
 
-[tool.pylint.main]
-ignore = ['archinstall']
-disable = [
-    "C",  # Convention warnings
-    "R",  # Refactor suggestions
-    "import-error",  # E0401
-    "no-name-in-module",  # E0611
-    "broad-exception-caught",  # W0718
-    "raise-missing-from",  # W0707
+# Module-specific overrides
+[[tool.mypy.overrides]]
+module = "archinstall.*"
+ignore_missing_imports = true
+
+# Pytest configuration
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short --cov=archinstall_zfs --cov-report=term-missing --cov-report=html"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
 ]
-
-[tool.pylint.format]
-max-line-length = 160
-
-[tool.pylint.basic]
-good-names = ["i", "j", "k", "ex", "Run", "_"]
-
-[tool.black]
-extend-exclude = '''
-(
-  archinstall/.*
-)
-'''
 
 [tool.hatch.metadata]
 allow-direct-references = true

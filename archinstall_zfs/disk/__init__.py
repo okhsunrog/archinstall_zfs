@@ -1,13 +1,14 @@
 import os
 from pathlib import Path
-from typing import Optional, List, Tuple, Annotated
+from typing import Annotated, List, Optional, Tuple
 
-from archinstall.tui import MenuItem, SelectMenu, MenuItemGroup
-from pydantic import BaseModel, Field, field_validator, BeforeValidator
-from archinstall import debug, info, error
+import parted
+from archinstall import debug, error, info
 from archinstall.lib.exceptions import SysCallError
 from archinstall.lib.general import SysCommand
-import parted
+from archinstall.tui import MenuItem, MenuItemGroup, SelectMenu
+from pydantic import BaseModel, BeforeValidator, Field, field_validator
+
 
 def validate_disk_path(path: Path | str) -> Path:
     """Ensure disk path is in by-id format"""
@@ -16,22 +17,25 @@ def validate_disk_path(path: Path | str) -> Path:
         raise ValueError(f"Disk path must be in /dev/disk/by-id format: {path}")
     return path
 
+
 ByIdPath = Annotated[Path, BeforeValidator(validate_disk_path)]
+
 
 class DiskConfig(BaseModel):
     selected_disk: ByIdPath
-    efi_partition: Optional[ByIdPath] = None
+    efi_partition: ByIdPath | None = None
 
     # noinspection PyMethodParameters
-    @field_validator('selected_disk', 'efi_partition', check_fields=False)
-    def validate_path_exists(cls, v: Optional[ByIdPath]) -> Optional[ByIdPath]:
+    @field_validator("selected_disk", "efi_partition", check_fields=False)
+    def validate_path_exists(cls, v: ByIdPath | None) -> ByIdPath | None:
         if v is not None and not v.exists():
-            raise ValueError(f'Path does not exist: {v}')
+            raise ValueError(f"Path does not exist: {v}")
         return v
 
 
 class PartitionConfig(BaseModel):
     """Configuration for partition sizes and types"""
+
     efi_size: str = Field(default="500M")
     efi_filesystem: str = Field(default="fat32")
     efi_partition_type: str = Field(default="ef00")  # EFI System Partition
@@ -56,23 +60,22 @@ class DiskManager:
             debug(f"Zeroing last 34 sectors at position {seek_position}")
             SysCommand(f"dd if=/dev/zero of={self.config.selected_disk} bs=512 count=34 seek={seek_position}")
         except SysCallError as e:
-            error(f"Failed to clear disk signatures: {str(e)}")
+            error(f"Failed to clear disk signatures: {e!s}")
             raise
 
     def create_partitions(self) -> None:
         """Creates fresh GPT and partitions for EFI and ZFS"""
         debug("Creating partition table")
         try:
-            debug(f"Zapping existing partitions")
+            debug("Zapping existing partitions")
             SysCommand(f"sgdisk -Z {self.config.selected_disk}")
-            debug(f"Creating fresh GPT")
+            debug("Creating fresh GPT")
             SysCommand(f"sgdisk -o {self.config.selected_disk}")
 
             debug(f"Creating EFI partition ({self.partition_config.efi_size})")
-            SysCommand(
-                f"sgdisk -n 1:0:+{self.partition_config.efi_size} -t 1:{self.partition_config.efi_partition_type} {self.config.selected_disk}")
+            SysCommand(f"sgdisk -n 1:0:+{self.partition_config.efi_size} -t 1:{self.partition_config.efi_partition_type} {self.config.selected_disk}")
 
-            debug(f"Creating ZFS partition (rest of disk)")
+            debug("Creating ZFS partition (rest of disk)")
             SysCommand(f"sgdisk -n 2:0:0 -t 2:{self.partition_config.zfs_partition_type} {self.config.selected_disk}")
 
             debug("Updating kernel partition table")
@@ -82,7 +85,7 @@ class DiskManager:
 
             self._format_efi_partition()
         except SysCallError as e:
-            error(f"Failed to create partitions: {str(e)}")
+            error(f"Failed to create partitions: {e!s}")
             raise
 
     def _format_efi_partition(self) -> None:
@@ -90,9 +93,9 @@ class DiskManager:
         debug("Formatting EFI partition")
         efi_part = f"{self.config.selected_disk}-part1"
         SysCommand(f"mkfs.fat -I -F32 {efi_part}")
-        debug(f"Successfully formatted EFI partition")
+        debug("Successfully formatted EFI partition")
 
-    def get_partitions(self) -> List[MenuItem]:
+    def get_partitions(self) -> list[MenuItem]:
         """Returns list of partitions for selection menus"""
         debug(f"Scanning partitions on disk: {self.config.selected_disk}")
         device = parted.getDevice(str(self.config.selected_disk))
@@ -119,11 +122,11 @@ class DiskManager:
             SysCommand(f"mount {self.config.efi_partition} {efi_mount}")
             info(f"Mounted EFI partition at {efi_mount}")
         except SysCallError as e:
-            error(f"Failed to mount EFI partition: {str(e)}")
+            error(f"Failed to mount EFI partition: {e!s}")
             raise
 
     def select_zfs_partition(self) -> ByIdPath:
-        debug(f"Displaying partition selection menu for ZFS")
+        debug("Displaying partition selection menu for ZFS")
         partition_menu = SelectMenu(
             MenuItemGroup(self.get_partitions()),
             header="Select partition for ZFS pool",
@@ -143,10 +146,10 @@ class DiskManager:
 
 class DiskManagerBuilder:
     def __init__(self):
-        self._selected_disk: Optional[ByIdPath] = None
-        self._efi_partition: Optional[ByIdPath] = None
+        self._selected_disk: ByIdPath | None = None
+        self._efi_partition: ByIdPath | None = None
 
-    def select_efi_partition(self) -> 'DiskManagerBuilder':
+    def select_efi_partition(self) -> "DiskManagerBuilder":
         if not self._selected_disk:
             raise ValueError("No disk selected")
 
@@ -160,7 +163,7 @@ class DiskManagerBuilder:
         info(f"Selected EFI partition: {self._efi_partition}")
         return self
 
-    def destroying_build(self) -> Tuple[DiskManager, ByIdPath]:
+    def destroying_build(self) -> tuple[DiskManager, ByIdPath]:
         """Builds manager for full disk installation"""
         if not self._selected_disk:
             raise ValueError("No disk selected")
@@ -184,12 +187,7 @@ class DiskManagerBuilder:
         if not self._selected_disk or not self._efi_partition:
             raise ValueError("Disk and EFI partition must be selected")
 
-        return DiskManager(
-            DiskConfig(
-                selected_disk=self._selected_disk,
-                efi_partition=self._efi_partition
-            )
-        )
+        return DiskManager(DiskConfig(selected_disk=self._selected_disk, efi_partition=self._efi_partition))
 
     @staticmethod
     def get_disk_by_id(disk_path: str) -> str:
@@ -201,7 +199,7 @@ class DiskManagerBuilder:
 
         for path in by_id_path.iterdir():
             if path.is_symlink() and path.readlink().name == disk_name:
-                if not path.name.split('-')[-1].startswith('part'):
+                if not path.name.split("-")[-1].startswith("part"):
                     debug(f"Found by-id path: {path}")
                     return str(path)
 
@@ -209,23 +207,20 @@ class DiskManagerBuilder:
         raise RuntimeError(f"Could not find /dev/disk/by-id path for {disk_path}")
 
     # noinspection PyMethodMayBeStatic
-    def _get_available_disks(self) -> List[MenuItem]:
+    def _get_available_disks(self) -> list[MenuItem]:
         debug("Scanning for available disks using parted")
         disks = []
 
         for device in parted.getAllDevices():
             if device.path.startswith("/dev/sd") or device.path.startswith("/dev/nvme"):
-                size_gb = device.length * device.sectorSize / (1024 ** 3)
-                disks.append(MenuItem(
-                    f"{device.path} ({size_gb:.1f}GB)",
-                    device.path
-                ))
+                size_gb = device.length * device.sectorSize / (1024**3)
+                disks.append(MenuItem(f"{device.path} ({size_gb:.1f}GB)", device.path))
                 debug(f"Found disk: {device.path}")
 
         info(f"Found {len(disks)} available disks")
         return disks
 
-    def select_disk(self) -> 'DiskManagerBuilder':
+    def select_disk(self) -> "DiskManagerBuilder":
         debug("Displaying disk selection menu")
         disk_menu = SelectMenu(
             MenuItemGroup(self._get_available_disks()),
