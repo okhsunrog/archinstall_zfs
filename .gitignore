@@ -35,3 +35,4 @@ qemu_scripts/my_vars.fd
 */*.iso
 *.iso
 out
+gen_iso/*/airootfs/root/

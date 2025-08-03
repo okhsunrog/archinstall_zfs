@@ -212,7 +212,13 @@ class DiskManagerBuilder:
         disks = []
 
         for device in parted.getAllDevices():
-            if device.path.startswith("/dev/sd") or device.path.startswith("/dev/nvme"):
+            # Include common disk types: SATA (sd*), NVMe (nvme*), VirtIO (vd*), loop devices, etc.
+            if (
+                device.path.startswith("/dev/sd")
+                or device.path.startswith("/dev/nvme")
+                or device.path.startswith("/dev/vd")
+                or device.path.startswith("/dev/xvd")
+            ):
                 size_gb = device.length * device.sectorSize / (1024**3)
                 disks.append(MenuItem(f"{device.path} ({size_gb:.1f}GB)", device.path))
                 debug(f"Found disk: {device.path}")
