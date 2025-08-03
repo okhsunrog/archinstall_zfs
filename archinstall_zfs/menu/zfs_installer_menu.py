@@ -153,7 +153,7 @@ class ZFSInstallerMenu:
         self.config.mirror_config = mirror_menu.run()
 
     def _configure_network(self) -> None:
-        self.config.network_config = ask_to_configure_network()
+        self.config.network_config = ask_to_configure_network(self.config.network_config)
 
     def _configure_hostname(self) -> None:
         hostname = ask_hostname()
