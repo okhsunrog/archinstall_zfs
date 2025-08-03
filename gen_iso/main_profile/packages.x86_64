@@ -50,9 +50,11 @@ lftp
 libfido2
 libusb-compat
 linux-lts
+linux-lts-headers
 linux-atm
 linux-firmware
-zfs-linux-lts
+base-devel
+zfs-dkms
 zfs-utils
 linux-firmware-marvell
 livecd-sounds
