@@ -36,7 +36,8 @@ jobs:
     - name: Install system dependencies
       run: |
         pacman -Syu --noconfirm
-        pacman -S --noconfirm archiso git base-devel just rsync
+        # Install python explicitly for gen_iso/build_zfs_package.py
+        pacman -S --noconfirm archiso git base-devel just rsync python
 
     - name: Set profile for build
       run: |
