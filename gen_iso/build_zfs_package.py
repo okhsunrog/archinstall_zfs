@@ -20,6 +20,22 @@ from contextlib import suppress
 from pathlib import Path
 
 
+class ZFSBuildError(Exception):
+    """Generic error for ZFS build failures."""
+
+
+class ZFSVersionMismatchError(ZFSBuildError):
+    """Raised when ZFS versions don't match or cannot be parsed."""
+
+
+class ZFSUtilsBuildError(ZFSBuildError):
+    """Raised when zfs-utils build fails."""
+
+
+class ZFSLinuxLTSBuildError(ZFSBuildError):
+    """Raised when zfs-linux-lts build fails."""
+
+
 class ZFSPackageBuilder:
     def __init__(self) -> None:
         self.project_root = Path(__file__).parent.parent
@@ -320,172 +336,265 @@ LocalFileSigLevel = Optional
 
     # moved above; keep line anchor for diff tool
 
-    def build_aur_package(self, combination: dict) -> bool:
-        """Build zfs-linux-lts from AUR using specified combination."""
+    def extract_zfs_version_from_combination(self, combination: dict) -> str:
+        """Extract ZFS version (e.g., 2.3.3) from combination['zfs_version'] like 2.3.3_6.12.40.2-1."""
+        zfs_version = str(combination.get("zfs_version", ""))
+        m = re.match(r"^(\d+\.\d+\.\d+)", zfs_version)
+        if not m:
+            raise ZFSVersionMismatchError(f"Cannot extract ZFS version from: {zfs_version}")
+        return m.group(1)
+
+    def find_matching_zfs_utils_commit(self, zfs_version: str) -> str | None:
+        """Find zfs-utils AUR commit where PKGBUILD pkgver equals zfs_version."""
         try:
-            # Create local repo directory
-            self.local_repo_dir.mkdir(exist_ok=True)
+            utils_dir = self.local_repo_dir / "zfs-utils-git"
+            if not utils_dir.exists():
+                print("Cloning zfs-utils AUR...")
+                self.run_command(["git", "clone", "https://aur.archlinux.org/zfs-utils.git", str(utils_dir)])
 
-            # Setup build directory
-            build_dir = self.local_repo_dir / "zfs-linux-lts-build"
-            if build_dir.exists():
-                subprocess.run(["rm", "-rf", str(build_dir)], check=True)  # noqa: S603, S607
-
-            # Clone and checkout specific commit if needed
-            if combination.get("aur_commit"):
-                print(f"📦 Building AUR package from commit {combination['aur_commit']}")
-                self.run_command(["git", "clone", "https://aur.archlinux.org/zfs-linux-lts.git", str(build_dir)])
-                subprocess.run(["git", "checkout", combination["aur_commit"]], cwd=build_dir, check=True)  # noqa: S603, S607
-            else:
-                print("📦 Building latest AUR package")
-                self.run_command(["git", "clone", "https://aur.archlinux.org/zfs-linux-lts.git", str(build_dir)])
-
-            # If using archive combination, sync deps with the same temporary config
-            if combination.get("source") == "archive_combination":
-                print(f"🔍 Debug: Using archive combination with URL: {combination.get('archive_url')}")
-                conf = self._generate_temp_pacman_conf(combination.get("archive_url"), include_local_repo=False)
-                print(f"🔍 Debug: Generated temp config at: {conf}")
-
+            result = subprocess.run(
+                ["/usr/bin/git", "log", "--oneline", "--follow", "PKGBUILD"],
+                cwd=utils_dir,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            for line in result.stdout.split("\n"):
+                if not line.strip():
+                    continue
+                commit_hash = line.split()[0]
                 try:
-                    print("🔄 Syncing package databases with archive config...")
-                    self._pacman_with_config(["-Sy"], conf)
+                    # The commit hash originates from `git log` output and is trusted in this context.
+                    # ruff: noqa: S603
+                    pkgbuild_result = subprocess.run(  # noqa: S603
+                        ["/usr/bin/git", "show", f"{commit_hash}:PKGBUILD"],
+                        cwd=utils_dir,
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
+                    pkgver_match = re.search(r'^pkgver="?([^"\n]+)"?', pkgbuild_result.stdout, re.M)
+                    if pkgver_match and pkgver_match.group(1) == zfs_version:
+                        print(f"✅ Found matching zfs-utils commit {commit_hash} for version {zfs_version}")
+                        return commit_hash
+                except subprocess.CalledProcessError:
+                    continue
+            print(f"❌ No matching zfs-utils commit found for version {zfs_version}")
+            return None
+        except Exception as e:
+            print(f"Error finding zfs-utils commit: {e}")
+            return None
 
-                    # Show what linux-lts packages are available with this config
-                    print("🔍 Debug: Available linux-lts packages with archive config:")
-                    try:
-                        result = self._pacman_with_config(["-Ss", "linux-lts"], conf)
-                        for line in result.stdout.split("\n")[:5]:  # Show first 5 lines
-                            if line.strip():
-                                print(f"    {line}")
-                    except Exception as e:
-                        print(f"    Error listing packages: {e}")
+    def _validate_package_built(self, pattern: str, label: str) -> None:
+        pkgs = list(self.local_repo_dir.glob(pattern))
+        if not pkgs:
+            raise ZFSBuildError(f"No {label} packages found after build")
+        print(f"✅ Found {len(pkgs)} {label} package(s):")
+        for p in pkgs:
+            print(f"  📦 {p.name}")
 
-                except subprocess.CalledProcessError as e:
-                    print(f"❌ Failed to sync dependencies for makepkg with temporary archive config: {e}")
-                    return False
+    def _update_repo_database(self, package_pattern: str = "*.pkg.tar.*") -> None:
+        """Update/create local repo database with matching packages."""
+        self.local_repo_dir.mkdir(parents=True, exist_ok=True)
+        pkg_files = list(self.local_repo_dir.glob(package_pattern))
+        if not pkg_files:
+            raise ZFSBuildError("No packages found to add to local repository")
+        db_path = self.local_repo_dir / "archzfs-local.db.tar.xz"
+        cmd = ["repo-add", str(db_path)] + [str(f) for f in pkg_files]
+        self.run_command(cmd, check=True, capture=True)
+        print(f"🗂️ repo-add updated: {db_path.name}")
 
-            # Build package
-            print("🔨 Building ZFS package...")
+    def _generate_build_pacman_conf_with_local(self) -> Path:
+        """Generate a pacman.conf including local repo for building subsequent packages."""
+        return self._generate_temp_pacman_conf(archive_url=None, include_local_repo=True)
 
-            # Debug: Show environment info
-            print("🔍 Debug: Build environment info:")
+    def _build_zfs_utils_package(self, zfs_version: str) -> None:
+        """Clone and build zfs-utils for the specified zfs_version."""
+        commit = self.find_matching_zfs_utils_commit(zfs_version)
+        if not commit:
+            raise ZFSUtilsBuildError(f"No matching zfs-utils AUR commit for version {zfs_version}")
+
+        build_dir = self.local_repo_dir / "zfs-utils-build"
+        if build_dir.exists():
+            subprocess.run(["rm", "-rf", str(build_dir)], check=True)  # noqa: S603, S607
+        self.run_command(["git", "clone", "https://aur.archlinux.org/zfs-utils.git", str(build_dir)])
+
+        subprocess.run(["git", "checkout", commit], cwd=build_dir, check=True)  # noqa: S603, S607
+
+        print("🔧 Installing build dependencies for zfs-utils (if needed)...")
+        with suppress(Exception):
+            self.run_command(
+                [
+                    *self._sudo_prefix(),
+                    "pacman",
+                    "-S",
+                    "--noconfirm",
+                    "archlinux-keyring",
+                    "gnupg",
+                    "bc",
+                    "flex",
+                    "bison",
+                    "openssl",
+                    "zlib",
+                    "perl",
+                    "elfutils",
+                    "git",
+                    "curl",
+                ],
+                check=True,
+                capture=False,
+            )
+
+        print("🔑 Initializing GPG keyring...")
+        with suppress(Exception):
+            self.run_command(["gpg", "--list-keys"], check=False, capture=True)
+
+        print("🔨 Running makepkg for zfs-utils...")
+        result = subprocess.run(
+            ["/usr/bin/makepkg", "-s", "--noconfirm", "--log"],
+            cwd=build_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            print("📋 STDOUT:")
+            print(result.stdout)
+            print("📋 STDERR:")
+            print(result.stderr)
+            raise ZFSUtilsBuildError(f"makepkg failed for zfs-utils (exit {result.returncode})")
+
+        for pkg_file in build_dir.glob("*.pkg.tar.*"):
+            pkg_file.rename(self.local_repo_dir / pkg_file.name)
+            print(f"📦 Built package: {pkg_file.name}")
+
+        self._validate_package_built("zfs-utils-*.pkg.tar.*", "zfs-utils")
+
+    def _build_zfs_linux_lts_package(self, combination: dict) -> None:
+        """Clone and build zfs-linux-lts using the specified combination info."""
+        self.local_repo_dir.mkdir(exist_ok=True)
+        build_dir = self.local_repo_dir / "zfs-linux-lts-build"
+        if build_dir.exists():
+            subprocess.run(["rm", "-rf", str(build_dir)], check=True)  # noqa: S603, S607
+
+        if combination.get("aur_commit"):
+            print(f"📦 Building AUR package from commit {combination['aur_commit']}")
+            self.run_command(["git", "clone", "https://aur.archlinux.org/zfs-linux-lts.git", str(build_dir)])
+            subprocess.run(["git", "checkout", combination["aur_commit"]], cwd=build_dir, check=True)  # noqa: S603, S607
+        else:
+            print("📦 Building latest AUR package")
+            self.run_command(["git", "clone", "https://aur.archlinux.org/zfs-linux-lts.git", str(build_dir)])
+
+        # Optional: for archive combination, pre-sync using archive config; build will still use local repo include
+        if combination.get("source") == "archive_combination":
+            print(f"🔍 Debug: Using archive combination with URL: {combination.get('archive_url')}")
+            conf = self._generate_temp_pacman_conf(combination.get("archive_url"), include_local_repo=False)
+            print(f"🔍 Debug: Generated temp config at: {conf}")
             try:
-                # Show current user
-                user_info = __import__("pwd").getpwuid(__import__("os").getuid())
-                print(f"  User: {user_info.pw_name} (UID: {__import__('os').getuid()})")
-            except Exception as e:
-                print(f"  User info error: {e}")
+                print("🔄 Syncing package databases with archive config...")
+                self._pacman_with_config(["-Sy"], conf)
+            except subprocess.CalledProcessError as e:
+                print(f"❌ Failed to sync dependencies with archive config: {e}")
 
-            # Show available kernel packages
-            print("  Available kernel packages:")
-            try:
-                result = self.run_command(["pacman", "-Ss", "linux-lts"], check=False, capture=True)
-                for line in result.stdout.split("\n")[:10]:  # Show first 10 lines
-                    if line.strip():
-                        print(f"    {line}")
-            except Exception as e:
-                print(f"    Error listing kernel packages: {e}")
+        print("🔧 Ensuring build dependencies for zfs-linux-lts...")
+        with suppress(Exception):
+            self.run_command(
+                [
+                    *self._sudo_prefix(),
+                    "pacman",
+                    "-S",
+                    "--noconfirm",
+                    "archlinux-keyring",
+                    "gnupg",
+                    "bc",
+                    "flex",
+                    "bison",
+                    "openssl",
+                    "zlib",
+                    "perl",
+                    "elfutils",
+                    "git",
+                    "curl",
+                    "linux-lts-headers",
+                ],
+                check=True,
+                capture=False,
+            )
 
-            # Show PKGBUILD content for debugging
-            pkgbuild_path = build_dir / "PKGBUILD"
-            if pkgbuild_path.exists():
-                print("  PKGBUILD key variables:")
-                try:
-                    content = pkgbuild_path.read_text()
-                    for line in content.split("\n"):
-                        if any(var in line for var in ["_zfsver=", "_kernelver=", "pkgver=", "pkgrel="]):
-                            print(f"    {line.strip()}")
-                except Exception as e:
-                    print(f"    Error reading PKGBUILD: {e}")
+        # Ensure makepkg uses local repo so zfs-utils exact version can be satisfied
+        build_conf = self._generate_build_pacman_conf_with_local()
+        print(f"🔧 Using temporary pacman.conf for build: {build_conf}")
 
-            # Ensure keyring and typical build deps exist at build time (in case they weren't present)
-            print("🔧 Installing build dependencies...")
-            with suppress(Exception):
-                # nosec: base system package installation for build tooling
-                self.run_command(
-                    [
-                        *self._sudo_prefix(),
-                        "pacman",
-                        "-S",
-                        "--noconfirm",
-                        "archlinux-keyring",
-                        "gnupg",
-                        "bc",
-                        "flex",
-                        "bison",
-                        "openssl",
-                        "zlib",
-                        "perl",
-                        "elfutils",
-                        "git",
-                        "curl",
-                    ],
-                    check=True,
-                    capture=False,
-                )
+        # Exported via env MAKEPKG_CONF is complex; instead leverage pacman inside PKGBUILD by setting PACMAN env
+        env = dict(**__import__("os").environ)
+        env["PACMAN"] = f"pacman --config {build_conf}"
 
-            # Initialize GPG keyring for makepkg
-            print("🔑 Initializing GPG keyring...")
-            with suppress(Exception):
-                self.run_command(["gpg", "--list-keys"], check=False, capture=True)
+        print("🔨 Running makepkg for zfs-linux-lts...")
+        result = subprocess.run(
+            ["/usr/bin/makepkg", "-s", "--noconfirm", "--log"],
+            cwd=build_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        if result.returncode != 0:
+            print("📋 STDOUT:")
+            print(result.stdout)
+            print("📋 STDERR:")
+            print(result.stderr)
+            raise ZFSLinuxLTSBuildError(f"makepkg failed for zfs-linux-lts (exit {result.returncode})")
 
-            # Run makepkg with verbose output and capture both stdout and stderr
-            print("🔨 Running makepkg...")
-            try:
-                result = subprocess.run(["makepkg", "-s", "--noconfirm", "--log"], cwd=build_dir, capture_output=True, text=True, check=False)  # noqa: S607
+        for pkg_file in build_dir.glob("*.pkg.tar.*"):
+            pkg_file.rename(self.local_repo_dir / pkg_file.name)
+            print(f"📦 Built package: {pkg_file.name}")
 
-                if result.returncode != 0:
-                    print(f"❌ makepkg failed with exit code {result.returncode}")
-                    print("📋 STDOUT:")
-                    print(result.stdout)
-                    print("📋 STDERR:")
-                    print(result.stderr)
+        self._validate_package_built("zfs-linux-lts-*.pkg.tar.*", "zfs-linux-lts")
 
-                    # Check for common error patterns
-                    combined_output = result.stdout + result.stderr
-                    if "==> ERROR: One or more PGP signatures could not be verified" in combined_output:
-                        print("🔍 Detected: PGP signature verification failure")
-                    elif "==> ERROR: Failure while downloading" in combined_output:
-                        print("🔍 Detected: Download failure")
-                    elif "make: *** No targets specified" in combined_output:
-                        print("🔍 Detected: Build system issue")
-                    elif "fatal error:" in combined_output and ".h: No such file" in combined_output:
-                        print("🔍 Detected: Missing header files")
+    def build_aur_package(self, combination: dict) -> bool:
+        """Build both zfs-utils and zfs-linux-lts from matching AUR commits."""
+        try:
+            # 1) Extract ZFS base version (e.g., 2.3.3)
+            zfs_base_ver = self.extract_zfs_version_from_combination(combination)
+            print(f"🔍 Building for ZFS version: {zfs_base_ver}")
 
-                    return False
+            # 2) Build zfs-utils first
+            print("📦 Building zfs-utils (pre-dependency)...")
+            self._build_zfs_utils_package(zfs_base_ver)
 
-                print("✅ makepkg completed successfully")
+            # 3) Create intermediate repo so zfs-linux-lts can resolve zfs-utils=exact
+            print("🗂️ Creating intermediate local repository with zfs-utils...")
+            self._update_repo_database("zfs-utils-*.pkg.tar.*")
 
-            except Exception as e:
-                print(f"❌ Exception during makepkg: {e}")
-                return False
+            # 4) Build zfs-linux-lts with local repo available
+            print("📦 Building zfs-linux-lts (kernel modules)...")
+            self._build_zfs_linux_lts_package(combination)
 
-            # Move built packages to local repo
-            for pkg_file in build_dir.glob("*.pkg.tar.*"):
-                pkg_file.rename(self.local_repo_dir / pkg_file.name)
-                print(f"📦 Built package: {pkg_file.name}")
-
+            print("✅ Both zfs-utils and zfs-linux-lts built successfully")
             return True
 
+        except ZFSBuildError as e:
+            print(f"❌ Error building AUR packages: {e}")
+            return False
         except subprocess.CalledProcessError as e:
-            print(f"Error building AUR package: {e}")
+            print(f"❌ Subprocess error building AUR packages: {e}")
             return False
 
     def create_local_repository(self) -> bool:
         """Create a local pacman repository from built packages."""
         try:
-            # Create repository database
             pkg_files = list(self.local_repo_dir.glob("*.pkg.tar.*"))
             if not pkg_files:
                 print("No package files found for repository creation")
                 return False
-
             print("Creating local repository database...")
             cmd = ["repo-add", str(self.local_repo_dir / "archzfs-local.db.tar.xz")] + [str(f) for f in pkg_files]
             self.run_command(cmd)
-
+            # Verify zfs-utils is present to satisfy runtime deps
+            utils_present = any("zfs-utils" in f.name for f in pkg_files)
+            if not utils_present:
+                print("⚠️ Warning: zfs-utils not found in local repository; dependency resolution may fail")
             return True
-
         except subprocess.CalledProcessError as e:
             print(f"Error creating local repository: {e}")
             return False
