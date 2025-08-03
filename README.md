@@ -20,6 +20,21 @@ A ZFS-focused Arch Linux installer built on top of archinstall. This installer p
 
 The `gen_iso` directory contains all the necessary tools and profiles to build custom Arch Linux ISOs and test them with QEMU. The process is managed through `just` commands for clarity and ease of use.
 
+### ZFS package preparation (no DKMS, no system repo edits)
+
+ISOs are configured to ALWAYS use precompiled ZFS kernel modules (never DKMS). This is handled by the helper script ([`python()`](gen_iso/build_zfs_package.py:1)) which:
+- Detects a compatible pair of linux-lts and zfs-linux-lts package versions via:
+  - Current ArchZFS repository
+  - Current/historical AUR metadata
+  - Archive repositories on archive.archlinux.org, if necessary
+- If needed, builds zfs-linux-lts from a specific AUR commit that matches the target linux-lts
+- Creates a local repository at `./local_repo` with the built packages
+- Updates the ISO profiles’ pacman.conf and packages list to consume precompiled packages
+
+Safety note: the builder uses pacman’s `--config` flag with a temporary, generated pacman.conf and does NOT modify `/etc/pacman.conf` on your host. See the helper methods `_generate_temp_pacman_conf` and `_pacman_with_config` inside ([`python.def _generate_temp_pacman_conf()`](gen_iso/build_zfs_package.py:250)) and ([`python.def _pacman_with_config()`](gen_iso/build_zfs_package.py:287)).
+
+You normally don’t run the script directly; the just recipes call it for you before building ISOs.
+
 ### ISO Profiles
 
 There are two ISO profiles available:
@@ -44,17 +59,25 @@ sudo pacman -S qemu-desktop edk2-ovmf archiso grub just rsync
 
 ### Building the ISOs
 
-- **Build the main production ISO:**
-  ```bash
-  just build-main-iso
-  ```
+ZFS packages are prepared automatically via ([`justfile`](justfile:108)) before ISO builds.
 
-- **Build the testing ISO for development:**
-  ```bash
-  just build-testing-iso
-  ```
+- Build the main production ISO:
+```bash
+just build-main-iso
+```
+
+- Build the testing ISO for development:
+```bash
+just build-testing-iso
+```
 
 The output ISOs will be placed in the `gen_iso/out` directory.
+
+If you want to invoke the ZFS package preparation step explicitly (usually not needed):
+```bash
+just prepare-zfs-packages
+```
+This will run ([`python()`](gen_iso/build_zfs_package.py:1)) and update the ISO profiles under `gen_iso/`.
 
 ### Testing with QEMU
 
@@ -168,7 +191,15 @@ This follows archiso best practices as documented in the [Arch Wiki](https://wik
 
 ### Available Commands
 
-Here's a quick reference of all available `just` commands:
+The project provides a set of `just` recipes to streamline development, ISO building, and QEMU workflows. Key entries related to ISO/ZFS packaging:
+
+- ZFS package preparation (precompiled modules, safe pacman config):
+  - ([`justfile`](justfile:108)) prepare-zfs-packages — runs ([`python()`](gen_iso/build_zfs_package.py:1)) to select/build ZFS packages and prepare a local repo
+- ISO builds:
+  - ([`justfile`](justfile:114)) build-main-iso — builds the production ISO after preparing ZFS packages
+  - ([`justfile`](justfile:122)) build-testing-iso — builds the testing ISO after preparing ZFS packages
+
+Here's a full reference of all available `just` commands:
 
 #### ISO Building
 ```bash

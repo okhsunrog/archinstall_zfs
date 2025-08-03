@@ -49,9 +49,11 @@ less
 lftp
 libfido2
 libusb-compat
-linux
+linux-lts
 linux-atm
 linux-firmware
+zfs-linux-lts
+zfs-utils
 linux-firmware-marvell
 livecd-sounds
 lsscsi

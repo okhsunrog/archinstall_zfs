@@ -36,3 +36,4 @@ qemu_scripts/my_vars.fd
 *.iso
 out
 gen_iso/*/airootfs/root/
+local_repo
