@@ -10,8 +10,6 @@ import archinstall
 from archinstall import SysInfo, debug, error, info
 from archinstall.lib.args import ArchConfig, Arguments
 from archinstall.lib.configuration import ConfigurationOutput
-from archinstall.lib.exceptions import SysCallError
-from archinstall.lib.general import SysCommand
 from archinstall.lib.models.device import DiskLayoutConfiguration, DiskLayoutType
 from archinstall.lib.storage import storage
 from archinstall.tui.curses_menu import EditMenu, MenuItemGroup, SelectMenu, Tui
@@ -241,16 +239,6 @@ def ask_user_questions(arch_config: ArchConfig) -> None:
     """Ask user questions via ZFS installer menu."""
     installer_menu = ZFSInstallerMenu(arch_config)
     installer_menu.run()
-
-
-def check_zfs_module() -> bool:
-    debug("Checking ZFS kernel module")
-    try:
-        SysCommand("modprobe zfs")
-        info("ZFS module loaded successfully")
-        return True
-    except SysCallError:
-        return False
 
 
 def main() -> bool:

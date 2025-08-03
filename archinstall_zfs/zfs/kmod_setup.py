@@ -182,7 +182,8 @@ class ZFSInitializer:
 
         info("Falling back to DKMS method")
         try:
-            SysCommand("pacman -Syyuu --noconfirm", peek_output=True)
+            # Only sync package databases, do NOT upgrade system on live ISO
+            SysCommand("pacman -Sy --noconfirm", peek_output=True)
             SysCommand("pacman -S --noconfirm --needed base-devel linux-headers git", peek_output=True)
 
             # Disable mkinitcpio hooks during DKMS installation on live system

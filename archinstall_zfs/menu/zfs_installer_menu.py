@@ -71,51 +71,41 @@ class ZFSInstallerMenu:
                 elif choice:
                     self._handle_menu_choice(choice)
 
-    def _show_main_menu(self) -> str | None:
-        """Display the main configuration menu."""
-        menu_items = [
+    def _get_menu_items(self) -> list[MenuItem]:
+        """Get the list of menu items for the main configuration menu."""
+        return [
             # Standard archinstall options (using their functions directly)
-            MenuItem(text=tr("Locale configuration"), action=lambda _: self._configure_locale(), preview_action=lambda _: self._preview_locale(), key="locale"),
-            MenuItem(
-                text=tr("Mirror configuration"), action=lambda _: self._configure_mirrors(), preview_action=lambda _: self._preview_mirrors(), key="mirrors"
-            ),
-            MenuItem(
-                text=tr("Network configuration"), action=lambda _: self._configure_network(), preview_action=lambda _: self._preview_network(), key="network"
-            ),
-            MenuItem(
-                text=tr("Hostname"), action=lambda _: self._configure_hostname(), preview_action=lambda _: f"Hostname: {self.config.hostname}", key="hostname"
-            ),
-            MenuItem(text=tr("Authentication"), action=lambda _: self._configure_authentication(), preview_action=lambda _: self._preview_auth(), key="auth"),
-            MenuItem(
-                text=tr("Timezone"), action=lambda _: self._configure_timezone(), preview_action=lambda _: f"Timezone: {self.config.timezone}", key="timezone"
-            ),
+            MenuItem(text=tr("Locale configuration"), action=self._configure_locale, preview_action=self._preview_locale, key="locale"),
+            MenuItem(text=tr("Mirror configuration"), action=self._configure_mirrors, preview_action=self._preview_mirrors, key="mirrors"),
+            MenuItem(text=tr("Network configuration"), action=self._configure_network, preview_action=self._preview_network, key="network"),
+            MenuItem(text=tr("Hostname"), action=self._configure_hostname, preview_action=lambda _: f"Hostname: {self.config.hostname}", key="hostname"),
+            MenuItem(text=tr("Authentication"), action=self._configure_authentication, preview_action=self._preview_auth, key="auth"),
+            MenuItem(text=tr("Timezone"), action=self._configure_timezone, preview_action=lambda _: f"Timezone: {self.config.timezone}", key="timezone"),
             MenuItem(
                 text=tr("NTP (time sync)"),
-                action=lambda _: self._configure_ntp(),
+                action=self._configure_ntp,
                 preview_action=lambda _: f"NTP: {'Enabled' if self.config.ntp else 'Disabled'}",
                 key="ntp",
             ),
-            MenuItem(
-                text=tr("Additional packages"), action=lambda _: self._configure_packages(), preview_action=lambda _: self._preview_packages(), key="packages"
-            ),
+            MenuItem(text=tr("Additional packages"), action=self._configure_packages, preview_action=self._preview_packages, key="packages"),
             # Separator
             MenuItem(text=""),
             # ZFS-specific options
             MenuItem(
                 text="ZFS Dataset Prefix",
-                action=lambda _: self._configure_dataset_prefix(),
+                action=self._configure_dataset_prefix,
                 preview_action=lambda _: f"Dataset prefix: {self.dataset_prefix}",
                 key="zfs_prefix",
             ),
             MenuItem(
                 text="ZFS Encryption",
-                action=lambda _: self._configure_zfs_encryption(),
-                preview_action=lambda _: self._preview_zfs_encryption(),
+                action=self._configure_zfs_encryption,
+                preview_action=self._preview_zfs_encryption,
                 key="zfs_encryption",
             ),
             MenuItem(
                 text="Init System",
-                action=lambda _: self._configure_init_system(),
+                action=self._configure_init_system,
                 preview_action=lambda _: f"Init system: {self.init_system.value}",
                 key="init_system",
             ),
@@ -127,6 +117,9 @@ class ZFSInstallerMenu:
             MenuItem(text=tr("Abort"), key="abort"),
         ]
 
+    def _show_main_menu(self) -> str | None:
+        """Display the main configuration menu."""
+        menu_items = self._get_menu_items()
         menu = SelectMenu(MenuItemGroup(menu_items), header="Arch Linux ZFS Installation Configuration")
 
         result = menu.run()
@@ -134,10 +127,12 @@ class ZFSInstallerMenu:
 
     def _handle_menu_choice(self, choice: str) -> None:
         """Handle a menu choice by calling the appropriate configuration method."""
-        for item in self._show_main_menu.__code__.co_consts:
+        menu_items = self._get_menu_items()
+
+        for item in menu_items:
             if hasattr(item, "key") and item.key == choice:
                 if item.action:
-                    item.action(None)
+                    item.action()
                 break
 
     # Standard archinstall configuration methods
@@ -156,7 +151,7 @@ class ZFSInstallerMenu:
         self.config.network_config = ask_to_configure_network(self.config.network_config)
 
     def _configure_hostname(self) -> None:
-        hostname = ask_hostname()
+        hostname = ask_hostname(self.config.hostname)
         if hostname:
             self.config.hostname = hostname
 
@@ -166,16 +161,18 @@ class ZFSInstallerMenu:
         self.config.auth_config = auth_menu.run()
 
     def _configure_timezone(self) -> None:
-        timezone = ask_for_a_timezone()
+        timezone = ask_for_a_timezone(self.config.timezone)
         if timezone:
             self.config.timezone = timezone
 
     def _configure_ntp(self) -> None:
-        self.config.ntp = ask_ntp(self.config.ntp)
+        ntp_result = ask_ntp(self.config.ntp)
+        if ntp_result is not None:
+            self.config.ntp = ntp_result
 
     def _configure_packages(self) -> None:
-        packages = ask_additional_packages_to_install()
-        if packages:
+        packages = ask_additional_packages_to_install(self.config.packages)
+        if packages is not None:
             self.config.packages = packages
 
     # ZFS-specific configuration methods
