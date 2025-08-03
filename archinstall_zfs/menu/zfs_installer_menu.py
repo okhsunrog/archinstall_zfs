@@ -75,37 +75,33 @@ class ZFSInstallerMenu:
         """Get the list of menu items for the main configuration menu."""
         return [
             # Standard archinstall options (using their functions directly)
-            MenuItem(text=tr("Locale configuration"), action=self._configure_locale, preview_action=self._preview_locale, key="locale"),
-            MenuItem(text=tr("Mirror configuration"), action=self._configure_mirrors, preview_action=self._preview_mirrors, key="mirrors"),
-            MenuItem(text=tr("Network configuration"), action=self._configure_network, preview_action=self._preview_network, key="network"),
-            MenuItem(text=tr("Hostname"), action=self._configure_hostname, preview_action=lambda _: f"Hostname: {self.config.hostname}", key="hostname"),
-            MenuItem(text=tr("Authentication"), action=self._configure_authentication, preview_action=self._preview_auth, key="auth"),
-            MenuItem(text=tr("Timezone"), action=self._configure_timezone, preview_action=lambda _: f"Timezone: {self.config.timezone}", key="timezone"),
+            MenuItem(text=tr("Locale configuration"), preview_action=self._preview_locale, key="locale"),
+            MenuItem(text=tr("Mirror configuration"), preview_action=self._preview_mirrors, key="mirrors"),
+            MenuItem(text=tr("Network configuration"), preview_action=self._preview_network, key="network"),
+            MenuItem(text=tr("Hostname"), preview_action=lambda _: f"Hostname: {self.config.hostname}", key="hostname"),
+            MenuItem(text=tr("Authentication"), preview_action=self._preview_auth, key="auth"),
+            MenuItem(text=tr("Timezone"), preview_action=lambda _: f"Timezone: {self.config.timezone}", key="timezone"),
             MenuItem(
                 text=tr("NTP (time sync)"),
-                action=self._configure_ntp,
                 preview_action=lambda _: f"NTP: {'Enabled' if self.config.ntp else 'Disabled'}",
                 key="ntp",
             ),
-            MenuItem(text=tr("Additional packages"), action=self._configure_packages, preview_action=self._preview_packages, key="packages"),
+            MenuItem(text=tr("Additional packages"), preview_action=self._preview_packages, key="packages"),
             # Separator
             MenuItem(text=""),
             # ZFS-specific options
             MenuItem(
                 text="ZFS Dataset Prefix",
-                action=self._configure_dataset_prefix,
                 preview_action=lambda _: f"Dataset prefix: {self.dataset_prefix}",
                 key="zfs_prefix",
             ),
             MenuItem(
                 text="ZFS Encryption",
-                action=self._configure_zfs_encryption,
                 preview_action=self._preview_zfs_encryption,
                 key="zfs_encryption",
             ),
             MenuItem(
                 text="Init System",
-                action=self._configure_init_system,
                 preview_action=lambda _: f"Init system: {self.init_system.value}",
                 key="init_system",
             ),
@@ -127,14 +123,22 @@ class ZFSInstallerMenu:
 
     def _handle_menu_choice(self, choice: str) -> None:
         """Handle a menu choice by calling the appropriate configuration method."""
-        menu_items = self._get_menu_items()
-
-        for item in menu_items:
-            if hasattr(item, "key") and item.key == choice:
-                if item.action:
-                    # Some TUI frameworks pass a context argument; our handlers accept *args
-                    item.action(None)
-                break
+        handlers: dict[str, Any] = {
+            "locale": self._configure_locale,
+            "mirrors": self._configure_mirrors,
+            "network": self._configure_network,
+            "hostname": self._configure_hostname,
+            "auth": self._configure_authentication,
+            "timezone": self._configure_timezone,
+            "ntp": self._configure_ntp,
+            "packages": self._configure_packages,
+            "zfs_prefix": self._configure_dataset_prefix,
+            "zfs_encryption": self._configure_zfs_encryption,
+            "init_system": self._configure_init_system,
+        }
+        handler = handlers.get(choice)
+        if handler:
+            handler()
 
     # Standard archinstall configuration methods
     def _configure_locale(self, *_: Any) -> None:
