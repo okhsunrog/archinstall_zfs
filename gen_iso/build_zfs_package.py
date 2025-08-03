@@ -247,64 +247,49 @@ class ZFSPackageBuilder:
         print("❌ No compatible combination found")
         return None
 
-    def setup_archive_repository(self, archive_url: str) -> bool:
-        """Setup archive repository for specific date."""
-        try:
-            print(f"🔧 Setting up archive repository: {archive_url}")
+    def _generate_temp_pacman_conf(self, archive_url: str | None, include_local_repo: bool) -> Path:
+        """
+        Generate a temporary pacman.conf without modifying system files.
+        - If archive_url is provided, core/extra will point to the archive URLs.
+        - Always adds [archzfs]; optionally adds [archzfs-local] to file:// local_repo_dir.
+        Returns the path to the generated config.
+        """
+        temp_conf_dir = self.local_repo_dir / "tmp_conf"
+        temp_conf_dir.mkdir(parents=True, exist_ok=True)
+        conf_path = temp_conf_dir / "pacman.conf"
 
-            # Backup current pacman.conf
-            subprocess.run(["sudo", "cp", "/etc/pacman.conf", "/etc/pacman.conf.backup"], check=True)  # noqa: S607
-
-            # Create new pacman.conf with archive repositories
-            archive_conf = f"""#
-# /etc/pacman.conf
-#
-# See the pacman.conf(5) manpage for option and repository directives
-
-[options]
-HoldPkg     = pacman glibc
+        options = """[options]
+HoldPkg = pacman glibc
 Architecture = auto
 CheckSpace
 ParallelDownloads = 5
-SigLevel    = Required DatabaseOptional
+SigLevel = Required DatabaseOptional
 LocalFileSigLevel = Optional
-
-# Archive repositories for specific kernel version
-[core]
-Server = {archive_url}core/os/$arch
-
-[extra]
-Server = {archive_url}extra/os/$arch
-
-# Current archzfs repository
-[archzfs]
-SigLevel = Optional TrustAll
-Server = https://archzfs.com/$repo/$arch
 """
 
-            # Note: using a predictable temp path for simplicity in build environment
-            with open("/tmp/pacman.conf.archive", "w") as f:  # noqa: S108
-                f.write(archive_conf)
+        if archive_url:
+            core = f"[core]\nServer = {archive_url}core/os/$arch\n\n"
+            extra = f"[extra]\nServer = {archive_url}extra/os/$arch\n\n"
+        else:
+            core = "[core]\nInclude = /etc/pacman.d/mirrorlist\n\n"
+            extra = "[extra]\nInclude = /etc/pacman.d/mirrorlist\n\n"
 
-            subprocess.run(["sudo", "cp", "/tmp/pacman.conf.archive", "/etc/pacman.conf"], check=True)  # noqa: S607, S108
-            subprocess.run(["sudo", "pacman", "-Sy"], check=True)  # noqa: S607
-            print("✅ Archive repository configured")
-            return True
+        archzfs = "[archzfs]\nSigLevel = Optional TrustAll\nServer = https://archzfs.com/$repo/$arch\n\n"
 
-        except Exception as e:
-            print(f"Error setting up archive repository: {e}")
-            return False
+        local_repo = ""
+        if include_local_repo:
+            local_repo = f"[archzfs-local]\nSigLevel = Optional TrustAll\nServer = file://{self.local_repo_dir}\n\n"
 
-    def restore_original_repositories(self) -> None:
-        """Restore original pacman.conf."""
-        try:
-            # nosec S607: Running expected system utilities with absolute paths
-            subprocess.run(["sudo", "cp", "/etc/pacman.conf.backup", "/etc/pacman.conf"], check=True)  # noqa: S607
-            subprocess.run(["sudo", "rm", "-f", "/etc/pacman.conf.backup", "/tmp/pacman.conf.archive"], check=True)  # noqa: S607, S108
-            subprocess.run(["sudo", "pacman", "-Sy"], check=True)  # noqa: S607
-            print("🔧 Restored original repositories")
-        except Exception as e:
-            print(f"Warning: Could not restore repositories: {e}")
+        conf_content = options + core + extra + local_repo + archzfs
+        conf_path.write_text(conf_content)
+        return conf_path
+
+    def _pacman_with_config(self, args: list[str], conf_path: Path) -> subprocess.CompletedProcess:
+        """
+        Run pacman with a specific --config file. Does not modify system configuration.
+        """
+        cmd = ["pacman", "--config", str(conf_path), *args]
+        return self.run_command(cmd, check=True, capture=True)
 
     def build_aur_package(self, combination: dict) -> bool:
         """Build zfs-linux-lts from AUR using specified combination."""
@@ -325,6 +310,15 @@ Server = https://archzfs.com/$repo/$arch
             else:
                 print("📦 Building latest AUR package")
                 self.run_command(["git", "clone", "https://aur.archlinux.org/zfs-linux-lts.git", str(build_dir)])
+
+            # If using archive combination, sync deps with the same temporary config
+            if combination.get("source") == "archive_combination":
+                conf = self._generate_temp_pacman_conf(combination.get("archive_url"), include_local_repo=False)
+                try:
+                    self._pacman_with_config(["-Sy"], conf)
+                except subprocess.CalledProcessError:
+                    print("❌ Failed to sync dependencies for makepkg with temporary archive config")
+                    return False
 
             # Build package
             print("🔨 Building ZFS package...")
@@ -464,12 +458,15 @@ Server = file://{self.local_repo_dir}
             print(f"🗂️ ZFS version: {combination['zfs_version']}")
             print(f"🔧 Source: {combination['source']}")
 
-            # Setup archive repository if needed
-            archive_setup = False
+            # Prepare a temporary pacman.conf for any operations that need archive repos
+            temp_conf: Path | None = None
             if combination["source"] == "archive_combination":
-                archive_setup = self.setup_archive_repository(combination["archive_url"])
-                if not archive_setup:
-                    print("❌ Failed to setup archive repository")
+                temp_conf = self._generate_temp_pacman_conf(combination["archive_url"], include_local_repo=False)
+                # Sync databases using the temporary configuration
+                try:
+                    self._pacman_with_config(["-Sy"], temp_conf)
+                except subprocess.CalledProcessError:
+                    print("❌ Failed to sync pacman databases with temporary archive config")
                     return 1
 
             try:
@@ -498,17 +495,11 @@ Server = file://{self.local_repo_dir}
                 return 0
 
             finally:
-                # Always restore repositories if we modified them
-                if archive_setup:
-                    self.restore_original_repositories()
+                # No system repository restoration needed when using --config
+                pass
 
         except Exception as e:
             print(f"💥 Unexpected error: {e}")
-            # Try to restore repositories if something went wrong
-            from contextlib import suppress  # noqa: PLC0415
-
-            with suppress(BaseException):
-                self.restore_original_repositories()
             return 1
 
 
