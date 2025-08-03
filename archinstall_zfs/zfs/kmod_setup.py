@@ -19,9 +19,17 @@ def check_zfs_module() -> bool:
 
 
 def initialize_zfs() -> None:
+    # First check if ZFS modules are already available (built into ISO)
+    if check_zfs_module():
+        info("ZFS modules already available, no initialization needed")
+        return
+
+    # ZFS modules not available, need to install them
+    info("ZFS modules not found, attempting to install")
     add_archzfs_repo()
+
     if not check_zfs_module():
-        info("ZFS module not loaded, initializing")
+        info("ZFS module not loaded after repo setup, initializing")
         zfs_init = ZFSInitializer()
         if not zfs_init.run():
             raise RuntimeError("Failed to initialize ZFS support")
@@ -212,10 +220,29 @@ class ZFSInitializer:
     def install_zfs(self) -> bool:
         kernel_version_fixed = self.kernel_version.replace("-", ".")
 
-        package_info = self.search_zfs_package("zfs-linux", kernel_version_fixed)
+        # Detect kernel type and search for appropriate ZFS package
+        if "lts" in self.kernel_version:
+            primary_package = "zfs-linux-lts"
+            fallback_package = "zfs-linux"
+            info("Detected LTS kernel, searching for zfs-linux-lts...")
+        else:
+            primary_package = "zfs-linux"
+            fallback_package = "zfs-linux-lts"
+            info("Detected regular kernel, searching for zfs-linux...")
+
+        # Try primary package first
+        package_info = self.search_zfs_package(primary_package, kernel_version_fixed)
+
+        # If primary not found, try fallback
+        if not package_info:
+            info(f"{primary_package} not found, trying {fallback_package}...")
+            package_info = self.search_zfs_package(fallback_package, kernel_version_fixed)
+
         if package_info:
             url, package = package_info
             package_url = f"{url}{package}"
+            package_type = "zfs-linux-lts" if "lts" in package else "zfs-linux"
+            info(f"Found {package_type} package: {package}")
 
             with tempfile.TemporaryDirectory() as tmpdir:
                 package_path = Path(tmpdir) / package
@@ -226,6 +253,7 @@ class ZFSInitializer:
 
                 if utils_info:
                     utils_url = f"{utils_info[0]}{utils_info[1]}"
+                    info(f"Installing zfs-utils and {package_type}")
                     SysCommand(f"pacman -U {utils_url} --noconfirm", peek_output=True)
                     SysCommand(f"pacman -U {package_url} --noconfirm", peek_output=True)
                     return True

@@ -1,6 +1,7 @@
 base
-linux
-linux-headers
+linux-lts
+zfs-linux-lts
+zfs-utils
 mkinitcpio
 mkinitcpio-archiso
 openssh
