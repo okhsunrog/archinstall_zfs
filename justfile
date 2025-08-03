@@ -47,6 +47,7 @@ clean:
 
 # Clean up ISO build artifacts only
 clean-iso:
+    sudo rm -rf {{ISO_OUT_DIR}}
     sudo rm -rf {{ISO_WORK_DIR}}
 
 # Install development dependencies
