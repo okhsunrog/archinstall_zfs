@@ -10,3 +10,4 @@ syslinux
 arch-install-scripts
 archinstall
 reflector
+gptfdisk
