@@ -40,13 +40,39 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) ->
             info("archzfs repository already configured")
             return
 
-    # Initialize keyring in target if this is a chroot environment
-    if installation:
-        try:
+    # Initialize keyring if needed - this is CRITICAL for archzfs
+    try:
+        if installation:
+            # In chroot environment
             installation.arch_chroot("pacman-key --init")
             installation.arch_chroot("pacman-key --populate archlinux")
-        except SysCallError as e:
-            debug(f"Keyring already initialized or failed: {e}")
+        else:
+            # On live system, ensure keyring is initialized with proper permissions
+            info("Initializing pacman keyring on live system")
+
+            # Remove any corrupted keyring
+            keyring_dir = Path("/etc/pacman.d/gnupg")
+            if keyring_dir.exists():
+                SysCommand(f"rm -rf {keyring_dir}")
+                debug("Removed existing keyring directory")
+
+            # Create fresh keyring directory with proper permissions
+            keyring_dir.mkdir(parents=True, exist_ok=True)
+            SysCommand(f"chmod 700 {keyring_dir}")
+            SysCommand(f"chown root:root {keyring_dir}")
+
+            # Initialize fresh keyring
+            SysCommand("pacman-key --init")
+            SysCommand("pacman-key --populate archlinux")
+
+            # Verify keyring is working
+            SysCommand("pacman-key --list-keys")
+            info("Keyring initialized and verified successfully")
+    except SysCallError as e:
+        error(f"Failed to initialize keyring: {e}")
+        if installation:
+            raise RuntimeError("Cannot proceed without working keyring") from e
+        raise RuntimeError("Cannot initialize keyring on live system - archzfs repository required") from e
 
     key_id = "DDF7DB817396A49B2A2723F7403BD972F75D9D76"
     key_sign = f"pacman-key --lsign-key {key_id}"
@@ -74,14 +100,25 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) ->
         if installation:
             # In production installation, this is a hard error
             raise RuntimeError("Cannot proceed without archzfs repository key")
-        # On live system, warn but continue for development
-        error("Continuing without key verification (development mode)")
-        info("Note: This may cause package verification issues")
-    # Only sign the key if we successfully received it
-    elif installation:
-        installation.arch_chroot(key_sign)
-    else:
-        SysCommand(key_sign)
+        # On live system, skip archzfs repo to avoid signature issues
+        error("Cannot verify archzfs packages - skipping repository")
+        info("ZFS installation will be attempted without archzfs repo")
+        return
+
+    # Only proceed if we successfully received the key
+    # Now try to sign the key
+    try:
+        if installation:
+            installation.arch_chroot(key_sign)
+        else:
+            SysCommand(key_sign)
+        info("Successfully signed archzfs key")
+    except SysCallError as e:
+        error(f"Failed to sign archzfs key: {e}")
+        if installation:
+            raise RuntimeError("Cannot proceed without signed archzfs key") from e
+        error("Skipping archzfs repository due to key signing failure")
+        return
 
     repo_config = [
         "\n[archzfs]\n",
@@ -93,8 +130,14 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) ->
     with open(pacman_conf, "a") as f:
         f.writelines(repo_config)
 
+    # Only sync databases after repository is properly configured with signed key
     if not installation:
-        SysCommand("pacman -Sy")
+        try:
+            SysCommand("pacman -Sy")
+            info("Successfully synced package databases")
+        except SysCallError as e:
+            error(f"Failed to sync databases: {e}")
+            raise RuntimeError("Cannot sync archzfs repository") from e
 
 
 class ZFSInitializer:
@@ -141,8 +184,36 @@ class ZFSInitializer:
         try:
             SysCommand("pacman -Syyuu --noconfirm", peek_output=True)
             SysCommand("pacman -S --noconfirm --needed base-devel linux-headers git", peek_output=True)
-            SysCommand("pacman -S zfs-dkms --noconfirm", peek_output=True)
-            return True
+
+            # Disable mkinitcpio hooks during DKMS installation on live system
+            # This prevents initramfs rebuild which fails on archiso
+            info("Temporarily disabling mkinitcpio hooks for live system")
+            hooks_dir = Path("/etc/pacman.d/hooks")
+            disabled_hooks = []
+
+            if hooks_dir.exists():
+                for hook_file in hooks_dir.glob("*mkinitcpio*"):
+                    disabled_file = hook_file.with_suffix(hook_file.suffix + ".disabled")
+                    hook_file.rename(disabled_file)
+                    disabled_hooks.append((hook_file, disabled_file))
+                    debug(f"Disabled hook: {hook_file}")
+
+            try:
+                SysCommand("pacman -S zfs-dkms --noconfirm", peek_output=True)
+
+                # Re-enable hooks
+                for original, disabled in disabled_hooks:
+                    disabled.rename(original)
+                    debug(f"Re-enabled hook: {original}")
+
+                return True
+            except Exception as e:
+                # Re-enable hooks even if installation failed
+                for original, disabled in disabled_hooks:
+                    if disabled.exists():
+                        disabled.rename(original)
+                raise e
+
         except Exception as e:
             error(f"DKMS installation failed: {e!s}")
             return False
