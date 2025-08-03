@@ -4,7 +4,7 @@ import os
 import socket
 import sys
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Literal, cast
 
 import archinstall
 from archinstall import SysInfo, debug, error, info
@@ -12,7 +12,6 @@ from archinstall.lib.args import ArchConfig, Arguments
 from archinstall.lib.configuration import ConfigurationOutput
 from archinstall.lib.exceptions import SysCallError
 from archinstall.lib.general import SysCommand
-from archinstall.lib.models import AudioConfiguration, NetworkConfiguration
 from archinstall.lib.models.device import DiskLayoutConfiguration, DiskLayoutType
 from archinstall.lib.storage import storage
 from archinstall.tui.curses_menu import EditMenu, MenuItemGroup, SelectMenu, Tui
@@ -122,7 +121,7 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
         # Adding dracut configuration
         dracut = DracutSetup(str(mountpoint), encryption_enabled=bool(zfs_manager.encryption_handler.password))
         dracut.configure()
-        zfs_config = ask_user_questions(arch_config)
+        ask_user_questions(arch_config)
 
         config = ConfigurationOutput(arch_config.safe_json())
         config.write_debug()
@@ -238,11 +237,10 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
         return False
 
 
-def ask_user_questions(arch_config: ArchConfig) -> dict[str, Any]:
-    """Ask user questions and return ZFS-specific configuration."""
+def ask_user_questions(arch_config: ArchConfig) -> None:
+    """Ask user questions via ZFS installer menu."""
     installer_menu = ZFSInstallerMenu(arch_config)
     installer_menu.run()
-    return installer_menu.get_zfs_config()
 
 
 def check_zfs_module() -> bool:

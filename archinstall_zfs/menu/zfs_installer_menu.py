@@ -5,12 +5,18 @@ This provides a clean separation between archinstall library functions and
 ZFS-specific configuration, allowing for better maintainability and version independence.
 """
 
+import sys
 from enum import Enum
-from typing import Any, cast
+from typing import Any
 
 from archinstall.lib.args import ArchConfig
 from archinstall.lib.authentication.authentication_menu import AuthenticationMenu
-from archinstall.lib.interactions.general_conf import ask_for_a_timezone, ask_hostname, ask_ntp, ask_additional_packages_to_install
+from archinstall.lib.interactions.general_conf import (
+    ask_additional_packages_to_install,
+    ask_for_a_timezone,
+    ask_hostname,
+    ask_ntp,
+)
 from archinstall.lib.interactions.network_menu import ask_to_configure_network
 from archinstall.lib.locale.locale_menu import LocaleMenu
 from archinstall.lib.mirrors import MirrorMenu
@@ -56,12 +62,11 @@ class ZFSInstallerMenu:
                 if choice == "install":
                     if self._validate_config():
                         break
-                    else:
-                        continue
-                elif choice == "save":
+                    continue
+                if choice == "save":
                     self._save_config()
                 elif choice == "abort":
-                    exit(1)
+                    sys.exit(1)
                 elif choice:
                     self._handle_menu_choice(choice)
 
