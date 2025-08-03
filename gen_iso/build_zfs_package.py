@@ -16,6 +16,7 @@ import subprocess
 import sys
 import urllib.parse
 import urllib.request
+from collections.abc import Mapping, MutableMapping
 from contextlib import suppress
 from pathlib import Path
 
@@ -42,14 +43,30 @@ class ZFSPackageBuilder:
         self.local_repo_dir = self.project_root / "local_repo"
         self.gen_iso_dir = Path(__file__).parent
 
-    def run_command(self, cmd: list[str], check: bool = True, capture: bool = True) -> subprocess.CompletedProcess:
-        """Run a command and return the result."""
+    def run_command(
+        self,
+        cmd: list[str],
+        check: bool = True,
+        capture: bool = True,
+        *,
+        cwd: str | bytes | Path | None = None,
+        env: Mapping[str, str] | MutableMapping[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        """
+        Run a command safely and return the result.
+
+        Security notes (ruff S603):
+        - shell=False is enforced by passing argv list to subprocess.run
+        - Executables are static/absolute paths or trusted binaries; arguments are constants or validated
+        - No user-supplied input is interpolated into the command lines
+        """
+        if not isinstance(cmd, list) or not all(isinstance(x, str) for x in cmd):
+            raise ValueError("cmd must be a list[str]")
         print(f"Running: {' '.join(cmd)}")
         if capture:
-            # Ruff S603: Commands are constructed from static strings in controlled contexts
-            return subprocess.run(cmd, check=check, capture_output=True, text=True)  # noqa: S603
-        # Ruff S603: Commands are constructed from static strings in controlled contexts
-        return subprocess.run(cmd, check=check)  # noqa: S603
+            return subprocess.run(cmd, check=check, capture_output=True, text=True, cwd=cwd, env=env)  # noqa: S603
+        # Ensure consistent return type parameter CompletedProcess[str] by using text=True
+        return subprocess.run(cmd, check=check, text=True, cwd=cwd, env=env)  # noqa: S603
 
     def _sudo_prefix(self) -> list[str]:
         """Return ['sudo'] if not running as root, else empty list."""
@@ -489,24 +506,22 @@ LocalFileSigLevel = Optional
         print("🔨 Running makepkg for zfs-utils...")
         # Try with signature verification first, fallback to --skippgpcheck if needed
         makepkg_cmd = ["/usr/bin/makepkg", "-s", "--noconfirm", "--log"]
-        result = subprocess.run(
+        result = self.run_command(
             makepkg_cmd,
-            cwd=build_dir,
-            capture_output=True,
-            text=True,
             check=False,
+            capture=True,
+            cwd=build_dir,
         )
 
         # If signature verification failed, retry with --skippgpcheck
         if result.returncode != 0 and "PGP signatures could not be verified" in (result.stdout + result.stderr):
             print("⚠️ PGP verification failed, retrying with --skippgpcheck...")
             makepkg_cmd.append("--skippgpcheck")
-            result = subprocess.run(
+            result = self.run_command(
                 makepkg_cmd,
-                cwd=build_dir,
-                capture_output=True,
-                text=True,
                 check=False,
+                capture=True,
+                cwd=build_dir,
             )
         if result.returncode != 0:
             print("📋 STDOUT:")
@@ -583,12 +598,11 @@ LocalFileSigLevel = Optional
         print("🔨 Running makepkg for zfs-linux-lts...")
         # Try with signature verification first, fallback to --skippgpcheck if needed
         makepkg_cmd = ["/usr/bin/makepkg", "-s", "--noconfirm", "--log"]
-        result = subprocess.run(
+        result = self.run_command(
             makepkg_cmd,
-            cwd=build_dir,
-            capture_output=True,
-            text=True,
             check=False,
+            capture=True,
+            cwd=build_dir,
             env=env,
         )
 
@@ -596,12 +610,11 @@ LocalFileSigLevel = Optional
         if result.returncode != 0 and "PGP signatures could not be verified" in (result.stdout + result.stderr):
             print("⚠️ PGP verification failed, retrying with --skippgpcheck...")
             makepkg_cmd.append("--skippgpcheck")
-            result = subprocess.run(
+            result = self.run_command(
                 makepkg_cmd,
-                cwd=build_dir,
-                capture_output=True,
-                text=True,
                 check=False,
+                capture=True,
+                cwd=build_dir,
                 env=env,
             )
         if result.returncode != 0:
