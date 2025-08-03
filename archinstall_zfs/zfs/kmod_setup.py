@@ -81,9 +81,9 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) ->
 
     repo_config = [
         "\n[archzfs]\n",
-        "Server = http://archzfs.com/$repo/$arch\n",
-        "Server = http://mirror.sum7.eu/archlinux/$repo/$repo/$arch\n",
-        "Server = https://mirror.biocrafting.net/archlinux/$repo/$repo/$arch\n",
+        "Server = https://archzfs.com/$repo/$arch\n",
+        "Server = https://mirror.sum7.eu/archlinux/archzfs/$arch\n",
+        "Server = https://mirror.biocrafting.net/archlinux/archzfs/$arch\n",
     ]
 
     with open(pacman_conf, "a") as f:

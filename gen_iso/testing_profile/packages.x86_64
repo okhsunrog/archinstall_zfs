@@ -9,3 +9,4 @@ rsync
 syslinux
 arch-install-scripts
 archinstall
+reflector
