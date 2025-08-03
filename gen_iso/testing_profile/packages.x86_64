@@ -1,8 +1,6 @@
 base
 linux-lts
-linux-lts-headers
-base-devel
-zfs-dkms
+zfs-linux-lts
 zfs-utils
 mkinitcpio
 mkinitcpio-archiso
@@ -16,7 +14,6 @@ archinstall
 reflector
 gptfdisk
 python-pyparted
-gptfdisk
 parted
 dosfstools
 efibootmgr
