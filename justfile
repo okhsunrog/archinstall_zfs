@@ -92,15 +92,15 @@ _prepare-source PROFILE_DIR:
         --exclude='dist' --exclude='*.egg-info' --exclude='gen_iso' \
         --exclude='tests' archinstall_zfs/ {{PROFILE_DIR}}/airootfs/root/archinstall_zfs/
     @cp pyproject.toml README.md LICENSE {{PROFILE_DIR}}/airootfs/root/archinstall_zfs/
-    @echo '#!/bin/bash' > {{PROFILE_DIR}}/airootfs/root/install-archinstall-zfs.sh
-    @echo 'cd /root/archinstall_zfs && pip install -e .' >> {{PROFILE_DIR}}/airootfs/root/install-archinstall-zfs.sh
-    @chmod +x {{PROFILE_DIR}}/airootfs/root/install-archinstall-zfs.sh
+    @echo '#!/bin/bash' > {{PROFILE_DIR}}/airootfs/root/installer
+    @echo 'export PYTHONPATH="/root:$PYTHONPATH"' >> {{PROFILE_DIR}}/airootfs/root/installer
+    @echo 'python -m archinstall_zfs' >> {{PROFILE_DIR}}/airootfs/root/installer
 
 # Clean up source code copy
 _cleanup-source PROFILE_DIR:
     @echo "Cleaning up source code copy from {{PROFILE_DIR}}..."
     @rm -rf {{PROFILE_DIR}}/airootfs/root/archinstall_zfs
-    @rm -f {{PROFILE_DIR}}/airootfs/root/install-archinstall-zfs.sh
+    @rm -f {{PROFILE_DIR}}/airootfs/root/installer
 
 # Build the main ISO for production release
 build-main-iso:
@@ -177,3 +177,7 @@ qemu-run:
 qemu-run-serial:
     @if [ ! -f {{DISK_IMAGE}} ]; then echo "Disk image not found. Run 'just qemu-install' first."; exit 1; fi
     {{QEMU_SCRIPT}} -D {{DISK_IMAGE}} -U {{UEFI_VARS}} -S
+
+# SSH into running QEMU VM
+ssh:
+    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost -p 2222

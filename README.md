@@ -113,9 +113,16 @@ Once booted, you have multiple ways to interact with the system:
 
 2. **SSH Access** (available in both modes):
    ```bash
-   ssh root@localhost -p 2222
+   ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost -p 2222
    ```
-   No password required - connects immediately.
+   No password required - connects immediately. The SSH options bypass host key checking since VMs get rebuilt frequently.
+
+**Important Note:** When using serial console mode (`just qemu-install-serial`), you should use SSH to run the archinstall_zfs installer, as archinstall's TUI doesn't work properly in serial console. The serial console is perfect for system monitoring and basic commands, but SSH provides the full terminal capabilities needed for the interactive installer.
+
+**Recommended workflow for serial console:**
+1. Start VM: `just qemu-install-serial`
+2. In another terminal: `just ssh`
+3. Run installer in SSH session: `./installer`
 
 #### Development Workflow
 
@@ -139,16 +146,17 @@ The system will boot instantly and log you in automatically, ready for testing.
 Both ISO profiles include the complete archinstall_zfs source code in `/root/archinstall_zfs`. The source is copied fresh from your working directory during each build using archiso's standard `airootfs` mechanism, ensuring it's always current. Once booted, you can:
 
 ```bash
-# Install the package (recommended - one time setup)
-./install-archinstall-zfs.sh
+# Option 1: Use the installer shortcut (recommended)
+./installer
 
-# Then run the installer
+# Option 2: Run the module directly
+export PYTHONPATH="/root:$PYTHONPATH"
 python -m archinstall_zfs
 
-# Alternative: Run directly without installing
+# Option 3: Run the main script directly
 python archinstall_zfs/main.py
 
-# Or examine the source code
+# Examine the source code
 ls -la archinstall_zfs/
 ```
 
@@ -180,6 +188,9 @@ just qemu-install-serial # Install with serial console
 # Run existing installation (boots from disk)
 just qemu-run           # Run with GUI
 just qemu-run-serial    # Run with serial console
+
+# SSH into running VM
+just ssh                # Connect via SSH
 ```
 
 #### Development

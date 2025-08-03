@@ -19,4 +19,5 @@ file_permissions=(
   ["/etc/shadow"]="0:0:400"
   ["/etc/systemd/system/getty@tty1.service.d/autologin.conf"]="0:0:644"
   ["/etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf"]="0:0:644"
+  ["/root/installer"]="0:0:755"
 )
