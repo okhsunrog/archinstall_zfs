@@ -16,88 +16,202 @@ A ZFS-focused Arch Linux installer built on top of archinstall. This installer p
 - User-friendly TUI interface
 - Comprehensive error handling and logging
 
-## Installation
+## Building and Testing
 
-To run the installer:
+The `gen_iso` directory contains all the necessary tools and profiles to build custom Arch Linux ISOs and test them with QEMU. The process is managed through `just` commands for clarity and ease of use.
 
-1. Boot into the Arch Linux live environment
-2. Clone the repository
-3. Navigate to the project directory
-4. Run:
-   ```python
-    python -m archinstall_zfs
-    ```
+### ISO Profiles
 
-## Testing with QEMU
+There are two ISO profiles available:
+- **`main_profile`**: Based on `releng`, this is for building a production-ready ISO for installation on real hardware.
+- **`testing_profile`**: Based on `baseline`, this is a streamlined development ISO optimized for QEMU testing with:
+  - Auto-login as root (no username/password required)
+  - Instant boot (0 timeout on all bootloaders)
+  - Serial console support with kernel output
+  - Passwordless SSH access on port 22
 
-For testing purposes, you can run the installer in QEMU using the provided scripts in the `qemu_scripts` directory:
-
-- `qemu_arch_install.sh` - Boot from ISO to install Arch with GUI
-- `qemu_arch_install_serial.sh` - Boot from ISO to install Arch with serial console
-- `qemu_arch_run.sh` - Boot from existing disk image with GUI
-- `qemu_arch_run_serial.sh` - Boot from existing disk image with serial console
+Both profiles automatically include the current archinstall_zfs source code at `/root/archinstall_zfs` during the build process, ensuring you always have the latest version available inside the ISO.
 
 ### Prerequisites
 
-1. Install QEMU and OVMF firmware:
-   - On Arch Linux: `pacman -S qemu-desktop edk2-ovmf`
-   - On Ubuntu/Debian: `apt install qemu-system-x86 ovmf`
-
-2. Download an Arch Linux ISO to `~/tmp_zfs/archiso.iso` (or pass as first argument)
-
-3. Create a disk image in the qemu_scripts directory: `qemu-img create -f qcow2 qemu_scripts/arch.qcow2 20G`
-
-4. Create UEFI variables file in the qemu_scripts directory:
-   ```bash
-   # On Arch Linux:
-   cp /usr/share/edk2-ovmf/x64/OVMF_VARS.4m.fd qemu_scripts/my_vars.fd
-   
-   # On Ubuntu/Debian:
-   cp /usr/share/OVMF/OVMF_VARS.fd qemu_scripts/my_vars.fd
-   ```
-
-### Understanding UEFI Files
-
-The QEMU scripts use UEFI boot mode, which requires two files:
-
-- **OVMF_CODE.4m.fd**: The UEFI firmware code (read-only)
-  - Contains the actual UEFI implementation
-  - Provided by the OVMF package at `/usr/share/edk2-ovmf/x64/OVMF_CODE.4m.fd`
-  - Used directly from the system installation
-
-- **my_vars.fd**: UEFI variables storage (read-write)
-  - Stores UEFI settings, boot entries, and secure boot keys
-  - Must be a writable copy of the OVMF_VARS template
-  - Created by copying from the system's OVMF_VARS file
-  - Gets modified during VM operation to persist UEFI settings
-
-### Usage
+To build the ISOs, you'll need to be running Arch Linux and have the following packages installed:
 
 ```bash
-# Navigate to qemu_scripts directory
-cd qemu_scripts
-
-# Make scripts executable
-chmod +x *.sh
-
-# Run installer with GUI
-./qemu_arch_install.sh
-
-# Run installer with serial console
-./qemu_arch_install_serial.sh
-
-# Run existing installation with GUI
-./qemu_arch_run.sh
-
-# Run existing installation with serial console
-./qemu_arch_run_serial.sh
+sudo pacman -S qemu-desktop edk2-ovmf archiso grub just rsync
 ```
 
-### Notes
+**Note on `grub`:** The `grub` package is required on the host system because `mkarchiso` may fail to create a bootable image without it.
 
-- SSH is forwarded to port 2222 on host (`ssh -p 2222 user@localhost`)
-- The scripts allocate 4GB RAM and 2 CPU cores to the VM
-- UEFI boot is enabled with secure boot support
+### Building the ISOs
+
+- **Build the main production ISO:**
+  ```bash
+  just build-main-iso
+  ```
+
+- **Build the testing ISO for development:**
+  ```bash
+  just build-testing-iso
+  ```
+
+The output ISOs will be placed in the `gen_iso/out` directory.
+
+### Testing with QEMU
+
+For development and testing, you should use the testing ISO which is optimized for automated workflows.
+
+#### Quick Start
+
+1.  **Set up the QEMU environment:**
+    ```bash
+    just qemu-setup
+    ```
+    This will create a disk image and UEFI variables file.
+
+2.  **Build the testing ISO:**
+    ```bash
+    just build-testing-iso
+    ```
+
+3.  **Install and run in QEMU:**
+    - **Recommended: Serial console mode** (headless, perfect for development):
+      ```bash
+      just qemu-install-serial
+      ```
+    - **GUI mode** (if you prefer a graphical interface):
+      ```bash
+      just qemu-install
+      ```
+
+4.  **Run an existing QEMU installation:**
+    - **Serial console:**
+      ```bash
+      just qemu-run-serial
+      ```
+    - **GUI:**
+      ```bash
+      just qemu-run
+      ```
+
+#### Testing ISO Features
+
+The testing profile provides a fully automated development experience:
+
+- **🚀 Instant Boot**: Boots immediately without waiting (0 timeout on all bootloaders)
+- **🔑 Auto-Login**: Automatically logs in as root - no username or password required
+- **📟 Serial Console**: Full kernel output and console access via serial port
+- **🌐 SSH Ready**: Passwordless SSH access on port 22
+
+#### Accessing the System
+
+Once booted, you have multiple ways to interact with the system:
+
+1. **Serial Console** (when using `-serial` commands):
+   - Direct console access in the terminal
+   - All kernel messages visible
+   - Auto-logged in as root
+
+2. **SSH Access** (available in both modes):
+   ```bash
+   ssh root@localhost -p 2222
+   ```
+   No password required - connects immediately.
+
+#### Development Workflow
+
+For rapid development cycles:
+
+```bash
+# Clean previous builds
+just clean-iso
+
+# Build new testing ISO
+just build-testing-iso
+
+# Test with serial console (recommended)
+just qemu-install-serial
+```
+
+The system will boot instantly and log you in automatically, ready for testing.
+
+#### Using archinstall_zfs Inside the ISO
+
+Both ISO profiles include the complete archinstall_zfs source code in `/root/archinstall_zfs`. The source is copied fresh from your working directory during each build using archiso's standard `airootfs` mechanism, ensuring it's always current. Once booted, you can:
+
+```bash
+# Install the package (recommended - one time setup)
+./install-archinstall-zfs.sh
+
+# Then run the installer
+python -m archinstall_zfs
+
+# Alternative: Run directly without installing
+python archinstall_zfs/main.py
+
+# Or examine the source code
+ls -la archinstall_zfs/
+```
+
+This follows archiso best practices as documented in the [Arch Wiki](https://wiki.archlinux.org/title/Archiso), where the `airootfs` directory serves as the starting point for the live system's root filesystem. The source is automatically prepared during each build using dedicated justfile recipes, ensuring it stays synchronized with your development work without creating static copies that could become outdated.
+
+### Available Commands
+
+Here's a quick reference of all available `just` commands:
+
+#### ISO Building
+```bash
+just build-main-iso      # Build production ISO (releng profile)
+just build-testing-iso   # Build testing ISO (baseline profile)
+just list-isos          # List available ISO files
+just clean-iso          # Clean ISO build artifacts
+```
+
+#### QEMU Setup and Testing
+```bash
+just qemu-setup         # Create disk image and UEFI vars
+just qemu-create-disk   # Create disk image only
+just qemu-setup-uefi    # Setup UEFI vars only
+just qemu-reset-uefi    # Reset UEFI vars to defaults
+
+# Installation (boots from ISO)
+just qemu-install       # Install with GUI
+just qemu-install-serial # Install with serial console
+
+# Run existing installation (boots from disk)
+just qemu-run           # Run with GUI
+just qemu-run-serial    # Run with serial console
+```
+
+#### Development
+```bash
+just format             # Format code with ruff
+just lint               # Lint and auto-fix with ruff
+just type-check         # Type check with mypy
+just test               # Run tests with pytest
+just all                # Run all quality checks
+just clean              # Clean up cache and build artifacts
+```
+
+### Advanced Usage
+
+The `gen_iso/run-qemu.sh` script is highly configurable via command-line options. You can run it directly for more advanced scenarios. Use `gen_iso/run-qemu.sh -h` to see all available options.
+
+### Configuration Details
+
+#### Network and SSH
+- SSH is forwarded to port 2222 on the host: `ssh root@localhost -p 2222`
+- No password required for root access (testing profile only)
+- Network configured with DHCP automatically
+
+#### Hardware Settings
+- Default VM: 4GB RAM, 2 CPU cores
+- Configurable via `justfile` variables or script parameters (`-m` for memory, `-p` for cores)
+- KVM acceleration enabled automatically
+
+#### Boot Configuration
+- **Testing Profile**: Instant boot, auto-login, serial console support
+- **Main Profile**: Standard timeout and login behavior
+- UEFI boot enabled by default (BIOS boot available with `-b` flag)
 
 ## Why Choose This Installer?
 

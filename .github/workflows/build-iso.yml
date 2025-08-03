@@ -1,0 +1,108 @@
+name: Build ISO
+
+on:
+  # Trigger on releases
+  release:
+    types: [published]
+  
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Profile to build (main_profile or testing_profile)'
+        required: true
+        default: 'main_profile'
+        type: choice
+        options:
+          - main_profile
+          - testing_profile
+      upload_artifact:
+        description: 'Upload ISO as artifact'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+      options: --privileged  # Required for archiso
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install system dependencies
+      run: |
+        pacman -Syu --noconfirm
+        pacman -S --noconfirm archiso git base-devel just
+
+    - name: Set profile for build
+      run: |
+        if [ "${{ github.event_name }}" = "release" ]; then
+          echo "PROFILE=main_profile" >> $GITHUB_ENV
+        else
+          echo "PROFILE=${{ github.event.inputs.profile || 'main_profile' }}" >> $GITHUB_ENV
+        fi
+
+    - name: Build ISO
+      run: |
+        if [ "$PROFILE" = "main_profile" ]; then
+          just build-main-iso
+        else
+          just build-testing-iso
+        fi
+
+    - name: Find and list built ISOs
+      run: |
+        echo "Built ISOs:"
+        ls -la gen_iso/out/
+        
+        # Find the ISO file (should be only one after build)
+        ISO_FILE=$(find gen_iso/out/ -name "*.iso" | head -1)
+        if [ -z "$ISO_FILE" ]; then
+          echo "Error: No ISO file found!"
+          exit 1
+        fi
+        
+        echo "ISO_FILE=$ISO_FILE" >> $GITHUB_ENV
+        echo "ISO_BASENAME=$(basename $ISO_FILE)" >> $GITHUB_ENV
+        echo "Found ISO: $ISO_FILE ($(du -h $ISO_FILE | cut -f1))"
+
+    - name: Upload ISO as artifact
+      if: github.event.inputs.upload_artifact != 'false'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ISO_BASENAME }}
+        path: ${{ env.ISO_FILE }}
+        retention-days: 30
+
+    - name: Generate checksums for release
+      if: github.event_name == 'release'
+      run: |
+        cd gen_iso/out
+        sha256sum *.iso > checksums.sha256
+        cat checksums.sha256
+
+    - name: Upload ISO to release
+      if: github.event_name == 'release'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ${{ env.ISO_FILE }}
+        asset_name: ${{ env.ISO_BASENAME }}
+        asset_content_type: application/octet-stream
+
+    - name: Upload checksums to release
+      if: github.event_name == 'release'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: gen_iso/out/checksums.sha256
+        asset_name: checksums.sha256
+        asset_content_type: text/plain

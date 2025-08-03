@@ -32,3 +32,6 @@ qemu_scripts/*.iso
 qemu_scripts/*.qcow2
 qemu_scripts/my_vars.fd
 
+*/*.iso
+*.iso
+out
