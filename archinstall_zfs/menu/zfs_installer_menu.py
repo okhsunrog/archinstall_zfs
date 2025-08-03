@@ -20,6 +20,7 @@ from archinstall.lib.interactions.general_conf import (
 from archinstall.lib.interactions.network_menu import ask_to_configure_network
 from archinstall.lib.locale.locale_menu import LocaleMenu
 from archinstall.lib.mirrors import MirrorMenu
+from archinstall.lib.models.locale import LocaleConfiguration
 from archinstall.lib.translationhandler import tr
 from archinstall.tui import EditMenu, MenuItem, MenuItemGroup, SelectMenu, Tui
 from archinstall.tui.result import ResultType
@@ -141,11 +142,14 @@ class ZFSInstallerMenu:
 
     # Standard archinstall configuration methods
     def _configure_locale(self) -> None:
-        locale_menu = LocaleMenu()
+        # Use existing locale config or create default
+        current_config = self.config.locale_config or LocaleConfiguration.default()
+        locale_menu = LocaleMenu(current_config)
         self.config.locale_config = locale_menu.run()
 
     def _configure_mirrors(self) -> None:
-        mirror_menu = MirrorMenu()
+        # Use existing mirror config if available
+        mirror_menu = MirrorMenu(self.config.mirror_config)
         self.config.mirror_config = mirror_menu.run()
 
     def _configure_network(self) -> None:
@@ -157,7 +161,8 @@ class ZFSInstallerMenu:
             self.config.hostname = hostname
 
     def _configure_authentication(self) -> None:
-        auth_menu = AuthenticationMenu()
+        # Use existing auth config if available
+        auth_menu = AuthenticationMenu(self.config.auth_config)
         self.config.auth_config = auth_menu.run()
 
     def _configure_timezone(self) -> None:
