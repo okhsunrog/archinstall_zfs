@@ -161,14 +161,7 @@ Both ISO profiles include the complete archinstall_zfs source code in `/root/arc
 ./installer
 
 # Option 2: Run the module directly
-export PYTHONPATH="/root:$PYTHONPATH"
 python -m archinstall_zfs
-
-# Option 3: Run the main script directly
-python archinstall_zfs/main.py
-
-# Examine the source code
-ls -la archinstall_zfs/
 ```
 
 This follows archiso best practices as documented in the [Arch Wiki](https://wiki.archlinux.org/title/Archiso), where the `airootfs` directory serves as the starting point for the live system's root filesystem. The source is automatically prepared during each build using dedicated justfile recipes, ensuring it stays synchronized with your development work without creating static copies that could become outdated.
