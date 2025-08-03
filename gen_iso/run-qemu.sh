@@ -141,7 +141,9 @@ run_image() {
     fi
 
     if [[ -n "${disk_image}" ]]; then
-        qemu_options+=('-drive' "file=${disk_image},format=qcow2,if=virtio")
+        # Add serial number to create stable /dev/disk/by-id path  
+        qemu_options+=('-drive' "file=${disk_image},format=qcow2,if=none,id=disk0")
+        qemu_options+=('-device' "virtio-blk-pci,drive=disk0,serial=archzfs-test-disk")
     fi
 
     if [[ -n "${oddimage}" ]]; then
