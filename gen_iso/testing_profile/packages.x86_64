@@ -6,3 +6,5 @@ openssh
 pv
 qemu-guest-agent
 syslinux
+arch-install-scripts
+archinstall

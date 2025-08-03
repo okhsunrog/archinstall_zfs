@@ -155,6 +155,12 @@ run_image() {
         display="none -nographic"
     fi
 
+    # Build serial options - only add -serial stdio when not using serial console mode
+    local serial_options=()
+    if [[ "${serial_console}" != "on" ]]; then
+        serial_options+=('-serial' 'stdio')
+    fi
+
     qemu-system-x86_64 \
         -enable-kvm \
         -cpu host \
@@ -168,7 +174,7 @@ run_image() {
         -net nic -net user,hostfwd=tcp::2222-:22 \
         -machine type=q35,smm=on,accel=kvm,usb=on,pcspk-audiodev=snd0 \
         -global ICH9-LPC.disable_s3=1 \
-        -serial stdio \
+        "${serial_options[@]}" \
         -no-reboot \
         "${qemu_options[@]}"
 }
