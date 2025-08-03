@@ -11,3 +11,8 @@ arch-install-scripts
 archinstall
 reflector
 gptfdisk
+python-pyparted
+gptfdisk
+parted
+dosfstools
+efibootmgr

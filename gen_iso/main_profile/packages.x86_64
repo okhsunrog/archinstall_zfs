@@ -126,3 +126,7 @@ xdg-utils
 xfsprogs
 xl2tpd
 zsh
+python-pyparted
+git
+curl
+neovim
