@@ -598,31 +598,55 @@ LocalFileSigLevel = Optional
         print("🔨 Running makepkg for zfs-linux-lts...")
         # Try with signature verification first, fallback to --skippgpcheck if needed
         makepkg_cmd = ["/usr/bin/makepkg", "-s", "--noconfirm", "--log"]
+        # Stream output for better real-time visibility; don't capture to buffers
         result = self.run_command(
             makepkg_cmd,
             check=False,
-            capture=True,
+            capture=False,
             cwd=build_dir,
             env=env,
         )
 
-        # If signature verification failed, retry with --skippgpcheck
-        if result.returncode != 0 and "PGP signatures could not be verified" in (result.stdout + result.stderr):
-            print("⚠️ PGP verification failed, retrying with --skippgpcheck...")
-            makepkg_cmd.append("--skippgpcheck")
-            result = self.run_command(
-                makepkg_cmd,
-                check=False,
-                capture=True,
-                cwd=build_dir,
-                env=env,
-            )
-        if result.returncode != 0:
-            print("📋 STDOUT:")
-            print(result.stdout)
-            print("📋 STDERR:")
-            print(result.stderr)
-            raise ZFSLinuxLTSBuildError(f"makepkg failed for zfs-linux-lts (exit {result.returncode})")
+        # If the first run failed, inspect logs and retry with --skippgpcheck on PGP errors
+        # When capture=False, CompletedProcess may not carry stdout/stderr; rely on logs and returncode
+        if getattr(result, "returncode", 0) != 0:
+            # Attempt to detect PGP verification failures by scanning recent makepkg logs
+            pgp_failure = False
+            try:
+                for log_file in sorted(build_dir.glob("*.log")):
+                    content = log_file.read_text()[-4000:]
+                    if "PGP signatures could not be verified" in content or "One or more PGP signatures could not be verified" in content:
+                        pgp_failure = True
+                        break
+            except Exception:
+                pass
+
+            if pgp_failure:
+                print("⚠️ PGP verification failed, retrying with --skippgpcheck...")
+                makepkg_cmd.append("--skippgpcheck")
+                result = self.run_command(
+                    makepkg_cmd,
+                    check=False,
+                    capture=False,
+                    cwd=build_dir,
+                    env=env,
+                )
+
+        if getattr(result, "returncode", 0) != 0:
+            # Print tail of any makepkg logs to provide context
+            try:
+                for log_file in sorted(build_dir.glob("*.log")):
+                    print(f"📋 {log_file.name} (tail):")
+                    tail = log_file.read_text()[-4000:]
+                    print(tail)
+            except Exception as e:
+                print(f"⚠️ Failed to read makepkg logs: {e}")
+
+            # Clarify common termination scenario
+            rc = getattr(result, "returncode", -1)
+            if rc in (-10, -15):
+                raise ZFSLinuxLTSBuildError("makepkg terminated by SIGTERM (likely timeout or resource exhaustion) for zfs-linux-lts")
+            raise ZFSLinuxLTSBuildError(f"makepkg failed for zfs-linux-lts (exit {rc})")
 
         for pkg_file in build_dir.glob("*.pkg.tar.*"):
             pkg_file.rename(self.local_repo_dir / pkg_file.name)

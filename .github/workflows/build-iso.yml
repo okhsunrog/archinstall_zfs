@@ -32,9 +32,10 @@ jobs:
   prepare-zfs-packages:
     name: Prepare ZFS packages
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     container:
       image: archlinux:latest
-      options: --privileged
+      options: --privileged --cpus=1 --memory=8g
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -91,9 +92,10 @@ jobs:
 
   build-iso:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     container:
       image: archlinux:latest
-      options: --privileged  # Required for archiso
+      options: --privileged --cpus=1 --memory=8g  # Single core, 8GB RAM; still privileged for archiso
 
     steps:
     - name: Checkout repository
