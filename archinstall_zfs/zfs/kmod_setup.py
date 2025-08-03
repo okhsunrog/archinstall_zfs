@@ -78,7 +78,7 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) ->
     key_sign = f"pacman-key --lsign-key {key_id}"
 
     # Try multiple keyservers for better reliability
-    keyservers = ["hkps://keys.openpgp.org", "hkps://keyserver.ubuntu.com", "hkps://pgp.mit.edu", "hkps://pool.sks-keyservers.net"]
+    keyservers = ["hkps://keyserver.ubuntu.com", "hkps://pgp.mit.edu", "hkps://pool.sks-keyservers.net", "hkps://keys.openpgp.org"]
 
     key_received = False
     for keyserver in keyservers:
