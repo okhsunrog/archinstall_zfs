@@ -30,12 +30,14 @@ There are two ISO profiles available:
   - Serial console support with kernel output
   - Passwordless SSH access on port 22
 
+Both profiles automatically include the current archinstall_zfs source code at `/root/archinstall_zfs` during the build process, ensuring you always have the latest version available inside the ISO.
+
 ### Prerequisites
 
 To build the ISOs, you'll need to be running Arch Linux and have the following packages installed:
 
 ```bash
-sudo pacman -S qemu-desktop edk2-ovmf archiso grub just
+sudo pacman -S qemu-desktop edk2-ovmf archiso grub just rsync
 ```
 
 **Note on `grub`:** The `grub` package is required on the host system because `mkarchiso` may fail to create a bootable image without it.
@@ -131,6 +133,26 @@ just qemu-install-serial
 ```
 
 The system will boot instantly and log you in automatically, ready for testing.
+
+#### Using archinstall_zfs Inside the ISO
+
+Both ISO profiles include the complete archinstall_zfs source code in `/root/archinstall_zfs`. The source is copied fresh from your working directory during each build using archiso's standard `airootfs` mechanism, ensuring it's always current. Once booted, you can:
+
+```bash
+# Install the package (recommended - one time setup)
+./install-archinstall-zfs.sh
+
+# Then run the installer
+python -m archinstall_zfs
+
+# Alternative: Run directly without installing
+python archinstall_zfs/main.py
+
+# Or examine the source code
+ls -la archinstall_zfs/
+```
+
+This follows archiso best practices as documented in the [Arch Wiki](https://wiki.archlinux.org/title/Archiso), where the `airootfs` directory serves as the starting point for the live system's root filesystem. The source is automatically prepared during each build using dedicated justfile recipes, ensuring it stays synchronized with your development work without creating static copies that could become outdated.
 
 ### Available Commands
 

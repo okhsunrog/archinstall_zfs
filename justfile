@@ -49,6 +49,8 @@ clean:
 clean-iso:
     sudo rm -rf {{ISO_OUT_DIR}}
     sudo rm -rf {{ISO_WORK_DIR}}
+    @just _cleanup-source {{MAIN_PROFILE_DIR}}
+    @just _cleanup-source {{TESTING_PROFILE_DIR}}
 
 # Install development dependencies
 install-dev:
@@ -81,15 +83,38 @@ ci-check: check test
 
 # ISO and QEMU Recipes
 
+# Prepare source code for inclusion in ISO
+_prepare-source PROFILE_DIR:
+    @echo "Preparing archinstall_zfs source code for {{PROFILE_DIR}}..."
+    @mkdir -p {{PROFILE_DIR}}/airootfs/root
+    @rsync -a --exclude='.git' --exclude='__pycache__' --exclude='.pytest_cache' \
+        --exclude='.mypy_cache' --exclude='.ruff_cache' --exclude='build' \
+        --exclude='dist' --exclude='*.egg-info' --exclude='gen_iso' \
+        --exclude='tests' archinstall_zfs/ {{PROFILE_DIR}}/airootfs/root/archinstall_zfs/
+    @cp pyproject.toml README.md LICENSE {{PROFILE_DIR}}/airootfs/root/archinstall_zfs/
+    @echo '#!/bin/bash' > {{PROFILE_DIR}}/airootfs/root/install-archinstall-zfs.sh
+    @echo 'cd /root/archinstall_zfs && pip install -e .' >> {{PROFILE_DIR}}/airootfs/root/install-archinstall-zfs.sh
+    @chmod +x {{PROFILE_DIR}}/airootfs/root/install-archinstall-zfs.sh
+
+# Clean up source code copy
+_cleanup-source PROFILE_DIR:
+    @echo "Cleaning up source code copy from {{PROFILE_DIR}}..."
+    @rm -rf {{PROFILE_DIR}}/airootfs/root/archinstall_zfs
+    @rm -f {{PROFILE_DIR}}/airootfs/root/install-archinstall-zfs.sh
+
 # Build the main ISO for production release
 build-main-iso:
+    @just _prepare-source {{MAIN_PROFILE_DIR}}
     @echo "Building main ISO from 'releng' profile..."
     sudo mkarchiso -v -r -w {{ISO_WORK_DIR}} -o {{ISO_OUT_DIR}} {{MAIN_PROFILE_DIR}}
+    @just _cleanup-source {{MAIN_PROFILE_DIR}}
 
 # Build the testing ISO for QEMU
 build-testing-iso:
+    @just _prepare-source {{TESTING_PROFILE_DIR}}
     @echo "Building testing ISO from 'baseline' profile..."
     sudo mkarchiso -v -r -w {{ISO_WORK_DIR}} -o {{ISO_OUT_DIR}} {{TESTING_PROFILE_DIR}}
+    @just _cleanup-source {{TESTING_PROFILE_DIR}}
 
 # List available ISO files
 list-isos:
