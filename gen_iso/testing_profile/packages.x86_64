@@ -5,6 +5,7 @@ mkinitcpio-archiso
 openssh
 pv
 qemu-guest-agent
+rsync
 syslinux
 arch-install-scripts
 archinstall

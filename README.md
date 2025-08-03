@@ -126,8 +126,19 @@ Once booted, you have multiple ways to interact with the system:
 
 #### Development Workflow
 
-For rapid development cycles:
+**Fast Development Cycles (Recommended):**
+```bash
+# Initial setup (once)
+just qemu-setup
+just build-testing-iso
+just qemu-install-serial
 
+# For each code change:
+just ssh                # Syncs your changes and connects
+./installer             # Test updated code immediately
+```
+
+**Full Rebuild (when needed):**
 ```bash
 # Clean previous builds
 just clean-iso
@@ -135,11 +146,11 @@ just clean-iso
 # Build new testing ISO
 just build-testing-iso
 
-# Test with serial console (recommended)
+# Test with serial console
 just qemu-install-serial
 ```
 
-The system will boot instantly and log you in automatically, ready for testing.
+The `just ssh` command automatically syncs your latest source code changes to the running VM, eliminating the need to rebuild the ISO for every change. This provides near-instant testing of code modifications.
 
 #### Using archinstall_zfs Inside the ISO
 
@@ -190,7 +201,8 @@ just qemu-run           # Run with GUI
 just qemu-run-serial    # Run with serial console
 
 # SSH into running VM
-just ssh                # Connect via SSH
+just ssh                # Sync source code and connect via SSH
+just ssh-only           # Connect via SSH without syncing
 ```
 
 #### Development

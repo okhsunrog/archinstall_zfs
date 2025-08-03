@@ -178,6 +178,29 @@ qemu-run-serial:
     @if [ ! -f {{DISK_IMAGE}} ]; then echo "Disk image not found. Run 'just qemu-install' first."; exit 1; fi
     {{QEMU_SCRIPT}} -D {{DISK_IMAGE}} -U {{UEFI_VARS}} -S
 
-# SSH into running QEMU VM
+# Sync source code and SSH into running QEMU VM
 ssh:
+    @echo "Syncing archinstall_zfs source code to VM..."
+    @if rsync -av --delete -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222" \
+        --exclude='.git' --exclude='__pycache__' --exclude='.pytest_cache' \
+        --exclude='.mypy_cache' --exclude='.ruff_cache' --exclude='build' \
+        --exclude='dist' --exclude='*.egg-info' --exclude='gen_iso' \
+        --exclude='tests' archinstall_zfs/ root@localhost:/root/archinstall_zfs/ 2>/dev/null; then \
+        echo "Source code synced with rsync!"; \
+    else \
+        echo "rsync not available in VM, using scp fallback..."; \
+        just ssh-scp; \
+    fi
+    @echo "Connecting to VM..."
+    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost -p 2222
+
+# Sync source code using scp (fallback when rsync not available)
+ssh-scp:
+    @echo "Syncing source code using scp..."
+    @ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost -p 2222 "rm -rf /root/archinstall_zfs_new"
+    scp -r -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P 2222 archinstall_zfs root@localhost:/root/archinstall_zfs_new
+    @ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost -p 2222 "rm -rf /root/archinstall_zfs && mv /root/archinstall_zfs_new /root/archinstall_zfs"
+
+# SSH into running QEMU VM without syncing source code
+ssh-only:
     ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost -p 2222
