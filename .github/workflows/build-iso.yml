@@ -36,7 +36,7 @@ jobs:
     - name: Install system dependencies
       run: |
         pacman -Syu --noconfirm
-        pacman -S --noconfirm archiso git base-devel just
+        pacman -S --noconfirm archiso git base-devel just rsync
 
     - name: Set profile for build
       run: |
