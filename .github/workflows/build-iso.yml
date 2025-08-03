@@ -1,10 +1,15 @@
-name: Build ISO
+name: Build ISO and Prepare ZFS
 
 on:
   # Trigger on releases
   release:
     types: [published]
-  
+
+  # Run prepare job on every push to surface regressions quickly
+  push:
+    branches:
+      - '**'
+
   # Allow manual triggering
   workflow_dispatch:
     inputs:
@@ -23,6 +28,67 @@ on:
         type: boolean
 
 jobs:
+  # Minimal, fast inner-loop job to exercise only the ZFS package preparation.
+  prepare-zfs-packages:
+    name: Prepare ZFS packages
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+      options: --privileged
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies (prepare-only)
+        run: |
+          set -euxo pipefail
+          pacman -Syu --noconfirm
+          # Core build and tooling set for makepkg/AUR
+          pacman -S --noconfirm git just rsync python base-devel fakeroot binutils gcc make cmake pkgconf curl
+          # For pacman keyring and signature checks
+          pacman -S --noconfirm archlinux-keyring gnupg
+          pacman-key --init
+          pacman-key --populate archlinux
+          # Create unprivileged builder (makepkg must not run as root)
+          useradd -m builder || true
+          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+          chown -R builder:builder .
+
+      - name: Run prepare step with verbose logging
+        env:
+          # Enable extra verbosity in our script if supported
+          ZFS_BUILDER_DEBUG: "1"
+        run: |
+          set -euxo pipefail
+          sudo -u builder -E just prepare-zfs-packages
+
+      - name: Collect makepkg/build logs
+        if: always()
+        run: |
+          set -euxo pipefail
+          mkdir -p artifacts
+          # Common locations for AUR build logs
+          find . -maxdepth 5 -type f -name "makepkg*.log" -print -exec cp -v {} artifacts/ \; || true
+          find . -maxdepth 6 -type f -name "*.log" -path "*/zfs*" -print -exec cp -v {} artifacts/ \; || true
+          # Optional: capture our script-specific logs if any
+          if [ -d gen_iso/logs ]; then cp -vr gen_iso/logs artifacts/ || true; fi
+          # Capture environment summaries for diagnostics
+          echo "== pacman -Q ==" > artifacts/env.txt
+          pacman -Q >> artifacts/env.txt || true
+          {
+            echo; echo "== uname -a =="; uname -a
+            echo; echo "== id =="; id
+            echo; echo "== env =="; env | sort
+          } >> artifacts/env.txt
+
+      - name: Upload prepare artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prepare-zfs-artifacts
+          path: artifacts
+          retention-days: 7
+
   build-iso:
     runs-on: ubuntu-latest
     container:
@@ -37,7 +103,10 @@ jobs:
       run: |
         pacman -Syu --noconfirm
         # Install toolchain required by makepkg and AUR builds
-        pacman -S --noconfirm archiso git just rsync python base-devel fakeroot binutils gcc make cmake pkgconf
+        pacman -S --noconfirm archiso git just rsync python base-devel fakeroot binutils gcc make cmake pkgconf archlinux-keyring gnupg
+        # Initialize keyring for signed sources and pacman sync
+        pacman-key --init
+        pacman-key --populate archlinux
         # Ensure non-root makepkg works by creating a build user (recommended practice on Arch)
         useradd -m builder || true
         echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers

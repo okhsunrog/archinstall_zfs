@@ -342,16 +342,64 @@ LocalFileSigLevel = Optional
 
             # If using archive combination, sync deps with the same temporary config
             if combination.get("source") == "archive_combination":
+                print(f"🔍 Debug: Using archive combination with URL: {combination.get('archive_url')}")
                 conf = self._generate_temp_pacman_conf(combination.get("archive_url"), include_local_repo=False)
+                print(f"🔍 Debug: Generated temp config at: {conf}")
+
                 try:
+                    print("🔄 Syncing package databases with archive config...")
                     self._pacman_with_config(["-Sy"], conf)
-                except subprocess.CalledProcessError:
-                    print("❌ Failed to sync dependencies for makepkg with temporary archive config")
+
+                    # Show what linux-lts packages are available with this config
+                    print("🔍 Debug: Available linux-lts packages with archive config:")
+                    try:
+                        result = self._pacman_with_config(["-Ss", "linux-lts"], conf)
+                        for line in result.stdout.split("\n")[:5]:  # Show first 5 lines
+                            if line.strip():
+                                print(f"    {line}")
+                    except Exception as e:
+                        print(f"    Error listing packages: {e}")
+
+                except subprocess.CalledProcessError as e:
+                    print(f"❌ Failed to sync dependencies for makepkg with temporary archive config: {e}")
                     return False
 
             # Build package
             print("🔨 Building ZFS package...")
+
+            # Debug: Show environment info
+            print("🔍 Debug: Build environment info:")
+            try:
+                # Show current user
+                user_info = __import__("pwd").getpwuid(__import__("os").getuid())
+                print(f"  User: {user_info.pw_name} (UID: {__import__('os').getuid()})")
+            except Exception as e:
+                print(f"  User info error: {e}")
+
+            # Show available kernel packages
+            print("  Available kernel packages:")
+            try:
+                result = self.run_command(["pacman", "-Ss", "linux-lts"], check=False, capture=True)
+                for line in result.stdout.split("\n")[:10]:  # Show first 10 lines
+                    if line.strip():
+                        print(f"    {line}")
+            except Exception as e:
+                print(f"    Error listing kernel packages: {e}")
+
+            # Show PKGBUILD content for debugging
+            pkgbuild_path = build_dir / "PKGBUILD"
+            if pkgbuild_path.exists():
+                print("  PKGBUILD key variables:")
+                try:
+                    content = pkgbuild_path.read_text()
+                    for line in content.split("\n"):
+                        if any(var in line for var in ["_zfsver=", "_kernelver=", "pkgver=", "pkgrel="]):
+                            print(f"    {line.strip()}")
+                except Exception as e:
+                    print(f"    Error reading PKGBUILD: {e}")
+
             # Ensure keyring and typical build deps exist at build time (in case they weren't present)
+            print("🔧 Installing build dependencies...")
             with suppress(Exception):
                 # nosec: base system package installation for build tooling
                 self.run_command(
@@ -375,7 +423,42 @@ LocalFileSigLevel = Optional
                     check=True,
                     capture=False,
                 )
-            subprocess.run(["makepkg", "-s", "--noconfirm"], cwd=build_dir, check=True)  # noqa: S607
+
+            # Initialize GPG keyring for makepkg
+            print("🔑 Initializing GPG keyring...")
+            with suppress(Exception):
+                self.run_command(["gpg", "--list-keys"], check=False, capture=True)
+
+            # Run makepkg with verbose output and capture both stdout and stderr
+            print("🔨 Running makepkg...")
+            try:
+                result = subprocess.run(["makepkg", "-s", "--noconfirm", "--log"], cwd=build_dir, capture_output=True, text=True, check=False)  # noqa: S607
+
+                if result.returncode != 0:
+                    print(f"❌ makepkg failed with exit code {result.returncode}")
+                    print("📋 STDOUT:")
+                    print(result.stdout)
+                    print("📋 STDERR:")
+                    print(result.stderr)
+
+                    # Check for common error patterns
+                    combined_output = result.stdout + result.stderr
+                    if "==> ERROR: One or more PGP signatures could not be verified" in combined_output:
+                        print("🔍 Detected: PGP signature verification failure")
+                    elif "==> ERROR: Failure while downloading" in combined_output:
+                        print("🔍 Detected: Download failure")
+                    elif "make: *** No targets specified" in combined_output:
+                        print("🔍 Detected: Build system issue")
+                    elif "fatal error:" in combined_output and ".h: No such file" in combined_output:
+                        print("🔍 Detected: Missing header files")
+
+                    return False
+
+                print("✅ makepkg completed successfully")
+
+            except Exception as e:
+                print(f"❌ Exception during makepkg: {e}")
+                return False
 
             # Move built packages to local repo
             for pkg_file in build_dir.glob("*.pkg.tar.*"):
@@ -523,10 +606,27 @@ Server = file://{self.local_repo_dir}
 
             # Ensure exact linux-lts and linux-lts-headers matching versions are installed
             linux_version = str(combination.get("linux_version"))
+            print(f"🔍 Debug: Installing exact kernel version: {linux_version}")
             try:
+                print(f"📦 Installing linux-lts={linux_version} and linux-lts-headers={linux_version}")
                 self._pacman_install_with_config([f"linux-lts={linux_version}", f"linux-lts-headers={linux_version}"], temp_conf)
+
+                # Verify installation
+                print("🔍 Debug: Verifying installed kernel packages:")
+                try:
+                    result = self.run_command(["pacman", "-Q", "linux-lts", "linux-lts-headers"], check=False, capture=True)
+                    if result.returncode == 0:
+                        for line in result.stdout.split("\n"):
+                            if line.strip():
+                                print(f"    {line}")
+                    else:
+                        print("    Failed to query installed packages")
+                except Exception as e:
+                    print(f"    Error querying packages: {e}")
+
             except subprocess.CalledProcessError as e:
                 print(f"❌ Failed to install matching linux-lts packages {linux_version}: {e}")
+                print("🔍 Debug: This might indicate the archive repository doesn't have the expected packages")
                 return 1
 
         # Build packages if needed
