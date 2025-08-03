@@ -4,10 +4,11 @@ import os
 import socket
 import sys
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import archinstall
 from archinstall import SysInfo, debug, error, info
+from archinstall.lib.args import ArchConfig, Arguments
 from archinstall.lib.configuration import ConfigurationOutput
 from archinstall.lib.exceptions import SysCallError
 from archinstall.lib.general import SysCommand
@@ -20,7 +21,7 @@ from archinstall.tui.menu_item import MenuItem
 from archinstall_zfs.disk import DiskManager, DiskManagerBuilder
 from archinstall_zfs.initramfs.dracut import DracutSetup
 from archinstall_zfs.installer import ZFSInstaller
-from archinstall_zfs.menu.installer import InstallerMenu
+from archinstall_zfs.menu.zfs_installer_menu import ZFSInstallerMenu
 from archinstall_zfs.zfs import ZFS_SERVICES, ZFSManager, ZFSManagerBuilder
 from archinstall_zfs.zfs.kmod_setup import add_archzfs_repo, initialize_zfs
 
@@ -83,7 +84,34 @@ def prepare_installation() -> tuple[ZFSManager, DiskManager]:
 def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> bool:
     try:
         mountpoint = zfs_manager.config.mountpoint
-        archinstall.arguments["disk_config"] = DiskLayoutConfiguration(DiskLayoutType.Pre_mount, mountpoint=mountpoint)
+
+        # Create configuration for archinstall 3.0.9 compatibility
+        config_dict = {
+            "disk_config": DiskLayoutConfiguration(DiskLayoutType.Pre_mount, mountpoint=mountpoint).json(),
+            "hostname": "archzfs",
+            "locale_config": {},
+            "mirror_config": {},
+            "network_config": {},
+            "profile_config": {},
+            "auth_config": {},
+            "app_config": {},
+            "packages": [],
+            "timezone": "UTC",
+            "ntp": True,
+            "kernels": ["linux-lts"],
+            "bootloader": "Systemd-boot",
+            "swap": False,
+        }
+
+        # Create Arguments object for ArchConfig
+        args = Arguments(
+            mountpoint=mountpoint,
+            silent=False,
+            dry_run=False,
+        )
+
+        # Create ArchConfig object using from_config method
+        arch_config = ArchConfig.from_config(config_dict, args)
 
         # ZFS setup
         zfs_manager.setup_for_installation()
@@ -94,16 +122,16 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
         # Adding dracut configuration
         dracut = DracutSetup(str(mountpoint), encryption_enabled=bool(zfs_manager.encryption_handler.password))
         dracut.configure()
-        ask_user_questions()
+        zfs_config = ask_user_questions(arch_config)
 
-        config = ConfigurationOutput(archinstall.arguments)
+        config = ConfigurationOutput(arch_config.safe_json())
         config.write_debug()
         config.save()
 
-        if archinstall.arguments.get("dry_run"):
+        if args.dry_run:
             sys.exit(0)
 
-        if not archinstall.arguments.get("silent"):
+        if not args.silent:
             with Tui():
                 if not config.confirm_config():
                     debug("Installation aborted")
@@ -121,23 +149,23 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
         ]
 
         # ZFSInstaller will use its own default base packages optimized for ZFS
-        with ZFSInstaller(mountpoint, disk_config=archinstall.arguments["disk_config"]) as installation:
+        with ZFSInstaller(mountpoint, disk_config=arch_config.disk_config) as installation:
             installation.sanity_check()
             # No more dirty hack needed - ZFSInstaller handles base packages properly
 
-            if mirror_config := archinstall.arguments.get("mirror_config", None):
-                installation.set_mirrors(mirror_config, on_target=False)
+            if arch_config.mirror_config:
+                installation.set_mirrors(arch_config.mirror_config, on_target=False)
 
             installation.minimal_installation(
                 testing=False,
                 multilib=True,
                 mkinitcpio=False,
-                hostname=archinstall.arguments.get("hostname", "archzfs"),
-                locale_config=archinstall.arguments["locale_config"],
+                hostname=arch_config.hostname,
+                locale_config=arch_config.locale_config,
             )
 
-            if mirror_config := archinstall.arguments.get("mirror_config", None):
-                installation.set_mirrors(mirror_config, on_target=True)
+            if arch_config.mirror_config:
+                installation.set_mirrors(arch_config.mirror_config, on_target=True)
 
             add_archzfs_repo(installation.target, installation)
 
@@ -145,40 +173,36 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
 
             # If user selected to copy the current ISO network configuration
             # Perform a copy of the config
-            network_config: NetworkConfiguration | None = archinstall.arguments.get("network_config", None)
+            if arch_config.network_config:
+                arch_config.network_config.install_network_config(installation, arch_config.profile_config)
 
-            if network_config:
-                network_config.install_network_config(installation, archinstall.arguments.get("profile_config", None))
+            if arch_config.auth_config and arch_config.auth_config.users:
+                installation.create_users(arch_config.auth_config.users)
 
-            if users := archinstall.arguments.get("!users", None):
-                installation.create_users(users)
-
-            audio_config: AudioConfiguration | None = archinstall.arguments.get("audio_config", None)
-            if audio_config:
-                audio_config.install_audio_config(installation)
+            if arch_config.app_config:
+                arch_config.app_config.install_audio_config(installation)
             else:
                 info("No audio server will be installed")
 
-            profile_config = archinstall.arguments.get("profile_config", None)
-            if profile_config and hasattr(profile_config, "profile") and hasattr(profile_config.profile, "post_install"):
+            if arch_config.profile_config and hasattr(arch_config.profile_config, "profile") and hasattr(arch_config.profile_config.profile, "post_install"):
                 # In archinstall 3.0.9, profile installation is handled differently
                 # The profile should have a post_install method that we can call
-                profile_config.profile.post_install(installation)
+                arch_config.profile_config.profile.post_install(installation)
 
-            if packages := archinstall.arguments.get("packages", []):
-                installation.add_additional_packages(packages)
+            if arch_config.packages:
+                installation.add_additional_packages(arch_config.packages)
 
-            if timezone := archinstall.arguments.get("timezone", None):
-                installation.set_timezone(timezone)
+            if arch_config.timezone:
+                installation.set_timezone(arch_config.timezone)
 
-            if archinstall.arguments.get("ntp", False):
+            if arch_config.ntp:
                 installation.activate_time_synchronization()
 
             if archinstall.accessibility_tools_in_use():
                 installation.enable_espeakup()
 
-            if (root_pw := archinstall.arguments.get("!root-password", None)) and len(root_pw):
-                installation.user_set_pw("root", root_pw)
+            if arch_config.auth_config and arch_config.auth_config.root_enc_password:
+                installation.user_set_pw("root", arch_config.auth_config.root_enc_password.plaintext)
 
             installation.enable_service(ZFS_SERVICES)
 
@@ -192,7 +216,7 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
 
             info("For post-installation tips, see https://wiki.archlinux.org/index.php/Installation_guide#Post-installation")
 
-            if not archinstall.arguments.get("silent"):
+            if not args.silent:
                 # Simple replacement for ask_chroot functionality
 
                 with Tui():
@@ -214,10 +238,11 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
         return False
 
 
-def ask_user_questions() -> None:
-    with Tui():
-        installer_menu = InstallerMenu(data_store=archinstall.arguments)
-        installer_menu.run()
+def ask_user_questions(arch_config: ArchConfig) -> dict[str, Any]:
+    """Ask user questions and return ZFS-specific configuration."""
+    installer_menu = ZFSInstallerMenu(arch_config)
+    installer_menu.run()
+    return installer_menu.get_zfs_config()
 
 
 def check_zfs_module() -> bool:
