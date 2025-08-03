@@ -3,7 +3,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, cast
 
-from archinstall import debug, error, info
+from archinstall import debug, error, info, warn
 from archinstall.lib.exceptions import SysCallError
 from archinstall.lib.general import SysCommand
 
@@ -152,6 +152,56 @@ class ZFSInitializer:
         info("Increasing cowspace to half of RAM")
         SysCommand("mount -o remount,size=50% /run/archiso/cowspace")
 
+    def _setup_archive_repository(self) -> None:
+        """Setup Archlinux Archive repository matching archiso version for DKMS consistency."""
+        info("Setting up Archlinux Archive repository for DKMS")
+
+        try:
+            # Get archiso version from /version file
+            version_file = Path("/version")
+            if version_file.exists():
+                archiso_version = version_file.read_text().strip()
+                debug(f"Detected archiso version: {archiso_version}")
+
+                # Skip archive setup for testing/development builds
+                if archiso_version in ["testing", "latest", "git", "devel"]:
+                    info(f"Detected {archiso_version} build, skipping archive setup")
+                    SysCommand("pacman -Sy --noconfirm", peek_output=True)
+                    return
+
+                # Convert dots to slashes (e.g., "2024.01.01" -> "2024/01/01")
+                archive_date = archiso_version.replace(".", "/")
+
+                # Workaround for specific date (from bash script)
+                if archive_date == "2022/02/01":
+                    archive_date = "2022/02/02"
+
+                archive_url = f"https://archive.archlinux.org/repos/{archive_date}/"
+                debug(f"Testing archive URL: {archive_url}")
+
+                # Test if archive exists
+                test_result = SysCommand(f"curl -s --head {archive_url}")
+                if "200 OK" in test_result.decode():
+                    info(f"Using Archlinux Archive for date: {archive_date}")
+
+                    # Update mirrorlist to use archive
+                    mirrorlist_content = f"Server={archive_url}$repo/os/$arch\n"
+                    Path("/etc/pacman.d/mirrorlist").write_text(mirrorlist_content)
+
+                    # Now safely upgrade to archive versions
+                    SysCommand("pacman -Syyuu --noconfirm", peek_output=True)
+                    info("Successfully upgraded to archive repository versions")
+                else:
+                    warn(f"Archive repository for {archive_date} not accessible, using current repos")
+                    SysCommand("pacman -Sy --noconfirm", peek_output=True)
+            else:
+                warn("Could not find /version file, using current repos")
+                SysCommand("pacman -Sy --noconfirm", peek_output=True)
+
+        except Exception as e:
+            warn(f"Failed to setup archive repository: {e}, using current repos")
+            SysCommand("pacman -Sy --noconfirm", peek_output=True)
+
     def extract_pkginfo(self, package_path: Path) -> str:
         pkginfo = SysCommand(f"bsdtar -qxO -f {package_path} .PKGINFO").decode()
         match = re.search(r"depend = zfs-utils=(.*)", pkginfo)
@@ -182,8 +232,8 @@ class ZFSInitializer:
 
         info("Falling back to DKMS method")
         try:
-            # Only sync package databases, do NOT upgrade system on live ISO
-            SysCommand("pacman -Sy --noconfirm", peek_output=True)
+            # Set up Archlinux Archive repository to match archiso version
+            self._setup_archive_repository()
             SysCommand("pacman -S --noconfirm --needed base-devel linux-headers git", peek_output=True)
 
             # Disable mkinitcpio hooks during DKMS installation on live system

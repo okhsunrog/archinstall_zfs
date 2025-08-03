@@ -1,5 +1,6 @@
 base
 linux
+linux-headers
 mkinitcpio
 mkinitcpio-archiso
 openssh
