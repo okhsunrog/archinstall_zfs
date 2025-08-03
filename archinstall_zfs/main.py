@@ -251,6 +251,15 @@ def main() -> bool:
         error("EFI boot mode required")
         return False
 
+    # Initialize pacman keyring on live system before adding archzfs repo
+    try:
+        info("Initializing pacman keyring")
+        SysCommand("pacman-key --init")
+        SysCommand("pacman-key --populate archlinux")
+    except SysCallError as e:
+        error(f"Failed to initialize pacman keyring: {e}")
+        return False
+
     initialize_zfs()
 
     try:
