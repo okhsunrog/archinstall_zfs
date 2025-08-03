@@ -16,6 +16,7 @@ import subprocess
 import sys
 import urllib.parse
 import urllib.request
+from contextlib import suppress
 from pathlib import Path
 
 
@@ -33,6 +34,39 @@ class ZFSPackageBuilder:
             return subprocess.run(cmd, check=check, capture_output=True, text=True)  # noqa: S603
         # Ruff S603: Commands are constructed from static strings in controlled contexts
         return subprocess.run(cmd, check=check)  # noqa: S603
+
+    def _sudo_prefix(self) -> list[str]:
+        """Return ['sudo'] if not running as root, else empty list."""
+        try:
+            # Use /proc/self/status to infer root privileges without importing os for lint compliance
+            # Fallback: assume sudo available when not root
+            with open("/proc/self/status") as f:
+                for line in f:
+                    if line.startswith("Uid:"):
+                        # Format: Uid:    real    effective ...
+                        parts = line.split()
+                        REAL_UID_INDEX = 1
+                        if len(parts) >= REAL_UID_INDEX + 1 and parts[REAL_UID_INDEX] == "0":
+                            return []
+                        break
+            return ["sudo"]
+        except Exception:
+            return ["sudo"]
+
+    def _pacman_with_config(self, args: list[str], conf_path: Path) -> subprocess.CompletedProcess:
+        """
+        Run pacman with a specific --config file. Does not modify system configuration.
+        """
+        cmd = ["pacman", "--config", str(conf_path), *args]
+        return self.run_command(cmd, check=True, capture=True)
+
+    def _pacman_install_with_config(self, packages: list[str], conf_path: Path) -> None:
+        """
+        Install packages using the temporary config, with sudo if needed.
+        """
+        cmd = [*self._sudo_prefix(), "pacman", "--config", str(conf_path), "-S", "--noconfirm", *packages]
+        # Use capture=False to stream output
+        self.run_command(cmd, check=True, capture=False)
 
     def get_archzfs_version(self) -> str | None:
         """Get the current zfs-linux-lts version from archzfs repository."""
@@ -284,12 +318,7 @@ LocalFileSigLevel = Optional
         conf_path.write_text(conf_content)
         return conf_path
 
-    def _pacman_with_config(self, args: list[str], conf_path: Path) -> subprocess.CompletedProcess:
-        """
-        Run pacman with a specific --config file. Does not modify system configuration.
-        """
-        cmd = ["pacman", "--config", str(conf_path), *args]
-        return self.run_command(cmd, check=True, capture=True)
+    # moved above; keep line anchor for diff tool
 
     def build_aur_package(self, combination: dict) -> bool:
         """Build zfs-linux-lts from AUR using specified combination."""
@@ -322,6 +351,30 @@ LocalFileSigLevel = Optional
 
             # Build package
             print("🔨 Building ZFS package...")
+            # Ensure keyring and typical build deps exist at build time (in case they weren't present)
+            with suppress(Exception):
+                # nosec: base system package installation for build tooling
+                self.run_command(
+                    [
+                        *self._sudo_prefix(),
+                        "pacman",
+                        "-S",
+                        "--noconfirm",
+                        "archlinux-keyring",
+                        "gnupg",
+                        "bc",
+                        "flex",
+                        "bison",
+                        "openssl",
+                        "zlib",
+                        "perl",
+                        "elfutils",
+                        "git",
+                        "curl",
+                    ],
+                    check=True,
+                    capture=False,
+                )
             subprocess.run(["makepkg", "-s", "--noconfirm"], cwd=build_dir, check=True)  # noqa: S607
 
             # Move built packages to local repo
@@ -444,63 +497,61 @@ Server = file://{self.local_repo_dir}
         print("=== Smart ZFS Package Builder ===")
         print("🎯 Goal: ALWAYS use precompiled packages (never DKMS)")
 
-        try:
-            # Find the best compatible combination
-            combination = self.find_compatible_combination()
+        # Find the best compatible combination
+        combination = self.find_compatible_combination()
 
-            if not combination:
-                print("💥 CRITICAL: No compatible combination found!")
-                print("This should never happen with our robust approach.")
+        if not combination:
+            print("💥 CRITICAL: No compatible combination found!")
+            print("This should never happen with our robust approach.")
+            return 1
+
+        print(f"\n🎯 Selected strategy: {combination['strategy']}")
+        print(f"📦 Linux version: {combination['linux_version']}")
+        print(f"🗂️ ZFS version: {combination['zfs_version']}")
+        print(f"🔧 Source: {combination['source']}")
+
+        # Prepare a temporary pacman.conf for any operations that need archive repos
+        temp_conf: Path | None = None
+        if combination["source"] == "archive_combination":
+            temp_conf = self._generate_temp_pacman_conf(combination["archive_url"], include_local_repo=False)
+            # Sync databases using the temporary configuration
+            try:
+                self._pacman_with_config(["-Sy"], temp_conf)
+            except subprocess.CalledProcessError:
+                print("❌ Failed to sync pacman databases with temporary archive config")
                 return 1
 
-            print(f"\n🎯 Selected strategy: {combination['strategy']}")
-            print(f"📦 Linux version: {combination['linux_version']}")
-            print(f"🗂️ ZFS version: {combination['zfs_version']}")
-            print(f"🔧 Source: {combination['source']}")
-
-            # Prepare a temporary pacman.conf for any operations that need archive repos
-            temp_conf: Path | None = None
-            if combination["source"] == "archive_combination":
-                temp_conf = self._generate_temp_pacman_conf(combination["archive_url"], include_local_repo=False)
-                # Sync databases using the temporary configuration
-                try:
-                    self._pacman_with_config(["-Sy"], temp_conf)
-                except subprocess.CalledProcessError:
-                    print("❌ Failed to sync pacman databases with temporary archive config")
-                    return 1
-
+            # Ensure exact linux-lts and linux-lts-headers matching versions are installed
+            linux_version = str(combination.get("linux_version"))
             try:
-                # Build packages if needed
-                if combination["source"] in ["aur_current", "aur_historical", "archive_combination"]:
-                    print("\n🔨 Building ZFS packages...")
-                    if not self.build_aur_package(combination):
-                        print("❌ Failed to build AUR package")
-                        return 1
+                self._pacman_install_with_config([f"linux-lts={linux_version}", f"linux-lts-headers={linux_version}"], temp_conf)
+            except subprocess.CalledProcessError as e:
+                print(f"❌ Failed to install matching linux-lts packages {linux_version}: {e}")
+                return 1
 
-                    if not self.create_local_repository():
-                        print("❌ Failed to create local repository")
-                        return 1
+        # Build packages if needed
+        if combination["source"] in ["aur_current", "aur_historical", "archive_combination"]:
+            print("\n🔨 Building ZFS packages...")
+            if not self.build_aur_package(combination):
+                print("❌ Failed to build AUR package")
+                return 1
 
-                    print("✅ Successfully built and packaged ZFS modules")
+            if not self.create_local_repository():
+                print("❌ Failed to create local repository")
+                return 1
 
-                # Update ISO configurations
-                print("\n⚙️ Configuring ISO profiles...")
-                self.update_iso_configs(combination)
+            print("✅ Successfully built and packaged ZFS modules")
 
-                # Success message
-                print("\n🎉 SUCCESS: ISO configured with precompiled ZFS packages!")
-                print("📏 Result: Slim ISO without build tools")
-                print(f"🚀 Strategy: {combination['strategy']}")
+        # Update ISO configurations
+        print("\n⚙️ Configuring ISO profiles...")
+        self.update_iso_configs(combination)
 
-                return 0
+        # Success message
+        print("\n🎉 SUCCESS: ISO configured with precompiled ZFS packages!")
+        print("📏 Result: Slim ISO without build tools")
+        print(f"🚀 Strategy: {combination['strategy']}")
 
-            finally:
-                # No system repository restoration needed when using --config
-                pass
-
-        except Exception as e:
-            print(f"💥 Unexpected error: {e}")
-            return 1
+        return 0
 
 
 if __name__ == "__main__":
