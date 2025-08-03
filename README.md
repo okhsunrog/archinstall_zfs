@@ -24,7 +24,11 @@ The `gen_iso` directory contains all the necessary tools and profiles to build c
 
 There are two ISO profiles available:
 - **`main_profile`**: Based on `releng`, this is for building a production-ready ISO for installation on real hardware.
-- **`testing_profile`**: Based on `baseline`, this is for building a development ISO for testing in QEMU.
+- **`testing_profile`**: Based on `baseline`, this is a streamlined development ISO optimized for QEMU testing with:
+  - Auto-login as root (no username/password required)
+  - Instant boot (0 timeout on all bootloaders)
+  - Serial console support with kernel output
+  - Passwordless SSH access on port 22
 
 ### Prerequisites
 
@@ -52,7 +56,9 @@ The output ISOs will be placed in the `gen_iso/out` directory.
 
 ### Testing with QEMU
 
-For development and testing, you should use the testing ISO.
+For development and testing, you should use the testing ISO which is optimized for automated workflows.
+
+#### Quick Start
 
 1.  **Set up the QEMU environment:**
     ```bash
@@ -65,35 +71,125 @@ For development and testing, you should use the testing ISO.
     just build-testing-iso
     ```
 
-3.  **Install in QEMU:**
-    - With a GUI:
-      ```bash
-      just qemu-install
-      ```
-    - With a serial console:
+3.  **Install and run in QEMU:**
+    - **Recommended: Serial console mode** (headless, perfect for development):
       ```bash
       just qemu-install-serial
       ```
+    - **GUI mode** (if you prefer a graphical interface):
+      ```bash
+      just qemu-install
+      ```
 
 4.  **Run an existing QEMU installation:**
-    - With a GUI:
-      ```bash
-      just qemu-run
-      ```
-    - With a serial console:
+    - **Serial console:**
       ```bash
       just qemu-run-serial
       ```
+    - **GUI:**
+      ```bash
+      just qemu-run
+      ```
+
+#### Testing ISO Features
+
+The testing profile provides a fully automated development experience:
+
+- **🚀 Instant Boot**: Boots immediately without waiting (0 timeout on all bootloaders)
+- **🔑 Auto-Login**: Automatically logs in as root - no username or password required
+- **📟 Serial Console**: Full kernel output and console access via serial port
+- **🌐 SSH Ready**: Passwordless SSH access on port 22
+
+#### Accessing the System
+
+Once booted, you have multiple ways to interact with the system:
+
+1. **Serial Console** (when using `-serial` commands):
+   - Direct console access in the terminal
+   - All kernel messages visible
+   - Auto-logged in as root
+
+2. **SSH Access** (available in both modes):
+   ```bash
+   ssh root@localhost -p 2222
+   ```
+   No password required - connects immediately.
+
+#### Development Workflow
+
+For rapid development cycles:
+
+```bash
+# Clean previous builds
+just clean-iso
+
+# Build new testing ISO
+just build-testing-iso
+
+# Test with serial console (recommended)
+just qemu-install-serial
+```
+
+The system will boot instantly and log you in automatically, ready for testing.
+
+### Available Commands
+
+Here's a quick reference of all available `just` commands:
+
+#### ISO Building
+```bash
+just build-main-iso      # Build production ISO (releng profile)
+just build-testing-iso   # Build testing ISO (baseline profile)
+just list-isos          # List available ISO files
+just clean-iso          # Clean ISO build artifacts
+```
+
+#### QEMU Setup and Testing
+```bash
+just qemu-setup         # Create disk image and UEFI vars
+just qemu-create-disk   # Create disk image only
+just qemu-setup-uefi    # Setup UEFI vars only
+just qemu-reset-uefi    # Reset UEFI vars to defaults
+
+# Installation (boots from ISO)
+just qemu-install       # Install with GUI
+just qemu-install-serial # Install with serial console
+
+# Run existing installation (boots from disk)
+just qemu-run           # Run with GUI
+just qemu-run-serial    # Run with serial console
+```
+
+#### Development
+```bash
+just format             # Format code with ruff
+just lint               # Lint and auto-fix with ruff
+just type-check         # Type check with mypy
+just test               # Run tests with pytest
+just all                # Run all quality checks
+just clean              # Clean up cache and build artifacts
+```
 
 ### Advanced Usage
 
 The `gen_iso/run-qemu.sh` script is highly configurable via command-line options. You can run it directly for more advanced scenarios. Use `gen_iso/run-qemu.sh -h` to see all available options.
 
-### Notes
+### Configuration Details
 
-- SSH is forwarded to port 2222 on the host (`ssh -p 2222 root@localhost`). The root password on the ISO is empty.
-- The default VM has 4GB RAM and 2 CPU cores. These can be changed in the `justfile` or via script parameters.
-- UEFI boot is enabled by default.
+#### Network and SSH
+- SSH is forwarded to port 2222 on the host: `ssh root@localhost -p 2222`
+- No password required for root access (testing profile only)
+- Network configured with DHCP automatically
+
+#### Hardware Settings
+- Default VM: 4GB RAM, 2 CPU cores
+- Configurable via `justfile` variables or script parameters (`-m` for memory, `-p` for cores)
+- KVM acceleration enabled automatically
+
+#### Boot Configuration
+- **Testing Profile**: Instant boot, auto-login, serial console support
+- **Main Profile**: Standard timeout and login behavior
+- UEFI boot enabled by default (BIOS boot available with `-b` flag)
 
 ## Why Choose This Installer?
 
