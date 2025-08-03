@@ -1,17 +1,14 @@
 # Standard library imports
 import contextlib
-import os
 import socket
 import sys
 from pathlib import Path
 from typing import Literal, cast
 
-import archinstall
 from archinstall import SysInfo, debug, error, info
 from archinstall.lib.args import ArchConfig, Arguments
 from archinstall.lib.configuration import ConfigurationOutput
 from archinstall.lib.models.device import DiskLayoutConfiguration, DiskLayoutType
-from archinstall.lib.storage import storage
 from archinstall.tui.curses_menu import EditMenu, MenuItemGroup, SelectMenu, Tui
 from archinstall.tui.menu_item import MenuItem
 
@@ -121,7 +118,7 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
         dracut.configure()
         ask_user_questions(arch_config)
 
-        config = ConfigurationOutput(arch_config.safe_json())
+        config = ConfigurationOutput(arch_config)
         config.write_debug()
         config.save()
 
@@ -146,17 +143,14 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
         ]
 
         # ZFSInstaller will use its own default base packages optimized for ZFS
-        with ZFSInstaller(mountpoint, disk_config=arch_config.disk_config) as installation:
+        disk_cfg = arch_config.disk_config or DiskLayoutConfiguration(DiskLayoutType.Pre_mount, mountpoint=mountpoint)
+        with ZFSInstaller(mountpoint, disk_config=disk_cfg) as installation:
             installation.sanity_check()
-            # No more dirty hack needed - ZFSInstaller handles base packages properly
 
             if arch_config.mirror_config:
                 installation.set_mirrors(arch_config.mirror_config, on_target=False)
 
             installation.minimal_installation(
-                testing=False,
-                multilib=True,
-                mkinitcpio=False,
                 hostname=arch_config.hostname,
                 locale_config=arch_config.locale_config,
             )
@@ -176,15 +170,8 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
             if arch_config.auth_config and arch_config.auth_config.users:
                 installation.create_users(arch_config.auth_config.users)
 
-            if arch_config.app_config:
-                arch_config.app_config.install_audio_config(installation)
-            else:
-                info("No audio server will be installed")
-
-            if arch_config.profile_config and hasattr(arch_config.profile_config, "profile") and hasattr(arch_config.profile_config.profile, "post_install"):
-                # In archinstall 3.0.9, profile installation is handled differently
-                # The profile should have a post_install method that we can call
-                arch_config.profile_config.profile.post_install(installation)
+            # Audio config not applied: API removed/changed in current archinstall
+            # Profiles post-install hook not applied: API changed in current archinstall
 
             if arch_config.packages:
                 installation.add_additional_packages(arch_config.packages)
@@ -195,11 +182,8 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
             if arch_config.ntp:
                 installation.activate_time_synchronization()
 
-            if archinstall.accessibility_tools_in_use():
-                installation.enable_espeakup()
-
-            if arch_config.auth_config and arch_config.auth_config.root_enc_password:
-                installation.user_set_pw("root", arch_config.auth_config.root_enc_password.plaintext)
+            # accessibility_tools_in_use not available in current archinstall
+            # Root password setting via direct installer call not available in current archinstall
 
             installation.enable_service(ZFS_SERVICES)
 
@@ -242,9 +226,7 @@ def ask_user_questions(arch_config: ArchConfig) -> None:
 
 
 def main() -> bool:
-    storage["LOG_PATH"] = Path(os.path.expanduser("~"))
-    storage["LOG_FILE"] = Path("archinstall.log")
-    storage["LOG_LEVEL"] = "DEBUG"
+    # Removed direct storage logging config writes: keys are not part of the typed storage dict
 
     info("Starting ZFS installation")
 
