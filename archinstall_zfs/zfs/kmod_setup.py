@@ -40,17 +40,20 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) ->
             info("archzfs repository already configured")
             return
 
+    # Initialize keyring in target if this is a chroot environment
+    if installation:
+        try:
+            installation.arch_chroot("pacman-key --init")
+            installation.arch_chroot("pacman-key --populate archlinux")
+        except SysCallError as e:
+            debug(f"Keyring already initialized or failed: {e}")
+
     key_id = "DDF7DB817396A49B2A2723F7403BD972F75D9D76"
     key_sign = f"pacman-key --lsign-key {key_id}"
-    
+
     # Try multiple keyservers for better reliability
-    keyservers = [
-        "hkps://keys.openpgp.org",
-        "hkps://keyserver.ubuntu.com",
-        "hkps://pgp.mit.edu",
-        "hkps://pool.sks-keyservers.net"
-    ]
-    
+    keyservers = ["hkps://keys.openpgp.org", "hkps://keyserver.ubuntu.com", "hkps://pgp.mit.edu", "hkps://pool.sks-keyservers.net"]
+
     key_received = False
     for keyserver in keyservers:
         key_receive = f"pacman-key --keyserver {keyserver} -r {key_id}"
@@ -65,19 +68,20 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) ->
         except SysCallError as e:
             error(f"Failed to receive key from {keyserver}: {e}")
             continue
-    
+
     if not key_received:
-        # For testing purposes, we can continue without the key
-        # This allows development even when keyservers are down
         error("Failed to receive archzfs key from all keyservers")
-        error("Continuing without key verification (testing mode)")
-        info("Note: This may cause package verification issues")
-    else:
-        # Only sign the key if we successfully received it
         if installation:
-            installation.arch_chroot(key_sign)
-        else:
-            SysCommand(key_sign)
+            # In production installation, this is a hard error
+            raise RuntimeError("Cannot proceed without archzfs repository key")
+        # On live system, warn but continue for development
+        error("Continuing without key verification (development mode)")
+        info("Note: This may cause package verification issues")
+    # Only sign the key if we successfully received it
+    elif installation:
+        installation.arch_chroot(key_sign)
+    else:
+        SysCommand(key_sign)
 
     repo_config = [
         "\n[archzfs]\n",

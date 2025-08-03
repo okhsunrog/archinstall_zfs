@@ -139,9 +139,6 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
             if mirror_config := archinstall.arguments.get("mirror_config", None):
                 installation.set_mirrors(mirror_config, on_target=True)
 
-            installation.arch_chroot("pacman-key --init")
-            installation.arch_chroot("pacman-key --populate archlinux")
-
             add_archzfs_repo(installation.target, installation)
 
             installation.add_additional_packages(SECOND_STAGE)
@@ -182,9 +179,6 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager) -> 
 
             if (root_pw := archinstall.arguments.get("!root-password", None)) and len(root_pw):
                 installation.user_set_pw("root", root_pw)
-
-            if profile_config := archinstall.arguments.get("profile_config", None):
-                profile_config.profile.post_install(installation)
 
             installation.enable_service(ZFS_SERVICES)
 
@@ -249,15 +243,6 @@ def main() -> bool:
 
     if not SysInfo.has_uefi():
         error("EFI boot mode required")
-        return False
-
-    # Initialize pacman keyring on live system before adding archzfs repo
-    try:
-        info("Initializing pacman keyring")
-        SysCommand("pacman-key --init")
-        SysCommand("pacman-key --populate archlinux")
-    except SysCallError as e:
-        error(f"Failed to initialize pacman keyring: {e}")
         return False
 
     initialize_zfs()
