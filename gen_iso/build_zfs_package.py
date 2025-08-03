@@ -148,7 +148,9 @@ class ZFSPackageBuilder:
                 commit_hash = line.split()[0]
                 # Get PKGBUILD content for this commit
                 try:
-                    pkgbuild_result = subprocess.run(["git", "show", f"{commit_hash}:PKGBUILD"], cwd=aur_dir, capture_output=True, text=True, check=True)  # noqa: S603, S607
+                    pkgbuild_result = subprocess.run(  # noqa: S603
+                        ["/usr/bin/git", "show", f"{commit_hash}:PKGBUILD"], cwd=aur_dir, capture_output=True, text=True, check=True
+                    )
                     pkgbuild_content = pkgbuild_result.stdout
 
                     # Extract version info from PKGBUILD
@@ -365,7 +367,6 @@ LocalFileSigLevel = Optional
                 commit_hash = line.split()[0]
                 try:
                     # The commit hash originates from `git log` output and is trusted in this context.
-                    # ruff: noqa: S603
                     pkgbuild_result = subprocess.run(  # noqa: S603
                         ["/usr/bin/git", "show", f"{commit_hash}:PKGBUILD"],
                         cwd=utils_dir,
@@ -416,10 +417,10 @@ LocalFileSigLevel = Optional
 
         build_dir = self.local_repo_dir / "zfs-utils-build"
         if build_dir.exists():
-            subprocess.run(["rm", "-rf", str(build_dir)], check=True)  # noqa: S603, S607
+            subprocess.run(["/usr/bin/rm", "-rf", str(build_dir)], check=True)  # noqa: S603
         self.run_command(["git", "clone", "https://aur.archlinux.org/zfs-utils.git", str(build_dir)])
 
-        subprocess.run(["git", "checkout", commit], cwd=build_dir, check=True)  # noqa: S603, S607
+        subprocess.run(["/usr/bin/git", "checkout", commit], cwd=build_dir, check=True)  # noqa: S603
 
         print("🔧 Installing build dependencies for zfs-utils (if needed)...")
         with suppress(Exception):
@@ -475,12 +476,12 @@ LocalFileSigLevel = Optional
         self.local_repo_dir.mkdir(exist_ok=True)
         build_dir = self.local_repo_dir / "zfs-linux-lts-build"
         if build_dir.exists():
-            subprocess.run(["rm", "-rf", str(build_dir)], check=True)  # noqa: S603, S607
+            subprocess.run(["/usr/bin/rm", "-rf", str(build_dir)], check=True)  # noqa: S603
 
         if combination.get("aur_commit"):
             print(f"📦 Building AUR package from commit {combination['aur_commit']}")
             self.run_command(["git", "clone", "https://aur.archlinux.org/zfs-linux-lts.git", str(build_dir)])
-            subprocess.run(["git", "checkout", combination["aur_commit"]], cwd=build_dir, check=True)  # noqa: S603, S607
+            subprocess.run(["/usr/bin/git", "checkout", combination["aur_commit"]], cwd=build_dir, check=True)  # noqa: S603
         else:
             print("📦 Building latest AUR package")
             self.run_command(["git", "clone", "https://aur.archlinux.org/zfs-linux-lts.git", str(build_dir)])
