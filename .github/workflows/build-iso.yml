@@ -36,8 +36,12 @@ jobs:
     - name: Install system dependencies
       run: |
         pacman -Syu --noconfirm
-        # Install python explicitly for gen_iso/build_zfs_package.py
-        pacman -S --noconfirm archiso git base-devel just rsync python
+        # Install toolchain required by makepkg and AUR builds
+        pacman -S --noconfirm archiso git just rsync python base-devel fakeroot binutils gcc make cmake pkgconf
+        # Ensure non-root makepkg works by creating a build user (recommended practice on Arch)
+        useradd -m builder || true
+        echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+        chown -R builder:builder .
 
     - name: Set profile for build
       run: |
@@ -49,10 +53,11 @@ jobs:
 
     - name: Build ISO
       run: |
+        # Run builds as an unprivileged user so that makepkg can create packages
         if [ "$PROFILE" = "main_profile" ]; then
-          just build-main-iso
+          sudo -u builder -E just build-main-iso
         else
-          just build-testing-iso
+          sudo -u builder -E just build-testing-iso
         fi
 
     - name: Find and list built ISOs
