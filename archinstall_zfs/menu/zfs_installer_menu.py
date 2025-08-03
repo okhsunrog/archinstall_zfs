@@ -132,57 +132,58 @@ class ZFSInstallerMenu:
         for item in menu_items:
             if hasattr(item, "key") and item.key == choice:
                 if item.action:
-                    item.action()
+                    # Some TUI frameworks pass a context argument; our handlers accept *args
+                    item.action(None)
                 break
 
     # Standard archinstall configuration methods
-    def _configure_locale(self) -> None:
+    def _configure_locale(self, *_: Any) -> None:
         # Use existing locale config or create default
         current_config = self.config.locale_config or LocaleConfiguration.default()
         locale_menu = LocaleMenu(current_config)
         self.config.locale_config = locale_menu.run()
 
-    def _configure_mirrors(self) -> None:
+    def _configure_mirrors(self, *_: Any) -> None:
         # Use existing mirror config if available
         mirror_menu = MirrorMenu(self.config.mirror_config)
         self.config.mirror_config = mirror_menu.run()
 
-    def _configure_network(self) -> None:
+    def _configure_network(self, *_: Any) -> None:
         self.config.network_config = ask_to_configure_network(self.config.network_config)
 
-    def _configure_hostname(self) -> None:
+    def _configure_hostname(self, *_: Any) -> None:
         hostname = ask_hostname(self.config.hostname)
         if hostname:
             self.config.hostname = hostname
 
-    def _configure_authentication(self) -> None:
+    def _configure_authentication(self, *_: Any) -> None:
         # Use existing auth config if available
         auth_menu = AuthenticationMenu(self.config.auth_config)
         self.config.auth_config = auth_menu.run()
 
-    def _configure_timezone(self) -> None:
+    def _configure_timezone(self, *_: Any) -> None:
         timezone = ask_for_a_timezone(self.config.timezone)
         if timezone:
             self.config.timezone = timezone
 
-    def _configure_ntp(self) -> None:
+    def _configure_ntp(self, *_: Any) -> None:
         ntp_result = ask_ntp(self.config.ntp)
         if ntp_result is not None:
             self.config.ntp = ntp_result
 
-    def _configure_packages(self) -> None:
+    def _configure_packages(self, *_: Any) -> None:
         packages = ask_additional_packages_to_install(self.config.packages)
         if packages is not None:
             self.config.packages = packages
 
     # ZFS-specific configuration methods
-    def _configure_dataset_prefix(self) -> None:
+    def _configure_dataset_prefix(self, *_: Any) -> None:
         result = EditMenu("ZFS Dataset Prefix", header="Enter prefix for ZFS datasets", default_text=self.dataset_prefix).input()
 
         if result.text():
             self.dataset_prefix = result.text()
 
-    def _configure_zfs_encryption(self) -> None:
+    def _configure_zfs_encryption(self, *_: Any) -> None:
         encryption_menu = SelectMenu(
             MenuItemGroup(
                 [
@@ -196,7 +197,9 @@ class ZFSInstallerMenu:
 
         result = encryption_menu.run()
         if result.type_ != ResultType.Skip:
-            self.zfs_encryption_mode = result.item().value
+            selected = result.item().value if result.item() else None
+            if selected is not None:
+                self.zfs_encryption_mode = selected
 
             if self.zfs_encryption_mode != ZFSEncryptionMode.NONE:
                 self._get_encryption_password()
@@ -215,43 +218,45 @@ class ZFSInstallerMenu:
                 self.zfs_encryption_password = password_result.text()
                 break
 
-    def _configure_init_system(self) -> None:
+    def _configure_init_system(self, *_: Any) -> None:
         init_menu = SelectMenu(
             MenuItemGroup([MenuItem("Dracut", InitSystem.DRACUT), MenuItem("Mkinitcpio", InitSystem.MKINITCPIO)]), header="Select init system"
         )
 
         result = init_menu.run()
         if result.type_ != ResultType.Skip:
-            self.init_system = result.item().value
+            selected = result.item().value if result.item() else None
+            if selected is not None:
+                self.init_system = selected
 
     # Preview methods
-    def _preview_locale(self) -> str | None:
+    def _preview_locale(self, *_: Any) -> str | None:
         if self.config.locale_config:
             return f"Locale: {self.config.locale_config.sys_lang}"
         return "Locale: Not configured"
 
-    def _preview_mirrors(self) -> str | None:
+    def _preview_mirrors(self, *_: Any) -> str | None:
         if self.config.mirror_config:
-            return f"Mirrors: {len(self.config.mirror_config.regions)} regions"
+            return "Mirrors: Configured"
         return "Mirrors: Not configured"
 
-    def _preview_network(self) -> str | None:
+    def _preview_network(self, *_: Any) -> str | None:
         if self.config.network_config:
             return f"Network: {self.config.network_config.type.value}"
         return "Network: Not configured"
 
-    def _preview_auth(self) -> str | None:
+    def _preview_auth(self, *_: Any) -> str | None:
         if self.config.auth_config:
             user_count = len(self.config.auth_config.users) if self.config.auth_config.users else 0
             return f"Users: {user_count}, Root: {'Set' if self.config.auth_config.root_enc_password else 'Not set'}"
         return "Authentication: Not configured"
 
-    def _preview_packages(self) -> str | None:
+    def _preview_packages(self, *_: Any) -> str | None:
         if self.config.packages:
             return f"Additional packages: {len(self.config.packages)} selected"
         return "Additional packages: None"
 
-    def _preview_zfs_encryption(self) -> str | None:
+    def _preview_zfs_encryption(self, *_: Any) -> str | None:
         mode_text = self.zfs_encryption_mode.value
         if self.zfs_encryption_mode != ZFSEncryptionMode.NONE:
             password_status = "Set" if self.zfs_encryption_password else "Not set"

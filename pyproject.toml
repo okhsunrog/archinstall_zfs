@@ -70,8 +70,12 @@ max-complexity = 15
 [tool.mypy]
 python_version = "3.13"
 mypy_path = "."
-exclude = ['archinstall/.*']  # Exclude archinstall library
-files = ["archinstall_zfs", "tests"]
+# Exclude third-party or generated sources
+exclude = [
+    'archinstall/.*',                # Exclude archinstall library
+    'local_repo/.*',                 # Exclude vendored/build artifacts
+]
+files = ["archinstall_zfs", "gen_iso", "tests"]
 
 # Type checking strictness
 warn_return_any = true
