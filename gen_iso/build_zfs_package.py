@@ -473,7 +473,7 @@ LocalFileSigLevel = Optional
         if build_dir.exists():
             subprocess.run(["/usr/bin/rm", "-rf", str(build_dir)], check=True)  # noqa: S603
         self.run_command(["git", "clone", "https://aur.archlinux.org/zfs-utils.git", str(build_dir)])
-
+        # Checkout the commit we matched to zfs_version
         subprocess.run(["/usr/bin/git", "checkout", commit], cwd=build_dir, check=True)  # noqa: S603
 
         print("🔧 Installing build dependencies for zfs-utils (if needed)...")
@@ -495,6 +495,15 @@ LocalFileSigLevel = Optional
                     "elfutils",
                     "git",
                     "curl",
+                    "python",         # some utils scripts require python at build time
+                    "util-linux",     # provides flock, script, etc.
+                    "autoconf",
+                    "automake",
+                    "libtool",
+                    "which",
+                    "grep",
+                    "sed",
+                    "awk",
                 ],
                 check=True,
                 capture=False,
@@ -502,6 +511,20 @@ LocalFileSigLevel = Optional
 
         print("🔑 Initializing GPG keyring and ZFS keys...")
         self._setup_zfs_gpg_keys()
+
+        # Patch PKGBUILD to reduce memory footprint and avoid debug subpackages
+        try:
+            pkgbuild_path = build_dir / "PKGBUILD"
+            if pkgbuild_path.exists():
+                text = pkgbuild_path.read_text()
+                if re.search(r"^options=", text, re.M):
+                    text = re.sub(r"^options=\([^)]+\)", "options=('!debug' 'strip')", text, flags=re.M)
+                else:
+                    text = "options=('!debug' 'strip')\n" + text
+                pkgbuild_path.write_text(text)
+                print("🩹 Patched zfs-utils PKGBUILD options to ('!debug' 'strip')")
+        except Exception as e:
+            print(f"⚠️ Failed to patch zfs-utils PKGBUILD options: {e}")
 
         print("🔨 Running makepkg for zfs-utils...")
         # Try with signature verification first, fallback to --skippgpcheck if needed
@@ -514,6 +537,14 @@ LocalFileSigLevel = Optional
         env_utils.setdefault("CFLAGS", "-O2 -pipe -fno-plt")
         env_utils.setdefault("CXXFLAGS", "-O2 -pipe -fno-plt")
         env_utils.setdefault("LDFLAGS", "-Wl,-O1,--as-needed")
+        # Some PKGBUILDs respect NO_COLOR and MAKEPKG env; keep output simple
+        env_utils.setdefault("NO_COLOR", "1")
+        # Ensure pacman inside PKGBUILD uses our temporary config if present for local repo usage
+        try:
+            build_conf_local = self._generate_build_pacman_conf_with_local()
+            env_utils["PACMAN"] = f"pacman --config {build_conf_local}"
+        except Exception:
+            pass
         try:
             result = subprocess.run(  # noqa: S603
                 makepkg_cmd,
@@ -559,6 +590,23 @@ LocalFileSigLevel = Optional
                 for log_file in sorted(build_dir.glob("*.log")):
                     print(f"📋 {log_file.name} (tail):")
                     print(log_file.read_text()[-4000:])
+            except Exception:
+                pass
+            # Also try to print PKGBUILD and .SRCINFO to help diagnose common failures (e.g., missing deps)
+            try:
+                srcinfo = (build_dir / ".SRCINFO")
+                if srcinfo.exists():
+                    print("📄 .SRCINFO:")
+                    print(srcinfo.read_text()[-4000:])
+                print("📄 PKGBUILD (head):")
+                print((build_dir / "PKGBUILD").read_text()[:4000])
+            except Exception:
+                pass
+            # Try to capture dmesg tail to spot OOM killer (best effort)
+            try:
+                dmesg = subprocess.run(["dmesg", "-T"], check=False, capture_output=True, text=True)  # noqa: S603
+                print("🖥️ dmesg tail:")
+                print("\n".join(dmesg.stdout.splitlines()[-200:]))
             except Exception:
                 pass
             rc = getattr(result, "returncode", -1)
