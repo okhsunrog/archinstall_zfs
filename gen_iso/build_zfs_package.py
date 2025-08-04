@@ -506,29 +506,65 @@ LocalFileSigLevel = Optional
         print("🔨 Running makepkg for zfs-utils...")
         # Try with signature verification first, fallback to --skippgpcheck if needed
         makepkg_cmd = ["/usr/bin/makepkg", "-s", "--noconfirm", "--log"]
-        result = self.run_command(
-            makepkg_cmd,
-            check=False,
-            capture=True,
-            cwd=build_dir,
-        )
-
-        # If signature verification failed, retry with --skippgpcheck
-        if result.returncode != 0 and "PGP signatures could not be verified" in (result.stdout + result.stderr):
-            print("⚠️ PGP verification failed, retrying with --skippgpcheck...")
-            makepkg_cmd.append("--skippgpcheck")
-            result = self.run_command(
+        # Use disk-backed tmp and conservative flags to reduce memory footprint
+        env_utils = dict(**__import__("os").environ)
+        env_utils["MAKEFLAGS"] = "-j1"
+        env_utils["MAKEPKG_BUILDDIR"] = "/build"
+        env_utils.setdefault("TMPDIR", "/build/tmp")
+        env_utils.setdefault("CFLAGS", "-O2 -pipe -fno-plt")
+        env_utils.setdefault("CXXFLAGS", "-O2 -pipe -fno-plt")
+        env_utils.setdefault("LDFLAGS", "-Wl,-O1,--as-needed")
+        try:
+            result = subprocess.run(  # noqa: S603
                 makepkg_cmd,
                 check=False,
-                capture=True,
+                text=True,
                 cwd=build_dir,
+                env=env_utils,
+                timeout=5400,
             )
-        if result.returncode != 0:
-            print("📋 STDOUT:")
-            print(result.stdout)
-            print("📋 STDERR:")
-            print(result.stderr)
-            raise ZFSUtilsBuildError(f"makepkg failed for zfs-utils (exit {result.returncode})")
+        except subprocess.TimeoutExpired:
+            try:
+                for log_file in sorted(build_dir.glob("*.log")):
+                    print(f"⏱️ Timeout - {log_file.name} (tail):")
+                    print(log_file.read_text()[-4000:])
+            except Exception:
+                pass
+            raise ZFSUtilsBuildError("makepkg timed out for zfs-utils")
+
+        # If signature verification failed, retry with --skippgpcheck
+        if getattr(result, "returncode", 0) != 0:
+            pgp_failure = False
+            try:
+                for log_file in sorted(build_dir.glob("*.log")):
+                    content = log_file.read_text()[-4000:]
+                    if "PGP signatures could not be verified" in content or "One or more PGP signatures could not be verified" in content:
+                        pgp_failure = True
+                        break
+            except Exception:
+                pass
+            if pgp_failure:
+                print("⚠️ PGP verification failed, retrying with --skippgpcheck...")
+                makepkg_cmd.append("--skippgpcheck")
+                result = subprocess.run(  # noqa: S603
+                    makepkg_cmd,
+                    check=False,
+                    text=True,
+                    cwd=build_dir,
+                    env=env_utils,
+                    timeout=5400,
+                )
+        if getattr(result, "returncode", 0) != 0:
+            try:
+                for log_file in sorted(build_dir.glob("*.log")):
+                    print(f"📋 {log_file.name} (tail):")
+                    print(log_file.read_text()[-4000:])
+            except Exception:
+                pass
+            rc = getattr(result, "returncode", -1)
+            if rc in (-10, -15):
+                raise ZFSUtilsBuildError("makepkg terminated by SIGTERM (likely timeout or resource exhaustion) for zfs-utils")
+            raise ZFSUtilsBuildError(f"makepkg failed for zfs-utils (exit {rc})")
 
         for pkg_file in build_dir.glob("*.pkg.tar.*"):
             pkg_file.rename(self.local_repo_dir / pkg_file.name)
@@ -551,6 +587,20 @@ LocalFileSigLevel = Optional
             print("📦 Building latest AUR package")
             self.run_command(["git", "clone", "https://aur.archlinux.org/zfs-linux-lts.git", str(build_dir)])
 
+        # Patch PKGBUILD to disable debug and force strip to reduce build size/memory
+        try:
+            pkgbuild_path = build_dir / "PKGBUILD"
+            if pkgbuild_path.exists():
+                text = pkgbuild_path.read_text()
+                if re.search(r"^options=", text, re.M):
+                    text = re.sub(r"^options=\([^)]+\)", "options=('!debug' 'strip')", text, flags=re.M)
+                else:
+                    text = "options=('!debug' 'strip')\n" + text
+                pkgbuild_path.write_text(text)
+                print("🩹 Patched PKGBUILD options to ('!debug' 'strip')")
+        except Exception as e:
+            print(f"⚠️ Failed to patch PKGBUILD options: {e}")
+
         # Optional: for archive combination, pre-sync using archive config; build will still use local repo include
         if combination.get("source") == "archive_combination":
             print(f"🔍 Debug: Using archive combination with URL: {combination.get('archive_url')}")
@@ -561,6 +611,11 @@ LocalFileSigLevel = Optional
                 self._pacman_with_config(["-Sy"], conf)
             except subprocess.CalledProcessError as e:
                 print(f"❌ Failed to sync dependencies with archive config: {e}")
+            # Ensure temp dir exists on disk
+            try:
+                (self.project_root / "local_repo" / "tmp").mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
 
         print("🔧 Ensuring build dependencies for zfs-linux-lts...")
         with suppress(Exception):
@@ -594,18 +649,38 @@ LocalFileSigLevel = Optional
         # Exported via env MAKEPKG_CONF is complex; instead leverage pacman inside PKGBUILD by setting PACMAN env
         env = dict(**__import__("os").environ)
         env["PACMAN"] = f"pacman --config {build_conf}"
+        # Reduce memory pressure and avoid /tmp tmpfs by forcing single-job builds and external BUILDDIR
+        env["MAKEFLAGS"] = "-j1"
+        env["MAKEPKG_BUILDDIR"] = "/build"
+        env.setdefault("TMPDIR", "/build/tmp")
+        env.setdefault("CFLAGS", "-O2 -pipe -fno-plt")
+        env.setdefault("CXXFLAGS", "-O2 -pipe -fno-plt")
+        env.setdefault("LDFLAGS", "-Wl,-O1,--as-needed")
 
         print("🔨 Running makepkg for zfs-linux-lts...")
         # Try with signature verification first, fallback to --skippgpcheck if needed
         makepkg_cmd = ["/usr/bin/makepkg", "-s", "--noconfirm", "--log"]
         # Stream output for better real-time visibility; don't capture to buffers
-        result = self.run_command(
-            makepkg_cmd,
-            check=False,
-            capture=False,
-            cwd=build_dir,
-            env=env,
-        )
+        # Apply an explicit timeout to distinguish external kills vs timeouts
+        try:
+            result = subprocess.run(  # noqa: S603
+                makepkg_cmd,
+                check=False,
+                text=True,
+                cwd=build_dir,
+                env=env,
+                timeout=7200,
+            )
+        except subprocess.TimeoutExpired:
+            # Print tail of logs if available, then raise a clearer error
+            try:
+                for log_file in sorted(build_dir.glob("*.log")):
+                    print(f"⏱️ Timeout - {log_file.name} (tail):")
+                    tail = log_file.read_text()[-4000:]
+                    print(tail)
+            except Exception as e:
+                print(f"⚠️ Failed to read makepkg logs after timeout: {e}")
+            raise ZFSLinuxLTSBuildError("makepkg timed out for zfs-linux-lts (explicit 2h limit)")
 
         # If the first run failed, inspect logs and retry with --skippgpcheck on PGP errors
         # When capture=False, CompletedProcess may not carry stdout/stderr; rely on logs and returncode
@@ -641,6 +716,13 @@ LocalFileSigLevel = Optional
                     print(tail)
             except Exception as e:
                 print(f"⚠️ Failed to read makepkg logs: {e}")
+            # Try to capture dmesg tail to spot OOM killer (best effort)
+            try:
+                dmesg = subprocess.run(["dmesg", "-T"], check=False, capture_output=True, text=True)  # noqa: S603
+                print("🖥️ dmesg tail:")
+                print("\n".join(dmesg.stdout.splitlines()[-200:]))
+            except Exception:
+                pass
 
             # Clarify common termination scenario
             rc = getattr(result, "returncode", -1)

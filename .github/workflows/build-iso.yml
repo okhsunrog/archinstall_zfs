@@ -35,7 +35,9 @@ jobs:
     timeout-minutes: 90
     container:
       image: archlinux:latest
-      options: --privileged --cpus=1 --memory=8g
+      # Use GitHub-hosted runner filesystem (no tmpfs) and set explicit cgroup limits.
+      # Note: --memory/--cpus constrain inside container; actual host has further limits.
+      options: --privileged --cpus=1 --memory=8g --memory-swap=8g --storage-opt size=20G
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -54,6 +56,11 @@ jobs:
           useradd -m builder || true
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
           chown -R builder:builder .
+          # Enforce single-job compilation and move BUILDDIR off /tmp
+          echo 'MAKEFLAGS="-j1"' | tee -a /etc/makepkg.conf
+          echo 'BUILDDIR=/build' | tee -a /etc/makepkg.conf
+          mkdir -p /build
+          chown -R builder:builder /build
 
       - name: Run prepare step with verbose logging
         env:
@@ -61,7 +68,21 @@ jobs:
           ZFS_BUILDER_DEBUG: "1"
         run: |
           set -euxo pipefail
-          sudo -u builder -E just prepare-zfs-packages
+          # Verify cgroup limits and filesystem space to avoid hidden OOM/tmpfs issues
+          echo "=== cgroup limits ==="
+          cat /sys/fs/cgroup/memory.max 2>/dev/null || true
+          cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || true
+          cat /sys/fs/cgroup/cpu.max 2>/dev/null || true
+          echo "=== df -h ==="
+          df -h || true
+          echo "=== mount ==="
+          mount || true
+          # Ensure disk-backed temp directories (avoid tmpfs)
+          mkdir -p /build/tmp
+          chown -R builder:builder /build/tmp
+          export TMPDIR=/build/tmp
+          echo "TMPDIR=${TMPDIR}"
+          sudo -u builder -E TMPDIR=/build/tmp just prepare-zfs-packages
 
       - name: Collect makepkg/build logs
         if: always()
@@ -95,7 +116,8 @@ jobs:
     timeout-minutes: 120
     container:
       image: archlinux:latest
-      options: --privileged --cpus=1 --memory=8g  # Single core, 8GB RAM; still privileged for archiso
+      # Match resource policy and avoid tmpfs by relying on runner filesystem.
+      options: --privileged --cpus=1 --memory=8g --memory-swap=8g --storage-opt size=20G  # single core, 8GB RAM
 
     steps:
     - name: Checkout repository
@@ -103,6 +125,7 @@ jobs:
 
     - name: Install system dependencies
       run: |
+        set -euxo pipefail
         pacman -Syu --noconfirm
         # Install toolchain required by makepkg and AUR builds
         pacman -S --noconfirm archiso git just rsync python base-devel fakeroot binutils gcc make cmake pkgconf archlinux-keyring gnupg
@@ -113,7 +136,27 @@ jobs:
         useradd -m builder || true
         echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
         chown -R builder:builder .
+        # Enforce single-job compilation and move BUILDDIR off /tmp
+        echo 'MAKEFLAGS="-j1"' | tee -a /etc/makepkg.conf
+        echo 'BUILDDIR=/build' | tee -a /etc/makepkg.conf
+        mkdir -p /build
+        chown -R builder:builder /build
 
+    - name: Verify environment limits and disks
+      run: |
+        set -euxo pipefail
+        echo "=== cgroup limits ==="
+        cat /sys/fs/cgroup/memory.max 2>/dev/null || true
+        cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || true
+        cat /sys/fs/cgroup/cpu.max 2>/dev/null || true
+        echo "=== df -h ==="
+        df -h || true
+        echo "=== mount ==="
+        mount || true
+        # Ensure disk-backed temp directories (avoid tmpfs)
+        mkdir -p /build/tmp
+        chown -R builder:builder /build/tmp
+        echo 'export TMPDIR=/build/tmp' >> /etc/profile
     - name: Set profile for build
       run: |
         if [ "${{ github.event_name }}" = "release" ]; then
