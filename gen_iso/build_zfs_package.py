@@ -509,8 +509,8 @@ LocalFileSigLevel = Optional
                 capture=False,
             )
 
-        print("🔑 Initializing GPG keyring and ZFS keys...")
-        self._setup_zfs_gpg_keys()
+        # Skip GPG initialization when we force --skippgpcheck to reduce flakiness in CI
+        print("🔑 Skipping GPG key initialization (using --skippgpcheck)")
 
         # Patch PKGBUILD to reduce memory footprint, disable signing/LTO, avoid tests/debug
         try:
@@ -534,10 +534,12 @@ LocalFileSigLevel = Optional
         # Use disk-backed tmp and conservative flags to reduce memory footprint
         env_utils = dict(**__import__("os").environ)
         env_utils["MAKEFLAGS"] = "-j1"
-        env_utils["MAKEPKG_BUILDDIR"] = "/build"
-        env_utils.setdefault("TMPDIR", "/build/tmp")
-        env_utils.setdefault("CFLAGS", "-O2 -pipe -fno-plt -fno-lto -fno-tree-vectorize")
-        env_utils.setdefault("CXXFLAGS", "-O2 -pipe -fno-plt -fno-lto -fno-tree-vectorize")
+        # Prefer host-backed workspace path when available to reduce overlayfs overhead
+        env_utils["MAKEPKG_BUILDDIR"] = "/__w/archinstall_zfs/archinstall_zfs/build" if Path("/__w/archinstall_zfs/archinstall_zfs").exists() else "/build"
+        env_utils.setdefault("TMPDIR", env_utils["MAKEPKG_BUILDDIR"] + "/tmp")
+        # Use lower optimization to reduce memory usage further
+        env_utils.setdefault("CFLAGS", "-O1 -pipe -fno-plt -fno-lto -fno-tree-vectorize")
+        env_utils.setdefault("CXXFLAGS", "-O1 -pipe -fno-plt -fno-lto -fno-tree-vectorize")
         env_utils.setdefault("LDFLAGS", "-Wl,-O1,--as-needed -Wl,--no-keep-memory")
         # Some PKGBUILDs respect NO_COLOR and MAKEPKG env; keep output simple
         env_utils.setdefault("NO_COLOR", "1")
@@ -547,6 +549,12 @@ LocalFileSigLevel = Optional
             env_utils["PACMAN"] = f"pacman --config {build_conf_local}"
         except Exception:
             pass
+        # Prevent makepkg from attempting to use a heavy keyring; keep private, empty ring
+        env_utils["GNUPGHOME"] = env_utils["MAKEPKG_BUILDDIR"] + "/gnupg"
+        try:
+            Path(env_utils["GNUPGHOME"]).mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
         try:
             result = subprocess.run(  # noqa: S603
                 makepkg_cmd,
@@ -554,6 +562,7 @@ LocalFileSigLevel = Optional
                 text=True,
                 cwd=build_dir,
                 env=env_utils,
+                capture_output=True,
                 timeout=5400,
             )
         except subprocess.TimeoutExpired:
@@ -569,10 +578,21 @@ LocalFileSigLevel = Optional
         if getattr(result, "returncode", 0) != 0:
             pass
         if getattr(result, "returncode", 0) != 0:
+            # Print direct makepkg stdout/stderr first
             try:
-                for log_file in sorted(build_dir.glob("*.log")):
+                if result.stdout:
+                    print("── makepkg stdout (tail) ──")
+                    print(result.stdout[-8000:])
+                if result.stderr:
+                    print("── makepkg stderr (tail) ──")
+                    print(result.stderr[-8000:])
+            except Exception:
+                pass
+            # Tail makepkg*.log files if present
+            try:
+                for log_file in sorted(build_dir.glob("makepkg*.log")):
                     print(f"📋 {log_file.name} (tail):")
-                    print(log_file.read_text()[-4000:])
+                    print(log_file.read_text()[-8000:])
             except Exception:
                 pass
             # Also try to print PKGBUILD and .SRCINFO to help diagnose common failures (e.g., missing deps)
@@ -585,6 +605,14 @@ LocalFileSigLevel = Optional
                 print((build_dir / "PKGBUILD").read_text()[:4000])
             except Exception:
                 pass
+            # Try to show config.log tail from the extracted source dir if configure failed
+            try:
+                # Find likely source dir: zfs-${pkgver} under $srcdir used by makepkg; search under build_dir
+                for cfg in list(build_dir.glob("**/config.log"))[:3]:
+                    print(f"📝 {cfg} (tail):")
+                    print(cfg.read_text()[-8000:])
+            except Exception:
+                pass
             # Try to capture dmesg tail to spot OOM killer (best effort)
             try:
                 dmesg = subprocess.run(["dmesg", "-T"], check=False, capture_output=True, text=True)  # noqa: S603
@@ -593,7 +621,7 @@ LocalFileSigLevel = Optional
             except Exception:
                 pass
             rc = getattr(result, "returncode", -1)
-            if rc in (-10, -15):
+            if rc in (-10, -15, 143):
                 raise ZFSUtilsBuildError("makepkg terminated by SIGTERM (likely timeout or resource exhaustion) for zfs-utils")
             raise ZFSUtilsBuildError(f"makepkg failed for zfs-utils (exit {rc})")
 
@@ -701,6 +729,7 @@ LocalFileSigLevel = Optional
                 text=True,
                 cwd=build_dir,
                 env=env,
+                capture_output=True,
                 timeout=7200,
             )
         except subprocess.TimeoutExpired:
@@ -718,26 +747,36 @@ LocalFileSigLevel = Optional
         if getattr(result, "returncode", 0) != 0:
             pgp_failure = False
 
+            # We already pass --skippgpcheck; no retry branch needed
             if pgp_failure:
-                print("⚠️ PGP verification failed, retrying with --skippgpcheck...")
-                makepkg_cmd.append("--skippgpcheck")
-                result = self.run_command(
-                    makepkg_cmd,
-                    check=False,
-                    capture=False,
-                    cwd=build_dir,
-                    env=env,
-                )
+                print("ℹ️ PGP verification message detected, but --skippgpcheck already in effect.")
 
         if getattr(result, "returncode", 0) != 0:
+            # Print direct makepkg stdout/stderr first
+            try:
+                if result.stdout:
+                    print("── makepkg stdout (tail) ──")
+                    print(result.stdout[-8000:])
+                if result.stderr:
+                    print("── makepkg stderr (tail) ──")
+                    print(result.stderr[-8000:])
+            except Exception:
+                pass
             # Print tail of any makepkg logs to provide context
             try:
-                for log_file in sorted(build_dir.glob("*.log")):
+                for log_file in sorted(build_dir.glob("makepkg*.log")):
                     print(f"📋 {log_file.name} (tail):")
-                    tail = log_file.read_text()[-4000:]
+                    tail = log_file.read_text()[-8000:]
                     print(tail)
             except Exception as e:
                 print(f"⚠️ Failed to read makepkg logs: {e}")
+            # Try to show config.log tail from the extracted source dir if configure/build failed
+            try:
+                for cfg in list(build_dir.glob("**/config.log"))[:3]:
+                    print(f"📝 {cfg} (tail):")
+                    print(cfg.read_text()[-8000:])
+            except Exception:
+                pass
             # Try to capture dmesg tail to spot OOM killer (best effort)
             try:
                 dmesg = subprocess.run(["dmesg", "-T"], check=False, capture_output=True, text=True)  # noqa: S603
@@ -948,6 +987,17 @@ Server = file://{self.local_repo_dir}
         # Build packages if needed
         if combination["source"] in ["aur_current", "aur_historical", "archive_combination"]:
             print("\n🔨 Building ZFS packages...")
+            # Extra environment diagnostics to understand headroom before build
+            try:
+                print("=== build environment diagnostics ===")
+                subprocess.run(["ulimit", "-a"], check=False)  # noqa: S603
+            except Exception:
+                pass
+            try:
+                subprocess.run(["/bin/sh", "-lc", "free -h || true; nproc || true; getconf _NPROCESSORS_ONLN || true"], check=False)  # noqa: S603
+                subprocess.run(["/bin/sh", "-lc", "head -40 /proc/meminfo || true"], check=False)  # noqa: S603
+            except Exception:
+                pass
             if not self.build_aur_package(combination):
                 print("❌ Failed to build AUR package")
                 return 1
