@@ -11,6 +11,7 @@ This script ensures ISOs ALWAYS use precompiled ZFS packages (no DKMS) by:
 """
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -19,6 +20,9 @@ import urllib.request
 from collections.abc import Mapping, MutableMapping
 from contextlib import suppress
 from pathlib import Path
+
+# Force unbuffered output for real-time visibility
+os.environ['PYTHONUNBUFFERED'] = '1'
 
 
 class ZFSBuildError(Exception):
@@ -42,6 +46,9 @@ class ZFSPackageBuilder:
         self.project_root = Path(__file__).parent.parent
         self.local_repo_dir = self.project_root / "local_repo"
         self.gen_iso_dir = Path(__file__).parent
+        # Create persistent artifacts directory for logs
+        self.artifacts_dir = self.project_root / "artifacts"
+        self.artifacts_dir.mkdir(exist_ok=True)
 
     def run_command(
         self,
@@ -97,7 +104,7 @@ class ZFSPackageBuilder:
         """
         Install packages using the temporary config, with sudo if needed.
         """
-        cmd = [*self._sudo_prefix(), "pacman", "--config", str(conf_path), "-S", "--noconfirm", *packages]
+        cmd = [*self._sudo_prefix(), "pacman", "--config", str(conf_path), "-S", "--noconfirm", "--needed", *packages]
         # Use capture=False to stream output
         self.run_command(cmd, check=True, capture=False)
 
@@ -255,9 +262,24 @@ class ZFSPackageBuilder:
 
     def kernel_versions_exact_match(self, zfs_kernel_version: str, linux_kernel_version: str) -> bool:
         """Check if ZFS package kernel version exactly matches linux kernel version."""
-        # Remove arch suffix from linux version
-        linux_base = linux_kernel_version.split("-")[0] + "-" + linux_kernel_version.split("-")[1]
-        return zfs_kernel_version == linux_base
+        # Normalize both versions for comparison
+        # ZFS uses dots: "6.12.41.1"
+        # Linux uses dashes: "6.12.41-1"
+        # Both refer to the same kernel version
+        
+        # Extract base version and release from linux version
+        linux_parts = linux_kernel_version.split("-")
+        if len(linux_parts) >= 2:
+            linux_base = linux_parts[0]  # "6.12.41"
+            linux_release = linux_parts[1]  # "1"
+            linux_normalized = f"{linux_base}.{linux_release}"  # "6.12.41.1"
+        else:
+            linux_normalized = linux_kernel_version
+        
+        # ZFS version should already be in dot format
+        zfs_normalized = zfs_kernel_version
+        
+        return zfs_normalized == linux_normalized
 
     def find_compatible_combination(self) -> dict | None:
         """Find the best compatible combination of linux-lts and zfs-linux-lts versions."""
@@ -484,6 +506,7 @@ LocalFileSigLevel = Optional
                     "pacman",
                     "-S",
                     "--noconfirm",
+                    "--needed",
                     "archlinux-keyring",
                     "gnupg",
                     "bc",
@@ -512,21 +535,8 @@ LocalFileSigLevel = Optional
         # Skip GPG initialization when we force --skippgpcheck to reduce flakiness in CI
         print("🔑 Skipping GPG key initialization (using --skippgpcheck)")
 
-        # Patch PKGBUILD to reduce memory footprint, disable signing/LTO, avoid tests/debug
-        try:
-            pkgbuild_path = build_dir / "PKGBUILD"
-            if pkgbuild_path.exists():
-                text = pkgbuild_path.read_text()
-                # Ensure desired options: '!sign' '!lto' '!debug' 'strip'
-                desired = "options=('!sign' '!lto' '!debug' 'strip')"
-                if re.search(r"^options=", text, re.M):
-                    text = re.sub(r"^options=\([^)]+\)", desired, text, flags=re.M)
-                else:
-                    text = desired + "\n" + text
-                pkgbuild_path.write_text(text)
-                print("🩹 Patched zfs-utils PKGBUILD options to ('!sign' '!lto' '!debug' 'strip')")
-        except Exception as e:
-            print(f"⚠️ Failed to patch zfs-utils PKGBUILD options: {e}")
+        # Skip PKGBUILD patching - the original PKGBUILD works fine
+        print("✅ Using original zfs-utils PKGBUILD without modifications")
 
         print("🔨 Running makepkg for zfs-utils...")
         # Force no tests and skip PGP checks to avoid flaky keyservers in CI
@@ -555,75 +565,126 @@ LocalFileSigLevel = Optional
             Path(env_utils["GNUPGHOME"]).mkdir(parents=True, exist_ok=True)
         except Exception:
             pass
+        # Print environment diagnostics before starting makepkg
+        print("=== Pre-build environment ===")
         try:
-            result = subprocess.run(  # noqa: S603
+            subprocess.run(["ulimit", "-a"], check=False)  # noqa: S603
+            subprocess.run(["/bin/sh", "-c", "free -h; echo 'CPUs:' $(nproc); echo 'Memory:'; head -10 /proc/meminfo"], check=False)  # noqa: S603
+        except Exception:
+            pass
+        
+        # Stream makepkg output in real-time and capture logs
+        print(f"🔨 Starting makepkg with command: {' '.join(makepkg_cmd)}")
+        print("=== makepkg output ===")
+        
+        try:
+            # Use unbuffered output for real-time visibility
+            process = subprocess.Popen(  # noqa: S603
                 makepkg_cmd,
-                check=False,
-                text=True,
                 cwd=build_dir,
                 env=env_utils,
-                capture_output=True,
-                timeout=5400,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=0,  # Unbuffered
+                universal_newlines=True
             )
-        except subprocess.TimeoutExpired:
+            
+            # Stream output line by line and copy logs as they appear
+            output_lines = []
+            if process.stdout:
+                while True:
+                    line = process.stdout.readline()
+                    if line:
+                        print(line.rstrip(), flush=True)  # Print to console immediately with flush
+                        output_lines.append(line)
+                        # Copy any new log files to artifacts directory
+                        try:
+                            for log_file in build_dir.glob("*.log"):
+                                artifact_log = self.artifacts_dir / f"zfs-utils-{log_file.name}"
+                                if not artifact_log.exists() or log_file.stat().st_mtime > artifact_log.stat().st_mtime:
+                                    artifact_log.write_text(log_file.read_text())
+                        except Exception:
+                            pass
+                    elif process.poll() is not None:
+                        break
+            
+            # Wait for process to complete with timeout
             try:
-                for log_file in sorted(build_dir.glob("*.log")):
-                    print(f"⏱️ Timeout - {log_file.name} (tail):")
-                    print(log_file.read_text()[-4000:])
-            except Exception:
-                pass
-            raise ZFSUtilsBuildError("makepkg timed out for zfs-utils")
+                returncode = process.wait(timeout=5400)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+                # Copy final logs
+                try:
+                    for log_file in sorted(build_dir.glob("*.log")):
+                        artifact_log = self.artifacts_dir / f"zfs-utils-{log_file.name}"
+                        artifact_log.write_text(log_file.read_text())
+                        print(f"⏱️ Timeout - copied {log_file.name} to artifacts", flush=True)
+                except Exception:
+                    pass
+                raise ZFSUtilsBuildError("makepkg timed out for zfs-utils")
+                
+        except Exception as e:
+            if "timed out" not in str(e):
+                print(f"❌ makepkg process error: {e}", flush=True)
+            raise
 
-        # We already passed --skippgpcheck; no retry branch needed anymore
-        if getattr(result, "returncode", 0) != 0:
-            pass
-        if getattr(result, "returncode", 0) != 0:
-            # Print direct makepkg stdout/stderr first
-            try:
-                if result.stdout:
-                    print("── makepkg stdout (tail) ──")
-                    print(result.stdout[-8000:])
-                if result.stderr:
-                    print("── makepkg stderr (tail) ──")
-                    print(result.stderr[-8000:])
-            except Exception:
-                pass
-            # Tail makepkg*.log files if present
-            try:
-                for log_file in sorted(build_dir.glob("makepkg*.log")):
-                    print(f"📋 {log_file.name} (tail):")
-                    print(log_file.read_text()[-8000:])
-            except Exception:
-                pass
-            # Also try to print PKGBUILD and .SRCINFO to help diagnose common failures (e.g., missing deps)
+        # Copy all logs to artifacts directory for collection
+        try:
+            for log_file in sorted(build_dir.glob("*.log")):
+                artifact_log = self.artifacts_dir / f"zfs-utils-{log_file.name}"
+                artifact_log.write_text(log_file.read_text())
+                print(f"📋 Copied {log_file.name} to artifacts directory")
+        except Exception as e:
+            print(f"⚠️ Failed to copy logs to artifacts: {e}")
+        
+        if returncode != 0:
+            print(f"❌ makepkg failed with exit code {returncode}", flush=True)
+            
+            # Show the actual makepkg output that was captured
+            if output_lines:
+                print("📄 Last 50 lines of makepkg output:", flush=True)
+                for line in output_lines[-50:]:
+                    print(f"  {line.rstrip()}", flush=True)
+            
+            # Copy additional diagnostic files
             try:
                 srcinfo = (build_dir / ".SRCINFO")
                 if srcinfo.exists():
-                    print("📄 .SRCINFO:")
-                    print(srcinfo.read_text()[-4000:])
-                print("📄 PKGBUILD (head):")
-                print((build_dir / "PKGBUILD").read_text()[:4000])
+                    (self.artifacts_dir / "zfs-utils-.SRCINFO").write_text(srcinfo.read_text())
+                    print("📄 .SRCINFO:", flush=True)
+                    print(srcinfo.read_text()[-4000:], flush=True)
+                    
+                pkgbuild = build_dir / "PKGBUILD"
+                if pkgbuild.exists():
+                    (self.artifacts_dir / "zfs-utils-PKGBUILD").write_text(pkgbuild.read_text())
+                    print("📄 PKGBUILD (head):", flush=True)
+                    print(pkgbuild.read_text()[:4000], flush=True)
             except Exception:
                 pass
-            # Try to show config.log tail from the extracted source dir if configure failed
+                
+            # Copy config.log files if they exist
             try:
-                # Find likely source dir: zfs-${pkgver} under $srcdir used by makepkg; search under build_dir
                 for cfg in list(build_dir.glob("**/config.log"))[:3]:
-                    print(f"📝 {cfg} (tail):")
-                    print(cfg.read_text()[-8000:])
+                    artifact_cfg = self.artifacts_dir / f"zfs-utils-config-{cfg.parent.name}.log"
+                    artifact_cfg.write_text(cfg.read_text())
+                    print(f"📝 {cfg} (tail):", flush=True)
+                    print(cfg.read_text()[-8000:], flush=True)
             except Exception:
                 pass
-            # Try to capture dmesg tail to spot OOM killer (best effort)
+                
+            # Capture dmesg for OOM detection
             try:
                 dmesg = subprocess.run(["dmesg", "-T"], check=False, capture_output=True, text=True)  # noqa: S603
-                print("🖥️ dmesg tail:")
-                print("\n".join(dmesg.stdout.splitlines()[-200:]))
+                if dmesg.stdout:
+                    (self.artifacts_dir / "zfs-utils-dmesg.log").write_text(dmesg.stdout)
+                    print("🖥️ dmesg tail:", flush=True)
+                    print("\n".join(dmesg.stdout.splitlines()[-200:]), flush=True)
             except Exception:
                 pass
-            rc = getattr(result, "returncode", -1)
-            if rc in (-10, -15, 143):
-                raise ZFSUtilsBuildError("makepkg terminated by SIGTERM (likely timeout or resource exhaustion) for zfs-utils")
-            raise ZFSUtilsBuildError(f"makepkg failed for zfs-utils (exit {rc})")
+                
+            raise ZFSUtilsBuildError(f"makepkg failed for zfs-utils with exit code {returncode}")
 
         for pkg_file in build_dir.glob("*.pkg.tar.*"):
             pkg_file.rename(self.local_repo_dir / pkg_file.name)
@@ -646,20 +707,8 @@ LocalFileSigLevel = Optional
             print("📦 Building latest AUR package")
             self.run_command(["git", "clone", "https://aur.archlinux.org/zfs-linux-lts.git", str(build_dir)])
 
-        # Patch PKGBUILD to reduce memory footprint, disable signing/LTO, avoid tests/debug
-        try:
-            pkgbuild_path = build_dir / "PKGBUILD"
-            if pkgbuild_path.exists():
-                text = pkgbuild_path.read_text()
-                desired = "options=('!sign' '!lto' '!debug' 'strip')"
-                if re.search(r"^options=", text, re.M):
-                    text = re.sub(r"^options=\([^)]+\)", desired, text, flags=re.M)
-                else:
-                    text = desired + "\n" + text
-                pkgbuild_path.write_text(text)
-                print("🩹 Patched PKGBUILD options to ('!sign' '!lto' '!debug' 'strip')")
-        except Exception as e:
-            print(f"⚠️ Failed to patch PKGBUILD options: {e}")
+        # Skip PKGBUILD patching - the original PKGBUILD works fine
+        print("✅ Using original zfs-linux-lts PKGBUILD without modifications")
 
         # Optional: for archive combination, pre-sync using archive config; build will still use local repo include
         if combination.get("source") == "archive_combination":
@@ -685,6 +734,7 @@ LocalFileSigLevel = Optional
                     "pacman",
                     "-S",
                     "--noconfirm",
+                    "--needed",
                     "archlinux-keyring",
                     "gnupg",
                     "bc",
@@ -696,11 +746,29 @@ LocalFileSigLevel = Optional
                     "elfutils",
                     "git",
                     "curl",
-                    "linux-lts-headers",
                 ],
                 check=True,
                 capture=False,
             )
+        
+        # For archive combinations, install specific kernel headers from archive
+        if combination.get("source") == "archive_combination":
+            linux_version = str(combination.get("linux_version"))
+            print(f"🔧 Installing specific kernel headers: linux-lts-headers={linux_version}")
+            try:
+                build_conf = self._generate_temp_pacman_conf(combination.get("archive_url"), include_local_repo=False)
+                self._pacman_install_with_config([f"linux-lts-headers={linux_version}"], build_conf)
+            except Exception as e:
+                print(f"⚠️ Warning: Failed to install specific kernel headers: {e}")
+                print("🔧 Continuing with --nodeps build...")
+        else:
+            # For current/AUR builds, try to install current headers
+            with suppress(Exception):
+                self.run_command(
+                    [*self._sudo_prefix(), "pacman", "-S", "--noconfirm", "--needed", "linux-lts-headers"],
+                    check=True,
+                    capture=False,
+                )
 
         # Ensure makepkg uses local repo so zfs-utils exact version can be satisfied
         build_conf = self._generate_build_pacman_conf_with_local()
@@ -722,74 +790,121 @@ LocalFileSigLevel = Optional
         makepkg_cmd = ["/usr/bin/makepkg", "-s", "--noconfirm", "--log", "--nocheck", "--skippgpcheck"]
         # Stream output for better real-time visibility; don't capture to buffers
         # Apply an explicit timeout to distinguish external kills vs timeouts
+        # Stream makepkg output in real-time for zfs-linux-lts
+        print(f"🔨 Starting makepkg with command: {' '.join(makepkg_cmd)}")
+        print("=== makepkg output ===")
+        
         try:
-            result = subprocess.run(  # noqa: S603
+            # Use unbuffered output for real-time visibility
+            process = subprocess.Popen(  # noqa: S603
                 makepkg_cmd,
-                check=False,
-                text=True,
                 cwd=build_dir,
                 env=env,
-                capture_output=True,
-                timeout=7200,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=0,  # Unbuffered
+                universal_newlines=True
             )
-        except subprocess.TimeoutExpired:
-            # Print tail of logs if available, then raise a clearer error
+            
+            # Stream output and copy logs
+            output_lines = []
+            if process.stdout:
+                while True:
+                    line = process.stdout.readline()
+                    if line:
+                        print(line.rstrip(), flush=True)  # Print to console immediately with flush
+                        output_lines.append(line)
+                        # Copy any new log files to artifacts directory
+                        try:
+                            for log_file in build_dir.glob("*.log"):
+                                artifact_log = self.artifacts_dir / f"zfs-linux-lts-{log_file.name}"
+                                if not artifact_log.exists() or log_file.stat().st_mtime > artifact_log.stat().st_mtime:
+                                    artifact_log.write_text(log_file.read_text())
+                        except Exception:
+                            pass
+                    elif process.poll() is not None:
+                        break
+            
+            # Wait for process to complete with timeout
             try:
-                for log_file in sorted(build_dir.glob("*.log")):
-                    print(f"⏱️ Timeout - {log_file.name} (tail):")
-                    tail = log_file.read_text()[-4000:]
-                    print(tail)
-            except Exception as e:
-                print(f"⚠️ Failed to read makepkg logs after timeout: {e}")
-            raise ZFSLinuxLTSBuildError("makepkg timed out for zfs-linux-lts (explicit 2h limit)")
+                returncode = process.wait(timeout=7200)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+                # Copy final logs
+                try:
+                    for log_file in sorted(build_dir.glob("*.log")):
+                        artifact_log = self.artifacts_dir / f"zfs-linux-lts-{log_file.name}"
+                        artifact_log.write_text(log_file.read_text())
+                        print(f"⏱️ Timeout - copied {log_file.name} to artifacts", flush=True)
+                except Exception:
+                    pass
+                raise ZFSLinuxLTSBuildError("makepkg timed out for zfs-linux-lts (explicit 2h limit)")
+                
+        except Exception as e:
+            if "timed out" not in str(e):
+                print(f"❌ makepkg process error: {e}", flush=True)
+            raise
 
-        # We already passed --skippgpcheck; no retry branch needed anymore
-        if getattr(result, "returncode", 0) != 0:
-            pgp_failure = False
+        # Comprehensive final log copy to artifacts directory
+        print("Copying all build logs to artifacts directory...")
+        try:
+            # Copy all log files
+            for log_file in build_dir.glob("*.log"):
+                artifact_log = self.artifacts_dir / f"zfs-linux-lts-{log_file.name}"
+                artifact_log.write_text(log_file.read_text())
+                print(f"Copied {log_file.name} to artifacts ({artifact_log})")
+            
+            # Copy config.log if it exists (often contains detailed error info)
+            config_log = build_dir / "src" / "zfs" / "config.log"
+            if config_log.exists():
+                artifact_config = self.artifacts_dir / "zfs-linux-lts-config.log"
+                artifact_config.write_text(config_log.read_text())
+                print(f"Copied config.log to artifacts ({artifact_config})")
+            
+            # Copy any other relevant files
+            for pattern in ["*.txt", "*.err", "*.out"]:
+                for log_file in build_dir.glob(pattern):
+                    artifact_log = self.artifacts_dir / f"zfs-linux-lts-{log_file.name}"
+                    artifact_log.write_text(log_file.read_text())
+                    print(f"Copied {log_file.name} to artifacts ({artifact_log})")
+            
+            # Save the complete makepkg output
+            if output_lines:
+                output_file = self.artifacts_dir / "zfs-linux-lts-makepkg-output.log"
+                output_file.write_text("".join(output_lines))
+                print(f"Saved complete makepkg output to {output_file}")
+                
+        except Exception as e:
+            print(f"Warning: Failed to copy some log files: {e}")
 
-            # We already pass --skippgpcheck; no retry branch needed
-            if pgp_failure:
-                print("ℹ️ PGP verification message detected, but --skippgpcheck already in effect.")
-
-        if getattr(result, "returncode", 0) != 0:
-            # Print direct makepkg stdout/stderr first
-            try:
-                if result.stdout:
-                    print("── makepkg stdout (tail) ──")
-                    print(result.stdout[-8000:])
-                if result.stderr:
-                    print("── makepkg stderr (tail) ──")
-                    print(result.stderr[-8000:])
-            except Exception:
-                pass
-            # Print tail of any makepkg logs to provide context
-            try:
-                for log_file in sorted(build_dir.glob("makepkg*.log")):
-                    print(f"📋 {log_file.name} (tail):")
-                    tail = log_file.read_text()[-8000:]
-                    print(tail)
-            except Exception as e:
-                print(f"⚠️ Failed to read makepkg logs: {e}")
-            # Try to show config.log tail from the extracted source dir if configure/build failed
+        if returncode != 0:
+            print(f"❌ makepkg failed with exit code {returncode}")
+            
+            # Copy config.log files if they exist
             try:
                 for cfg in list(build_dir.glob("**/config.log"))[:3]:
+                    artifact_cfg = self.artifacts_dir / f"zfs-linux-lts-config-{cfg.parent.name}.log"
+                    artifact_cfg.write_text(cfg.read_text())
                     print(f"📝 {cfg} (tail):")
                     print(cfg.read_text()[-8000:])
             except Exception:
                 pass
-            # Try to capture dmesg tail to spot OOM killer (best effort)
+                
+            # Capture dmesg for OOM detection
             try:
                 dmesg = subprocess.run(["dmesg", "-T"], check=False, capture_output=True, text=True)  # noqa: S603
-                print("🖥️ dmesg tail:")
-                print("\n".join(dmesg.stdout.splitlines()[-200:]))
+                if dmesg.stdout:
+                    (self.artifacts_dir / "zfs-linux-lts-dmesg.log").write_text(dmesg.stdout)
+                    print("🖥️ dmesg tail:")
+                    print("\n".join(dmesg.stdout.splitlines()[-200:]))
             except Exception:
                 pass
 
-            # Clarify common termination scenario
-            rc = getattr(result, "returncode", -1)
-            if rc in (-10, -15):
+            if returncode in (-10, -15, 143):
                 raise ZFSLinuxLTSBuildError("makepkg terminated by SIGTERM (likely timeout or resource exhaustion) for zfs-linux-lts")
-            raise ZFSLinuxLTSBuildError(f"makepkg failed for zfs-linux-lts (exit {rc})")
+            raise ZFSLinuxLTSBuildError(f"makepkg failed for zfs-linux-lts (exit {returncode})")
 
         for pkg_file in build_dir.glob("*.pkg.tar.*"):
             pkg_file.rename(self.local_repo_dir / pkg_file.name)

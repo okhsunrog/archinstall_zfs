@@ -46,9 +46,9 @@ jobs:
           set -euxo pipefail
           pacman -Syu --noconfirm
           # Core build and tooling set for makepkg/AUR
-          pacman -S --noconfirm git just rsync python base-devel fakeroot binutils gcc make cmake pkgconf curl
+          pacman -S --noconfirm --needed git just rsync python base-devel fakeroot binutils gcc make cmake pkgconf curl
           # For pacman keyring and signature checks
-          pacman -S --noconfirm archlinux-keyring gnupg
+          pacman -S --noconfirm --needed archlinux-keyring gnupg
           pacman-key --init
           pacman-key --populate archlinux
           # Create unprivileged builder (makepkg must not run as root)
@@ -88,11 +88,28 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p artifacts
-          # Common locations for AUR build logs
+          
+          # Primary: Copy logs from our script's artifacts directory
+          if [ -d artifacts ]; then
+            echo "=== Copying logs from script artifacts directory ==="
+            find artifacts -type f -name "*.log" -print -exec ls -la {} \; || true
+            # Artifacts directory already contains our logs, just list them
+            ls -la artifacts/ || true
+          fi
+          
+          # Secondary: Common locations for AUR build logs (fallback)
+          echo "=== Searching for additional makepkg logs ==="
           find . -maxdepth 5 -type f -name "makepkg*.log" -print -exec cp -v {} artifacts/ \; || true
           find . -maxdepth 6 -type f -name "*.log" -path "*/zfs*" -print -exec cp -v {} artifacts/ \; || true
-          # Optional: capture our script-specific logs if any
+          
+          # Tertiary: capture our script-specific logs if any
           if [ -d gen_iso/logs ]; then cp -vr gen_iso/logs artifacts/ || true; fi
+          
+          # Search for any build directories that might contain logs
+          echo "=== Searching build directories ==="
+          find . -type d -name "*build*" -exec find {} -name "*.log" -print \; || true
+          find . -type d -name "*zfs*" -exec find {} -name "*.log" -print \; || true
+          
           # Capture environment summaries for diagnostics
           echo "== pacman -Q ==" > artifacts/env.txt
           pacman -Q >> artifacts/env.txt || true
@@ -100,7 +117,14 @@ jobs:
             echo; echo "== uname -a =="; uname -a
             echo; echo "== id =="; id
             echo; echo "== env =="; env | sort
+            echo; echo "== disk usage =="; df -h
+            echo; echo "== memory info =="; free -h || true
+            echo; echo "== dmesg tail =="; dmesg | tail -50 || true
           } >> artifacts/env.txt
+          
+          # List all collected artifacts
+          echo "=== Final artifacts listing ==="
+          find artifacts -type f -exec ls -la {} \; || true
 
       - name: Upload prepare artifacts
         if: always()
@@ -127,7 +151,7 @@ jobs:
         set -euxo pipefail
         pacman -Syu --noconfirm
         # Install toolchain required by makepkg and AUR builds
-        pacman -S --noconfirm archiso git just rsync python base-devel fakeroot binutils gcc make cmake pkgconf archlinux-keyring gnupg
+        pacman -S --noconfirm --needed archiso git just rsync python base-devel fakeroot binutils gcc make cmake pkgconf archlinux-keyring gnupg
         # Initialize keyring for signed sources and pacman sync
         pacman-key --init
         pacman-key --populate archlinux
