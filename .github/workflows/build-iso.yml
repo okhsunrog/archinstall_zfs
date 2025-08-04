@@ -35,9 +35,8 @@ jobs:
     timeout-minutes: 90
     container:
       image: archlinux:latest
-      # Use GitHub-hosted runner filesystem (no tmpfs) and set explicit cgroup limits.
-      # Note: --memory/--cpus constrain inside container; actual host has further limits.
-      options: --privileged --cpus=1 --memory=8g --memory-swap=8g --storage-opt size=20G
+      # Use cgroup limits supported on GitHub runners. Remove unsupported --storage-opt that caused docker create failure.
+      options: --privileged --cpus=1 --memory=8g --memory-swap=8g
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -116,8 +115,8 @@ jobs:
     timeout-minutes: 120
     container:
       image: archlinux:latest
-      # Match resource policy and avoid tmpfs by relying on runner filesystem.
-      options: --privileged --cpus=1 --memory=8g --memory-swap=8g --storage-opt size=20G  # single core, 8GB RAM
+      # Match resource policy; remove unsupported --storage-opt on GitHub runners.
+      options: --privileged --cpus=1 --memory=8g --memory-swap=8g  # single core, 8GB RAM
 
     steps:
     - name: Checkout repository
