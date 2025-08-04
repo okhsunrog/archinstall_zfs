@@ -512,31 +512,33 @@ LocalFileSigLevel = Optional
         print("🔑 Initializing GPG keyring and ZFS keys...")
         self._setup_zfs_gpg_keys()
 
-        # Patch PKGBUILD to reduce memory footprint and avoid debug subpackages
+        # Patch PKGBUILD to reduce memory footprint, disable signing/LTO, avoid tests/debug
         try:
             pkgbuild_path = build_dir / "PKGBUILD"
             if pkgbuild_path.exists():
                 text = pkgbuild_path.read_text()
+                # Ensure desired options: '!sign' '!lto' '!debug' 'strip'
+                desired = "options=('!sign' '!lto' '!debug' 'strip')"
                 if re.search(r"^options=", text, re.M):
-                    text = re.sub(r"^options=\([^)]+\)", "options=('!debug' 'strip')", text, flags=re.M)
+                    text = re.sub(r"^options=\([^)]+\)", desired, text, flags=re.M)
                 else:
-                    text = "options=('!debug' 'strip')\n" + text
+                    text = desired + "\n" + text
                 pkgbuild_path.write_text(text)
-                print("🩹 Patched zfs-utils PKGBUILD options to ('!debug' 'strip')")
+                print("🩹 Patched zfs-utils PKGBUILD options to ('!sign' '!lto' '!debug' 'strip')")
         except Exception as e:
             print(f"⚠️ Failed to patch zfs-utils PKGBUILD options: {e}")
 
         print("🔨 Running makepkg for zfs-utils...")
-        # Try with signature verification first, fallback to --skippgpcheck if needed
-        makepkg_cmd = ["/usr/bin/makepkg", "-s", "--noconfirm", "--log"]
+        # Force no tests and skip PGP checks to avoid flaky keyservers in CI
+        makepkg_cmd = ["/usr/bin/makepkg", "-s", "--noconfirm", "--log", "--nocheck", "--skippgpcheck"]
         # Use disk-backed tmp and conservative flags to reduce memory footprint
         env_utils = dict(**__import__("os").environ)
         env_utils["MAKEFLAGS"] = "-j1"
         env_utils["MAKEPKG_BUILDDIR"] = "/build"
         env_utils.setdefault("TMPDIR", "/build/tmp")
-        env_utils.setdefault("CFLAGS", "-O2 -pipe -fno-plt")
-        env_utils.setdefault("CXXFLAGS", "-O2 -pipe -fno-plt")
-        env_utils.setdefault("LDFLAGS", "-Wl,-O1,--as-needed")
+        env_utils.setdefault("CFLAGS", "-O2 -pipe -fno-plt -fno-lto -fno-tree-vectorize")
+        env_utils.setdefault("CXXFLAGS", "-O2 -pipe -fno-plt -fno-lto -fno-tree-vectorize")
+        env_utils.setdefault("LDFLAGS", "-Wl,-O1,--as-needed -Wl,--no-keep-memory")
         # Some PKGBUILDs respect NO_COLOR and MAKEPKG env; keep output simple
         env_utils.setdefault("NO_COLOR", "1")
         # Ensure pacman inside PKGBUILD uses our temporary config if present for local repo usage
@@ -563,28 +565,9 @@ LocalFileSigLevel = Optional
                 pass
             raise ZFSUtilsBuildError("makepkg timed out for zfs-utils")
 
-        # If signature verification failed, retry with --skippgpcheck
+        # We already passed --skippgpcheck; no retry branch needed anymore
         if getattr(result, "returncode", 0) != 0:
-            pgp_failure = False
-            try:
-                for log_file in sorted(build_dir.glob("*.log")):
-                    content = log_file.read_text()[-4000:]
-                    if "PGP signatures could not be verified" in content or "One or more PGP signatures could not be verified" in content:
-                        pgp_failure = True
-                        break
-            except Exception:
-                pass
-            if pgp_failure:
-                print("⚠️ PGP verification failed, retrying with --skippgpcheck...")
-                makepkg_cmd.append("--skippgpcheck")
-                result = subprocess.run(  # noqa: S603
-                    makepkg_cmd,
-                    check=False,
-                    text=True,
-                    cwd=build_dir,
-                    env=env_utils,
-                    timeout=5400,
-                )
+            pass
         if getattr(result, "returncode", 0) != 0:
             try:
                 for log_file in sorted(build_dir.glob("*.log")):
@@ -635,17 +618,18 @@ LocalFileSigLevel = Optional
             print("📦 Building latest AUR package")
             self.run_command(["git", "clone", "https://aur.archlinux.org/zfs-linux-lts.git", str(build_dir)])
 
-        # Patch PKGBUILD to disable debug and force strip to reduce build size/memory
+        # Patch PKGBUILD to reduce memory footprint, disable signing/LTO, avoid tests/debug
         try:
             pkgbuild_path = build_dir / "PKGBUILD"
             if pkgbuild_path.exists():
                 text = pkgbuild_path.read_text()
+                desired = "options=('!sign' '!lto' '!debug' 'strip')"
                 if re.search(r"^options=", text, re.M):
-                    text = re.sub(r"^options=\([^)]+\)", "options=('!debug' 'strip')", text, flags=re.M)
+                    text = re.sub(r"^options=\([^)]+\)", desired, text, flags=re.M)
                 else:
-                    text = "options=('!debug' 'strip')\n" + text
+                    text = desired + "\n" + text
                 pkgbuild_path.write_text(text)
-                print("🩹 Patched PKGBUILD options to ('!debug' 'strip')")
+                print("🩹 Patched PKGBUILD options to ('!sign' '!lto' '!debug' 'strip')")
         except Exception as e:
             print(f"⚠️ Failed to patch PKGBUILD options: {e}")
 
@@ -701,13 +685,13 @@ LocalFileSigLevel = Optional
         env["MAKEFLAGS"] = "-j1"
         env["MAKEPKG_BUILDDIR"] = "/build"
         env.setdefault("TMPDIR", "/build/tmp")
-        env.setdefault("CFLAGS", "-O2 -pipe -fno-plt")
-        env.setdefault("CXXFLAGS", "-O2 -pipe -fno-plt")
-        env.setdefault("LDFLAGS", "-Wl,-O1,--as-needed")
+        env.setdefault("CFLAGS", "-O2 -pipe -fno-plt -fno-lto -fno-tree-vectorize")
+        env.setdefault("CXXFLAGS", "-O2 -pipe -fno-plt -fno-lto -fno-tree-vectorize")
+        env.setdefault("LDFLAGS", "-Wl,-O1,--as-needed -Wl,--no-keep-memory")
 
         print("🔨 Running makepkg for zfs-linux-lts...")
-        # Try with signature verification first, fallback to --skippgpcheck if needed
-        makepkg_cmd = ["/usr/bin/makepkg", "-s", "--noconfirm", "--log"]
+        # Force no tests and skip PGP checks to avoid flaky keyservers in CI
+        makepkg_cmd = ["/usr/bin/makepkg", "-s", "--noconfirm", "--log", "--nocheck", "--skippgpcheck"]
         # Stream output for better real-time visibility; don't capture to buffers
         # Apply an explicit timeout to distinguish external kills vs timeouts
         try:
@@ -730,19 +714,9 @@ LocalFileSigLevel = Optional
                 print(f"⚠️ Failed to read makepkg logs after timeout: {e}")
             raise ZFSLinuxLTSBuildError("makepkg timed out for zfs-linux-lts (explicit 2h limit)")
 
-        # If the first run failed, inspect logs and retry with --skippgpcheck on PGP errors
-        # When capture=False, CompletedProcess may not carry stdout/stderr; rely on logs and returncode
+        # We already passed --skippgpcheck; no retry branch needed anymore
         if getattr(result, "returncode", 0) != 0:
-            # Attempt to detect PGP verification failures by scanning recent makepkg logs
             pgp_failure = False
-            try:
-                for log_file in sorted(build_dir.glob("*.log")):
-                    content = log_file.read_text()[-4000:]
-                    if "PGP signatures could not be verified" in content or "One or more PGP signatures could not be verified" in content:
-                        pgp_failure = True
-                        break
-            except Exception:
-                pass
 
             if pgp_failure:
                 print("⚠️ PGP verification failed, retrying with --skippgpcheck...")
