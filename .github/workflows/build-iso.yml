@@ -36,7 +36,7 @@ jobs:
     container:
       image: archlinux:latest
       # Use cgroup limits supported on GitHub runners. Remove unsupported --storage-opt that caused docker create failure.
-      options: --privileged --cpus=1 --memory=8g --memory-swap=8g
+      options: --privileged --cpus=1
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -116,7 +116,7 @@ jobs:
     container:
       image: archlinux:latest
       # Match resource policy; remove unsupported --storage-opt on GitHub runners.
-      options: --privileged --cpus=1 --memory=8g --memory-swap=8g  # single core, 8GB RAM
+      options: --privileged --cpus=1  # single core, no explicit memory limit
 
     steps:
     - name: Checkout repository
