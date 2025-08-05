@@ -238,7 +238,7 @@ def main() -> bool:
         error("EFI boot mode required")
         return False
 
-    initialize_zfs()
+    # initialize_zfs()
 
     try:
         debug("Starting installation preparation")
