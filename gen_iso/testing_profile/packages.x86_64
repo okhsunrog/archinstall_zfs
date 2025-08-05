@@ -1,6 +1,7 @@
 base
 linux-lts
-zfs-linux-lts
+linux-lts-headers
+zfs-dkms
 zfs-utils
 mkinitcpio
 mkinitcpio-archiso

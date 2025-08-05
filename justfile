@@ -50,10 +50,10 @@ clean-iso:
     sudo rm -rf {{ISO_OUT_DIR}}
     sudo rm -rf {{ISO_WORK_DIR}}
 
-# Clean up local ZFS repository  
-clean-zfs-repo:
-    rm -rf local_repo/
-    @echo "Local ZFS repository cleaned"
+# Clean up local ZFS repository  (removed: no longer using local_repo)
+#clean-zfs-repo:
+#    rm -rf local_repo/
+#    @echo "Local ZFS repository cleaned"
 
 # Install development dependencies
 install-dev:
@@ -105,14 +105,22 @@ _cleanup-source PROFILE_DIR:
     @rm -rf {{PROFILE_DIR}}/airootfs/root/archinstall_zfs
     @rm -f {{PROFILE_DIR}}/airootfs/root/installer
 
-# Prepare ZFS packages (check archzfs vs AUR, build if needed)
-prepare-zfs-packages:
-    @echo "Preparing optimal ZFS packages..."
-    python gen_iso/build_zfs_package.py
+# Prepare ZFS packages (legacy precompiled flow) - removed
+#prepare-zfs-packages:
+#    @echo "Preparing optimal ZFS packages (legacy precompiled flow)..."
+#    python gen_iso/build_zfs_package.py
+
+# DKMS prebuild no longer needed: zfs-dkms builds during mkarchiso package installation.
+# (Intentionally left as a no-op to preserve target name for callers, if any.)
+_prebuild-dkms PROFILE_DIR:
+    @echo "Skipping DKMS prebuild: handled by mkarchiso during package installation."
+
+# Deprecated helper; no-op to avoid breaking external calls.
+_prebuild-dkms-active PROFILE_DIR:
+    @echo "Skipping DKMS prebuild (deprecated target)."
 
 # Build the main ISO for production release
 build-main-iso:
-    @just prepare-zfs-packages
     @just _prepare-source {{MAIN_PROFILE_DIR}}
     @echo "Building main ISO from 'releng' profile..."
     sudo mkarchiso -v -r -w {{ISO_WORK_DIR}} -o {{ISO_OUT_DIR}} {{MAIN_PROFILE_DIR}}
@@ -120,7 +128,6 @@ build-main-iso:
 
 # Build the testing ISO for QEMU
 build-testing-iso:
-    @just prepare-zfs-packages
     @just _prepare-source {{TESTING_PROFILE_DIR}}
     @echo "Building testing ISO from 'baseline' profile..."
     sudo mkarchiso -v -r -w {{ISO_WORK_DIR}} -o {{ISO_OUT_DIR}} {{TESTING_PROFILE_DIR}}
