@@ -15,7 +15,8 @@ from archinstall.tui.menu_item import MenuItem
 from archinstall_zfs.config_io import load_combined_configuration, save_combined_configuration
 from archinstall_zfs.disk import DiskManager, DiskManagerBuilder
 from archinstall_zfs.installer import ZFSInstaller
-from archinstall_zfs.menu.zfs_installer_menu import ZFSEncryptionMode, ZFSInstallerMenu, ZFSModuleMode
+from archinstall_zfs.menu import GlobalConfigMenu
+from archinstall_zfs.menu.models import InstallationMode, ZFSEncryptionMode, ZFSModuleMode
 from archinstall_zfs.zfs import ZFS_SERVICES, EncryptionMode, ZFSManager, ZFSManagerBuilder
 from archinstall_zfs.zfs.kmod_setup import add_archzfs_repo
 
@@ -33,57 +34,74 @@ def check_internet() -> bool:
         return False
 
 
-def get_installation_mode() -> InstallMode:
-    menu = SelectMenu(
-        MenuItemGroup(
-            [
-                MenuItem("Full Disk Installation", "full_disk"),
-                MenuItem("New ZFS Pool", "new_pool"),
-                MenuItem("Existing ZFS Pool", "existing_pool"),
-            ]
-        ),
-        header="Select installation mode",
-    )
-    selected = menu.run().item().value
-    info(f"Selected installation mode: {selected}")
-    return cast(InstallMode, selected)
+def get_installation_mode_from_menu(installer_menu: GlobalConfigMenu) -> InstallMode:
+    # No fallback prompts — rely on global menu validation
+    return cast(InstallMode, installer_menu.cfg.installation_mode.value)  # type: ignore[union-attr]
 
 
-def prepare_installation(installer_menu: ZFSInstallerMenu) -> tuple[ZFSManager, DiskManager]:
+def prepare_installation(installer_menu: GlobalConfigMenu) -> tuple[ZFSManager, DiskManager]:
     with Tui():
-        mode = get_installation_mode()
+        mode = get_installation_mode_from_menu(installer_menu)
         disk_builder = DiskManagerBuilder()
         zfs_builder = ZFSManagerBuilder()
 
         # Use values from the global menu instead of prompting here
         # Map menu encryption selection to ZFS encryption mode
         selected_mode: EncryptionMode | None = None
-        if installer_menu.zfs_encryption_mode is ZFSEncryptionMode.POOL:
+        if installer_menu.cfg.zfs_encryption_mode is ZFSEncryptionMode.POOL:
             selected_mode = EncryptionMode.POOL
-        elif installer_menu.zfs_encryption_mode is ZFSEncryptionMode.DATASET:
+        elif installer_menu.cfg.zfs_encryption_mode is ZFSEncryptionMode.DATASET:
             selected_mode = EncryptionMode.DATASET
-        zfs_builder.with_dataset_prefix(installer_menu.dataset_prefix).with_mountpoint(Path("/mnt")).with_encryption(
+        zfs_builder.with_dataset_prefix(installer_menu.cfg.dataset_prefix).with_mountpoint(Path("/mnt")).with_encryption(
             selected_mode,
-            installer_menu.zfs_encryption_password,
+            installer_menu.cfg.zfs_encryption_password,
         )
 
+        # Configure disk builder strictly from global menu
+        if installer_menu.cfg.disk_by_id:
+            from pathlib import Path as _P
+            disk_builder.with_selected_disk(_P(installer_menu.cfg.disk_by_id))
         if mode != "full_disk":
-            disk_manager = disk_builder.select_disk().select_efi_partition().build()
+            # new_pool/existing_pool require EFI
+            if installer_menu.cfg.efi_partition_by_id:
+                from pathlib import Path as _P
+                disk_builder.with_efi_partition(_P(installer_menu.cfg.efi_partition_by_id))
+            disk_manager = disk_builder.build()
 
         match mode:
             case "full_disk":
-                disk_manager, zfs_partition = disk_builder.select_disk().destroying_build()
-                zfs = zfs_builder.new_pool(zfs_partition).build()
+                # Full disk always creates partitions fresh
+                disk_manager, zfs_partition = disk_builder.destroying_build()
+                zfs = (
+                    zfs_builder.with_mountpoint(Path("/mnt"))
+                    .with_dataset_prefix(installer_menu.cfg.dataset_prefix)
+                    .with_encryption(selected_mode, installer_menu.cfg.zfs_encryption_password)
+                    .set_new_pool(zfs_partition, cast(str, installer_menu.cfg.pool_name))
+                    .build()
+                )
             case "new_pool":
-                zfs_partition = disk_manager.select_zfs_partition()
-                zfs = zfs_builder.new_pool(zfs_partition).build()
+                # Use provided ZFS partition
+                zfs_partition = cast(Path, Path(installer_menu.cfg.zfs_partition_by_id))
+                zfs = (
+                    zfs_builder.with_mountpoint(Path("/mnt"))
+                    .with_dataset_prefix(installer_menu.cfg.dataset_prefix)
+                    .with_encryption(selected_mode, installer_menu.cfg.zfs_encryption_password)
+                    .set_new_pool(zfs_partition, cast(str, installer_menu.cfg.pool_name))
+                    .build()
+                )
             case "existing_pool":
-                zfs = zfs_builder.select_existing_pool().build()
+                zfs = (
+                    zfs_builder.with_mountpoint(Path("/mnt"))
+                    .with_dataset_prefix(installer_menu.cfg.dataset_prefix)
+                    .with_encryption(selected_mode, installer_menu.cfg.zfs_encryption_password)
+                    .set_existing_pool(cast(str, installer_menu.cfg.pool_name))
+                    .build()
+                )
 
     return zfs, disk_manager
 
 
-def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, installer_menu: ZFSInstallerMenu, arch_config: ArchConfig) -> bool:
+def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, installer_menu: GlobalConfigMenu, arch_config: ArchConfig) -> bool:
     try:
         mountpoint = zfs_manager.config.mountpoint
 
@@ -141,6 +159,9 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
             if arch_config.mirror_config:
                 installation.set_mirrors(arch_config.mirror_config, on_target=True)
 
+            # Ensure archzfs repos are available both on the host (used by pacstrap)
+            # and in the target (for the installed system's pacman.conf)
+            add_archzfs_repo()
             add_archzfs_repo(installation.target, installation)
 
             # Precompiled preferred path with fallback to DKMS if requested or if precompiled fails
@@ -214,9 +235,9 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
         return False
 
 
-def ask_user_questions(arch_config: ArchConfig, zfs_data: dict | None = None, run_ui: bool = True) -> ZFSInstallerMenu:
+def ask_user_questions(arch_config: ArchConfig, zfs_data: dict | None = None, run_ui: bool = True) -> GlobalConfigMenu:
     """Ask user questions via ZFS installer menu and return it."""
-    installer_menu = ZFSInstallerMenu(arch_config)
+    installer_menu = GlobalConfigMenu(arch_config)
     if zfs_data:
         installer_menu.apply_json(zfs_data)
     if run_ui:

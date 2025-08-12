@@ -367,10 +367,15 @@ class ZFSManagerBuilder:
         self._preselected_encryption_password: str | None = None
 
     def new_pool(self, device: Path) -> "ZFSManagerBuilder":
-        pool_menu = EditMenu("Pool Name", header="Enter name for new ZFS pool", default_text="zroot")
-        pool_name = pool_menu.input().text()
-        info(f"Selected pool name: {pool_name}")
+        raise RuntimeError("Interactive new_pool() is disabled. Use set_new_pool(device, pool_name).")
 
+    def set_new_pool(self, device: Path, pool_name: str) -> "ZFSManagerBuilder":
+        """Configure builder for a new pool without interactive prompts.
+
+        Sets the target device and desired pool name and marks the flow as a new pool
+        creation. Callers must still set dataset prefix, mountpoint, and encryption via
+        the corresponding builder methods before build().
+        """
         self._device = str(device)
         self._pool_name = pool_name
         self._paths.pool_name = pool_name
@@ -378,29 +383,19 @@ class ZFSManagerBuilder:
         return self
 
     def select_existing_pool(self) -> "ZFSManagerBuilder":
-        debug("Scanning for importable ZFS pools")
-        try:
-            output = SysCommand("zpool import").decode()
-            pools = []
-            for line in output.splitlines():
-                if line.strip().startswith("pool:"):
-                    pool_name = line.split(":")[1].strip()
-                    debug(f"Found pool: {pool_name}")
-                    pools.append(MenuItem(pool_name, pool_name))
+        raise RuntimeError("Interactive select_existing_pool() is disabled. Use set_existing_pool(pool_name).")
 
-            if not pools:
-                error("No importable ZFS pools found")
-                raise ValueError("No importable ZFS pools found. Make sure pools exist and are exported.")
+    def set_existing_pool(self, pool_name: str) -> "ZFSManagerBuilder":
+        """Configure builder for an existing pool without interactive prompts.
 
-            pool_menu = SelectMenu(MenuItemGroup(pools), header="Select existing ZFS pool")
-            self._pool_name = pool_menu.run().item().value
-            self._paths.pool_name = self._pool_name
-            self._is_new_pool = False
-            return self
-        except SysCallError as e:
-            error(f"Failed to get pool list: {e!s}")
-            raise
-
+        Sets the pool name and marks the flow as using an existing pool. Callers must
+        still set dataset prefix, mountpoint, and encryption via the corresponding
+        builder methods before build().
+        """
+        self._pool_name = pool_name
+        self._paths.pool_name = pool_name
+        self._is_new_pool = False
+        return self
     def with_pool_name(self, name: str) -> "ZFSManagerBuilder":
         self._pool_name = name
         self._paths.pool_name = name

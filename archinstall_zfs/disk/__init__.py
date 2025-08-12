@@ -1,12 +1,12 @@
 import os
+import re
+import time
 from pathlib import Path
 from typing import Annotated
 
-import parted  # type: ignore[import-untyped]
 from archinstall import debug, error, info
 from archinstall.lib.exceptions import SysCallError
 from archinstall.lib.general import SysCommand
-from archinstall.tui import MenuItem, MenuItemGroup, SelectMenu
 from pydantic import BaseModel, BeforeValidator, Field, field_validator
 
 
@@ -95,24 +95,6 @@ class DiskManager:
         SysCommand(f"mkfs.fat -I -F32 {efi_part}")
         debug("Successfully formatted EFI partition")
 
-    def get_partitions(self) -> list[MenuItem]:
-        """Returns list of partitions for selection menus"""
-        debug(f"Scanning partitions on disk: {self.config.selected_disk}")
-        device = parted.getDevice(str(self.config.selected_disk))
-        disk_obj = parted.Disk(device)
-        partitions = []
-
-        MB_TO_GB_THRESHOLD = 1024
-        for p in disk_obj.partitions:
-            size_mb = (p.getLength() * device.sectorSize) / (1024 * 1024)
-            size_display = f"{size_mb:.1f}M" if size_mb < MB_TO_GB_THRESHOLD else f"{size_mb / MB_TO_GB_THRESHOLD:.1f}G"
-            part_name = Path(p.path).name
-            by_id_part = Path(str(self.config.selected_disk) + "-part" + part_name[-1])
-            partitions.append(MenuItem(f"{by_id_part} ({size_display})", str(by_id_part)))
-
-        info(f"Found {len(partitions)} partitions")
-        return partitions
-
     def mount_efi_partition(self, mountpoint: Path) -> None:
         """Mounts EFI partition at the specified mountpoint"""
         debug("Mounting EFI partition")
@@ -125,16 +107,6 @@ class DiskManager:
         except SysCallError as e:
             error(f"Failed to mount EFI partition: {e!s}")
             raise
-
-    def select_zfs_partition(self) -> ByIdPath:
-        debug("Displaying partition selection menu for ZFS")
-        partition_menu = SelectMenu(
-            MenuItemGroup(self.get_partitions()),
-            header="Select partition for ZFS pool",
-        )
-        selected = Path(partition_menu.run().item().value)
-        info(f"Selected ZFS partition: {selected}")
-        return selected
 
     @staticmethod
     def finish(mountpoint: Path) -> None:
@@ -150,20 +122,6 @@ class DiskManagerBuilder:
         self._selected_disk: ByIdPath | None = None
         self._efi_partition: ByIdPath | None = None
 
-    def select_efi_partition(self) -> "DiskManagerBuilder":
-        if not self._selected_disk:
-            raise ValueError("No disk selected")
-
-        debug("Displaying EFI partition selection menu")
-        disk_manager = DiskManager(DiskConfig(selected_disk=self._selected_disk))
-        partition_menu = SelectMenu(
-            MenuItemGroup(disk_manager.get_partitions()),
-            header="Select EFI partition",
-        )
-        self._efi_partition = Path(partition_menu.run().item().value)
-        info(f"Selected EFI partition: {self._efi_partition}")
-        return self
-
     def destroying_build(self) -> tuple[DiskManager, ByIdPath]:
         """Builds manager for full disk installation"""
         if not self._selected_disk:
@@ -175,6 +133,10 @@ class DiskManagerBuilder:
 
         self._efi_partition = Path(f"{self._selected_disk}-part1")
         zfs_partition = Path(f"{self._selected_disk}-part2")
+
+        # Wait for by-id symlinks to appear after partitioning
+        self._wait_for_partition_symlink(self._efi_partition)
+        self._wait_for_partition_symlink(zfs_partition)
 
         return DiskManager(
             DiskConfig(
@@ -188,7 +150,22 @@ class DiskManagerBuilder:
         if not self._selected_disk or not self._efi_partition:
             raise ValueError("Disk and EFI partition must be selected")
 
+        # Ensure EFI partition belongs to the selected disk
+        if not str(self._efi_partition).startswith(f"{self._selected_disk}-part"):
+            raise ValueError("Provided EFI partition does not belong to selected disk")
+
         return DiskManager(DiskConfig(selected_disk=self._selected_disk, efi_partition=self._efi_partition))
+
+    # --- Internal helpers ---
+    @staticmethod
+    def _wait_for_partition_symlink(path: Path, timeout_seconds: float = 10.0, poll_interval: float = 0.2) -> None:
+        """Wait until a by-id partition symlink exists, or raise on timeout."""
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            if path.exists():
+                return
+            time.sleep(poll_interval)
+        raise TimeoutError(f"Partition symlink did not appear: {path}")
 
     @staticmethod
     def get_disk_by_id(disk_path: str) -> str:
@@ -206,34 +183,18 @@ class DiskManagerBuilder:
         error(f"No by-id path found for disk: {disk_path}")
         raise RuntimeError(f"Could not find /dev/disk/by-id path for {disk_path}")
 
-    # noinspection PyMethodMayBeStatic
-    def _get_available_disks(self) -> list[MenuItem]:
-        debug("Scanning for available disks using parted")
-        disks = []
+    # Interactive discovery helpers removed; global config only
 
-        for device in parted.getAllDevices():
-            # Include common disk types: SATA (sd*), NVMe (nvme*), VirtIO (vd*), loop devices, etc.
-            if (
-                device.path.startswith("/dev/sd")
-                or device.path.startswith("/dev/nvme")
-                or device.path.startswith("/dev/vd")
-                or device.path.startswith("/dev/xvd")
-            ):
-                size_gb = device.length * device.sectorSize / (1024**3)
-                disks.append(MenuItem(f"{device.path} ({size_gb:.1f}GB)", device.path))
-                debug(f"Found disk: {device.path}")
+    # Interactive selection has been removed entirely in favor of global config
 
-        info(f"Found {len(disks)} available disks")
-        return disks
-
-    def select_disk(self) -> "DiskManagerBuilder":
-        debug("Displaying disk selection menu")
-        disk_menu = SelectMenu(
-            MenuItemGroup(self._get_available_disks()),
-            header="Select disk for installation",
-        )
-        selected_path = disk_menu.run().item().value
-        by_id_path = self.get_disk_by_id(selected_path)
-        self._selected_disk = Path(by_id_path)
+    def with_selected_disk(self, by_id_disk: Path) -> "DiskManagerBuilder":
+        """Set the selected disk non-interactively (expects /dev/disk/by-id path)."""
+        self._selected_disk = validate_disk_path(by_id_disk)
         info(f"Selected disk: {self._selected_disk}")
+        return self
+
+    def with_efi_partition(self, by_id_partition: Path) -> "DiskManagerBuilder":
+        """Set the EFI partition non-interactively (expects /dev/disk/by-id path)."""
+        self._efi_partition = validate_disk_path(by_id_partition)
+        info(f"Selected EFI partition: {self._efi_partition}")
         return self
