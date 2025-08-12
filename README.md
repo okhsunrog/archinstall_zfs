@@ -1,7 +1,5 @@
 # Archinstall-ZFS
 
-# WARNING: This is work-in-progress and doesn't work on the latest commit for now
-
 A ZFS-focused Arch Linux installer built on top of archinstall. This installer provides a streamlined way to set up Arch Linux with ZFS as the root filesystem, featuring automatic ZFSBootMenu configuration.
 
 ## Features
@@ -20,20 +18,9 @@ A ZFS-focused Arch Linux installer built on top of archinstall. This installer p
 
 The `gen_iso` directory contains all the necessary tools and profiles to build custom Arch Linux ISOs and test them with QEMU. The process is managed through `just` commands for clarity and ease of use.
 
-### ZFS package preparation (no DKMS, no system repo edits)
+### ZFS packages
 
-ISOs are configured to ALWAYS use precompiled ZFS kernel modules (never DKMS). This is handled by the helper script ([`python()`](gen_iso/build_zfs_package.py:1)) which:
-- Detects a compatible pair of linux-lts and zfs-linux-lts package versions via:
-  - Current ArchZFS repository
-  - Current/historical AUR metadata
-  - Archive repositories on archive.archlinux.org, if necessary
-- If needed, builds zfs-linux-lts from a specific AUR commit that matches the target linux-lts
-- Creates a local repository at `./local_repo` with the built packages
-- Updates the ISO profiles’ pacman.conf and packages list to consume precompiled packages
-
-Safety note: the builder uses pacman’s `--config` flag with a temporary, generated pacman.conf and does NOT modify `/etc/pacman.conf` on your host. See the helper methods `_generate_temp_pacman_conf` and `_pacman_with_config` inside ([`python.def _generate_temp_pacman_conf()`](gen_iso/build_zfs_package.py:250)) and ([`python.def _pacman_with_config()`](gen_iso/build_zfs_package.py:287)).
-
-You normally don’t run the script directly; the just recipes call it for you before building ISOs.
+ISOs and the installer use precompiled ZFS modules from the ArchZFS repository. No DKMS/prebuild step is required, and your host pacman configuration is not modified.
 
 ### ISO Profiles
 
@@ -59,8 +46,6 @@ sudo pacman -S qemu-desktop edk2-ovmf archiso grub just rsync
 
 ### Building the ISOs
 
-ZFS packages are prepared automatically via ([`justfile`](justfile:108)) before ISO builds.
-
 - Build the main production ISO:
 ```bash
 just build-main-iso
@@ -73,11 +58,6 @@ just build-testing-iso
 
 The output ISOs will be placed in the `gen_iso/out` directory.
 
-If you want to invoke the ZFS package preparation step explicitly (usually not needed):
-```bash
-just prepare-zfs-packages
-```
-This will run ([`python()`](gen_iso/build_zfs_package.py:1)) and update the ISO profiles under `gen_iso/`.
 
 ### Testing with QEMU
 
@@ -90,6 +70,11 @@ For development and testing, you should use the testing ISO which is optimized f
     just qemu-setup
     ```
     This will create a disk image and UEFI variables file.
+
+    If you need to reset both between test runs:
+    ```bash
+    just qemu-refresh
+    ```
 
 2.  **Build the testing ISO:**
     ```bash
@@ -215,6 +200,7 @@ just qemu-setup         # Create disk image and UEFI vars
 just qemu-create-disk   # Create disk image only
 just qemu-setup-uefi    # Setup UEFI vars only
 just qemu-reset-uefi    # Reset UEFI vars to defaults
+just qemu-refresh       # Remove existing disk + UEFI vars, then set up fresh ones
 
 # Installation (boots from ISO)
 just qemu-install       # Install with GUI
@@ -280,19 +266,12 @@ This project is licensed under the GNU General Public License v3.0. See the LICE
 
 ## TODO
 
-1. Configuration Improvements
-   - Integrate with archinstall's global menu system
-   - Implement unified configuration handling
-   - Add support for custom dataset configurations via JSON
-   - Add menu cancellation options
-
-2. System Enhancements
-   - Evaluate replacing mkinitcpio with dracut
+1. System Enhancements
    - Implement smarter hostid generation, based on hostname
    - Add local ZFSBootMenu building support
-   - Add swap configuration options (zswap, zram, swap patition)
+   - Add swap configuration options (zswap, zram, swap partition)
 
-3. Additional Features
+2. Additional Features
    - Expand post-installation customization options
    - Add more ZFS optimization options (configurable compression, DirectIO, etc.)
    - Install and configure zrepl for backup and replication
