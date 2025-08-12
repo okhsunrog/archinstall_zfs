@@ -1,12 +1,8 @@
 from __future__ import annotations
 
 from enum import Enum
-from pathlib import Path
-from typing import Optional
 
-from pydantic import BaseModel
-from pydantic import ConfigDict
-from pydantic import field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class InstallationMode(Enum):
@@ -41,22 +37,22 @@ class GlobalConfig(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
 
     # Global flow
-    installation_mode: Optional[InstallationMode] = None
-    disk_by_id: Optional[str] = None
-    efi_partition_by_id: Optional[str] = None
-    zfs_partition_by_id: Optional[str] = None  # used for NEW_POOL
-    pool_name: Optional[str] = None
+    installation_mode: InstallationMode | None = None
+    disk_by_id: str | None = None
+    efi_partition_by_id: str | None = None
+    zfs_partition_by_id: str | None = None  # used for NEW_POOL
+    pool_name: str | None = None
 
     # ZFS specifics
     dataset_prefix: str = "arch0"
     init_system: InitSystem = InitSystem.DRACUT
     zfs_module_mode: ZFSModuleMode = ZFSModuleMode.PRECOMPILED
     zfs_encryption_mode: ZFSEncryptionMode = ZFSEncryptionMode.NONE
-    zfs_encryption_password: Optional[str] = None
+    zfs_encryption_password: str | None = None
 
     @field_validator("pool_name")
     @classmethod
-    def _validate_pool_name(cls, v: Optional[str]) -> Optional[str]:
+    def _validate_pool_name(cls, v: str | None) -> str | None:
         if v and not v.isalnum():
             raise ValueError("Pool name must be alphanumeric")
         return v
@@ -105,7 +101,5 @@ class GlobalConfig(BaseModel):
         return self.model_dump(mode="json", exclude_none=True)
 
     @classmethod
-    def from_json(cls, data: dict) -> "GlobalConfig":
+    def from_json(cls, data: dict) -> GlobalConfig:
         return cls.model_validate(data)
-
-

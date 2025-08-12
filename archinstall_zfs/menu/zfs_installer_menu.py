@@ -5,11 +5,10 @@ This provides a clean separation between archinstall library functions and
 ZFS-specific configuration, allowing for better maintainability and version independence.
 """
 
+import re
 import sys
-from contextlib import suppress
 from pathlib import Path
 from typing import Any
-import re
 
 from archinstall.lib.args import ArchConfig
 from archinstall.lib.authentication.authentication_menu import AuthenticationMenu
@@ -30,8 +29,7 @@ from archinstall.tui.result import ResultType
 from archinstall_zfs.initramfs.base import InitramfsHandler
 from archinstall_zfs.initramfs.dracut import DracutInitramfsHandler
 from archinstall_zfs.initramfs.mkinitcpio import MkinitcpioInitramfsHandler
-from archinstall_zfs.disk import ByIdPath
-from archinstall_zfs.menu.models import InstallationMode, InitSystem, ZFSEncryptionMode, GlobalConfig, ZFSModuleMode
+from archinstall_zfs.menu.models import GlobalConfig, InitSystem, InstallationMode, ZFSEncryptionMode, ZFSModuleMode
 
 
 class GlobalConfigMenu:
@@ -82,7 +80,11 @@ class GlobalConfigMenu:
             # Separator
             MenuItem(text=""),
             # ZFS-specific options
-            MenuItem(text="ZFS Dataset Prefix", preview_action=lambda _: f"Dataset prefix: {self.cfg.dataset_prefix}", key="zfs_prefix"),
+            MenuItem(
+                text="ZFS Configuration",
+                preview_action=self._preview_zfs_configuration,
+                key="zfs_config",
+            ),
             MenuItem(
                 text="Installation Mode",
                 preview_action=self._preview_installation_mode,
@@ -140,13 +142,11 @@ class GlobalConfigMenu:
             "timezone": self._configure_timezone,
             "ntp": self._configure_ntp,
             "packages": self._configure_packages,
-            "zfs_prefix": self._configure_dataset_prefix,
+            "zfs_config": self._configure_zfs_configuration,
             "install_mode": self._configure_installation_mode,
             "disk_config": self._configure_disk_configuration,
             "pool_name": self._configure_pool_name,
-            "zfs_encryption": self._configure_zfs_encryption,
             "init_system": self._configure_init_system,
-            "zfs_modules": self._configure_zfs_modules,
         }
         handler = handlers.get(choice)
         if handler:
@@ -244,6 +244,7 @@ class GlobalConfigMenu:
             self.cfg.zfs_partition_by_id = str(choice.item().value)
             return True
         return False
+
     def _configure_disk_configuration(self, *_: Any) -> None:
         """Guided flow that asks for disk + partitions depending on install mode."""
         mode = self.cfg.installation_mode
@@ -276,10 +277,14 @@ class GlobalConfigMenu:
             self.cfg.pool_name = result.text()
 
     def _configure_dataset_prefix(self, *_: Any) -> None:
-        result = EditMenu("ZFS Dataset Prefix", header="Enter prefix for ZFS datasets", default_text=self.dataset_prefix).input()
+        result = EditMenu(
+            "ZFS Dataset Prefix",
+            header="Enter prefix for ZFS datasets",
+            default_text=self.cfg.dataset_prefix,
+        ).input()
 
         if result.text():
-            self.dataset_prefix = result.text()
+            self.cfg.dataset_prefix = result.text()
 
     def _configure_zfs_encryption(self, *_: Any) -> None:
         encryption_menu = SelectMenu(
@@ -301,6 +306,31 @@ class GlobalConfigMenu:
 
             if self.cfg.zfs_encryption_mode != ZFSEncryptionMode.NONE:
                 self._get_encryption_password()
+
+    def _configure_zfs_configuration(self, *_: Any) -> None:
+        """Grouped flow for ZFS settings: dataset prefix, encryption, module mode."""
+        while True:
+            summary = self._preview_zfs_configuration(None) or ""
+            menu = SelectMenu(
+                MenuItemGroup(
+                    [
+                        MenuItem("Dataset Prefix", "prefix"),
+                        MenuItem("Encryption", "encryption"),
+                        MenuItem("Modules Source", "modules"),
+                        MenuItem("Done", "done"),
+                    ]
+                ),
+                header=f"ZFS Configuration\n{summary}",
+            )
+            choice = menu.run().item().value
+            if choice == "prefix":
+                self._configure_dataset_prefix()
+            elif choice == "encryption":
+                self._configure_zfs_encryption()
+            elif choice == "modules":
+                self._configure_zfs_modules()
+            else:
+                break
 
     def _get_encryption_password(self) -> None:
         """Get encryption password for ZFS."""
@@ -377,6 +407,10 @@ class GlobalConfigMenu:
             return f"Encryption: {mode_text}, Password: {password_status}"
         return f"Encryption: {mode_text}"
 
+    def _preview_zfs_configuration(self, *_: Any) -> str | None:
+        enc = self._preview_zfs_encryption(None) or ""
+        return f"Dataset prefix: {self.cfg.dataset_prefix}\n{enc}\nModules: {self.cfg.zfs_module_mode.value}"
+
     def _preview_installation_mode(self, *_: Any) -> str | None:
         if not self.cfg.installation_mode:
             return "Install mode: Not set"
@@ -390,12 +424,12 @@ class GlobalConfigMenu:
             return f"Disk: {self.cfg.disk_by_id or 'Not set'} (full disk)"
         if mode is InstallationMode.NEW_POOL:
             return (
-                f"Disk: {self.cfg.disk_by_id or 'Not set'}; EFI: {self.cfg.efi_partition_by_id or 'Not set'}; "
-                f"ZFS: {self.cfg.zfs_partition_by_id or 'Not set'}"
+                f"Disk: {self.cfg.disk_by_id or 'Not set'}; EFI: {self.cfg.efi_partition_by_id or 'Not set'}; ZFS: {self.cfg.zfs_partition_by_id or 'Not set'}"
             )
         if mode is InstallationMode.EXISTING_POOL:
             return f"Disk: {self.cfg.disk_by_id or 'Not set'}; EFI: {self.cfg.efi_partition_by_id or 'Not set'}"
         return None
+
     # --- by-id listing helpers for global menu ---
     @staticmethod
     def _by_id_dir() -> Path:

@@ -1,5 +1,4 @@
 import os
-import re
 import time
 from pathlib import Path
 from typing import Annotated
@@ -182,10 +181,6 @@ class DiskManagerBuilder:
 
         error(f"No by-id path found for disk: {disk_path}")
         raise RuntimeError(f"Could not find /dev/disk/by-id path for {disk_path}")
-
-    # Interactive discovery helpers removed; global config only
-
-    # Interactive selection has been removed entirely in favor of global config
 
     def with_selected_disk(self, by_id_disk: Path) -> "DiskManagerBuilder":
         """Set the selected disk non-interactively (expects /dev/disk/by-id path)."""

@@ -366,9 +366,6 @@ class ZFSManagerBuilder:
         self._preselected_encryption_mode: EncryptionMode | None = None
         self._preselected_encryption_password: str | None = None
 
-    def new_pool(self, device: Path) -> "ZFSManagerBuilder":
-        raise RuntimeError("Interactive new_pool() is disabled. Use set_new_pool(device, pool_name).")
-
     def set_new_pool(self, device: Path, pool_name: str) -> "ZFSManagerBuilder":
         """Configure builder for a new pool without interactive prompts.
 
@@ -382,9 +379,6 @@ class ZFSManagerBuilder:
         self._is_new_pool = True
         return self
 
-    def select_existing_pool(self) -> "ZFSManagerBuilder":
-        raise RuntimeError("Interactive select_existing_pool() is disabled. Use set_existing_pool(pool_name).")
-
     def set_existing_pool(self, pool_name: str) -> "ZFSManagerBuilder":
         """Configure builder for an existing pool without interactive prompts.
 
@@ -396,6 +390,7 @@ class ZFSManagerBuilder:
         self._paths.pool_name = pool_name
         self._is_new_pool = False
         return self
+
     def with_pool_name(self, name: str) -> "ZFSManagerBuilder":
         self._pool_name = name
         self._paths.pool_name = name

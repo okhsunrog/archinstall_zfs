@@ -16,7 +16,7 @@ from archinstall_zfs.config_io import load_combined_configuration, save_combined
 from archinstall_zfs.disk import DiskManager, DiskManagerBuilder
 from archinstall_zfs.installer import ZFSInstaller
 from archinstall_zfs.menu import GlobalConfigMenu
-from archinstall_zfs.menu.models import InstallationMode, ZFSEncryptionMode, ZFSModuleMode
+from archinstall_zfs.menu.models import ZFSEncryptionMode, ZFSModuleMode
 from archinstall_zfs.zfs import ZFS_SERVICES, EncryptionMode, ZFSManager, ZFSManagerBuilder
 from archinstall_zfs.zfs.kmod_setup import add_archzfs_repo
 
@@ -59,13 +59,11 @@ def prepare_installation(installer_menu: GlobalConfigMenu) -> tuple[ZFSManager, 
 
         # Configure disk builder strictly from global menu
         if installer_menu.cfg.disk_by_id:
-            from pathlib import Path as _P
-            disk_builder.with_selected_disk(_P(installer_menu.cfg.disk_by_id))
+            disk_builder.with_selected_disk(Path(installer_menu.cfg.disk_by_id))
         if mode != "full_disk":
             # new_pool/existing_pool require EFI
             if installer_menu.cfg.efi_partition_by_id:
-                from pathlib import Path as _P
-                disk_builder.with_efi_partition(_P(installer_menu.cfg.efi_partition_by_id))
+                disk_builder.with_efi_partition(Path(installer_menu.cfg.efi_partition_by_id))
             disk_manager = disk_builder.build()
 
         match mode:
@@ -81,7 +79,7 @@ def prepare_installation(installer_menu: GlobalConfigMenu) -> tuple[ZFSManager, 
                 )
             case "new_pool":
                 # Use provided ZFS partition
-                zfs_partition = cast(Path, Path(installer_menu.cfg.zfs_partition_by_id))
+                zfs_partition = Path(cast(str, installer_menu.cfg.zfs_partition_by_id))
                 zfs = (
                     zfs_builder.with_mountpoint(Path("/mnt"))
                     .with_dataset_prefix(installer_menu.cfg.dataset_prefix)
@@ -139,7 +137,7 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
 
         SECOND_STAGE: list[str] = []
         # ZFS module choice
-        if installer_menu.zfs_module_mode == ZFSModuleMode.DKMS:
+        if installer_menu.cfg.zfs_module_mode == ZFSModuleMode.DKMS:
             SECOND_STAGE.extend(["zfs-dkms", "linux-lts-headers"])
 
         # ZFSInstaller will use its own default base packages optimized for ZFS
@@ -165,7 +163,7 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
             add_archzfs_repo(installation.target, installation)
 
             # Precompiled preferred path with fallback to DKMS if requested or if precompiled fails
-            if installer_menu.zfs_module_mode == ZFSModuleMode.PRECOMPILED:
+            if installer_menu.cfg.zfs_module_mode == ZFSModuleMode.PRECOMPILED:
                 try:
                     installation.add_additional_packages(["zfs-linux-lts", "zfs-utils"])  # try precompiled first
                 except Exception:
