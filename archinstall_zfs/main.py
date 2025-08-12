@@ -46,12 +46,13 @@ def prepare_installation(installer_menu: GlobalConfigMenu) -> tuple[ZFSManager, 
         zfs_builder = ZFSManagerBuilder()
 
         # Use values from the global menu instead of prompting here
-        # Map menu encryption selection to ZFS encryption mode
-        selected_mode: EncryptionMode | None = None
+        # Map menu encryption selection to ZFS encryption mode (always preselect to avoid prompts)
         if installer_menu.cfg.zfs_encryption_mode is ZFSEncryptionMode.POOL:
-            selected_mode = EncryptionMode.POOL
+            selected_mode: EncryptionMode | None = EncryptionMode.POOL
         elif installer_menu.cfg.zfs_encryption_mode is ZFSEncryptionMode.DATASET:
             selected_mode = EncryptionMode.DATASET
+        else:
+            selected_mode = EncryptionMode.NONE
         zfs_builder.with_dataset_prefix(installer_menu.cfg.dataset_prefix).with_mountpoint(Path("/mnt")).with_encryption(
             selected_mode,
             installer_menu.cfg.zfs_encryption_password,
@@ -160,6 +161,7 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
             # Ensure archzfs repos are available both on the host (used by pacstrap)
             # and in the target (for the installed system's pacman.conf)
             add_archzfs_repo()
+            # Ensure the target has refreshed keyring and synced DBs before package install
             add_archzfs_repo(installation.target, installation)
 
             # Precompiled preferred path with fallback to DKMS if requested or if precompiled fails

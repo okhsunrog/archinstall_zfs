@@ -185,11 +185,11 @@ class DiskManagerBuilder:
     def with_selected_disk(self, by_id_disk: Path) -> "DiskManagerBuilder":
         """Set the selected disk non-interactively (expects /dev/disk/by-id path)."""
         self._selected_disk = validate_disk_path(by_id_disk)
-        info(f"Selected disk: {self._selected_disk}")
+        debug(f"Selected disk: {self._selected_disk}")
         return self
 
     def with_efi_partition(self, by_id_partition: Path) -> "DiskManagerBuilder":
         """Set the EFI partition non-interactively (expects /dev/disk/by-id path)."""
         self._efi_partition = validate_disk_path(by_id_partition)
-        info(f"Selected EFI partition: {self._efi_partition}")
+        debug(f"Selected EFI partition: {self._efi_partition}")
         return self

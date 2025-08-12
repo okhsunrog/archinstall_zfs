@@ -43,6 +43,8 @@ class GlobalConfigMenu:
     def __init__(self, arch_config: ArchConfig):
         self.config = arch_config
         self.cfg = GlobalConfig()
+        # Remember last selected main-menu item key to restore cursor position
+        self._last_selected_key: str | None = None
 
     def run(self) -> None:
         """Run the main installer menu loop."""
@@ -96,24 +98,9 @@ class GlobalConfigMenu:
                 key="disk_config",
             ),
             MenuItem(
-                text="ZFS Pool Name",
-                preview_action=lambda _: f"Pool: {self.cfg.pool_name or 'Not set'}",
-                key="pool_name",
-            ),
-            MenuItem(
-                text="ZFS Encryption",
-                preview_action=self._preview_zfs_encryption,
-                key="zfs_encryption",
-            ),
-            MenuItem(
                 text="Init System",
                 preview_action=lambda _: f"Init system: {self.cfg.init_system.value}",
                 key="init_system",
-            ),
-            MenuItem(
-                text="ZFS Modules Source",
-                preview_action=lambda _: f"ZFS modules: {self.cfg.zfs_module_mode.value}",
-                key="zfs_modules",
             ),
             # Separator
             MenuItem(text=""),
@@ -124,12 +111,25 @@ class GlobalConfigMenu:
         ]
 
     def _show_main_menu(self) -> str | None:
-        """Display the main configuration menu."""
+        """Display the main configuration menu, restoring cursor to last selection."""
         menu_items = self._get_menu_items()
-        menu = SelectMenu(MenuItemGroup(menu_items), header="Arch Linux ZFS Installation Configuration")
+
+        # Try to find previously selected item to focus
+        focus_item = None
+        if self._last_selected_key is not None:
+            for item in menu_items:
+                if item.key == self._last_selected_key:
+                    focus_item = item
+                    break
+
+        group = MenuItemGroup(menu_items, focus_item=focus_item) if focus_item else MenuItemGroup(menu_items)
+        menu = SelectMenu(group, header="Arch Linux ZFS Installation Configuration")
 
         result = menu.run()
-        return result.item().key if result.item() else None
+        selected_key = result.item().key if result.item() else None
+        if selected_key is not None:
+            self._last_selected_key = selected_key
+        return selected_key
 
     def _handle_menu_choice(self, choice: str) -> None:
         """Handle a menu choice by calling the appropriate configuration method."""
@@ -314,6 +314,7 @@ class GlobalConfigMenu:
             menu = SelectMenu(
                 MenuItemGroup(
                     [
+                        MenuItem("Pool Name", "pool_name"),
                         MenuItem("Dataset Prefix", "prefix"),
                         MenuItem("Encryption", "encryption"),
                         MenuItem("Modules Source", "modules"),
@@ -323,7 +324,9 @@ class GlobalConfigMenu:
                 header=f"ZFS Configuration\n{summary}",
             )
             choice = menu.run().item().value
-            if choice == "prefix":
+            if choice == "pool_name":
+                self._configure_pool_name()
+            elif choice == "prefix":
                 self._configure_dataset_prefix()
             elif choice == "encryption":
                 self._configure_zfs_encryption()
@@ -409,7 +412,8 @@ class GlobalConfigMenu:
 
     def _preview_zfs_configuration(self, *_: Any) -> str | None:
         enc = self._preview_zfs_encryption(None) or ""
-        return f"Dataset prefix: {self.cfg.dataset_prefix}\n{enc}\nModules: {self.cfg.zfs_module_mode.value}"
+        pool = f"Pool: {self.cfg.pool_name or 'Not set'}"
+        return f"{pool}\nDataset prefix: {self.cfg.dataset_prefix}\n{enc}\nModules: {self.cfg.zfs_module_mode.value}"
 
     def _preview_installation_mode(self, *_: Any) -> str | None:
         if not self.cfg.installation_mode:

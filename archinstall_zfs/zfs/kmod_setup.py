@@ -52,10 +52,11 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) ->
             info("archzfs repository already configured")
             # Still ensure database sync happens in the right environment
             try:
+                info("Syncing package databases...")
                 if installation:
                     installation.arch_chroot("pacman -Sy")
                 else:
-                    SysCommand("pacman -Sy")
+                    SysCommand("pacman -Sy", peek_output=True)
             except SysCallError as e:
                 warn(f"Database sync failed: {e}")
             return
@@ -66,8 +67,8 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) ->
             installation.arch_chroot("pacman-key --init")
             installation.arch_chroot("pacman-key --populate archlinux")
         else:
-            SysCommand("pacman-key --init")
-            SysCommand("pacman-key --populate archlinux")
+            SysCommand("pacman-key --init", peek_output=True)
+            SysCommand("pacman-key --populate archlinux", peek_output=True)
     except SysCallError as e:
         error(f"Failed to initialize keyring: {e}")
         raise RuntimeError("Cannot proceed without working keyring") from e
@@ -86,9 +87,10 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) ->
         key_receive = f"pacman-key --keyserver {keyserver} -r {key_id}"
         try:
             if installation:
-                installation.arch_chroot(key_receive)
+                # Avoid blocking if GPG pinentry tries to prompt; use no-tty.
+                installation.arch_chroot(key_receive + " --no-tty")
             else:
-                SysCommand(key_receive)
+                SysCommand(key_receive + " --no-tty", peek_output=True)
             key_received = True
             info(f"Successfully received key from {keyserver}")
             break
@@ -103,7 +105,7 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) ->
         if installation:
             installation.arch_chroot(key_sign)
         else:
-            SysCommand(key_sign)
+            SysCommand(key_sign, peek_output=True)
         info("Successfully signed archzfs key")
     except SysCallError as e:
         raise RuntimeError("Cannot proceed without signed archzfs key") from e
@@ -118,11 +120,12 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) ->
         f.writelines(repo_config)
 
     try:
+        info("Syncing package databases...")
         if installation:
             installation.arch_chroot("pacman -Sy")
             info("Successfully synced package databases on target")
         else:
-            SysCommand("pacman -Sy")
+            SysCommand("pacman -Sy", peek_output=True)
             info("Successfully synced package databases on host")
     except SysCallError as e:
         error(f"Failed to sync databases: {e}")
