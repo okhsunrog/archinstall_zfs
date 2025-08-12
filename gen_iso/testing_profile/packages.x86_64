@@ -5,6 +5,7 @@ zfs-utils
 mkinitcpio
 mkinitcpio-archiso
 openssh
+rsync
 syslinux
 arch-install-scripts
 archinstall

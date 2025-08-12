@@ -89,19 +89,9 @@ class GlobalConfigMenu:
                 key="install_mode",
             ),
             MenuItem(
-                text="Target Disk (/dev/disk/by-id)",
-                preview_action=lambda _: f"Disk: {self.cfg.disk_by_id or 'Not set'}",
-                key="disk_select",
-            ),
-            MenuItem(
-                text="EFI Partition (/dev/disk/by-id)",
-                preview_action=lambda _: f"EFI: {self.cfg.efi_partition_by_id or 'Not set'}",
-                key="efi_select",
-            ),
-            MenuItem(
-                text="ZFS Partition (/dev/disk/by-id)",
-                preview_action=lambda _: f"ZFS: {self.cfg.zfs_partition_by_id or 'Not set'}",
-                key="zfs_part_select",
+                text="Disk Configuration",
+                preview_action=self._preview_disk_configuration,
+                key="disk_config",
             ),
             MenuItem(
                 text="ZFS Pool Name",
@@ -152,9 +142,7 @@ class GlobalConfigMenu:
             "packages": self._configure_packages,
             "zfs_prefix": self._configure_dataset_prefix,
             "install_mode": self._configure_installation_mode,
-            "disk_select": self._configure_disk_by_id,
-            "efi_select": self._configure_efi_partition_by_id,
-            "zfs_part_select": self._configure_zfs_partition_by_id,
+            "disk_config": self._configure_disk_configuration,
             "pool_name": self._configure_pool_name,
             "zfs_encryption": self._configure_zfs_encryption,
             "init_system": self._configure_init_system,
@@ -219,33 +207,64 @@ class GlobalConfigMenu:
         result = mode_menu.run()
         if result.type_ != ResultType.Skip and result.item():
             self.cfg.installation_mode = result.item().value
+            # Clear disk-related fields when switching modes to avoid stale state
+            self.cfg.disk_by_id = None
+            self.cfg.efi_partition_by_id = None
+            self.cfg.zfs_partition_by_id = None
 
-    def _configure_disk_by_id(self, *_: Any) -> None:
+    def _configure_disk_by_id(self) -> bool:
         items = self._list_by_id_disks_menu_items()
         if not items:
             SelectMenu(MenuItemGroup([MenuItem("OK", None)]), header="No /dev/disk/by-id entries found").run()
-            return
+            return False
         choice = SelectMenu(MenuItemGroup(items), header="Select target disk (/dev/disk/by-id)").run()
         if choice.item():
             self.cfg.disk_by_id = str(choice.item().value)
+            return True
+        return False
 
-    def _configure_efi_partition_by_id(self, *_: Any) -> None:
+    def _configure_efi_partition_by_id(self) -> bool:
         parts = self._list_by_id_partitions_menu_items()
         if not parts:
             SelectMenu(MenuItemGroup([MenuItem("OK", None)]), header="No partitions found under /dev/disk/by-id").run()
-            return
+            return False
         choice = SelectMenu(MenuItemGroup(parts), header="Select EFI partition (/dev/disk/by-id)").run()
         if choice.item():
             self.cfg.efi_partition_by_id = str(choice.item().value)
+            return True
+        return False
 
-    def _configure_zfs_partition_by_id(self, *_: Any) -> None:
+    def _configure_zfs_partition_by_id(self) -> bool:
         parts = self._list_by_id_partitions_menu_items()
         if not parts:
             SelectMenu(MenuItemGroup([MenuItem("OK", None)]), header="No partitions found under /dev/disk/by-id").run()
-            return
+            return False
         choice = SelectMenu(MenuItemGroup(parts), header="Select ZFS partition (/dev/disk/by-id)").run()
         if choice.item():
             self.cfg.zfs_partition_by_id = str(choice.item().value)
+            return True
+        return False
+    def _configure_disk_configuration(self, *_: Any) -> None:
+        """Guided flow that asks for disk + partitions depending on install mode."""
+        mode = self.cfg.installation_mode
+        if not mode:
+            SelectMenu(MenuItemGroup([MenuItem("OK", None)]), header="Select installation mode first").run()
+            return
+
+        # For full disk, only disk selection is needed (partitions will be created)
+        if mode is InstallationMode.FULL_DISK:
+            if not self._configure_disk_by_id():
+                return
+            # Partitions will be derived during full-disk partitioning
+            return
+
+        # For new/existing pool, we need an EFI partition and optionally ZFS partition (new pool)
+        if not self._configure_disk_by_id():
+            return
+        if not self._configure_efi_partition_by_id():
+            return
+        if mode is InstallationMode.NEW_POOL:
+            self._configure_zfs_partition_by_id()
 
     def _configure_pool_name(self, *_: Any) -> None:
         result = EditMenu(
@@ -363,6 +382,20 @@ class GlobalConfigMenu:
             return "Install mode: Not set"
         return f"Install mode: {self.cfg.installation_mode.value}"
 
+    def _preview_disk_configuration(self, *_: Any) -> str | None:
+        mode = self.cfg.installation_mode
+        if not mode:
+            return "Disk: (mode not set)"
+        if mode is InstallationMode.FULL_DISK:
+            return f"Disk: {self.cfg.disk_by_id or 'Not set'} (full disk)"
+        if mode is InstallationMode.NEW_POOL:
+            return (
+                f"Disk: {self.cfg.disk_by_id or 'Not set'}; EFI: {self.cfg.efi_partition_by_id or 'Not set'}; "
+                f"ZFS: {self.cfg.zfs_partition_by_id or 'Not set'}"
+            )
+        if mode is InstallationMode.EXISTING_POOL:
+            return f"Disk: {self.cfg.disk_by_id or 'Not set'}; EFI: {self.cfg.efi_partition_by_id or 'Not set'}"
+        return None
     # --- by-id listing helpers for global menu ---
     @staticmethod
     def _by_id_dir() -> Path:
