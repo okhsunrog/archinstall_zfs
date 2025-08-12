@@ -45,6 +45,8 @@ class GlobalConfigMenu:
         self.cfg = GlobalConfig()
         # Remember last selected main-menu item key to restore cursor position
         self._last_selected_key: str | None = None
+        # Remember last selected ZFS submenu item key to restore cursor position
+        self._last_selected_zfs_key: str | None = None
 
     def run(self) -> None:
         """Run the main installer menu loop."""
@@ -217,7 +219,17 @@ class GlobalConfigMenu:
         if not items:
             SelectMenu(MenuItemGroup([MenuItem("OK", None)]), header="No /dev/disk/by-id entries found").run()
             return False
-        choice = SelectMenu(MenuItemGroup(items), header="Select target disk (/dev/disk/by-id)").run()
+        # Restore focus to previously selected disk if available
+        focus_item = None
+        if self.cfg.disk_by_id is not None:
+            for item in items:
+                if str(item.value) == str(self.cfg.disk_by_id):
+                    focus_item = item
+                    break
+        choice = SelectMenu(
+            MenuItemGroup(items, focus_item=focus_item) if focus_item else MenuItemGroup(items),
+            header="Select target disk (/dev/disk/by-id)",
+        ).run()
         if choice.item():
             self.cfg.disk_by_id = str(choice.item().value)
             return True
@@ -228,7 +240,17 @@ class GlobalConfigMenu:
         if not parts:
             SelectMenu(MenuItemGroup([MenuItem("OK", None)]), header="No partitions found under /dev/disk/by-id").run()
             return False
-        choice = SelectMenu(MenuItemGroup(parts), header="Select EFI partition (/dev/disk/by-id)").run()
+        # Restore focus to previously selected EFI partition if available
+        focus_item = None
+        if self.cfg.efi_partition_by_id is not None:
+            for item in parts:
+                if str(item.value) == str(self.cfg.efi_partition_by_id):
+                    focus_item = item
+                    break
+        choice = SelectMenu(
+            MenuItemGroup(parts, focus_item=focus_item) if focus_item else MenuItemGroup(parts),
+            header="Select EFI partition (/dev/disk/by-id)",
+        ).run()
         if choice.item():
             self.cfg.efi_partition_by_id = str(choice.item().value)
             return True
@@ -239,7 +261,17 @@ class GlobalConfigMenu:
         if not parts:
             SelectMenu(MenuItemGroup([MenuItem("OK", None)]), header="No partitions found under /dev/disk/by-id").run()
             return False
-        choice = SelectMenu(MenuItemGroup(parts), header="Select ZFS partition (/dev/disk/by-id)").run()
+        # Restore focus to previously selected ZFS partition if available
+        focus_item = None
+        if self.cfg.zfs_partition_by_id is not None:
+            for item in parts:
+                if str(item.value) == str(self.cfg.zfs_partition_by_id):
+                    focus_item = item
+                    break
+        choice = SelectMenu(
+            MenuItemGroup(parts, focus_item=focus_item) if focus_item else MenuItemGroup(parts),
+            header="Select ZFS partition (/dev/disk/by-id)",
+        ).run()
         if choice.item():
             self.cfg.zfs_partition_by_id = str(choice.item().value)
             return True
@@ -311,19 +343,35 @@ class GlobalConfigMenu:
         """Grouped flow for ZFS settings: dataset prefix, encryption, module mode."""
         while True:
             summary = self._preview_zfs_configuration(None) or ""
+            # Build submenu items with stable keys
+            submenu_items = [
+                MenuItem("Pool Name", "pool_name", key="pool_name"),
+                MenuItem("Dataset Prefix", "prefix", key="prefix"),
+                MenuItem("Encryption", "encryption", key="encryption"),
+                MenuItem("Modules Source", "modules", key="modules"),
+                MenuItem("Done", "done", key="done"),
+            ]
+
+            # Restore focus to the previously selected submenu item if available
+            focus_item = None
+            if self._last_selected_zfs_key is not None:
+                for item in submenu_items:
+                    if getattr(item, "key", None) == self._last_selected_zfs_key:
+                        focus_item = item
+                        break
+
             menu = SelectMenu(
-                MenuItemGroup(
-                    [
-                        MenuItem("Pool Name", "pool_name"),
-                        MenuItem("Dataset Prefix", "prefix"),
-                        MenuItem("Encryption", "encryption"),
-                        MenuItem("Modules Source", "modules"),
-                        MenuItem("Done", "done"),
-                    ]
-                ),
+                MenuItemGroup(submenu_items, focus_item=focus_item) if focus_item else MenuItemGroup(submenu_items),
                 header=f"ZFS Configuration\n{summary}",
             )
-            choice = menu.run().item().value
+
+            result = menu.run()
+            selected_item = result.item()
+            selected_key = selected_item.key if selected_item and hasattr(selected_item, "key") else None
+            if selected_key is not None:
+                self._last_selected_zfs_key = selected_key
+
+            choice = selected_item.value if selected_item else None
             if choice == "pool_name":
                 self._configure_pool_name()
             elif choice == "prefix":
