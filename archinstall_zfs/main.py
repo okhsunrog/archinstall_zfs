@@ -6,16 +6,17 @@ from pathlib import Path
 from typing import Literal, cast
 
 from archinstall import SysInfo, debug, error, info
-from archinstall.lib.args import ArchConfig, Arguments
+from archinstall.lib.args import ArchConfig, Arguments, arch_config_handler
 from archinstall.lib.configuration import ConfigurationOutput
 from archinstall.lib.models.device import DiskLayoutConfiguration, DiskLayoutType
-from archinstall.tui.curses_menu import EditMenu, MenuItemGroup, SelectMenu, Tui
+from archinstall.tui.curses_menu import MenuItemGroup, SelectMenu, Tui
 from archinstall.tui.menu_item import MenuItem
 
+from archinstall_zfs.config_io import load_combined_configuration, save_combined_configuration
 from archinstall_zfs.disk import DiskManager, DiskManagerBuilder
 from archinstall_zfs.installer import ZFSInstaller
-from archinstall_zfs.menu.zfs_installer_menu import ZFSInstallerMenu, ZFSModuleMode
-from archinstall_zfs.zfs import ZFS_SERVICES, ZFSManager, ZFSManagerBuilder
+from archinstall_zfs.menu.zfs_installer_menu import ZFSEncryptionMode, ZFSInstallerMenu, ZFSModuleMode
+from archinstall_zfs.zfs import ZFS_SERVICES, EncryptionMode, ZFSManager, ZFSManagerBuilder
 from archinstall_zfs.zfs.kmod_setup import add_archzfs_repo
 
 InstallMode = Literal["full_disk", "new_pool", "existing_pool"]
@@ -48,15 +49,23 @@ def get_installation_mode() -> InstallMode:
     return cast(InstallMode, selected)
 
 
-def prepare_installation() -> tuple[ZFSManager, DiskManager]:
+def prepare_installation(installer_menu: ZFSInstallerMenu) -> tuple[ZFSManager, DiskManager]:
     with Tui():
         mode = get_installation_mode()
         disk_builder = DiskManagerBuilder()
         zfs_builder = ZFSManagerBuilder()
 
-        zfs_builder.with_dataset_prefix(
-            EditMenu("Dataset Prefix", header="Enter prefix for ZFS datasets", default_text="arch0").input().text()
-        ).with_mountpoint(Path("/mnt"))
+        # Use values from the global menu instead of prompting here
+        # Map menu encryption selection to ZFS encryption mode
+        selected_mode: EncryptionMode | None = None
+        if installer_menu.zfs_encryption_mode is ZFSEncryptionMode.POOL:
+            selected_mode = EncryptionMode.POOL
+        elif installer_menu.zfs_encryption_mode is ZFSEncryptionMode.DATASET:
+            selected_mode = EncryptionMode.DATASET
+        zfs_builder.with_dataset_prefix(installer_menu.dataset_prefix).with_mountpoint(Path("/mnt")).with_encryption(
+            selected_mode,
+            installer_menu.zfs_encryption_password,
+        )
 
         if mode != "full_disk":
             disk_manager = disk_builder.select_disk().select_efi_partition().build()
@@ -94,7 +103,8 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
 
         config = ConfigurationOutput(arch_config)
         config.write_debug()
-        config.save()
+        # Merge ZFS config into the same user_configuration.json
+        save_combined_configuration(config, config._default_save_path, installer_menu.to_json())
 
         # Dry-run/silence not currently sourced from ArchConfig; default to normal run
         if False:
@@ -204,10 +214,13 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
         return False
 
 
-def ask_user_questions(arch_config: ArchConfig) -> ZFSInstallerMenu:
+def ask_user_questions(arch_config: ArchConfig, zfs_data: dict | None = None, run_ui: bool = True) -> ZFSInstallerMenu:
     """Ask user questions via ZFS installer menu and return it."""
     installer_menu = ZFSInstallerMenu(arch_config)
-    installer_menu.run()
+    if zfs_data:
+        installer_menu.apply_json(zfs_data)
+    if run_ui:
+        installer_menu.run()
     return installer_menu
 
 
@@ -228,31 +241,41 @@ def main() -> bool:
 
     try:
         debug("Starting installation preparation")
-        zfs_manager, disk_manager = prepare_installation()
+        zfs_data: dict | None = None
+        # If user provided a config, load it like guided installer does
+        if arch_config_handler.args.config is not None:
+            arch_config = arch_config_handler.config
+            try:
+                _, zfs_data = load_combined_configuration(arch_config_handler.args.config)
+            except Exception:
+                zfs_data = None
+        else:
+            # Build a default ArchConfig for interactive menu
+            args = Arguments(mountpoint=Path("/mnt"), silent=False, dry_run=False)
+            config_dict = {
+                "disk_config": DiskLayoutConfiguration(DiskLayoutType.Pre_mount, mountpoint=Path("/mnt")).json(),
+                "hostname": "archzfs",
+                "locale_config": {},
+                "mirror_config": {},
+                "network_config": {},
+                "profile_config": {},
+                "auth_config": {},
+                "app_config": {},
+                "packages": [],
+                "timezone": "UTC",
+                "ntp": True,
+                "kernels": ["linux-lts"],
+                "bootloader": "Systemd-boot",
+                "swap": False,
+            }
+            arch_config = ArchConfig.from_config(config_dict, args)
+        run_ui = not arch_config_handler.args.silent
+        installer_menu = ask_user_questions(arch_config, zfs_data, run_ui=run_ui)
+
+        zfs_manager, disk_manager = prepare_installation(installer_menu)
         debug("Installation preparation completed")
 
         debug("Starting installation execution")
-        # Build an initial ArchConfig to run the menu now and get selections
-        args = Arguments(mountpoint=Path("/mnt"), silent=False, dry_run=False)
-        config_dict = {
-            "disk_config": DiskLayoutConfiguration(DiskLayoutType.Pre_mount, mountpoint=Path("/mnt")).json(),
-            "hostname": "archzfs",
-            "locale_config": {},
-            "mirror_config": {},
-            "network_config": {},
-            "profile_config": {},
-            "auth_config": {},
-            "app_config": {},
-            "packages": [],
-            "timezone": "UTC",
-            "ntp": True,
-            "kernels": ["linux-lts"],
-            "bootloader": "Systemd-boot",
-            "swap": False,
-        }
-        arch_config = ArchConfig.from_config(config_dict, args)
-        installer_menu = ask_user_questions(arch_config)
-
         success = perform_installation(disk_manager, zfs_manager, installer_menu, arch_config)
         if not success:
             error("Installation execution failed")

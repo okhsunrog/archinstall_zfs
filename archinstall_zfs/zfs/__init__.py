@@ -98,10 +98,21 @@ class ZFSPaths(BaseModel):
 
 
 class ZFSEncryption:
-    def __init__(self, key_path: Path, is_new_pool: bool, pool_name: str):
+    def __init__(
+        self,
+        key_path: Path,
+        is_new_pool: bool,
+        pool_name: str,
+        preselected_mode: EncryptionMode | None = None,
+        preselected_password: str | None = None,
+    ):
         self.key_path: Path = key_path
-        self.password: str | None = None
-        self.mode: EncryptionMode | None = None
+        self.password: str | None = preselected_password
+        self.mode: EncryptionMode | None = preselected_mode
+
+        if self.mode is not None:
+            # Use preselected configuration and skip prompts
+            return
 
         if is_new_pool:
             self._setup_new_pool_encryption()
@@ -352,6 +363,8 @@ class ZFSManagerBuilder:
         self._is_new_pool: bool = True
         self._paths: ZFSPaths = ZFSPaths()
         self._encryption_handler: ZFSEncryption | None = None
+        self._preselected_encryption_mode: EncryptionMode | None = None
+        self._preselected_encryption_password: str | None = None
 
     def new_pool(self, device: Path) -> "ZFSManagerBuilder":
         pool_menu = EditMenu("Pool Name", header="Enter name for new ZFS pool", default_text="zroot")
@@ -401,6 +414,11 @@ class ZFSManagerBuilder:
         self._mountpoint = path
         return self
 
+    def with_encryption(self, mode: EncryptionMode | None, password: str | None) -> "ZFSManagerBuilder":
+        self._preselected_encryption_mode = mode
+        self._preselected_encryption_password = password
+        return self
+
     def build(self) -> "ZFSManager":
         if not self._pool_name:
             raise ValueError("Pool name must be set before building ZFS manager")
@@ -410,7 +428,13 @@ class ZFSManagerBuilder:
             raise ValueError("Mountpoint must be set before building ZFS manager")
 
         self._datasets = DEFAULT_DATASETS
-        self._encryption_handler = ZFSEncryption(self._paths.key_file, self._is_new_pool, self._pool_name)
+        self._encryption_handler = ZFSEncryption(
+            self._paths.key_file,
+            self._is_new_pool,
+            self._pool_name,
+            preselected_mode=self._preselected_encryption_mode,
+            preselected_password=self._preselected_encryption_password,
+        )
         config = ZFSConfig(
             pool_name=self._pool_name, dataset_prefix=self._dataset_prefix, mountpoint=self._mountpoint, compression=self._compression, datasets=self._datasets
         )

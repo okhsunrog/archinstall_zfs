@@ -6,6 +6,7 @@ ZFS-specific configuration, allowing for better maintainability and version inde
 """
 
 import sys
+from contextlib import suppress
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -341,3 +342,28 @@ class ZFSInstallerMenu:
             return DracutInitramfsHandler(target, encryption_enabled)
 
         return MkinitcpioInitramfsHandler(target, encryption_enabled)
+
+    # Serialization for combined configuration file
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "dataset_prefix": self.dataset_prefix,
+            "init_system": self.init_system.value,
+            "zfs_module_mode": self.zfs_module_mode.value,
+            "zfs_encryption_mode": self.zfs_encryption_mode.value,
+            # Intentionally omit password from the main config file
+        }
+
+    def apply_json(self, data: dict[str, Any]) -> None:
+        if not data:
+            return
+        if v := data.get("dataset_prefix"):
+            self.dataset_prefix = str(v)
+        if v := data.get("init_system"):
+            with suppress(Exception):
+                self.init_system = InitSystem(v)
+        if v := data.get("zfs_module_mode"):
+            with suppress(Exception):
+                self.zfs_module_mode = ZFSModuleMode(v)
+        if v := data.get("zfs_encryption_mode"):
+            with suppress(Exception):
+                self.zfs_encryption_mode = ZFSEncryptionMode(v)
