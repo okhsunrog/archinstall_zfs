@@ -7,6 +7,7 @@ ZFS-specific configuration, allowing for better maintainability and version inde
 
 import sys
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from archinstall.lib.args import ArchConfig
@@ -25,10 +26,19 @@ from archinstall.lib.translationhandler import tr
 from archinstall.tui import EditMenu, MenuItem, MenuItemGroup, SelectMenu, Tui
 from archinstall.tui.result import ResultType
 
+from archinstall_zfs.initramfs.base import InitramfsHandler
+from archinstall_zfs.initramfs.dracut import DracutInitramfsHandler
+from archinstall_zfs.initramfs.mkinitcpio import MkinitcpioInitramfsHandler
+
 
 class InitSystem(Enum):
     DRACUT = "dracut"
     MKINITCPIO = "mkinitcpio"
+
+
+class ZFSModuleMode(Enum):
+    PRECOMPILED = "Precompiled (zfs-linux-lts, fallback to zfs-dkms)"
+    DKMS = "DKMS (zfs-dkms)"
 
 
 class ZFSEncryptionMode(Enum):
@@ -53,6 +63,7 @@ class ZFSInstallerMenu:
         self.init_system: InitSystem = InitSystem.DRACUT
         self.zfs_encryption_mode: ZFSEncryptionMode = ZFSEncryptionMode.NONE
         self.zfs_encryption_password: str | None = None
+        self.zfs_module_mode: ZFSModuleMode = ZFSModuleMode.PRECOMPILED
 
     def run(self) -> None:
         """Run the main installer menu loop."""
@@ -105,6 +116,11 @@ class ZFSInstallerMenu:
                 preview_action=lambda _: f"Init system: {self.init_system.value}",
                 key="init_system",
             ),
+            MenuItem(
+                text="ZFS Modules Source",
+                preview_action=lambda _: f"ZFS modules: {self.zfs_module_mode.value}",
+                key="zfs_modules",
+            ),
             # Separator
             MenuItem(text=""),
             # Actions
@@ -135,6 +151,7 @@ class ZFSInstallerMenu:
             "zfs_prefix": self._configure_dataset_prefix,
             "zfs_encryption": self._configure_zfs_encryption,
             "init_system": self._configure_init_system,
+            "zfs_modules": self._configure_zfs_modules,
         }
         handler = handlers.get(choice)
         if handler:
@@ -233,6 +250,22 @@ class ZFSInstallerMenu:
             if selected is not None:
                 self.init_system = selected
 
+    def _configure_zfs_modules(self, *_: Any) -> None:
+        mode_menu = SelectMenu(
+            MenuItemGroup(
+                [
+                    MenuItem(ZFSModuleMode.PRECOMPILED.value, ZFSModuleMode.PRECOMPILED),
+                    MenuItem(ZFSModuleMode.DKMS.value, ZFSModuleMode.DKMS),
+                ]
+            ),
+            header="Select ZFS modules source",
+        )
+        result = mode_menu.run()
+        if result.type_ != ResultType.Skip:
+            selected = result.item().value if result.item() else None
+            if selected is not None:
+                self.zfs_module_mode = selected
+
     # Preview methods
     def _preview_locale(self, *_: Any) -> str | None:
         if self.config.locale_config:
@@ -299,4 +332,12 @@ class ZFSInstallerMenu:
             "init_system": self.init_system,
             "encryption_mode": self.zfs_encryption_mode,
             "encryption_password": self.zfs_encryption_password,
+            "zfs_module_mode": self.zfs_module_mode,
         }
+
+    # Factory for initramfs handler
+    def create_initramfs_handler(self, target: Path, encryption_enabled: bool = False) -> InitramfsHandler:
+        if self.init_system == InitSystem.DRACUT:
+            return DracutInitramfsHandler(target, encryption_enabled)
+
+        return MkinitcpioInitramfsHandler(target, encryption_enabled)

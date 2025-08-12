@@ -2,11 +2,12 @@ from pathlib import Path
 
 from archinstall.lib.general import SysCommand
 
+from .base import InitramfsHandler
 
-class DracutSetup:
-    def __init__(self, target: str, encryption_enabled: bool = False):
-        self.target = target
-        self.encryption_enabled = encryption_enabled
+
+class DracutInitramfsHandler(InitramfsHandler):
+    def __init__(self, target: Path, encryption_enabled: bool = False):
+        super().__init__(target, encryption_enabled)
         self.scripts_dir = Path(target) / "usr/local/bin"
         self.hooks_dir = Path(target) / "etc/pacman.d/hooks"
         self.conf_dir = Path(target) / "etc/dracut.conf.d"
@@ -86,3 +87,27 @@ NeedsTargets"""
 
         (self.hooks_dir / "90-dracut-install.hook").write_text(install_hook)
         (self.hooks_dir / "60-dracut-remove.hook").write_text(remove_hook)
+
+    # InitramfsHandler API
+    def install_packages(self) -> list[str]:
+        return ["dracut"]
+
+    def setup_hooks(self) -> None:
+        # Hooks are created as part of configure()
+        return None
+
+    def generate_initramfs(self, _: str) -> bool:
+        # Generate initramfs inside the chroot for the latest installed kernel
+        # Compute version and pkgbase inside the chroot shell to avoid host expansion
+        try:
+            cmd = (
+                f"arch-chroot {self.target} bash -lc "
+                f"'kver=$(ls -1 /usr/lib/modules | sort | tail -n1); "
+                f"pkgbase=$(cat /usr/lib/modules/$kver/pkgbase 2>/dev/null || echo linux); "
+                f"install -Dm0644 /usr/lib/modules/$kver/vmlinuz /boot/vmlinuz-$pkgbase; "
+                f"dracut --force /boot/initramfs-$pkgbase.img --kver $kver'"
+            )
+            SysCommand(cmd)
+            return True
+        except Exception:
+            return False

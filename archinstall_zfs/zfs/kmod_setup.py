@@ -50,12 +50,10 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) ->
 
     # Initialize keyring if needed - this is CRITICAL for archzfs
     try:
-        if True:
-            # In chroot environment
-            SysCommand("pacman-key --init")
-            SysCommand("pacman-key --populate archlinux")
-            # installation.arch_chroot("pacman-key --init")
-            # installation.arch_chroot("pacman-key --populate archlinux")
+        if installation:
+            # In target chroot environment
+            installation.arch_chroot("pacman-key --init")
+            installation.arch_chroot("pacman-key --populate archlinux")
         else:
             # On live system, ensure keyring is initialized with proper permissions
             info("Initializing pacman keyring on live system")

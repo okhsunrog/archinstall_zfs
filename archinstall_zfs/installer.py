@@ -10,6 +10,8 @@ from pathlib import Path
 from archinstall.lib.installer import Installer
 from archinstall.lib.models.device import DiskLayoutConfiguration
 
+from archinstall_zfs.initramfs.base import InitramfsHandler
+
 
 class ZFSInstaller(Installer):
     """
@@ -23,6 +25,7 @@ class ZFSInstaller(Installer):
         self,
         target: Path,
         disk_config: DiskLayoutConfiguration,
+        initramfs_handler: InitramfsHandler,
         base_packages: list[str] | None = None,
         kernels: list[str] | None = None,
     ):
@@ -37,7 +40,10 @@ class ZFSInstaller(Installer):
         """
         # Define ZFS-specific base packages if not provided
         if base_packages is None:
-            base_packages = ["base", "base-devel", "linux-firmware", "linux-firmware-marvell", "sof-firmware", "dracut"]
+            base_packages = ["base", "base-devel", "linux-firmware", "linux-firmware-marvell", "sof-firmware"]
+
+        # Merge initramfs packages provided by handler
+        base_packages.extend(pkg for pkg in initramfs_handler.install_packages() if pkg not in base_packages)
 
         # Default to linux-lts for ZFS compatibility
         if kernels is None:
@@ -45,3 +51,22 @@ class ZFSInstaller(Installer):
 
         # Call parent constructor with our custom packages
         super().__init__(target=target, disk_config=disk_config, base_packages=base_packages, kernels=kernels)
+
+        # Store handler and perform its configuration inside target
+        self.initramfs_handler: InitramfsHandler = initramfs_handler
+        self.initramfs_handler.configure()
+        self.initramfs_handler.setup_hooks()
+
+    # Delegate mkinitcpio step to our initramfs handler
+    def mkinitcpio(self, _: list[str]) -> bool:
+        try:
+            return all(self.initramfs_handler.generate_initramfs(kernel) for kernel in self.kernels)
+        except Exception:
+            return False
+
+    def regenerate_initramfs(self) -> bool:
+        """Regenerate initramfs for all kernels via the active initramfs handler."""
+        try:
+            return all(self.initramfs_handler.generate_initramfs(kernel) for kernel in self.kernels)
+        except Exception:
+            return False
