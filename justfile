@@ -171,6 +171,20 @@ qemu-setup: qemu-create-disk qemu-setup-uefi
     @echo "Now run 'just build-testing-iso'"
     @echo "Then 'just qemu-install' or 'just qemu-install-serial'"
 
+# Remove existing QEMU artifacts and set up fresh ones
+qemu-refresh:
+    @echo "Refreshing QEMU disk image and UEFI vars..."
+    @if [ -f {{DISK_IMAGE}} ]; then \
+        echo "Removing existing disk image: {{DISK_IMAGE}}"; \
+        rm -f {{DISK_IMAGE}}; \
+    fi
+    @if [ -f {{UEFI_VARS}} ]; then \
+        echo "Removing existing UEFI vars file: {{UEFI_VARS}}"; \
+        rm -f {{UEFI_VARS}}; \
+    fi
+    @just qemu-setup
+    @echo "QEMU refresh complete."
+
 # Install Arch Linux in QEMU with GUI from the generated testing ISO
 qemu-install:
     @if [ ! -f {{DISK_IMAGE}} ]; then just qemu-create-disk; fi
