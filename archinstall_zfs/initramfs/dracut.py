@@ -18,7 +18,9 @@ class DracutInitramfsHandler(InitramfsHandler):
             'hostonly_cmdline="no"',
             'fscks="no"',
             'early_microcode="yes"',
-            'compress="zstd"',
+            "# ZFS datasets are already compressed, use uncompressed initramfs to avoid double compression",
+            'compress="cat"',
+            'omit_dracutmodules+=" network btrfs brltty plymouth "',
         ]
 
         if self.encryption_enabled:
