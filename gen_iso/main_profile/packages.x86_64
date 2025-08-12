@@ -53,7 +53,7 @@ linux-lts
 linux-lts-headers
 linux-atm
 linux-firmware
-zfs-dkms
+archzfs-linux-lts
 zfs-utils
 linux-firmware-marvell
 livecd-sounds
