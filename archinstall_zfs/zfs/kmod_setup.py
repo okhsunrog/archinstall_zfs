@@ -41,92 +41,56 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) ->
 
     pacman_conf = target_path / "etc/pacman.conf"
 
-    # Check if repo already exists
     with open(pacman_conf) as f:
         content = f.read()
         if "[archzfs]" in content:
             info("archzfs repository already configured")
             return
 
-    # Initialize keyring if needed - this is CRITICAL for archzfs
+    # Initialize keyring if needed - handled by systemd pacman-init on ISO
     try:
         if installation:
-            # In target chroot environment
             installation.arch_chroot("pacman-key --init")
             installation.arch_chroot("pacman-key --populate archlinux")
         else:
-            # On live system, ensure keyring is initialized with proper permissions
-            info("Initializing pacman keyring on live system")
-
-            # Remove any corrupted keyring
-            keyring_dir = Path("/etc/pacman.d/gnupg")
-            if keyring_dir.exists():
-                SysCommand(f"rm -rf {keyring_dir}")
-                debug("Removed existing keyring directory")
-
-            # Create fresh keyring directory with proper permissions
-            keyring_dir.mkdir(parents=True, exist_ok=True)
-            SysCommand(f"chmod 700 {keyring_dir}")
-            SysCommand(f"chown root:root {keyring_dir}")
-
-            # Initialize fresh keyring
-            SysCommand("pacman-key --init")
-            SysCommand("pacman-key --populate archlinux")
-
-            # Verify keyring is working
-            SysCommand("pacman-key --list-keys")
-            info("Keyring initialized and verified successfully")
+            # Live ISO path: skip keyring work and proceed to write repo only
+            pass
     except SysCallError as e:
         error(f"Failed to initialize keyring: {e}")
         if installation:
             raise RuntimeError("Cannot proceed without working keyring") from e
-        raise RuntimeError("Cannot initialize keyring on live system - archzfs repository required") from e
+        # Live ISO: skip keyring errors
 
     key_id = "DDF7DB817396A49B2A2723F7403BD972F75D9D76"
     key_sign = f"pacman-key --lsign-key {key_id}"
-
-    # Try multiple keyservers for better reliability
-    keyservers = ["hkps://keyserver.ubuntu.com", "hkps://pgp.mit.edu", "hkps://pool.sks-keyservers.net", "hkps://keys.openpgp.org"]
+    keyservers = [
+        "hkps://keyserver.ubuntu.com",
+        "hkps://pgp.mit.edu",
+        "hkps://pool.sks-keyservers.net",
+        "hkps://keys.openpgp.org",
+    ]
 
     key_received = False
-    for keyserver in keyservers:
-        key_receive = f"pacman-key --keyserver {keyserver} -r {key_id}"
-        try:
-            if installation:
+    if installation:
+        for keyserver in keyservers:
+            key_receive = f"pacman-key --keyserver {keyserver} -r {key_id}"
+            try:
                 installation.arch_chroot(key_receive)
-            else:
-                SysCommand(key_receive)
-            key_received = True
-            info(f"Successfully received key from {keyserver}")
-            break
-        except SysCallError as e:
-            error(f"Failed to receive key from {keyserver}: {e}")
-            continue
+                key_received = True
+                info(f"Successfully received key from {keyserver}")
+                break
+            except SysCallError as e:
+                error(f"Failed to receive key from {keyserver}: {e}")
+                continue
 
-    if not key_received:
-        error("Failed to receive archzfs key from all keyservers")
-        if installation:
-            # In production installation, this is a hard error
+        if not key_received:
             raise RuntimeError("Cannot proceed without archzfs repository key")
-        # On live system, skip archzfs repo to avoid signature issues
-        error("Cannot verify archzfs packages - skipping repository")
-        info("ZFS installation will be attempted without archzfs repo")
-        return
 
-    # Only proceed if we successfully received the key
-    # Now try to sign the key
-    try:
-        if installation:
+        try:
             installation.arch_chroot(key_sign)
-        else:
-            SysCommand(key_sign)
-        info("Successfully signed archzfs key")
-    except SysCallError as e:
-        error(f"Failed to sign archzfs key: {e}")
-        if installation:
+            info("Successfully signed archzfs key")
+        except SysCallError as e:
             raise RuntimeError("Cannot proceed without signed archzfs key") from e
-        error("Skipping archzfs repository due to key signing failure")
-        return
 
     repo_config = [
         "\n[archzfs]\n",
@@ -138,14 +102,12 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) ->
     with open(pacman_conf, "a") as f:
         f.writelines(repo_config)
 
-    # Only sync databases after repository is properly configured with signed key
-    if not installation:
+    if installation:
         try:
-            SysCommand("pacman -Sy")
-            info("Successfully synced package databases")
+            installation.arch_chroot("pacman -Sy")
+            info("Successfully synced package databases on target")
         except SysCallError as e:
-            error(f"Failed to sync databases: {e}")
-            raise RuntimeError("Cannot sync archzfs repository") from e
+            error(f"Failed to sync databases on target: {e}")
 
 
 class ZFSInitializer:
