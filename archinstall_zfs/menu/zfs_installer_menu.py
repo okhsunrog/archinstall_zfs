@@ -416,7 +416,7 @@ class GlobalConfigMenu:
             return "Install mode: Not set"
         return f"Install mode: {self.cfg.installation_mode.value}"
 
-    def _preview_disk_configuration(self, *_: Any) -> str | None:
+    def _preview_disk_configuration(self, *_: Any) -> str:
         mode = self.cfg.installation_mode
         if not mode:
             return "Disk: (mode not set)"
@@ -426,9 +426,8 @@ class GlobalConfigMenu:
             return (
                 f"Disk: {self.cfg.disk_by_id or 'Not set'}; EFI: {self.cfg.efi_partition_by_id or 'Not set'}; ZFS: {self.cfg.zfs_partition_by_id or 'Not set'}"
             )
-        if mode is InstallationMode.EXISTING_POOL:
-            return f"Disk: {self.cfg.disk_by_id or 'Not set'}; EFI: {self.cfg.efi_partition_by_id or 'Not set'}"
-        return None
+        # The only remaining valid enum value is EXISTING_POOL
+        return f"Disk: {self.cfg.disk_by_id or 'Not set'}; EFI: {self.cfg.efi_partition_by_id or 'Not set'}"
 
     # --- by-id listing helpers for global menu ---
     @staticmethod
