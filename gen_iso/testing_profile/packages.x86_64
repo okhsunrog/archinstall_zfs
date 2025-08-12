@@ -1,6 +1,5 @@
 base
 linux-lts
-linux-lts-headers
 archzfs-linux-lts
 zfs-utils
 mkinitcpio

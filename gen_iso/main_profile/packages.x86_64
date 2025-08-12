@@ -50,7 +50,6 @@ lftp
 libfido2
 libusb-compat
 linux-lts
-linux-lts-headers
 linux-atm
 linux-firmware
 archzfs-linux-lts
