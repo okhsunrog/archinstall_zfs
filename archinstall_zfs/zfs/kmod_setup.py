@@ -61,7 +61,7 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) ->
             raise RuntimeError("Cannot proceed without working keyring") from e
         # Live ISO: skip keyring errors
 
-    key_id = "DDF7DB817396A49B2A2723F7403BD972F75D9D76"
+    key_id = "3A9917BF0DED5C13F69AC68FABEC0A1208037BE9"
     key_sign = f"pacman-key --lsign-key {key_id}"
     keyservers = [
         "hkps://keyserver.ubuntu.com",
@@ -94,9 +94,8 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) ->
 
     repo_config = [
         "\n[archzfs]\n",
-        "Server = https://archzfs.com/$repo/$arch\n",
-        "Server = https://mirror.sum7.eu/archlinux/archzfs/$arch\n",
-        "Server = https://mirror.biocrafting.net/archlinux/archzfs/$arch\n",
+        "SigLevel = Required\n",
+        "Server = https://github.com/archzfs/archzfs/releases/download/experimental\n",
     ]
 
     with open(pacman_conf, "a") as f:
@@ -281,7 +280,7 @@ class ZFSInitializer:
         return self.load_zfs_module()
 
     def search_zfs_package(self, package_name: str, version: str) -> tuple[str, str] | None:
-        urls = ["http://archzfs.com/archzfs/x86_64/", "http://archzfs.com/archive_archzfs/"]
+        urls = ["https://github.com/archzfs/archzfs/releases/download/experimental/"]
 
         pattern = f'{package_name}-[0-9][^"]*{version}[^"]*x86_64[^"]*'
 
