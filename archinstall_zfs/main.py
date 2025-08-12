@@ -167,11 +167,12 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
             # Precompiled preferred path with fallback to DKMS if requested or if precompiled fails
             if installer_menu.cfg.zfs_module_mode == ZFSModuleMode.PRECOMPILED:
                 try:
-                    installation.add_additional_packages(["zfs-linux-lts", "zfs-utils"])  # try precompiled first
+                    # Ensure pacstrap uses archzfs repo and right kernel version already installed
+                    installation.add_additional_packages(["zfs-utils", "zfs-linux-lts"])  # precompiled first
                 except Exception:
-                    installation.add_additional_packages(["zfs-dkms", "linux-lts-headers", "zfs-utils"])  # fallback
+                    installation.add_additional_packages(["zfs-utils", "zfs-dkms", "linux-lts-headers"])  # fallback
             else:
-                installation.add_additional_packages(["zfs-dkms", "linux-lts-headers", "zfs-utils"])  # DKMS path
+                installation.add_additional_packages(["zfs-utils", "zfs-dkms", "linux-lts-headers"])  # DKMS path
 
             # Add the rest (firmware, kernel already part of base/minimal flow)
             if SECOND_STAGE:

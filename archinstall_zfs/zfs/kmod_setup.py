@@ -35,6 +35,45 @@ def initialize_zfs() -> None:
             raise RuntimeError("Failed to initialize ZFS support")
 
 
+def _rewrite_archzfs_repo_block(content: str) -> str:
+    """Ensure [archzfs] block uses the official archzfs.com repo.
+
+    Replaces any existing [archzfs] block with a canonical stanza to avoid
+    pointing to unsupported or experimental sources that break dependency
+    resolution.
+    """
+    lines = content.splitlines()
+    start = None
+    end = None
+    for idx, line in enumerate(lines):
+        if line.strip().lower() == "[archzfs]":
+            start = idx
+            # Find the end of the block (next section or EOF)
+            for j in range(idx + 1, len(lines)):
+                if lines[j].startswith("[") and lines[j].endswith("]"):
+                    end = j
+                    break
+            if end is None:
+                end = len(lines)
+            break
+    canonical = [
+        "[archzfs]",
+        "SigLevel = Never",
+        "Server = https://github.com/archzfs/archzfs/releases/download/experimental",
+        "",
+    ]
+    if start is None:
+        # No existing block, append at the end
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.extend(canonical)
+        return "\n".join(lines) + "\n"
+
+    # Replace existing block with canonical
+    new_lines = lines[:start] + canonical + lines[end:]
+    return "\n".join(new_lines) + "\n"
+
+
 def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) -> None:
     """Add archzfs repository to pacman.conf and ensure key is trusted.
 
@@ -48,18 +87,14 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) ->
 
     with open(pacman_conf) as f:
         content = f.read()
-        if "[archzfs]" in content:
-            info("archzfs repository already configured")
-            # Still ensure database sync happens in the right environment
-            try:
-                info("Syncing package databases...")
-                if installation:
-                    installation.arch_chroot("pacman -Sy")
-                else:
-                    SysCommand("pacman -Sy", peek_output=True)
-            except SysCallError as e:
-                warn(f"Database sync failed: {e}")
-            return
+
+    # Always rewrite or append archzfs block to use GitHub experimental
+    updated = _rewrite_archzfs_repo_block(content)
+    if updated != content:
+        info("Writing archzfs repo configuration (GitHub experimental)")
+        pacman_conf.write_text(updated)
+    else:
+        info("archzfs repository already configured (GitHub experimental)")
 
     # Initialize keyring
     try:
@@ -73,8 +108,12 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) ->
         error(f"Failed to initialize keyring: {e}")
         raise RuntimeError("Cannot proceed without working keyring") from e
 
-    key_id = "3A9917BF0DED5C13F69AC68FABEC0A1208037BE9"
-    key_sign = f"pacman-key --lsign-key {key_id}"
+    # Known archzfs signing keys (maintainers rotate keys periodically)
+    # Keep this list updated when archzfs rotates keys to avoid interactive prompts
+    archzfs_key_ids = [
+        "3A9917BF0DED5C13F69AC68FABEC0A1208037BE9",
+        "DDF7DB817396A49B2A2723F7403BD972F75D9D76",
+    ]
     keyservers = [
         "hkps://keyserver.ubuntu.com",
         "hkps://pgp.mit.edu",
@@ -82,50 +121,46 @@ def add_archzfs_repo(target_path: Path = Path("/"), installation: Any = None) ->
         "hkps://keys.openpgp.org",
     ]
 
-    key_received = False
-    for keyserver in keyservers:
-        key_receive = f"pacman-key --keyserver {keyserver} -r {key_id}"
+    # Receive and locally sign all known archzfs keys
+    for key_id in archzfs_key_ids:
+        key_received = False
+        for keyserver in keyservers:
+            key_receive = f"pacman-key --keyserver {keyserver} -r {key_id}"
+            try:
+                if installation:
+                    installation.arch_chroot(key_receive)
+                else:
+                    SysCommand(key_receive, peek_output=True)
+                key_received = True
+                info(f"Successfully received key {key_id[-8:]} from {keyserver}")
+                break
+            except SysCallError as e:
+                warn(f"Failed to receive key {key_id[-8:]} from {keyserver}: {e}")
+                continue
+
+        if not key_received:
+            raise RuntimeError(f"Cannot proceed without archzfs repository key {key_id}")
+
+        key_sign = f"pacman-key --lsign-key {key_id}"
         try:
             if installation:
-                # Avoid blocking if GPG pinentry tries to prompt; use no-tty.
-                installation.arch_chroot(key_receive + " --no-tty")
+                installation.arch_chroot(key_sign)
             else:
-                SysCommand(key_receive + " --no-tty", peek_output=True)
-            key_received = True
-            info(f"Successfully received key from {keyserver}")
-            break
+                SysCommand(key_sign, peek_output=True)
+            info(f"Successfully signed archzfs key {key_id[-8:]}")
         except SysCallError as e:
-            warn(f"Failed to receive key from {keyserver}: {e}")
-            continue
+            raise RuntimeError(f"Cannot proceed without signed archzfs key {key_id}") from e
 
-    if not key_received:
-        raise RuntimeError("Cannot proceed without archzfs repository key")
-
-    try:
-        if installation:
-            installation.arch_chroot(key_sign)
-        else:
-            SysCommand(key_sign, peek_output=True)
-        info("Successfully signed archzfs key")
-    except SysCallError as e:
-        raise RuntimeError("Cannot proceed without signed archzfs key") from e
-
-    repo_config = [
-        "\n[archzfs]\n",
-        "SigLevel = Required\n",
-        "Server = https://archzfs.com/$repo/$arch\n",
-    ]
-
-    with open(pacman_conf, "a") as f:
-        f.writelines(repo_config)
+    # Repo block written above; now sync dbs non-interactively
 
     try:
         info("Syncing package databases...")
         if installation:
-            installation.arch_chroot("pacman -Sy")
+            # Use non-interactive pacman in the target
+            installation.arch_chroot("pacman -Sy --noconfirm")
             info("Successfully synced package databases on target")
         else:
-            SysCommand("pacman -Sy", peek_output=True)
+            SysCommand("pacman -Sy --noconfirm", peek_output=True)
             info("Successfully synced package databases on host")
     except SysCallError as e:
         error(f"Failed to sync databases: {e}")

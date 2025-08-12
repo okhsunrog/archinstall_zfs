@@ -13,15 +13,18 @@ class DracutInitramfsHandler(InitramfsHandler):
         self.conf_dir = Path(target) / "etc/dracut.conf.d"
 
     def _write_dracut_conf(self) -> None:
-        dracut_conf = """hostonly="no"
-fscks="no"
-early_microcode="yes"
-compress="zstd\""""
+        lines = [
+            'hostonly="yes"',
+            'hostonly_cmdline="no"',
+            'fscks="no"',
+            'early_microcode="yes"',
+            'compress="zstd"',
+        ]
 
         if self.encryption_enabled:
-            dracut_conf = dracut_conf.replace('fscks="no"', 'fscks="no"\ninstall_items+=" /etc/zfs/zroot.key "')
+            lines.append('install_items+=" /etc/zfs/zroot.key "')
 
-        (self.conf_dir / "zfs.conf").write_text(dracut_conf)
+        (self.conf_dir / "zfs.conf").write_text("\n".join(lines) + "\n")
 
     def configure(self) -> None:
         self._create_directories()
