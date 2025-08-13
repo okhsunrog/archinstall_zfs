@@ -458,6 +458,8 @@ class ZFSManager:
         self.pool = ZFSPool(config)
         self.datasets = ZFSDatasetManager(config, self.paths)
         self.encryption_handler = encryption_handler
+        # Default to disabling zswap; caller can override based on selected swap mode
+        self.zswap_enabled: bool = False
 
     def mount_datasets(self) -> None:
         """Mount all datasets in the correct order"""
@@ -520,6 +522,10 @@ class ZFSManager:
         SysCommand(f"cp {self.paths.key_file} {self.mounted_paths.key_file}")
         info("Encryption key copied successfully")
 
+    def set_zswap_enabled(self, enabled: bool) -> None:
+        """Set whether zswap should be enabled in the kernel command line."""
+        self.zswap_enabled = enabled
+
     def genfstab(self) -> None:
         """Generate fstab entries for ZFS installation"""
         debug("Generating fstab for ZFS")
@@ -529,7 +535,7 @@ class ZFSManager:
         raw_fstab = SysCommand(f"/usr/bin/genfstab -t UUID {self.config.mountpoint}").decode()
 
         # Filter out all ZFS entries; we'll append the root dataset explicitly
-        filtered_lines = [line for line in raw_fstab.splitlines() if "\tzfs\t" not in line and self.config.pool_name not in line]
+        filtered_lines = [line for line in raw_fstab.splitlines() if line.strip() and "\tzfs\t" not in line and self.config.pool_name not in line]
 
         # Append the root dataset line for stability (e.g., snapshot navigation quirks)
         root_dataset = next(ds for ds in self.config.datasets if ds.properties.get("mountpoint") == "/")
@@ -573,9 +579,11 @@ class ZFSManager:
 
         # Configure ZFSBootMenu properties on the root dataset
         # Command line: do not include root=; ZFSBootMenu injects it automatically
-        # zswap default disabled; caller may have toggled via config.init_system or elsewhere
-        # Note: zswap enable/disable is handled by the installer based on selected swap mode
-        SysCommand(f'zfs set org.zfsbootmenu:commandline="spl.spl_hostid=$(hostid) rw" {full_dataset_path}')
+        # Include zswap parameter based on installer-selected swap mode
+        cmdline_parts = ["spl.spl_hostid=$(hostid)"]
+        cmdline_parts.append("zswap.enabled=1" if self.zswap_enabled else "zswap.enabled=0")
+        cmdline_parts.append("rw")
+        SysCommand(f'zfs set org.zfsbootmenu:commandline="{" ".join(cmdline_parts)}" {full_dataset_path}')
 
         # Root prefix: respect selected init system
         rootprefix = "root=ZFS=" if self.config.init_system == "dracut" else "zfs="

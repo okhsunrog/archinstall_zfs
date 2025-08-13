@@ -240,6 +240,19 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
 
             installation.enable_service(ZFS_SERVICES)
 
+            # Configure zswap kernel parameter based on selected swap mode
+            # - ZRAM: zswap must be disabled
+            # - ZSWAP partition modes: zswap must be enabled
+            if installer_menu.cfg.swap_mode == SwapMode.ZRAM:
+                zfs_manager.set_zswap_enabled(False)
+            elif installer_menu.cfg.swap_mode in {SwapMode.ZSWAP_PARTITION, SwapMode.ZSWAP_PARTITION_ENCRYPTED}:
+                zfs_manager.set_zswap_enabled(True)
+            else:
+                zfs_manager.set_zswap_enabled(False)
+
+            # Generate base fstab before making swap-specific additions
+            zfs_manager.genfstab()
+
             # Swap configuration on target
             if installer_menu.cfg.swap_mode == SwapMode.ZRAM:
                 # zram-generator
@@ -265,9 +278,18 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
                     swap_part = Path(installer_menu.cfg.swap_partition_by_id) if installer_menu.cfg.swap_partition_by_id else None
 
                 if swap_part is not None:
+                    fstab = installation.target / "etc/fstab"
                     if installer_menu.cfg.swap_mode == SwapMode.ZSWAP_PARTITION:
                         with contextlib.suppress(Exception):
                             SysCommand(f"mkswap {swap_part}")
+                        # Append explicit swap UUID line, since genfstab won't include inactive swap
+                        with contextlib.suppress(Exception):
+                            uuid = SysCommand(f"blkid -s UUID -o value {swap_part}").decode().strip()
+                            # Avoid duplicate if present
+                            existing = fstab.read_text() if fstab.exists() else ""
+                            if uuid and (f"UUID={uuid}" not in existing):
+                                with open(fstab, "a") as f:
+                                    f.write(f"UUID={uuid} none swap defaults 0 0\n")
                     else:
                         # Encrypted random-key dm-crypt: set up crypttab and fstab only
                         partuuid = SysCommand(f"blkid -s PARTUUID -o value {swap_part}").decode().strip()
@@ -275,11 +297,9 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
                         crypttab_line = f"cryptswap PARTUUID={partuuid} /dev/urandom swap,cipher=aes-xts-plain64,size=256\n"
                         with open(crypttab, "a") as f:
                             f.write(crypttab_line)
-                        fstab = installation.target / "etc/fstab"
                         with open(fstab, "a") as f:
                             f.write("/dev/mapper/cryptswap none swap defaults 0 0\n")
 
-            zfs_manager.genfstab()
             zfs_manager.copy_misc_files()
 
             # Copy custom ZED hook, then make it immutable
