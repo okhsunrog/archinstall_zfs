@@ -192,53 +192,40 @@ class ZFSInitializer:
         SysCommand("mount -o remount,size=50% /run/archiso/cowspace")
 
     def _setup_archive_repository(self) -> None:
-        """Setup Archlinux Archive repository matching archiso version for DKMS consistency."""
+        """Pin pacman to Archlinux Archive matching the ISO date to align headers with running kernel."""
         info("Setting up Archlinux Archive repository for DKMS")
 
         try:
-            # Get archiso version from /version file
             version_file = Path("/version")
-            if version_file.exists():
-                archiso_version = version_file.read_text().strip()
-                debug(f"Detected archiso version: {archiso_version}")
-
-                # Skip archive setup for testing/development builds
-                if archiso_version in ["testing", "latest", "git", "devel"]:
-                    info(f"Detected {archiso_version} build, skipping archive setup")
-                    SysCommand("pacman -Sy --noconfirm", peek_output=True)
-                    return
-
-                # Convert dots to slashes (e.g., "2024.01.01" -> "2024/01/01")
-                archive_date = archiso_version.replace(".", "/")
-
-                # Workaround for specific date (from bash script)
-                if archive_date == "2022/02/01":
-                    archive_date = "2022/02/02"
-
-                archive_url = f"https://archive.archlinux.org/repos/{archive_date}/"
-                debug(f"Testing archive URL: {archive_url}")
-
-                # Test if archive exists
-                test_result = SysCommand(f"curl -s --head {archive_url}")
-                if "200 OK" in test_result.decode():
-                    info(f"Using Archlinux Archive for date: {archive_date}")
-
-                    # Update mirrorlist to use archive
-                    mirrorlist_content = f"Server={archive_url}$repo/os/$arch\n"
-                    Path("/etc/pacman.d/mirrorlist").write_text(mirrorlist_content)
-
-                    # Now safely upgrade to archive versions
-                    SysCommand("pacman -Syyuu --noconfirm", peek_output=True)
-                    info("Successfully upgraded to archive repository versions")
-                else:
-                    warn(f"Archive repository for {archive_date} not accessible, using current repos")
-                    SysCommand("pacman -Sy --noconfirm", peek_output=True)
-            else:
-                warn("Could not find /version file, using current repos")
+            if not version_file.exists():
+                warn("/version not found; using current repos")
                 SysCommand("pacman -Sy --noconfirm", peek_output=True)
+                return
 
+            archiso_version = version_file.read_text().strip()
+            debug(f"Detected archiso version: {archiso_version}")
+
+            # Skip archive setup for non-date tags
+            if archiso_version in ["testing", "latest", "git", "devel"]:
+                info(f"Detected {archiso_version} build, using current repos")
+                SysCommand("pacman -Sy --noconfirm", peek_output=True)
+                return
+
+            # Convert dots to slashes (e.g., 2024.01.01 -> 2024/01/01)
+            archive_date = archiso_version.replace(".", "/")
+            if archive_date == "2022/02/01":
+                archive_date = "2022/02/02"
+
+            archive_url = f"https://archive.archlinux.org/repos/{archive_date}/"
+            info(f"Using Archlinux Archive date: {archive_date}")
+
+            # Force mirrorlist to archive and full downgrade/upgrade to that snapshot
+            mirrorlist_content = f"Server={archive_url}$repo/os/$arch\n"
+            Path("/etc/pacman.d/mirrorlist").write_text(mirrorlist_content)
+            SysCommand("pacman -Syyuu --noconfirm", peek_output=True)
+            info("Successfully aligned to archive repository versions")
         except Exception as e:
-            warn(f"Failed to setup archive repository: {e}, using current repos")
+            warn(f"Archive setup failed ({e!s}); continuing with current repos")
             SysCommand("pacman -Sy --noconfirm", peek_output=True)
 
     def extract_pkginfo(self, package_path: Path) -> str:
@@ -300,8 +287,9 @@ class ZFSInitializer:
                 debug(f"Creating missing modules directory: {modules_dir}")
                 modules_dir.mkdir(parents=True, exist_ok=True)
 
-            # Install toolchain and headers matching the running kernel
+            # Install toolchain and headers matching the running kernel; reinstall to ensure presence
             SysCommand("pacman -S --noconfirm --needed base-devel linux-headers git", peek_output=True)
+            SysCommand("pacman -S --noconfirm linux-headers", peek_output=True)
 
             # Temporarily disable mkinitcpio hooks (both etc and share locations) to avoid live ISO errors
             info("Temporarily disabling mkinitcpio hooks for live system")
