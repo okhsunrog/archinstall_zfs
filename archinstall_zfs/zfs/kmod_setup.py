@@ -1,3 +1,4 @@
+import contextlib
 import re
 import tempfile
 from pathlib import Path
@@ -18,21 +19,33 @@ def check_zfs_module() -> bool:
         return False
 
 
+def check_zfs_utils() -> bool:
+    """Return True if zfs/zpool utilities are available on the host."""
+    try:
+        SysCommand("command -v zpool")
+        SysCommand("command -v zfs")
+        return True
+    except SysCallError:
+        return False
+
+
 def initialize_zfs() -> None:
-    # First check if ZFS modules are already available (built into ISO)
-    if check_zfs_module():
-        info("ZFS modules already available, no initialization needed")
+    """Ensure ZFS is available on the live system (host).
+
+    - If the kernel module and utils are available, do nothing
+    - Otherwise, add archzfs repo and install precompiled or DKMS fallback
+    - Finally, load the module
+    """
+    if check_zfs_module() and check_zfs_utils():
+        info("ZFS already available on host")
         return
 
-    # ZFS modules not available, need to install them
-    info("ZFS modules not found, attempting to install")
+    info("Preparing live system for ZFS (installing packages if needed)")
     add_archzfs_repo()
 
-    if not check_zfs_module():
-        info("ZFS module not loaded after repo setup, initializing")
-        zfs_init = ZFSInitializer()
-        if not zfs_init.run():
-            raise RuntimeError("Failed to initialize ZFS support")
+    zfs_init = ZFSInitializer()
+    if not zfs_init.run():
+        raise RuntimeError("Failed to initialize ZFS support on host")
 
 
 def _rewrite_archzfs_repo_block(content: str) -> str:
@@ -325,11 +338,9 @@ class ZFSInitializer:
             return False
 
     def run(self) -> bool:
-        if not Path("/proc/cmdline").read_text().find("arch.*iso"):
-            error("Not running in archiso")
-            return False
-
-        self.increase_cowspace()
+        # No archiso detection; just prepare and ensure ZFS is present
+        with contextlib.suppress(Exception):
+            self.increase_cowspace()
 
         if not self.install_zfs():
             return False

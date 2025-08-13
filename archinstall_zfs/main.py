@@ -24,7 +24,7 @@ from archinstall_zfs.installer import ZFSInstaller
 from archinstall_zfs.menu import GlobalConfigMenu
 from archinstall_zfs.menu.models import InstallationMode, SwapMode, ZFSEncryptionMode, ZFSModuleMode
 from archinstall_zfs.zfs import ZFS_SERVICES, EncryptionMode, ZFSManagerBuilder
-from archinstall_zfs.zfs.kmod_setup import add_archzfs_repo
+from archinstall_zfs.zfs.kmod_setup import add_archzfs_repo, initialize_zfs
 
 
 def check_internet() -> bool:
@@ -68,6 +68,9 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
         info("Starting installation...")
 
         # Build managers and perform disk/ZFS preparation now (after confirm)
+        # Ensure host has ZFS available before manipulating pools/datasets
+        print("Preparing live system for ZFS support (this may take a minute)...")
+        initialize_zfs()
         # Installation mode comes from the menu's config (use enum directly)
         assert installer_menu.cfg.installation_mode is not None
         mode = installer_menu.cfg.installation_mode
