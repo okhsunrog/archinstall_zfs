@@ -30,7 +30,8 @@ from archinstall_zfs.zfs.kmod_setup import add_archzfs_repo
 def check_internet() -> bool:
     debug("Checking internet connection")
     try:
-        socket.create_connection(("archlinux.org", 80))
+        # Use a direct IP and short timeout to avoid DNS-related hangs
+        socket.create_connection(("1.1.1.1", 53), timeout=3.0)
         info("Internet connection available")
         return True
     except OSError as e:
