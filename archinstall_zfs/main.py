@@ -40,16 +40,6 @@ def check_internet() -> bool:
         return False
 
 
-def get_installation_mode_from_menu(installer_menu: GlobalConfigMenu) -> InstallMode:
-    # No fallback prompts — rely on global menu validation
-    return cast(InstallMode, installer_menu.cfg.installation_mode.value)  # type: ignore[union-attr]
-
-
-def prepare_installation(_: GlobalConfigMenu) -> tuple[None, None]:
-    # Legacy function retained for compatibility; destructive steps moved into perform_installation
-    return None, None
-
-
 def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConfig) -> bool:
     try:
         mountpoint = Path("/mnt")
@@ -79,7 +69,8 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
         info("Starting installation...")
 
         # Build managers and perform disk/ZFS preparation now (after confirm)
-        mode = get_installation_mode_from_menu(installer_menu)
+        # Installation mode comes from the menu's config
+        mode = cast(InstallMode, installer_menu.cfg.installation_mode.value)  # type: ignore[union-attr]
         disk_builder = DiskManagerBuilder()
         zfs_builder = ZFSManagerBuilder()
 
