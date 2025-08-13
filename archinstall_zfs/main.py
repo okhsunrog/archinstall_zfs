@@ -7,11 +7,12 @@ from typing import Literal, cast
 
 from archinstall import SysInfo, debug, error, info
 from archinstall.lib.applications.application_handler import application_handler
-from archinstall.lib.installer import accessibility_tools_in_use, run_custom_user_commands
-from archinstall.lib.profile.profiles_handler import profile_handler
 from archinstall.lib.args import ArchConfig, Arguments, arch_config_handler
 from archinstall.lib.configuration import ConfigurationOutput
+from archinstall.lib.installer import accessibility_tools_in_use, run_custom_user_commands
 from archinstall.lib.models.device import DiskLayoutConfiguration, DiskLayoutType
+from archinstall.lib.models.users import User
+from archinstall.lib.profile.profiles_handler import profile_handler
 from archinstall.tui.curses_menu import MenuItemGroup, SelectMenu, Tui
 from archinstall.tui.menu_item import MenuItem
 
@@ -196,8 +197,6 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
 
             # Set root password if provided
             if arch_config.auth_config and arch_config.auth_config.root_enc_password:
-                from archinstall.lib.models.users import User
-
                 root_user = User("root", arch_config.auth_config.root_enc_password, False)
                 installation.set_user_password(root_user)
 

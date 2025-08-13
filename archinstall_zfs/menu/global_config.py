@@ -10,8 +10,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from archinstall.lib.args import ArchConfig
 from archinstall.lib.applications.application_menu import ApplicationMenu
+from archinstall.lib.args import ArchConfig
 from archinstall.lib.authentication.authentication_menu import AuthenticationMenu
 from archinstall.lib.interactions.general_conf import (
     ask_additional_packages_to_install,
@@ -22,9 +22,9 @@ from archinstall.lib.interactions.general_conf import (
 from archinstall.lib.interactions.network_menu import ask_to_configure_network
 from archinstall.lib.locale.locale_menu import LocaleMenu
 from archinstall.lib.mirrors import MirrorMenu
+from archinstall.lib.models.application import ApplicationConfiguration
 from archinstall.lib.models.locale import LocaleConfiguration
 from archinstall.lib.translationhandler import tr
-from archinstall.lib.models.application import ApplicationConfiguration
 from archinstall.tui import EditMenu, MenuItem, MenuItemGroup, SelectMenu, Tui
 from archinstall.tui.result import ResultType
 
