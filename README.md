@@ -28,7 +28,7 @@ Requirements: UEFI firmware and internet connectivity (both are validated by the
 ```bash
 ./installer
 # or
-python -m archinstall_zfs
+cd archinstall_zfs && python -m archinstall_zfs
 ```
 
 Notes:
