@@ -186,6 +186,58 @@ class ZFSInitializer:
         self._mirrorlist_path: Path = Path("/etc/pacman.d/mirrorlist")
         self._mirrorlist_backup: str | None = self._mirrorlist_path.read_text() if self._mirrorlist_path.exists() else None
         self._archive_set: bool = False
+        # Reflector service state tracking
+        self._reflector_changed: bool = False
+        self._reflector_was_active: bool = False
+        self._reflector_was_enabled: bool = False
+
+    def _is_service_active(self, name: str) -> bool:
+        try:
+            SysCommand(f"systemctl is-active --quiet {name}")
+            return True
+        except SysCallError:
+            return False
+
+    def _is_service_enabled(self, name: str) -> bool:
+        try:
+            SysCommand(f"systemctl is-enabled --quiet {name}")
+            return True
+        except SysCallError:
+            return False
+
+    def _stop_reflector_for_archive(self) -> None:
+        """Stop/disable reflector while we pin mirrorlist to the Archive.
+
+        Saves original state so we can restore later.
+        """
+        try:
+            self._reflector_was_active = self._is_service_active("reflector.service")
+            self._reflector_was_enabled = self._is_service_enabled("reflector.service")
+            # Disable and stop to avoid auto-restart loops during repo pinning/downgrade
+            SysCommand("systemctl disable --now reflector.service", peek_output=True)
+            SysCommand("systemctl reset-failed reflector.service", peek_output=True)
+            self._reflector_changed = True
+            info("Temporarily disabled reflector.service during Archive pinning")
+        except Exception as e:
+            warn(f"Failed to disable reflector.service: {e!s}")
+
+    def _restore_reflector(self) -> None:
+        if not self._reflector_changed:
+            return
+        try:
+            # Restore previous enabled/active state
+            if self._reflector_was_enabled:
+                SysCommand("systemctl enable reflector.service", peek_output=True)
+            else:
+                # Ensure it's not enabled if it wasn't
+                SysCommand("systemctl disable reflector.service", peek_output=True)
+            if self._reflector_was_active:
+                SysCommand("systemctl start reflector.service", peek_output=True)
+            else:
+                SysCommand("systemctl stop reflector.service", peek_output=True)
+            info("Restored reflector.service to previous state")
+        except Exception as e:
+            warn(f"Failed to restore reflector.service: {e!s}")
 
     def _get_running_kernel_version(self) -> str:
         return cast(str, SysCommand("uname -r").decode().strip())
@@ -222,6 +274,9 @@ class ZFSInitializer:
             archive_url = f"https://archive.archlinux.org/repos/{archive_date}/"
             info(f"Using Archlinux Archive date: {archive_date}")
 
+            # Stop reflector while we pin mirrorlist and downgrade to the archive snapshot
+            self._stop_reflector_for_archive()
+
             # Force mirrorlist to archive and full downgrade/upgrade to that snapshot
             mirrorlist_content = f"Server={archive_url}$repo/os/$arch\n"
             # Backup is taken in __init__; write pinned mirrorlist
@@ -243,6 +298,8 @@ class ZFSInitializer:
                 info("Restored current repositories")
             except Exception as e:
                 warn(f"Failed to restore mirrorlist: {e!s}")
+        # Regardless of archive pin, restore reflector if we changed it
+        self._restore_reflector()
 
     def extract_pkginfo(self, package_path: Path) -> str:
         pkginfo = SysCommand(f"bsdtar -qxO -f {package_path} .PKGINFO").decode()

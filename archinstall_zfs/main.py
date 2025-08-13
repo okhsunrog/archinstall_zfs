@@ -148,12 +148,6 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
         selected_kernels: list[str] = arch_config.kernels if arch_config.kernels else ["linux-lts"]
         kernel_headers: list[str] = [f"{k}-headers" for k in selected_kernels]
 
-        # Workaround: reflector on live ISO can be stuck auto-restarting after repo pinning.
-        # Stop it so archinstall's sanity_check doesn't block waiting for it.
-        with contextlib.suppress(Exception):
-            SysCommand("systemctl disable --now reflector.service", peek_output=True)
-            SysCommand("systemctl reset-failed reflector.service", peek_output=True)
-
         # ZFSInstaller will use its own default base packages optimized for ZFS
         disk_cfg = arch_config.disk_config or DiskLayoutConfiguration(DiskLayoutType.Pre_mount, mountpoint=mountpoint)
         with ZFSInstaller(
