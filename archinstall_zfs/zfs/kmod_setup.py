@@ -183,6 +183,9 @@ class ZFSInitializer:
     def __init__(self, verbose: bool = False):
         self.verbose = verbose
         self.kernel_version = self._get_running_kernel_version()
+        self._mirrorlist_path: Path = Path("/etc/pacman.d/mirrorlist")
+        self._mirrorlist_backup: str | None = self._mirrorlist_path.read_text() if self._mirrorlist_path.exists() else None
+        self._archive_set: bool = False
 
     def _get_running_kernel_version(self) -> str:
         return cast(str, SysCommand("uname -r").decode().strip())
@@ -221,12 +224,25 @@ class ZFSInitializer:
 
             # Force mirrorlist to archive and full downgrade/upgrade to that snapshot
             mirrorlist_content = f"Server={archive_url}$repo/os/$arch\n"
-            Path("/etc/pacman.d/mirrorlist").write_text(mirrorlist_content)
+            # Backup is taken in __init__; write pinned mirrorlist
+            self._mirrorlist_path.write_text(mirrorlist_content)
+            self._archive_set = True
             SysCommand("pacman -Syyuu --noconfirm", peek_output=True)
             info("Successfully aligned to archive repository versions")
         except Exception as e:
             warn(f"Archive setup failed ({e!s}); continuing with current repos")
             SysCommand("pacman -Sy --noconfirm", peek_output=True)
+
+    def _restore_archive_mirrorlist(self) -> None:
+        """Restore original mirrorlist if we pinned to Archive, and resync."""
+        if self._archive_set and self._mirrorlist_backup is not None:
+            try:
+                info("Restoring original pacman mirrorlist")
+                self._mirrorlist_path.write_text(self._mirrorlist_backup)
+                SysCommand("pacman -Syy --noconfirm", peek_output=True)
+                info("Restored current repositories")
+            except Exception as e:
+                warn(f"Failed to restore mirrorlist: {e!s}")
 
     def extract_pkginfo(self, package_path: Path) -> str:
         pkginfo = SysCommand(f"bsdtar -qxO -f {package_path} .PKGINFO").decode()
@@ -337,10 +353,13 @@ class ZFSInitializer:
         with contextlib.suppress(Exception):
             self.increase_cowspace()
 
-        if not self.install_zfs():
-            return False
-
-        return self.load_zfs_module()
+        try:
+            if not self.install_zfs():
+                return False
+            return self.load_zfs_module()
+        finally:
+            # Always attempt to restore mirrorlist so pacstrap uses stock repos
+            self._restore_archive_mirrorlist()
 
     def search_zfs_package(self, package_name: str, version: str) -> tuple[str, str] | None:
         urls = ["https://github.com/archzfs/archzfs/releases/download/experimental/"]
