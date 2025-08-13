@@ -14,6 +14,7 @@ from archinstall.lib.applications.application_menu import ApplicationMenu
 from archinstall.lib.args import ArchConfig
 from archinstall.lib.authentication.authentication_menu import AuthenticationMenu
 from archinstall.lib.interactions.general_conf import (
+    add_number_of_parallel_downloads,
     ask_additional_packages_to_install,
     ask_for_a_timezone,
     ask_hostname,
@@ -24,6 +25,8 @@ from archinstall.lib.locale.locale_menu import LocaleMenu
 from archinstall.lib.mirrors import MirrorMenu
 from archinstall.lib.models.application import ApplicationConfiguration
 from archinstall.lib.models.locale import LocaleConfiguration
+from archinstall.lib.models.profile import ProfileConfiguration
+from archinstall.lib.profile.profile_menu import ProfileMenu
 from archinstall.lib.translationhandler import tr
 from archinstall.tui import EditMenu, MenuItem, MenuItemGroup, SelectMenu, Tui
 from archinstall.tui.result import ResultType
@@ -77,6 +80,9 @@ class GlobalConfigMenu:
             MenuItem(text=tr("Hostname"), preview_action=lambda _: f"Hostname: {self.config.hostname}", key="hostname"),
             MenuItem(text=tr("Authentication"), preview_action=self._preview_auth, key="auth"),
             MenuItem(text=tr("Applications"), preview_action=self._preview_applications, key="applications"),
+            MenuItem(text=tr("Kernels"), preview_action=self._preview_kernels, key="kernels"),
+            MenuItem(text=tr("Profile"), preview_action=self._preview_profile, key="profile"),
+            MenuItem(text=tr("Parallel Downloads"), value=0, preview_action=self._preview_parallel_dw, key="parallel_downloads"),
             MenuItem(text=tr("Timezone"), preview_action=lambda _: f"Timezone: {self.config.timezone}", key="timezone"),
             MenuItem(
                 text=tr("NTP (time sync)"),
@@ -145,6 +151,9 @@ class GlobalConfigMenu:
             "hostname": self._configure_hostname,
             "auth": self._configure_authentication,
             "applications": self._configure_applications,
+            "kernels": self._configure_kernels,
+            "profile": self._configure_profile,
+            "parallel_downloads": self._configure_parallel_downloads,
             "timezone": self._configure_timezone,
             "ntp": self._configure_ntp,
             "packages": self._configure_packages,
@@ -186,6 +195,44 @@ class GlobalConfigMenu:
     def _configure_applications(self, *_: Any) -> None:
         app_menu = ApplicationMenu(self.config.app_config)
         self.config.app_config = app_menu.run()
+
+    def _configure_kernels(self, *_: Any) -> None:
+        # Custom kernel + ZFS combo selector
+        items = [
+            MenuItem("Linux LTS + precompiled ZFS (recommended)", ("linux-lts", "precompiled"), key="lts_pre"),
+            MenuItem("Linux LTS + ZFS DKMS", ("linux-lts", "dkms"), key="lts_dkms"),
+            MenuItem("Linux + ZFS DKMS", ("linux", "dkms"), key="linux_dkms"),
+            MenuItem("Linux-zen + ZFS DKMS", ("linux-zen", "dkms"), key="zen_dkms"),
+        ]
+        # Focus current selection if possible
+        focus_item = None
+        cur_kernel = self.config.kernels[0] if self.config.kernels else "linux-lts"
+        for it in items:
+            k, m = it.value
+            if k == cur_kernel and (
+                (m == "precompiled" and self.cfg.zfs_module_mode == ZFSModuleMode.PRECOMPILED)
+                or (m == "dkms" and self.cfg.zfs_module_mode == ZFSModuleMode.DKMS)
+            ):
+                focus_item = it
+                break
+
+        result = SelectMenu(
+            MenuItemGroup(items, focus_item=focus_item) if focus_item else MenuItemGroup(items), header="Select kernel and ZFS module mode"
+        ).run()
+        if result.item():
+            kernel, mode = result.item().value
+            self.config.kernels = [kernel]
+            # Sync ZFS module mode based on selection
+            self.cfg.zfs_module_mode = ZFSModuleMode.PRECOMPILED if mode == "precompiled" else ZFSModuleMode.DKMS
+
+    def _configure_parallel_downloads(self, *_: Any) -> None:
+        val = add_number_of_parallel_downloads(self.config.parallel_downloads)
+        if val is not None:
+            self.config.parallel_downloads = val
+
+    def _configure_profile(self, *_: Any) -> None:
+        profile_menu = ProfileMenu(preset=self.config.profile_config)
+        self.config.profile_config = profile_menu.run()
 
     def _configure_timezone(self, *_: Any) -> None:
         timezone = ask_for_a_timezone(self.config.timezone)
@@ -348,7 +395,7 @@ class GlobalConfigMenu:
                 self._get_encryption_password()
 
     def _configure_zfs_configuration(self, *_: Any) -> None:
-        """Grouped flow for ZFS settings: dataset prefix, encryption, module mode."""
+        """Grouped flow for ZFS settings: dataset prefix and encryption."""
         while True:
             summary = self._preview_zfs_configuration(None) or ""
             # Build submenu items with stable keys
@@ -356,7 +403,6 @@ class GlobalConfigMenu:
                 MenuItem("Pool Name", "pool_name", key="pool_name"),
                 MenuItem("Dataset Prefix", "prefix", key="prefix"),
                 MenuItem("Encryption", "encryption", key="encryption"),
-                MenuItem("Modules Source", "modules", key="modules"),
                 MenuItem("Done", "done", key="done"),
             ]
 
@@ -386,8 +432,6 @@ class GlobalConfigMenu:
                 self._configure_dataset_prefix()
             elif choice == "encryption":
                 self._configure_zfs_encryption()
-            elif choice == "modules":
-                self._configure_zfs_modules()
             else:
                 break
 
@@ -416,21 +460,7 @@ class GlobalConfigMenu:
             if selected is not None:
                 self.cfg.init_system = selected
 
-    def _configure_zfs_modules(self, *_: Any) -> None:
-        mode_menu = SelectMenu(
-            MenuItemGroup(
-                [
-                    MenuItem("Precompiled (preferred)", ZFSModuleMode.PRECOMPILED),
-                    MenuItem("DKMS", ZFSModuleMode.DKMS),
-                ]
-            ),
-            header="Select ZFS modules source",
-        )
-        result = mode_menu.run()
-        if result.type_ != ResultType.Skip:
-            selected = result.item().value if result.item() else None
-            if selected is not None:
-                self.cfg.zfs_module_mode = selected
+    # Removed separate ZFS modules selector; controlled by Kernel selection
 
     # Preview methods
     def _preview_locale(self, *_: Any) -> str | None:
@@ -465,6 +495,28 @@ class GlobalConfigMenu:
             out_parts.append(f"Audio: {app_config.audio_config.audio.value}")
         return "\n".join(out_parts) if out_parts else "Applications: Not configured"
 
+    def _preview_kernels(self, *_: Any) -> str | None:
+        kernel = ", ".join(self.config.kernels) if self.config.kernels else "linux-lts"
+        mode = self.cfg.zfs_module_mode.value if self.cfg.zfs_module_mode else ZFSModuleMode.PRECOMPILED.value
+        return f"Kernel: {kernel}\nZFS modules: {mode}"
+
+    def _preview_parallel_dw(self, *_: Any) -> str | None:
+        return f"Parallel Downloads: {self.config.parallel_downloads}"
+
+    def _preview_profile(self, *_: Any) -> str | None:
+        profile_config: ProfileConfiguration | None = self.config.profile_config
+        if not profile_config or not profile_config.profile:
+            return "Profile: Not configured"
+        names = profile_config.profile.current_selection_names()
+        summary = ", ".join(names) if names else profile_config.profile.name
+        extra: list[str] = []
+        if profile_config.gfx_driver:
+            extra.append(f"Graphics: {profile_config.gfx_driver.value}")
+        if profile_config.greeter:
+            extra.append(f"Greeter: {profile_config.greeter.value}")
+        tail = "\n" + "\n".join(extra) if extra else ""
+        return f"Profiles: {summary}{tail}"
+
     def _preview_packages(self, *_: Any) -> str | None:
         if self.config.packages:
             return f"Additional packages: {len(self.config.packages)} selected"
@@ -480,7 +532,7 @@ class GlobalConfigMenu:
     def _preview_zfs_configuration(self, *_: Any) -> str | None:
         enc = self._preview_zfs_encryption(None) or ""
         pool = f"Pool: {self.cfg.pool_name or 'Not set'}"
-        return f"{pool}\nDataset prefix: {self.cfg.dataset_prefix}\n{enc}\nModules: {self.cfg.zfs_module_mode.value}"
+        return f"{pool}\nDataset prefix: {self.cfg.dataset_prefix}\n{enc}"
 
     def _preview_installation_mode(self, *_: Any) -> str | None:
         if not self.cfg.installation_mode:

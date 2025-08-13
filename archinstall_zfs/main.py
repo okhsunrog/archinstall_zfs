@@ -310,7 +310,7 @@ def main() -> bool:
                 "timezone": "UTC",
                 "ntp": True,
                 "kernels": ["linux-lts"],
-                "bootloader": "Systemd-boot",
+                "bootloader": None,
                 "swap": False,
             }
             arch_config = ArchConfig.from_config(config_dict, args)

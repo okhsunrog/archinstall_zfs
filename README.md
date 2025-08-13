@@ -269,12 +269,19 @@ This project is licensed under the GNU General Public License v3.0. See the LICE
 1. System Enhancements
    - Implement smarter hostid generation, based on hostname
    - Add local ZFSBootMenu building support
-   - Add swap configuration options (zswap, zram, swap partition)
+   - Add swap configuration options
+     - Note: swap on ZFS requires special handling; swapfile on ZFS is discouraged
+     - Planned options:
+       - No swap
+       - ZRAM only
+       - Swap partition (with or without LUKS)
+       - Swap partition + zswap
 
 2. Additional Features
    - Expand post-installation customization options
    - Add more ZFS optimization options (configurable compression, DirectIO, etc.)
    - Install and configure zrepl for backup and replication
+   - Add Archinstall language selection to the menu
 
 ## Support
 
