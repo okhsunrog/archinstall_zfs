@@ -34,7 +34,7 @@ from archinstall.tui.result import ResultType
 from archinstall_zfs.initramfs.base import InitramfsHandler
 from archinstall_zfs.initramfs.dracut import DracutInitramfsHandler
 from archinstall_zfs.initramfs.mkinitcpio import MkinitcpioInitramfsHandler
-from archinstall_zfs.menu.models import GlobalConfig, InitSystem, InstallationMode, ZFSEncryptionMode, ZFSModuleMode, SwapMode
+from archinstall_zfs.menu.models import GlobalConfig, InitSystem, InstallationMode, SwapMode, ZFSEncryptionMode, ZFSModuleMode
 
 
 class GlobalConfigMenu:
@@ -596,7 +596,9 @@ class GlobalConfigMenu:
     def _preview_swap(self, *_: Any) -> str | None:
         mode = self.cfg.swap_mode.value if self.cfg.swap_mode else "none"
         if self.cfg.swap_mode == SwapMode.ZRAM:
-            return f"Swap: {mode} (size={self.cfg.zram_size_expr or 'min(ram/2,4096)'} or fraction={self.cfg.zram_fraction if self.cfg.zram_fraction is not None else 'default'})"
+            size_expr = self.cfg.zram_size_expr or "min(ram/2,4096)"
+            fraction = self.cfg.zram_fraction if self.cfg.zram_fraction is not None else "default"
+            return f"Swap: {mode} (size={size_expr} or fraction={fraction})"
         if self.cfg.swap_mode in {SwapMode.ZSWAP_PARTITION, SwapMode.ZSWAP_PARTITION_ENCRYPTED}:
             if self.cfg.installation_mode is InstallationMode.FULL_DISK:
                 return f"Swap: {mode}, size={self.cfg.swap_partition_size or 'Not set'}"

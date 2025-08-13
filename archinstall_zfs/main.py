@@ -10,6 +10,7 @@ from archinstall import SysInfo, debug, error, info
 from archinstall.lib.applications.application_handler import application_handler
 from archinstall.lib.args import ArchConfig, Arguments, arch_config_handler
 from archinstall.lib.configuration import ConfigurationOutput
+from archinstall.lib.general import SysCommand
 from archinstall.lib.installer import accessibility_tools_in_use, run_custom_user_commands
 from archinstall.lib.models.device import DiskLayoutConfiguration, DiskLayoutType
 from archinstall.lib.models.users import User
@@ -21,9 +22,8 @@ from archinstall_zfs.config_io import load_combined_configuration, save_combined
 from archinstall_zfs.disk import DiskManager, DiskManagerBuilder
 from archinstall_zfs.installer import ZFSInstaller
 from archinstall_zfs.menu import GlobalConfigMenu
-from archinstall_zfs.menu.models import ZFSEncryptionMode, ZFSModuleMode, SwapMode
+from archinstall_zfs.menu.models import SwapMode, ZFSEncryptionMode, ZFSModuleMode
 from archinstall_zfs.zfs import ZFS_SERVICES, EncryptionMode, ZFSManager, ZFSManagerBuilder
-from archinstall.lib.general import SysCommand
 from archinstall_zfs.zfs.kmod_setup import add_archzfs_repo
 
 InstallMode = Literal["full_disk", "new_pool", "existing_pool"]
@@ -76,9 +76,13 @@ def prepare_installation(installer_menu: GlobalConfigMenu) -> tuple[ZFSManager, 
             disk_manager = disk_builder.build()
 
         # Configure optional swap tail for full-disk ZSWAP modes
-        if installer_menu.cfg.installation_mode is not None and installer_menu.cfg.installation_mode.value == "full_disk":
-            if installer_menu.cfg.swap_mode in {SwapMode.ZSWAP_PARTITION, SwapMode.ZSWAP_PARTITION_ENCRYPTED} and installer_menu.cfg.swap_partition_size:
-                disk_builder.with_swap_size(installer_menu.cfg.swap_partition_size)
+        if (
+            installer_menu.cfg.installation_mode is not None
+            and installer_menu.cfg.installation_mode.value == "full_disk"
+            and installer_menu.cfg.swap_mode in {SwapMode.ZSWAP_PARTITION, SwapMode.ZSWAP_PARTITION_ENCRYPTED}
+            and installer_menu.cfg.swap_partition_size
+        ):
+            disk_builder.with_swap_size(installer_menu.cfg.swap_partition_size)
 
         match mode:
             case "full_disk":
@@ -262,10 +266,8 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
 
                 if swap_part is not None:
                     if installer_menu.cfg.swap_mode == SwapMode.ZSWAP_PARTITION:
-                        try:
+                        with contextlib.suppress(Exception):
                             SysCommand(f"mkswap {swap_part}")
-                        except Exception:
-                            pass
                     else:
                         # Encrypted random-key dm-crypt: set up crypttab and fstab only
                         partuuid = SysCommand(f"blkid -s PARTUUID -o value {swap_part}").decode().strip()
