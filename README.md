@@ -2,7 +2,7 @@
 
 ZFS‑first Arch Linux installer with batteries included. Effortless ZFS root, automatic ZFSBootMenu, and a fast, friendly TUI.
 
-[![Demo](/home/okhsunrog/code/svg-term-cli/examples/archinstall-zfs.svg)](https://asciinema.org/a/Lt0B9qvvu9bLPpkAV96SC5prq)
+[![Demo](assets/archinstall-demo.svg)](https://asciinema.org/a/Lt0B9qvvu9bLPpkAV96SC5prq)
 
 ### Highlights
 
