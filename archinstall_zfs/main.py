@@ -3,6 +3,7 @@ import contextlib
 import socket
 import sys
 from pathlib import Path
+from shutil import copy2
 from typing import Literal, cast
 
 from archinstall import SysInfo, debug, error, info
@@ -231,6 +232,22 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
 
             zfs_manager.genfstab()
             zfs_manager.copy_misc_files()
+
+            # Copy custom ZED hook, then make it immutable
+            try:
+                repo_asset = Path(__file__).resolve().parent.parent / "assets" / "zed" / "history_event-zfs-list-cacher.sh"
+                host_path = Path("/etc/zfs/zed.d/history_event-zfs-list-cacher.sh")
+                zed_src = repo_asset if repo_asset.exists() else host_path
+                if zed_src.exists():
+                    zed_dst_dir = installation.target / "etc" / "zfs" / "zed.d"
+                    zed_dst_dir.mkdir(parents=True, exist_ok=True)
+                    zed_dst = zed_dst_dir / zed_src.name
+                    copy2(zed_src, zed_dst)
+                    installation.arch_chroot("chattr +i /etc/zfs/zed.d/history_event-zfs-list-cacher.sh")
+                else:
+                    debug(f"Custom ZED script not found at {repo_asset} or {host_path}, skipping copy")
+            except Exception as e:
+                error(f"Failed to install ZED history cacher hook: {e!s}")
 
             if disk_manager.config.efi_partition:
                 zfs_manager.setup_bootloader(disk_manager.config.efi_partition)

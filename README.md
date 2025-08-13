@@ -9,6 +9,9 @@ A ZFS-focused Arch Linux installer built on top of archinstall. This installer p
   - New ZFS pool creation on existing partition
   - Installation alongside existing distros on existing ZFS pool
 - Automatic ZFSBootMenu setup with recovery options
+- Boot environment-aware mounts: a custom ZED hook updates zfs-list.cache to only
+  include datasets from the active boot environment (plus shared datasets),
+  preventing cross-environment mounts on shared pools
 - Native ZFS encryption support (pool-wide or dataset-specific)
 - Seamless integration with archinstall's profile system
 - User-friendly TUI interface

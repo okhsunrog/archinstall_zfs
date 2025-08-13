@@ -120,3 +120,8 @@ allow-direct-references = true
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = [
+    "archinstall_zfs/assets/**",
+]
