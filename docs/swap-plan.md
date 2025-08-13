@@ -19,16 +19,18 @@ Goal: Add swap support with two safe options — ZRAM and a traditional swap par
 - Extend `GlobalConfig`:
   - `swap_mode: SwapMode = none`
   - `swap_partition_size: str | None = None` (e.g. "8G"; used only when mode == partition in full‑disk)
-  - `zram_fraction: float | None = 0.5` (optional; v1 defaults to 0.5 if unset)
+  - `zram_size_expr: str | None = "min(ram / 2, 4096)"` (default based on ArchWiki guidance)
+  - `zram_fraction: float | None = None` (if set, takes precedence over size expression)
 
 ### Installer behavior
 1) ZRAM mode
    - Ensure package `zram-generator` is installed
    - Write `/etc/systemd/zram-generator.conf` in target with defaults:
      - `[zram0]`
-     - `zram-fraction = 0.5` (or `zram_fraction` if provided)
+     - `zram-size = min(ram / 2, 4096)` (or `zram-fraction = X` if fraction is set)
      - `compression-algorithm = zstd`
      - `swap-priority = 100`
+   - Keep zswap disabled to avoid intercepting zram (kernel parameter `zswap.enabled=0` already present)
    - No initramfs changes needed
 
 2) Swap partition mode (Full‑disk install only in v1)
@@ -71,5 +73,9 @@ Goal: Add swap support with two safe options — ZRAM and a traditional swap par
 - Allow selecting an existing swap partition for new/existing pool modes
 - Hibernation support (resume kernel arg and initramfs integration)
 - Advanced ZRAM tuning (multiple devices, bounds, NUMA)
+
+### References
+- ArchWiki — Zram: https://wiki.archlinux.org/title/Zram
+- ArchWiki — Zswap: https://wiki.archlinux.org/title/Zswap
 
 
