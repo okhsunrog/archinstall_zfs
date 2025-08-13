@@ -191,6 +191,12 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
             if arch_config.auth_config and arch_config.auth_config.users:
                 installation.create_users(arch_config.auth_config.users)
 
+            # Set root password if provided
+            if arch_config.auth_config and arch_config.auth_config.root_enc_password:
+                from archinstall.lib.models.users import User
+                root_user = User("root", arch_config.auth_config.root_enc_password, False)
+                installation.set_user_password(root_user)
+
             # Audio config not applied: API removed/changed in current archinstall
             # Profiles post-install hook not applied: API changed in current archinstall
 
@@ -204,7 +210,6 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
                 installation.activate_time_synchronization()
 
             # accessibility_tools_in_use not available in current archinstall
-            # Root password setting via direct installer call not available in current archinstall
 
             installation.enable_service(ZFS_SERVICES)
 
