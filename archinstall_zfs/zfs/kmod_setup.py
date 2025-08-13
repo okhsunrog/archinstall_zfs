@@ -291,38 +291,45 @@ class ZFSInitializer:
 
         info("Falling back to DKMS method")
         try:
-            # Set up Archlinux Archive repository to match archiso version
+            # Set up Archlinux Archive repository to match archiso version (best-effort)
             self._setup_archive_repository()
+
+            # Ensure the kernel modules directory exists for the running kernel
+            modules_dir = Path(f"/usr/lib/modules/{self.kernel_version}")
+            if not modules_dir.exists():
+                debug(f"Creating missing modules directory: {modules_dir}")
+                modules_dir.mkdir(parents=True, exist_ok=True)
+
+            # Install toolchain and headers matching the running kernel
             SysCommand("pacman -S --noconfirm --needed base-devel linux-headers git", peek_output=True)
 
-            # Disable mkinitcpio hooks during DKMS installation on live system
-            # This prevents initramfs rebuild which fails on archiso
+            # Temporarily disable mkinitcpio hooks (both etc and share locations) to avoid live ISO errors
             info("Temporarily disabling mkinitcpio hooks for live system")
-            hooks_dir = Path("/etc/pacman.d/hooks")
-            disabled_hooks = []
-
-            if hooks_dir.exists():
-                for hook_file in hooks_dir.glob("*mkinitcpio*"):
+            hooks_locations = [Path("/etc/pacman.d/hooks"), Path("/usr/share/libalpm/hooks")]
+            disabled_hooks: list[tuple[Path, Path]] = []
+            for loc in hooks_locations:
+                if not loc.exists():
+                    continue
+                for hook_file in loc.glob("*mkinitcpio*"):
                     disabled_file = hook_file.with_suffix(hook_file.suffix + ".disabled")
-                    hook_file.rename(disabled_file)
-                    disabled_hooks.append((hook_file, disabled_file))
-                    debug(f"Disabled hook: {hook_file}")
+                    try:
+                        hook_file.rename(disabled_file)
+                        disabled_hooks.append((hook_file, disabled_file))
+                        debug(f"Disabled hook: {hook_file}")
+                    except Exception as e:
+                        warn(f"Failed to disable hook {hook_file}: {e}")
 
             try:
+                # Install DKMS ZFS which will trigger DKMS build for the running kernel
                 SysCommand("pacman -S zfs-dkms --noconfirm", peek_output=True)
 
-                # Re-enable hooks
-                for original, disabled in disabled_hooks:
-                    disabled.rename(original)
-                    debug(f"Re-enabled hook: {original}")
-
                 return True
-            except Exception as e:
-                # Re-enable hooks even if installation failed
+            finally:
+                # Re-enable hooks regardless of success
                 for original, disabled in disabled_hooks:
-                    if disabled.exists():
+                    with contextlib.suppress(Exception):
                         disabled.rename(original)
-                raise e
+                        debug(f"Re-enabled hook: {original}")
 
         except Exception as e:
             error(f"DKMS installation failed: {e!s}")
