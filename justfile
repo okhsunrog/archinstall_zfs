@@ -48,12 +48,7 @@ clean:
 # Clean up ISO build artifacts only
 clean-iso:
     sudo rm -rf {{ISO_OUT_DIR}}
-    sudo rm -rf {{ISO_WORK_DIR}}
-
-# Clean up local ZFS repository  (removed: no longer using local_repo)
-#clean-zfs-repo:
-#    rm -rf local_repo/
-#    @echo "Local ZFS repository cleaned"
+    rm -rf {{ISO_WORK_DIR}}
 
 # Install development dependencies
 install-dev:
@@ -104,20 +99,6 @@ _cleanup-source PROFILE_DIR:
     @echo "Cleaning up source code copy from {{PROFILE_DIR}}..."
     @rm -rf {{PROFILE_DIR}}/airootfs/root/archinstall_zfs
     @rm -f {{PROFILE_DIR}}/airootfs/root/installer
-
-# Prepare ZFS packages (legacy precompiled flow) - removed
-#prepare-zfs-packages:
-#    @echo "Preparing optimal ZFS packages (legacy precompiled flow)..."
-#    python gen_iso/build_zfs_package.py
-
-# DKMS prebuild no longer needed: zfs-dkms builds during mkarchiso package installation.
-# (Intentionally left as a no-op to preserve target name for callers, if any.)
-_prebuild-dkms PROFILE_DIR:
-    @echo "Skipping DKMS prebuild: handled by mkarchiso during package installation."
-
-# Deprecated helper; no-op to avoid breaking external calls.
-_prebuild-dkms-active PROFILE_DIR:
-    @echo "Skipping DKMS prebuild (deprecated target)."
 
 # Build the main ISO for production release
 build-main-iso:
