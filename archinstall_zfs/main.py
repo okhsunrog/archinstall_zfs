@@ -309,8 +309,6 @@ def main() -> bool:
                 "packages": [],
                 "timezone": "UTC",
                 "ntp": True,
-                "kernels": ["linux-lts"],
-                "bootloader": None,
                 "swap": False,
             }
             arch_config = ArchConfig.from_config(config_dict, args)
