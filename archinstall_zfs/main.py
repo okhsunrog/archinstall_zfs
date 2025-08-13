@@ -53,7 +53,9 @@ def prepare_installation(installer_menu: GlobalConfigMenu) -> tuple[ZFSManager, 
             selected_mode = EncryptionMode.DATASET
         else:
             selected_mode = EncryptionMode.NONE
-        zfs_builder.with_dataset_prefix(installer_menu.cfg.dataset_prefix).with_mountpoint(Path("/mnt")).with_encryption(
+        zfs_builder.with_dataset_prefix(installer_menu.cfg.dataset_prefix).with_mountpoint(Path("/mnt")).with_init_system(
+            installer_menu.cfg.init_system.value
+        ).with_encryption(
             selected_mode,
             installer_menu.cfg.zfs_encryption_password,
         )

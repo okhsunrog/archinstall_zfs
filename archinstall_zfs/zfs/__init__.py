@@ -46,6 +46,7 @@ class ZFSConfig(BaseModel):
     dataset_prefix: str
     mountpoint: Path
     compression: str = Field(default="lz4")
+    init_system: str = Field(default="dracut")
     # disabled because of PyCharm bug
     # noinspection PyDataclass
     datasets: list[DatasetConfig] = Field(default_factory=list)
@@ -371,6 +372,7 @@ class ZFSManagerBuilder:
         self._encryption_handler: ZFSEncryption | None = None
         self._preselected_encryption_mode: EncryptionMode | None = None
         self._preselected_encryption_password: str | None = None
+        self._init_system: str = "dracut"
 
     def set_new_pool(self, device: Path, pool_name: str) -> "ZFSManagerBuilder":
         """Configure builder for a new pool without interactive prompts.
@@ -415,6 +417,10 @@ class ZFSManagerBuilder:
         self._preselected_encryption_password = password
         return self
 
+    def with_init_system(self, init_system: str) -> "ZFSManagerBuilder":
+        self._init_system = init_system
+        return self
+
     def build(self) -> "ZFSManager":
         if not self._pool_name:
             raise ValueError("Pool name must be set before building ZFS manager")
@@ -432,7 +438,12 @@ class ZFSManagerBuilder:
             preselected_password=self._preselected_encryption_password,
         )
         config = ZFSConfig(
-            pool_name=self._pool_name, dataset_prefix=self._dataset_prefix, mountpoint=self._mountpoint, compression=self._compression, datasets=self._datasets
+            pool_name=self._pool_name,
+            dataset_prefix=self._dataset_prefix,
+            mountpoint=self._mountpoint,
+            compression=self._compression,
+            datasets=self._datasets,
+            init_system=self._init_system,
         )
         mounted_paths = ZFSPaths.create_mounted(self._paths, self._mountpoint)
         return ZFSManager(config, self._paths, mounted_paths, self._encryption_handler, device=self._device)
@@ -517,8 +528,13 @@ class ZFSManager:
         # Generate full fstab with UUIDs
         raw_fstab = SysCommand(f"/usr/bin/genfstab -t UUID {self.config.mountpoint}").decode()
 
-        # Filter out all ZFS entries; zfs-mount-generator and initramfs handle ZFS mounts and root
+        # Filter out all ZFS entries; we'll append the root dataset explicitly
         filtered_lines = [line for line in raw_fstab.splitlines() if "\tzfs\t" not in line and self.config.pool_name not in line]
+
+        # Append the root dataset line for stability (e.g., snapshot navigation quirks)
+        root_dataset = next(ds for ds in self.config.datasets if ds.properties.get("mountpoint") == "/")
+        full_dataset_path = f"{self.datasets.base_dataset}/{root_dataset.name}"
+        filtered_lines.append(f"{full_dataset_path} / zfs defaults 0 0")
 
         # Write final fstab
         fstab_path.write_text("\n".join(filtered_lines) + "\n")
@@ -549,15 +565,19 @@ class ZFSManager:
     def finish(self) -> None:
         """Clean up ZFS mounts and export pool"""
         debug("Finishing ZFS setup")
-        SysCommand(f'zfs set org.zfsbootmenu:commandline="spl.spl_hostid=$(hostid) zswap.enabled=0 rw" {self.datasets.base_dataset}')
-        # SysCommand(f"zfs set org.zfsbootmenu:keysource=\"{root_dataset}\" {self.config.pool_name}")
-
         os.sync()
 
         root_dataset = next(ds for ds in self.config.datasets if ds.properties.get("mountpoint") == "/")
         full_dataset_path = f"{self.datasets.base_dataset}/{root_dataset.name}"
         debug(f"Root dataset: {full_dataset_path}")
-        SysCommand(f"zpool set bootfs={full_dataset_path} {self.config.pool_name}")
+
+        # Configure ZFSBootMenu properties on the root dataset
+        # Command line: do not include root=; ZFSBootMenu injects it automatically
+        SysCommand(f'zfs set org.zfsbootmenu:commandline="spl.spl_hostid=$(hostid) zswap.enabled=0 rw" {full_dataset_path}')
+
+        # Root prefix: respect selected init system
+        rootprefix = "root=ZFS=" if self.config.init_system == "dracut" else "zfs="
+        SysCommand(f'zfs set org.zfsbootmenu:rootprefix="{rootprefix}" {full_dataset_path}')
 
         # Multiple unmount attempts with different strategies
         unmount_attempts = [
