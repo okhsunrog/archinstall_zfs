@@ -181,10 +181,11 @@ just ssh-only
 1. System Enhancements
    - Smarter hostid generation (based on hostname)
    - Local ZFSBootMenu build support
+   - Secure Boot support (sign kernels/ZBM and manage keys)
 
 2. Additional Features
    - More ZFS tuning options (compression, DirectIO, etc.)
-   - zrepl setup for backup/replication
+   - zrepl support: guided setup for backup/replication
    - Archinstall language selection in the menu
 
 ## Contributing 🤝
