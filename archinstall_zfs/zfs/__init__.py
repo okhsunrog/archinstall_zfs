@@ -25,7 +25,7 @@ DEFAULT_DATASETS = [
     DatasetConfig(name="vm", properties={"mountpoint": "/vm"}),
 ]
 
-ZFS_SERVICES = ["zfs.target", "zfs-import.target", "zfs-volumes.target", "zfs-import-cache.service", "zfs-zed.service"]
+ZFS_SERVICES = ["zfs.target", "zfs-import.target", "zfs-volumes.target", "zfs-import-scan.service", "zfs-zed.service"]
 
 
 class EncryptionMode(Enum):
