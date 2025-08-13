@@ -3,22 +3,26 @@
 Goal: Add swap support with two safe options — ZRAM and a traditional swap partition — while explicitly not supporting swap on ZFS zvols per Arch Wiki and OpenZFS guidance.
 
 ### Scope (v1)
-- Modes: None, ZRAM, Swap partition
+- Modes: None, ZRAM only, ZSWAP + swap partition, ZSWAP + encrypted swap partition
 - Default: None
 - No zvol swap, no swapfile on ZFS
 - No hibernation/resume support in v1 (documented limitation)
 
 ### User‑facing changes
 - New installer menu section: "Swap"
-  - Options: None, ZRAM, Swap partition
+  - Options:
+    - None
+    - ZRAM only (disables zswap)
+    - ZSWAP + swap partition
+    - ZSWAP + encrypted swap partition (dm-crypt with random key each boot)
   - If ZRAM: optional advanced settings later (v1 uses sensible defaults)
-  - If Swap partition: only supported in Full‑disk mode for v1; asks for size (e.g. 0.5G, 8G). For other modes, show info message that only ZRAM is supported in v1
+  - If swap partition: only supported in Full‑disk mode for v1; asks for size (e.g. 0.5G, 8G). For other modes, show info message that only ZRAM is supported in v1
 
 ### Configuration model
-- Add `SwapMode` enum: `none | zram | partition`
+- Add `SwapMode` enum: `none | zram | zswap_partition | zswap_partition_encrypted`
 - Extend `GlobalConfig`:
   - `swap_mode: SwapMode = none`
-  - `swap_partition_size: str | None = None` (e.g. "8G"; used only when mode == partition in full‑disk)
+  - `swap_partition_size: str | None = None` (e.g. "8G"; used when mode is a partition mode in full‑disk)
   - `zram_size_expr: str | None = "min(ram / 2, 4096)"` (default based on ArchWiki guidance)
   - `zram_fraction: float | None = None` (if set, takes precedence over size expression)
 
@@ -33,15 +37,27 @@ Goal: Add swap support with two safe options — ZRAM and a traditional swap par
    - Keep zswap disabled to avoid intercepting zram (kernel parameter `zswap.enabled=0` already present)
    - No initramfs changes needed
 
-2) Swap partition mode (Full‑disk install only in v1)
+2) ZSWAP + swap partition (Full‑disk install only in v1)
+   - Enable zswap (`zswap.enabled=1` kernel parameter via ZFSBootMenu dataset property)
    - Partition layout: EFI (p1), Swap (p2), ZFS (p3)
    - Create swap of requested size (e.g. `sgdisk -n 2:0:+<size> -t 2:8200`)
    - Create ZFS partition from the remainder (`-n 3:0:0 -t 3:bf00`)
    - Format swap (`mkswap`); do not activate it on the live ISO
    - fstab: rely on `genfstab` to include the swap UUID line (we already filter only ZFS lines); if missing, append `UUID=<uuid> none swap defaults 0 0`
-   - Hibernation: out of scope in v1 (no `resume=` kernel arg or initramfs resume hooks)
+   - Hibernation: out of scope in v1
 
-3) Existing/New pool modes in v1
+3) ZSWAP + encrypted swap partition (Full‑disk install only in v1)
+   - Enable zswap (`zswap.enabled=1` kernel parameter via ZFSBootMenu dataset property)
+   - Partition layout: EFI (p1), Swap (p2), ZFS (p3)
+   - Do not format underlying p2 directly
+   - Add `/etc/crypttab` entry (use PARTUUID for stability), example:
+     - `cryptswap PARTUUID=<p2-partuuid> /dev/urandom swap,cipher=aes-xts-plain64,size=256`
+   - Add `/etc/fstab` entry referencing the mapped device:
+     - `/dev/mapper/cryptswap none swap defaults 0 0`
+   - Let systemd-cryptsetup generator create `systemd-cryptsetup@cryptswap.service` which will `systemd-makefs swap /dev/mapper/cryptswap` on first boot
+   - Hibernation: not supported with random key each boot
+
+4) Existing/New pool modes in v1
    - Do not create swap partitions
    - Suggest ZRAM for these modes; potential future enhancement: allow selecting an existing swap partition by‑id
 
@@ -60,7 +76,7 @@ Goal: Add swap support with two safe options — ZRAM and a traditional swap par
 
 ### Safety and constraints
 - No zvol swap, per Arch Wiki and OpenZFS warnings
-- Keep `zswap.enabled=0` (already set via ZFSBootMenu command line); ZRAM path does not use zswap
+- Toggle zswap via kernel parameter per selected mode: disable for ZRAM, enable for ZSWAP modes
 - If user selects partition mode outside of full‑disk, show message and prevent proceeding (v1)
 
 ### Acceptance criteria
