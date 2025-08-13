@@ -1,5 +1,5 @@
 from .global_config import GlobalConfigMenu
-from .models import GlobalConfig, InitSystem, InstallationMode, ZFSEncryptionMode, ZFSModuleMode
+from .models import GlobalConfig, InitSystem, InstallationMode, ZFSEncryptionMode, ZFSModuleMode, SwapMode
 
 __all__ = [
     "GlobalConfig",
@@ -8,4 +8,5 @@ __all__ = [
     "InstallationMode",
     "ZFSEncryptionMode",
     "ZFSModuleMode",
+    "SwapMode",
 ]

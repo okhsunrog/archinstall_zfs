@@ -23,6 +23,7 @@ ByIdPath = Annotated[Path, BeforeValidator(validate_disk_path)]
 class DiskConfig(BaseModel):
     selected_disk: ByIdPath
     efi_partition: ByIdPath | None = None
+    swap_partition: ByIdPath | None = None
 
     # noinspection PyMethodParameters
     @field_validator("selected_disk", "efi_partition", check_fields=False)
@@ -39,6 +40,8 @@ class PartitionConfig(BaseModel):
     efi_filesystem: str = Field(default="fat32")
     efi_partition_type: str = Field(default="ef00")  # EFI System Partition
     zfs_partition_type: str = Field(default="bf00")  # Solaris/ZFS
+    swap_partition_type: str = Field(default="8200")  # Linux swap
+    swap_size: str | None = None  # if set, reserve tail for swap (e.g. "16G")
 
 
 class DiskManager:
@@ -63,7 +66,7 @@ class DiskManager:
             raise
 
     def create_partitions(self) -> None:
-        """Creates fresh GPT and partitions for EFI and ZFS"""
+        """Creates fresh GPT and partitions for EFI, ZFS and optionally SWAP (tail)."""
         debug("Creating partition table")
         try:
             debug("Zapping existing partitions")
@@ -74,8 +77,16 @@ class DiskManager:
             debug(f"Creating EFI partition ({self.partition_config.efi_size})")
             SysCommand(f"sgdisk -n 1:0:+{self.partition_config.efi_size} -t 1:{self.partition_config.efi_partition_type} {self.config.selected_disk}")
 
-            debug("Creating ZFS partition (rest of disk)")
-            SysCommand(f"sgdisk -n 2:0:0 -t 2:{self.partition_config.zfs_partition_type} {self.config.selected_disk}")
+            if self.partition_config.swap_size:
+                debug(f"Creating ZFS partition (to tail -{self.partition_config.swap_size})")
+                SysCommand(
+                    f"sgdisk -n 2:0:-{self.partition_config.swap_size} -t 2:{self.partition_config.zfs_partition_type} {self.config.selected_disk}"
+                )
+                debug("Creating SWAP partition (tail)")
+                SysCommand(f"sgdisk -n 3:0:0 -t 3:{self.partition_config.swap_partition_type} {self.config.selected_disk}")
+            else:
+                debug("Creating ZFS partition (rest of disk)")
+                SysCommand(f"sgdisk -n 2:0:0 -t 2:{self.partition_config.zfs_partition_type} {self.config.selected_disk}")
 
             debug("Updating kernel partition table")
             SysCommand(f"partprobe {self.config.selected_disk}")
@@ -120,6 +131,7 @@ class DiskManagerBuilder:
     def __init__(self) -> None:
         self._selected_disk: ByIdPath | None = None
         self._efi_partition: ByIdPath | None = None
+        self._swap_size: str | None = None
 
     def destroying_build(self) -> tuple[DiskManager, ByIdPath]:
         """Builds manager for full disk installation"""
@@ -127,20 +139,27 @@ class DiskManagerBuilder:
             raise ValueError("No disk selected")
 
         disk_manager = DiskManager(DiskConfig(selected_disk=self._selected_disk))
+        # Configure optional swap tail if requested
+        if self._swap_size:
+            disk_manager.partition_config.swap_size = self._swap_size
         disk_manager.clear_disk_signatures()
         disk_manager.create_partitions()
 
         self._efi_partition = Path(f"{self._selected_disk}-part1")
         zfs_partition = Path(f"{self._selected_disk}-part2")
+        swap_partition: Path | None = Path(f"{self._selected_disk}-part3") if self._swap_size else None
 
         # Wait for by-id symlinks to appear after partitioning
         self._wait_for_partition_symlink(self._efi_partition)
         self._wait_for_partition_symlink(zfs_partition)
+        if swap_partition is not None:
+            self._wait_for_partition_symlink(swap_partition)
 
         return DiskManager(
             DiskConfig(
                 selected_disk=self._selected_disk,
                 efi_partition=self._efi_partition,
+                swap_partition=swap_partition,
             )
         ), zfs_partition
 
@@ -192,4 +211,11 @@ class DiskManagerBuilder:
         """Set the EFI partition non-interactively (expects /dev/disk/by-id path)."""
         self._efi_partition = validate_disk_path(by_id_partition)
         debug(f"Selected EFI partition: {self._efi_partition}")
+        return self
+
+    def with_swap_size(self, size: str | None) -> "DiskManagerBuilder":
+        """Optionally set a swap size for full-disk installs (e.g. "16G")."""
+        if size:
+            self._swap_size = size
+            debug(f"Requested swap tail size: {self._swap_size}")
         return self

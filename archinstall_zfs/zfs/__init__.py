@@ -573,7 +573,9 @@ class ZFSManager:
 
         # Configure ZFSBootMenu properties on the root dataset
         # Command line: do not include root=; ZFSBootMenu injects it automatically
-        SysCommand(f'zfs set org.zfsbootmenu:commandline="spl.spl_hostid=$(hostid) zswap.enabled=0 rw" {full_dataset_path}')
+        # zswap default disabled; caller may have toggled via config.init_system or elsewhere
+        # Note: zswap enable/disable is handled by the installer based on selected swap mode
+        SysCommand(f'zfs set org.zfsbootmenu:commandline="spl.spl_hostid=$(hostid) rw" {full_dataset_path}')
 
         # Root prefix: respect selected init system
         rootprefix = "root=ZFS=" if self.config.init_system == "dracut" else "zfs="

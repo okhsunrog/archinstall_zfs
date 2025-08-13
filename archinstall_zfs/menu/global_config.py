@@ -34,7 +34,7 @@ from archinstall.tui.result import ResultType
 from archinstall_zfs.initramfs.base import InitramfsHandler
 from archinstall_zfs.initramfs.dracut import DracutInitramfsHandler
 from archinstall_zfs.initramfs.mkinitcpio import MkinitcpioInitramfsHandler
-from archinstall_zfs.menu.models import GlobalConfig, InitSystem, InstallationMode, ZFSEncryptionMode, ZFSModuleMode
+from archinstall_zfs.menu.models import GlobalConfig, InitSystem, InstallationMode, ZFSEncryptionMode, ZFSModuleMode, SwapMode
 
 
 class GlobalConfigMenu:
@@ -113,6 +113,11 @@ class GlobalConfigMenu:
                 preview_action=lambda _: f"Init system: {self.cfg.init_system.value}",
                 key="init_system",
             ),
+            MenuItem(
+                text="Swap",
+                preview_action=self._preview_swap,
+                key="swap",
+            ),
             # Separator
             MenuItem(text=""),
             # Actions
@@ -162,6 +167,7 @@ class GlobalConfigMenu:
             "disk_config": self._configure_disk_configuration,
             "pool_name": self._configure_pool_name,
             "init_system": self._configure_init_system,
+            "swap": self._configure_swap,
         }
         handler = handlers.get(choice)
         if handler:
@@ -435,6 +441,54 @@ class GlobalConfigMenu:
             else:
                 break
 
+    def _configure_swap(self, *_: Any) -> None:
+        # Pick mode first
+        result = SelectMenu(
+            MenuItemGroup(
+                [
+                    MenuItem("None", SwapMode.NONE),
+                    MenuItem("ZRAM only (disable zswap)", SwapMode.ZRAM),
+                    MenuItem("ZSWAP + swap partition", SwapMode.ZSWAP_PARTITION),
+                    MenuItem("ZSWAP + encrypted swap partition", SwapMode.ZSWAP_PARTITION_ENCRYPTED),
+                ]
+            ),
+            header="Select swap mode",
+        ).run()
+        if result.item():
+            self.cfg.swap_mode = result.item().value
+
+        # If ZRAM, optionally allow size or fraction edit later; for now keep defaults
+        if self.cfg.swap_mode == SwapMode.ZRAM:
+            return
+
+        # If ZSWAP modes, either ask for size (full-disk) or pick partition (other modes)
+        mode = self.cfg.installation_mode
+        if self.cfg.swap_mode in {SwapMode.ZSWAP_PARTITION, SwapMode.ZSWAP_PARTITION_ENCRYPTED}:
+            if mode is InstallationMode.FULL_DISK:
+                # Ask for size string
+                size_res = EditMenu(
+                    "Swap size",
+                    header="Enter swap size for the tail partition (e.g. 16G)",
+                    default_text=self.cfg.swap_partition_size or "16G",
+                ).input()
+                if size_res.text():
+                    self.cfg.swap_partition_size = size_res.text()
+            else:
+                # Pick existing partition by-id
+                parts = self._list_by_id_partitions_menu_items()
+                focus_item = None
+                if self.cfg.swap_partition_by_id is not None:
+                    for item in parts:
+                        if str(item.value) == str(self.cfg.swap_partition_by_id):
+                            focus_item = item
+                            break
+                choice = SelectMenu(
+                    MenuItemGroup(parts, focus_item=focus_item) if focus_item else MenuItemGroup(parts),
+                    header="Select swap partition (/dev/disk/by-id)",
+                ).run()
+                if choice.item():
+                    self.cfg.swap_partition_by_id = str(choice.item().value)
+
     def _get_encryption_password(self) -> None:
         """Get encryption password for ZFS."""
         while True:
@@ -538,6 +592,16 @@ class GlobalConfigMenu:
         if not self.cfg.installation_mode:
             return "Install mode: Not set"
         return f"Install mode: {self.cfg.installation_mode.value}"
+
+    def _preview_swap(self, *_: Any) -> str | None:
+        mode = self.cfg.swap_mode.value if self.cfg.swap_mode else "none"
+        if self.cfg.swap_mode == SwapMode.ZRAM:
+            return f"Swap: {mode} (size={self.cfg.zram_size_expr or 'min(ram/2,4096)'} or fraction={self.cfg.zram_fraction if self.cfg.zram_fraction is not None else 'default'})"
+        if self.cfg.swap_mode in {SwapMode.ZSWAP_PARTITION, SwapMode.ZSWAP_PARTITION_ENCRYPTED}:
+            if self.cfg.installation_mode is InstallationMode.FULL_DISK:
+                return f"Swap: {mode}, size={self.cfg.swap_partition_size or 'Not set'}"
+            return f"Swap: {mode}, partition={self.cfg.swap_partition_by_id or 'Not set'}"
+        return f"Swap: {mode}"
 
     def _preview_disk_configuration(self, *_: Any) -> str:
         mode = self.cfg.installation_mode
