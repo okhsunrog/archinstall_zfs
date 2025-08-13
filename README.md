@@ -63,6 +63,19 @@ This path takes a bit longer because it installs ZFS modules on the fly. The pre
 - 🔐 ZFS encryption: Pool or per‑dataset
 - 🧾 Robust logs and error handling
 
+## Swap options
+
+- **No swap**: Skip configuring swap.
+- **ZRAM only**: Compressed, RAM-backed swap using zram-generator. We disable zswap in this mode.
+- **ZSWAP + swap partition**:
+  - Full-disk installs: creates a tail swap partition at the end of the disk.
+  - New/existing pool modes: select an existing partition by-id to use as swap.
+  - Two variants: unencrypted (plain mkswap) or encrypted with a random key each boot (dm-crypt via crypttab; mapped as `/dev/mapper/cryptswap`).
+
+Notes:
+- Swap on ZFS zvol and swapfiles on ZFS are not supported.
+- Hibernation/resume is not supported in the current release.
+
 ## Development 🧑‍💻
 
 The `gen_iso` directory ships everything to build custom ISOs and test them in QEMU. Use `just` to orchestrate common workflows.
