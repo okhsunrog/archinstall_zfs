@@ -242,6 +242,15 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
                     zed_dst_dir = installation.target / "etc" / "zfs" / "zed.d"
                     zed_dst_dir.mkdir(parents=True, exist_ok=True)
                     zed_dst = zed_dst_dir / zed_src.name
+                    # Ensure destination is replaced cleanly even if identical path/device
+                    with contextlib.suppress(Exception):
+                        installation.arch_chroot("chattr -i /etc/zfs/zed.d/history_event-zfs-list-cacher.sh")
+                    try:
+                        if zed_dst.exists():
+                            zed_dst.unlink(missing_ok=True)
+                    except Exception:
+                        # Fallback: remove inside chroot in case of attribute/permission issues
+                        installation.arch_chroot("rm -f /etc/zfs/zed.d/history_event-zfs-list-cacher.sh")
                     copy2(zed_src, zed_dst)
                     installation.arch_chroot("chattr +i /etc/zfs/zed.d/history_event-zfs-list-cacher.sh")
                 else:
