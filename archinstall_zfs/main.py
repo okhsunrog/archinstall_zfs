@@ -10,6 +10,7 @@ from archinstall import SysInfo, debug, error, info
 from archinstall.lib.applications.application_handler import application_handler
 from archinstall.lib.args import ArchConfig, Arguments, arch_config_handler
 from archinstall.lib.configuration import ConfigurationOutput
+from archinstall.lib.general import SysCommand
 from archinstall.lib.installer import accessibility_tools_in_use, run_custom_user_commands
 from archinstall.lib.models.device import DiskLayoutConfiguration, DiskLayoutType
 from archinstall.lib.models.users import User
@@ -21,7 +22,7 @@ from archinstall_zfs.config_io import load_combined_configuration, save_combined
 from archinstall_zfs.disk import DiskManager, DiskManagerBuilder
 from archinstall_zfs.installer import ZFSInstaller
 from archinstall_zfs.menu import GlobalConfigMenu
-from archinstall_zfs.menu.models import ZFSEncryptionMode, ZFSModuleMode
+from archinstall_zfs.menu.models import SwapMode, ZFSEncryptionMode, ZFSModuleMode
 from archinstall_zfs.zfs import ZFS_SERVICES, EncryptionMode, ZFSManager, ZFSManagerBuilder
 from archinstall_zfs.zfs.kmod_setup import add_archzfs_repo
 
@@ -73,6 +74,15 @@ def prepare_installation(installer_menu: GlobalConfigMenu) -> tuple[ZFSManager, 
             if installer_menu.cfg.efi_partition_by_id:
                 disk_builder.with_efi_partition(Path(installer_menu.cfg.efi_partition_by_id))
             disk_manager = disk_builder.build()
+
+        # Configure optional swap tail for full-disk ZSWAP modes
+        if (
+            installer_menu.cfg.installation_mode is not None
+            and installer_menu.cfg.installation_mode.value == "full_disk"
+            and installer_menu.cfg.swap_mode in {SwapMode.ZSWAP_PARTITION, SwapMode.ZSWAP_PARTITION_ENCRYPTED}
+            and installer_menu.cfg.swap_partition_size
+        ):
+            disk_builder.with_swap_size(installer_menu.cfg.swap_partition_size)
 
         match mode:
             case "full_disk":
@@ -230,7 +240,66 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
 
             installation.enable_service(ZFS_SERVICES)
 
+            # Configure zswap kernel parameter based on selected swap mode
+            # - ZRAM: zswap must be disabled
+            # - ZSWAP partition modes: zswap must be enabled
+            if installer_menu.cfg.swap_mode == SwapMode.ZRAM:
+                zfs_manager.set_zswap_enabled(False)
+            elif installer_menu.cfg.swap_mode in {SwapMode.ZSWAP_PARTITION, SwapMode.ZSWAP_PARTITION_ENCRYPTED}:
+                zfs_manager.set_zswap_enabled(True)
+            else:
+                zfs_manager.set_zswap_enabled(False)
+
+            # Generate base fstab before making swap-specific additions
             zfs_manager.genfstab()
+
+            # Swap configuration on target
+            if installer_menu.cfg.swap_mode == SwapMode.ZRAM:
+                # zram-generator
+                installation.add_additional_packages(["zram-generator"])
+                zram_conf = installation.target / "etc/systemd/zram-generator.conf"
+                zram_conf.parent.mkdir(parents=True, exist_ok=True)
+                lines = ["[zram0]"]
+                if installer_menu.cfg.zram_fraction is not None:
+                    lines.append(f"zram-fraction = {installer_menu.cfg.zram_fraction}")
+                else:
+                    lines.append(f"zram-size = {installer_menu.cfg.zram_size_expr or 'min(ram / 2, 4096)'}")
+                lines.append("compression-algorithm = zstd")
+                lines.append("swap-priority = 100")
+                zram_conf.write_text("\n".join(lines) + "\n")
+            elif installer_menu.cfg.swap_mode in {SwapMode.ZSWAP_PARTITION, SwapMode.ZSWAP_PARTITION_ENCRYPTED}:
+                # Unencrypted: format and rely on genfstab; Encrypted: write crypttab+fstab entries
+                # Determine swap partition path
+                if installer_menu.cfg.installation_mode is not None and installer_menu.cfg.installation_mode.value == "full_disk":
+                    # Full-disk path is part3 if swap tail requested
+                    dm = disk_manager.config
+                    swap_part = dm.swap_partition if dm.swap_partition else None
+                else:
+                    swap_part = Path(installer_menu.cfg.swap_partition_by_id) if installer_menu.cfg.swap_partition_by_id else None
+
+                if swap_part is not None:
+                    fstab = installation.target / "etc/fstab"
+                    if installer_menu.cfg.swap_mode == SwapMode.ZSWAP_PARTITION:
+                        with contextlib.suppress(Exception):
+                            SysCommand(f"mkswap {swap_part}")
+                        # Append explicit swap UUID line, since genfstab won't include inactive swap
+                        with contextlib.suppress(Exception):
+                            uuid = SysCommand(f"blkid -s UUID -o value {swap_part}").decode().strip()
+                            # Avoid duplicate if present
+                            existing = fstab.read_text() if fstab.exists() else ""
+                            if uuid and (f"UUID={uuid}" not in existing):
+                                with open(fstab, "a") as f:
+                                    f.write(f"UUID={uuid} none swap defaults 0 0\n")
+                    else:
+                        # Encrypted random-key dm-crypt: set up crypttab and fstab only
+                        partuuid = SysCommand(f"blkid -s PARTUUID -o value {swap_part}").decode().strip()
+                        crypttab = installation.target / "etc/crypttab"
+                        crypttab_line = f"cryptswap PARTUUID={partuuid} /dev/urandom swap,cipher=aes-xts-plain64,size=256\n"
+                        with open(crypttab, "a") as f:
+                            f.write(crypttab_line)
+                        with open(fstab, "a") as f:
+                            f.write("/dev/mapper/cryptswap none swap defaults 0 0\n")
+
             zfs_manager.copy_misc_files()
 
             # Copy custom ZED hook, then make it immutable
