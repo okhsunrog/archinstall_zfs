@@ -19,11 +19,11 @@ from archinstall.tui.curses_menu import MenuItemGroup, SelectMenu, Tui
 from archinstall.tui.menu_item import MenuItem
 
 from archinstall_zfs.config_io import load_combined_configuration, save_combined_configuration
-from archinstall_zfs.disk import DiskManager, DiskManagerBuilder
+from archinstall_zfs.disk import DiskManagerBuilder
 from archinstall_zfs.installer import ZFSInstaller
 from archinstall_zfs.menu import GlobalConfigMenu
 from archinstall_zfs.menu.models import SwapMode, ZFSEncryptionMode, ZFSModuleMode
-from archinstall_zfs.zfs import ZFS_SERVICES, EncryptionMode, ZFSManager, ZFSManagerBuilder
+from archinstall_zfs.zfs import ZFS_SERVICES, EncryptionMode, ZFSManagerBuilder
 from archinstall_zfs.zfs.kmod_setup import add_archzfs_repo
 
 InstallMode = Literal["full_disk", "new_pool", "existing_pool"]
@@ -45,95 +45,20 @@ def get_installation_mode_from_menu(installer_menu: GlobalConfigMenu) -> Install
     return cast(InstallMode, installer_menu.cfg.installation_mode.value)  # type: ignore[union-attr]
 
 
-def prepare_installation(installer_menu: GlobalConfigMenu) -> tuple[ZFSManager, DiskManager]:
-    with Tui():
-        mode = get_installation_mode_from_menu(installer_menu)
-        disk_builder = DiskManagerBuilder()
-        zfs_builder = ZFSManagerBuilder()
-
-        # Use values from the global menu instead of prompting here
-        # Map menu encryption selection to ZFS encryption mode (always preselect to avoid prompts)
-        if installer_menu.cfg.zfs_encryption_mode is ZFSEncryptionMode.POOL:
-            selected_mode: EncryptionMode | None = EncryptionMode.POOL
-        elif installer_menu.cfg.zfs_encryption_mode is ZFSEncryptionMode.DATASET:
-            selected_mode = EncryptionMode.DATASET
-        else:
-            selected_mode = EncryptionMode.NONE
-        zfs_builder.with_dataset_prefix(installer_menu.cfg.dataset_prefix).with_mountpoint(Path("/mnt")).with_init_system(
-            installer_menu.cfg.init_system.value
-        ).with_encryption(
-            selected_mode,
-            installer_menu.cfg.zfs_encryption_password,
-        )
-
-        # Configure disk builder strictly from global menu
-        if installer_menu.cfg.disk_by_id:
-            disk_builder.with_selected_disk(Path(installer_menu.cfg.disk_by_id))
-        if mode != "full_disk":
-            # new_pool/existing_pool require EFI
-            if installer_menu.cfg.efi_partition_by_id:
-                disk_builder.with_efi_partition(Path(installer_menu.cfg.efi_partition_by_id))
-            disk_manager = disk_builder.build()
-
-        # Configure optional swap tail for full-disk ZSWAP modes
-        if (
-            installer_menu.cfg.installation_mode is not None
-            and installer_menu.cfg.installation_mode.value == "full_disk"
-            and installer_menu.cfg.swap_mode in {SwapMode.ZSWAP_PARTITION, SwapMode.ZSWAP_PARTITION_ENCRYPTED}
-            and installer_menu.cfg.swap_partition_size
-        ):
-            disk_builder.with_swap_size(installer_menu.cfg.swap_partition_size)
-
-        match mode:
-            case "full_disk":
-                # Full disk always creates partitions fresh
-                disk_manager, zfs_partition = disk_builder.destroying_build()
-                zfs = (
-                    zfs_builder.with_mountpoint(Path("/mnt"))
-                    .with_dataset_prefix(installer_menu.cfg.dataset_prefix)
-                    .with_encryption(selected_mode, installer_menu.cfg.zfs_encryption_password)
-                    .set_new_pool(zfs_partition, cast(str, installer_menu.cfg.pool_name))
-                    .build()
-                )
-            case "new_pool":
-                # Use provided ZFS partition
-                zfs_partition = Path(cast(str, installer_menu.cfg.zfs_partition_by_id))
-                zfs = (
-                    zfs_builder.with_mountpoint(Path("/mnt"))
-                    .with_dataset_prefix(installer_menu.cfg.dataset_prefix)
-                    .with_encryption(selected_mode, installer_menu.cfg.zfs_encryption_password)
-                    .set_new_pool(zfs_partition, cast(str, installer_menu.cfg.pool_name))
-                    .build()
-                )
-            case "existing_pool":
-                zfs = (
-                    zfs_builder.with_mountpoint(Path("/mnt"))
-                    .with_dataset_prefix(installer_menu.cfg.dataset_prefix)
-                    .with_encryption(selected_mode, installer_menu.cfg.zfs_encryption_password)
-                    .set_existing_pool(cast(str, installer_menu.cfg.pool_name))
-                    .build()
-                )
-
-    return zfs, disk_manager
+def prepare_installation(_: GlobalConfigMenu) -> tuple[None, None]:
+    # Legacy function retained for compatibility; destructive steps moved into perform_installation
+    return None, None
 
 
-def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, installer_menu: GlobalConfigMenu, arch_config: ArchConfig) -> bool:
+def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConfig) -> bool:
     try:
-        mountpoint = zfs_manager.config.mountpoint
+        mountpoint = Path("/mnt")
 
         # Ensure disk_config mountpoint matches the ZFS target
         if not arch_config.disk_config:
             arch_config.disk_config = DiskLayoutConfiguration(DiskLayoutType.Pre_mount, mountpoint=mountpoint)
 
-        # ZFS setup
-        zfs_manager.setup_for_installation()
-
-        # Mount EFI partition
-        disk_manager.mount_efi_partition(mountpoint)
-
-        # Run menu already provided by caller; use its config
-        # Create initramfs handler based on menu selection
-        initramfs_handler = installer_menu.create_initramfs_handler(mountpoint, bool(zfs_manager.encryption_handler.password))
+        # Run confirmation before any destructive operations
 
         config = ConfigurationOutput(arch_config)
         config.write_debug()
@@ -152,6 +77,78 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
 
         # Perform actual installation
         info("Starting installation...")
+
+        # Build managers and perform disk/ZFS preparation now (after confirm)
+        mode = get_installation_mode_from_menu(installer_menu)
+        disk_builder = DiskManagerBuilder()
+        zfs_builder = ZFSManagerBuilder()
+
+        # Map encryption selection
+        if installer_menu.cfg.zfs_encryption_mode is ZFSEncryptionMode.POOL:
+            selected_mode: EncryptionMode | None = EncryptionMode.POOL
+        elif installer_menu.cfg.zfs_encryption_mode is ZFSEncryptionMode.DATASET:
+            selected_mode = EncryptionMode.DATASET
+        else:
+            selected_mode = EncryptionMode.NONE
+
+        zfs_builder.with_dataset_prefix(installer_menu.cfg.dataset_prefix).with_mountpoint(mountpoint).with_init_system(
+            installer_menu.cfg.init_system.value
+        ).with_encryption(selected_mode, installer_menu.cfg.zfs_encryption_password)
+
+        # Configure disk builder strictly from global menu
+        if installer_menu.cfg.disk_by_id:
+            disk_builder.with_selected_disk(Path(installer_menu.cfg.disk_by_id))
+        # new_pool/existing_pool require EFI
+        if mode != "full_disk" and installer_menu.cfg.efi_partition_by_id:
+            disk_builder.with_efi_partition(Path(installer_menu.cfg.efi_partition_by_id))
+
+        # Configure optional swap tail for full-disk ZSWAP modes
+        if (
+            installer_menu.cfg.installation_mode is not None
+            and installer_menu.cfg.installation_mode.value == "full_disk"
+            and installer_menu.cfg.swap_mode in {SwapMode.ZSWAP_PARTITION, SwapMode.ZSWAP_PARTITION_ENCRYPTED}
+            and installer_menu.cfg.swap_partition_size
+        ):
+            disk_builder.with_swap_size(installer_menu.cfg.swap_partition_size)
+
+        # Build disk manager and zfs manager depending on mode
+        if mode == "full_disk":
+            disk_manager, zfs_partition = disk_builder.destroying_build()
+            zfs_manager = (
+                zfs_builder.with_mountpoint(mountpoint)
+                .with_dataset_prefix(installer_menu.cfg.dataset_prefix)
+                .with_encryption(selected_mode, installer_menu.cfg.zfs_encryption_password)
+                .set_new_pool(zfs_partition, cast(str, installer_menu.cfg.pool_name))
+                .build()
+            )
+        elif mode == "new_pool":
+            disk_manager = disk_builder.build()
+            zfs_partition = Path(cast(str, installer_menu.cfg.zfs_partition_by_id))
+            zfs_manager = (
+                zfs_builder.with_mountpoint(mountpoint)
+                .with_dataset_prefix(installer_menu.cfg.dataset_prefix)
+                .with_encryption(selected_mode, installer_menu.cfg.zfs_encryption_password)
+                .set_new_pool(zfs_partition, cast(str, installer_menu.cfg.pool_name))
+                .build()
+            )
+        else:  # existing_pool
+            disk_manager = disk_builder.build()
+            zfs_manager = (
+                zfs_builder.with_mountpoint(mountpoint)
+                .with_dataset_prefix(installer_menu.cfg.dataset_prefix)
+                .with_encryption(selected_mode, installer_menu.cfg.zfs_encryption_password)
+                .set_existing_pool(cast(str, installer_menu.cfg.pool_name))
+                .build()
+            )
+
+        # ZFS setup
+        zfs_manager.setup_for_installation()
+
+        # Mount EFI partition
+        disk_manager.mount_efi_partition(mountpoint)
+
+        # Create initramfs handler based on menu selection
+        initramfs_handler = installer_menu.create_initramfs_handler(mountpoint, bool(zfs_manager.encryption_handler.password))
 
         # Determine selected kernels and corresponding headers (for DKMS path)
         selected_kernels: list[str] = arch_config.kernels if arch_config.kernels else ["linux-lts"]
@@ -416,11 +413,9 @@ def main() -> bool:
         run_ui = not arch_config_handler.args.silent
         installer_menu = ask_user_questions(arch_config, zfs_data, run_ui=run_ui)
 
-        zfs_manager, disk_manager = prepare_installation(installer_menu)
-        debug("Installation preparation completed")
-
+        # Preparation moved to perform_installation; proceed directly
         debug("Starting installation execution")
-        success = perform_installation(disk_manager, zfs_manager, installer_menu, arch_config)
+        success = perform_installation(installer_menu, arch_config)
         if not success:
             error("Installation execution failed")
             return False
