@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from archinstall.lib.args import ArchConfig
+from archinstall.lib.applications.application_menu import ApplicationMenu
 from archinstall.lib.authentication.authentication_menu import AuthenticationMenu
 from archinstall.lib.interactions.general_conf import (
     ask_additional_packages_to_install,
@@ -23,6 +24,7 @@ from archinstall.lib.locale.locale_menu import LocaleMenu
 from archinstall.lib.mirrors import MirrorMenu
 from archinstall.lib.models.locale import LocaleConfiguration
 from archinstall.lib.translationhandler import tr
+from archinstall.lib.models.application import ApplicationConfiguration
 from archinstall.tui import EditMenu, MenuItem, MenuItemGroup, SelectMenu, Tui
 from archinstall.tui.result import ResultType
 
@@ -74,6 +76,7 @@ class GlobalConfigMenu:
             MenuItem(text=tr("Network configuration"), preview_action=self._preview_network, key="network"),
             MenuItem(text=tr("Hostname"), preview_action=lambda _: f"Hostname: {self.config.hostname}", key="hostname"),
             MenuItem(text=tr("Authentication"), preview_action=self._preview_auth, key="auth"),
+            MenuItem(text=tr("Applications"), preview_action=self._preview_applications, key="applications"),
             MenuItem(text=tr("Timezone"), preview_action=lambda _: f"Timezone: {self.config.timezone}", key="timezone"),
             MenuItem(
                 text=tr("NTP (time sync)"),
@@ -141,6 +144,7 @@ class GlobalConfigMenu:
             "network": self._configure_network,
             "hostname": self._configure_hostname,
             "auth": self._configure_authentication,
+            "applications": self._configure_applications,
             "timezone": self._configure_timezone,
             "ntp": self._configure_ntp,
             "packages": self._configure_packages,
@@ -178,6 +182,10 @@ class GlobalConfigMenu:
         # Use existing auth config if available
         auth_menu = AuthenticationMenu(self.config.auth_config)
         self.config.auth_config = auth_menu.run()
+
+    def _configure_applications(self, *_: Any) -> None:
+        app_menu = ApplicationMenu(self.config.app_config)
+        self.config.app_config = app_menu.run()
 
     def _configure_timezone(self, *_: Any) -> None:
         timezone = ask_for_a_timezone(self.config.timezone)
@@ -445,6 +453,17 @@ class GlobalConfigMenu:
             user_count = len(self.config.auth_config.users) if self.config.auth_config.users else 0
             return f"Users: {user_count}, Root: {'Set' if self.config.auth_config.root_enc_password else 'Not set'}"
         return "Authentication: Not configured"
+
+    def _preview_applications(self, *_: Any) -> str | None:
+        app_config: ApplicationConfiguration | None = self.config.app_config
+        if not app_config:
+            return "Applications: Not configured"
+        out_parts: list[str] = []
+        if app_config.bluetooth_config is not None:
+            out_parts.append(f"Bluetooth: {'Enabled' if app_config.bluetooth_config.enabled else 'Disabled'}")
+        if app_config.audio_config is not None:
+            out_parts.append(f"Audio: {app_config.audio_config.audio.value}")
+        return "\n".join(out_parts) if out_parts else "Applications: Not configured"
 
     def _preview_packages(self, *_: Any) -> str | None:
         if self.config.packages:

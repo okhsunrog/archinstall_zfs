@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import Literal, cast
 
 from archinstall import SysInfo, debug, error, info
+from archinstall.lib.applications.application_handler import application_handler
+from archinstall.lib.installer import accessibility_tools_in_use, run_custom_user_commands
+from archinstall.lib.profile.profiles_handler import profile_handler
 from archinstall.lib.args import ArchConfig, Arguments, arch_config_handler
 from archinstall.lib.configuration import ConfigurationOutput
 from archinstall.lib.models.device import DiskLayoutConfiguration, DiskLayoutType
@@ -194,11 +197,19 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
             # Set root password if provided
             if arch_config.auth_config and arch_config.auth_config.root_enc_password:
                 from archinstall.lib.models.users import User
+
                 root_user = User("root", arch_config.auth_config.root_enc_password, False)
                 installation.set_user_password(root_user)
 
-            # Audio config not applied: API removed/changed in current archinstall
-            # Profiles post-install hook not applied: API changed in current archinstall
+            # Install applications (audio, bluetooth) via the official handler
+            if arch_config.app_config:
+                # Pass users if we created any (for per-user PipeWire enablement)
+                users = arch_config.auth_config.users if (arch_config.auth_config and arch_config.auth_config.users) else None
+                application_handler.install_applications(installation, arch_config.app_config, users)
+
+            # Install selected profile(s) and run their post-install hooks
+            if arch_config.profile_config:
+                profile_handler.install_profile_config(installation, arch_config.profile_config)
 
             if arch_config.packages:
                 installation.add_additional_packages(arch_config.packages)
@@ -209,7 +220,13 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
             if arch_config.ntp:
                 installation.activate_time_synchronization()
 
-            # accessibility_tools_in_use not available in current archinstall
+            # Enable accessibility services if used on the live ISO
+            if accessibility_tools_in_use():
+                installation.enable_espeakup()
+
+            # Run any custom post-install commands if provided
+            if arch_config.custom_commands:
+                run_custom_user_commands(arch_config.custom_commands, installation)
 
             installation.enable_service(ZFS_SERVICES)
 
