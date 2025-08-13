@@ -4,7 +4,7 @@ import socket
 import sys
 from pathlib import Path
 from shutil import copy2
-from typing import Literal, cast
+from typing import cast
 
 from archinstall import SysInfo, debug, error, info
 from archinstall.lib.applications.application_handler import application_handler
@@ -22,11 +22,9 @@ from archinstall_zfs.config_io import load_combined_configuration, save_combined
 from archinstall_zfs.disk import DiskManagerBuilder
 from archinstall_zfs.installer import ZFSInstaller
 from archinstall_zfs.menu import GlobalConfigMenu
-from archinstall_zfs.menu.models import SwapMode, ZFSEncryptionMode, ZFSModuleMode
+from archinstall_zfs.menu.models import InstallationMode, SwapMode, ZFSEncryptionMode, ZFSModuleMode
 from archinstall_zfs.zfs import ZFS_SERVICES, EncryptionMode, ZFSManagerBuilder
 from archinstall_zfs.zfs.kmod_setup import add_archzfs_repo
-
-InstallMode = Literal["full_disk", "new_pool", "existing_pool"]
 
 
 def check_internet() -> bool:
@@ -69,8 +67,9 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
         info("Starting installation...")
 
         # Build managers and perform disk/ZFS preparation now (after confirm)
-        # Installation mode comes from the menu's config
-        mode = cast(InstallMode, installer_menu.cfg.installation_mode.value)  # type: ignore[union-attr]
+        # Installation mode comes from the menu's config (use enum directly)
+        assert installer_menu.cfg.installation_mode is not None
+        mode = installer_menu.cfg.installation_mode
         disk_builder = DiskManagerBuilder()
         zfs_builder = ZFSManagerBuilder()
 
@@ -90,7 +89,7 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
         if installer_menu.cfg.disk_by_id:
             disk_builder.with_selected_disk(Path(installer_menu.cfg.disk_by_id))
         # new_pool/existing_pool require EFI
-        if mode != "full_disk" and installer_menu.cfg.efi_partition_by_id:
+        if mode is not InstallationMode.FULL_DISK and installer_menu.cfg.efi_partition_by_id:
             disk_builder.with_efi_partition(Path(installer_menu.cfg.efi_partition_by_id))
 
         # Configure optional swap tail for full-disk ZSWAP modes
@@ -103,7 +102,7 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
             disk_builder.with_swap_size(installer_menu.cfg.swap_partition_size)
 
         # Build disk manager and zfs manager depending on mode
-        if mode == "full_disk":
+        if mode is InstallationMode.FULL_DISK:
             disk_manager, zfs_partition = disk_builder.destroying_build()
             zfs_manager = (
                 zfs_builder.with_mountpoint(mountpoint)
@@ -112,7 +111,7 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
                 .set_new_pool(zfs_partition, cast(str, installer_menu.cfg.pool_name))
                 .build()
             )
-        elif mode == "new_pool":
+        elif mode is InstallationMode.NEW_POOL:
             disk_manager = disk_builder.build()
             zfs_partition = Path(cast(str, installer_menu.cfg.zfs_partition_by_id))
             zfs_manager = (
@@ -264,7 +263,7 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
             elif installer_menu.cfg.swap_mode in {SwapMode.ZSWAP_PARTITION, SwapMode.ZSWAP_PARTITION_ENCRYPTED}:
                 # Unencrypted: format and rely on genfstab; Encrypted: write crypttab+fstab entries
                 # Determine swap partition path
-                if installer_menu.cfg.installation_mode is not None and installer_menu.cfg.installation_mode.value == "full_disk":
+                if installer_menu.cfg.installation_mode is not None and installer_menu.cfg.installation_mode is InstallationMode.FULL_DISK:
                     # Full-disk path is part3 if swap tail requested
                     dm = disk_manager.config
                     swap_part = dm.swap_partition if dm.swap_partition else None
