@@ -79,9 +79,7 @@ class DiskManager:
 
             if self.partition_config.swap_size:
                 debug(f"Creating ZFS partition (to tail -{self.partition_config.swap_size})")
-                SysCommand(
-                    f"sgdisk -n 2:0:-{self.partition_config.swap_size} -t 2:{self.partition_config.zfs_partition_type} {self.config.selected_disk}"
-                )
+                SysCommand(f"sgdisk -n 2:0:-{self.partition_config.swap_size} -t 2:{self.partition_config.zfs_partition_type} {self.config.selected_disk}")
                 debug("Creating SWAP partition (tail)")
                 SysCommand(f"sgdisk -n 3:0:0 -t 3:{self.partition_config.swap_partition_type} {self.config.selected_disk}")
             else:

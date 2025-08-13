@@ -257,7 +257,7 @@ def perform_installation(disk_manager: DiskManager, zfs_manager: ZFSManager, ins
             elif installer_menu.cfg.swap_mode in {SwapMode.ZSWAP_PARTITION, SwapMode.ZSWAP_PARTITION_ENCRYPTED}:
                 # Unencrypted: format and rely on genfstab; Encrypted: write crypttab+fstab entries
                 # Determine swap partition path
-                if installer_menu.cfg.installation_mode.value == "full_disk":
+                if installer_menu.cfg.installation_mode is not None and installer_menu.cfg.installation_mode.value == "full_disk":
                     # Full-disk path is part3 if swap tail requested
                     dm = disk_manager.config
                     swap_part = dm.swap_partition if dm.swap_partition else None
