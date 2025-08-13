@@ -168,13 +168,6 @@ just ssh-only
 1. System Enhancements
    - Smarter hostid generation (based on hostname)
    - Local ZFSBootMenu build support
-   - Swap configuration options
-     - Note: swap on ZFS needs special handling; swapfile on ZFS is discouraged
-     - Planned options:
-       - No swap
-       - ZRAM only
-       - Swap partition (with or without LUKS)
-       - Swap partition + zswap
 
 2. Additional Features
    - More ZFS tuning options (compression, DirectIO, etc.)
