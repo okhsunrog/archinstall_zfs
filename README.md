@@ -41,7 +41,7 @@ Notes:
 2) Install minimal deps:
 
 ```bash
-pacman -Sy python-pyparted git
+pacman -Sy git
 ```
 
 3) Fetch and run the installer:
