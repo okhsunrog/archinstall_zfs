@@ -25,7 +25,13 @@ DEFAULT_DATASETS = [
     DatasetConfig(name="vm", properties={"mountpoint": "/vm"}),
 ]
 
-ZFS_SERVICES = ["zfs.target", "zfs-import.target", "zfs-volumes.target", "zfs-import-scan.service", "zfs-zed.service"]
+ZFS_SERVICES = [
+    "zfs.target",
+    "zfs-import.target",
+    "zfs-volumes.target",
+    "zfs-import-scan.service",
+    "zfs-zed.service",
+]
 
 
 class EncryptionMode(Enum):
@@ -238,8 +244,8 @@ class ZFSPool:
         cmd = f"zpool create -f {' '.join(options)} {self.config.pool_name} {device}"
         try:
             SysCommand(cmd)
-            # Set pool cache file to none, as it's deprecated
-            SysCommand(f"zpool set cachefile=/etc/zfs/zpool.cache {self.config.pool_name}")
+            # Do not rely on legacy zpool.cache when using zfs-mount-generator
+            SysCommand(f"zpool set cachefile=none {self.config.pool_name}")
             info(f"Created pool {self.config.pool_name}")
         except SysCallError as e:
             error(f"Failed to create pool: {e!s}")
@@ -490,9 +496,6 @@ class ZFSManager:
             # Copy hostid
             SysCommand(f"cp {self.paths.hostid} {self.mounted_paths.hostid}")
 
-            # Copy zpool cache
-            SysCommand("cp /etc/zfs/zpool.cache /mnt/etc/zfs/zpool.cache")
-
             info("ZFS misc files configured successfully")
         except SysCallError as e:
             error(f"Failed to copy ZFS misc files: {e!s}")
@@ -514,11 +517,8 @@ class ZFSManager:
         # Generate full fstab with UUIDs
         raw_fstab = SysCommand(f"/usr/bin/genfstab -t UUID {self.config.mountpoint}").decode()
 
-        # Filter out pool-related entries and add root dataset
-        filtered_lines = [line for line in raw_fstab.splitlines() if self.config.pool_name not in line]
-        root_dataset = next(ds for ds in self.config.datasets if ds.properties.get("mountpoint") == "/")
-        full_dataset_path = f"{self.datasets.base_dataset}/{root_dataset.name}"
-        filtered_lines.append(f"{full_dataset_path} / zfs defaults 0 0")
+        # Filter out all ZFS entries; zfs-mount-generator and initramfs handle ZFS mounts and root
+        filtered_lines = [line for line in raw_fstab.splitlines() if "\tzfs\t" not in line and self.config.pool_name not in line]
 
         # Write final fstab
         fstab_path.write_text("\n".join(filtered_lines) + "\n")
