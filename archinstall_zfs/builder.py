@@ -31,7 +31,7 @@ def compute_headers_package(kernel: str) -> str:
 def build_context(opts: BuildOptions) -> dict:
     use_dkms = opts.zfs_mode == "dkms"
     use_precompiled = not use_dkms
-    include_headers = (opts.include_headers if opts.include_headers is not None else use_dkms)
+    include_headers = opts.include_headers if opts.include_headers is not None else use_dkms
     headers_pkg = compute_headers_package(opts.kernel)
 
     return {
@@ -183,7 +183,7 @@ def parse_args(argv: list[str]) -> BuildOptions:
         "--headers",
         choices=["auto", "true", "false"],
         default="auto",
-        help='Include kernel headers package: auto (true when zfs=dkms), true, or false',
+        help="Include kernel headers package: auto (true when zfs=dkms), true, or false",
     )
     parser.add_argument("--strict-links", action="store_true", help="Fail on dangling symlinks")
     parser.add_argument(
@@ -227,5 +227,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
