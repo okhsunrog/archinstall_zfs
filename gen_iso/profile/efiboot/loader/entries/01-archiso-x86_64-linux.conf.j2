@@ -1,0 +1,7 @@
+title    Arch Linux install medium (x86_64, UEFI)
+sort-key 01
+linux    /%INSTALL_DIR%/boot/x86_64/vmlinuz-{{ kernel }}
+initrd   /%INSTALL_DIR%/boot/x86_64/initramfs-{{ kernel }}.img
+options  archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID%{% if fast_build %} console=tty0 console=ttyS0,115200{% endif %}
+
+

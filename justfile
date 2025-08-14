@@ -4,10 +4,9 @@ QEMU_SCRIPT := "gen_iso/run-qemu.sh"
 ISO_OUT_DIR := "gen_iso/out"
 DISK_IMAGE := "gen_iso/arch.qcow2"
 UEFI_VARS := "gen_iso/my_vars.fd"
-MAIN_PROFILE_DIR := "gen_iso/main_profile"
-TESTING_PROFILE_DIR := "gen_iso/testing_profile"
-TESTING_ISO_PATH := "gen_iso/out/archzfs-testing-x86_64.iso"
+MAIN_PROFILE_DIR := "gen_iso/profile"
 ISO_WORK_DIR := "/tmp/archiso-tmp"
+TEMP_PROFILE_DIR := "/tmp/archzfs-profile"
 
 # Default recipe to display available commands
 default:
@@ -49,10 +48,11 @@ clean:
 clean-iso:
     sudo rm -rf {{ISO_OUT_DIR}}
     sudo rm -rf {{ISO_WORK_DIR}}
+    sudo rm -rf {{TEMP_PROFILE_DIR}}
 
 # Install development dependencies
 install-dev:
-    uv pip install -e .[dev]
+    uv pip install -e '.[dev]'
 
 # Setup development environment
 setup: install-dev
@@ -102,19 +102,51 @@ _cleanup-source PROFILE_DIR:
     @rm -rf {{PROFILE_DIR}}/airootfs/root/archinstall_zfs
     @rm -f {{PROFILE_DIR}}/airootfs/root/installer
 
-# Build the main ISO for production release
-build-main-iso:
+render-main-profile PRECOMPILED KERNEL HEADERS FAST:
+    @echo "Rendering main profile (precompiled={{PRECOMPILED}}, kernel={{KERNEL}}, headers={{HEADERS}}, fast={{FAST}}) into {{TEMP_PROFILE_DIR}}..."
+    @rm -rf {{TEMP_PROFILE_DIR}}
+    @ZFS_MODE="precompiled"; if [ "{{PRECOMPILED}}" != "true" ]; then ZFS_MODE="dkms"; fi; \
+    FAST_FLAG=""; if [ "{{FAST}}" = "true" ]; then FAST_FLAG="--fast"; fi; \
+    uv run python archinstall_zfs/builder.py --profile-dir {{MAIN_PROFILE_DIR}} --out-dir {{TEMP_PROFILE_DIR}} --kernel "{{KERNEL}}" --zfs "$ZFS_MODE" --headers "{{HEADERS}}" $FAST_FLAG
+
+# Build main ISO (parametric)
+# Usage: just build-main [pre|dkms] [linux|linux-lts|linux-zen]
+build-main MODE="pre" KERNEL="linux-lts":
+    @echo "Building main ISO (mode={{MODE}}, kernel={{KERNEL}})"
     @just _prepare-source {{MAIN_PROFILE_DIR}}
-    @echo "Building main ISO from 'releng' profile..."
-    sudo mkarchiso -v -r -w {{ISO_WORK_DIR}} -o {{ISO_OUT_DIR}} {{MAIN_PROFILE_DIR}}
+    @PRE="true"; HEAD="auto"; if [ "{{MODE}}" = "dkms" ]; then PRE="false"; HEAD="true"; fi; \
+    just render-main-profile $PRE {{KERNEL}} $HEAD false
+    @echo "Building main ISO from rendered profile..."
+    sudo mkarchiso -v -r -w {{ISO_WORK_DIR}} -o {{ISO_OUT_DIR}} {{TEMP_PROFILE_DIR}}
     @just _cleanup-source {{MAIN_PROFILE_DIR}}
 
-# Build the testing ISO for QEMU
+# Build testing ISO (parametric)
+# Usage: just build-test [pre|dkms] [linux|linux-lts|linux-zen]
+build-test MODE="pre" KERNEL="linux-lts":
+    @echo "Building testing ISO (mode={{MODE}}, kernel={{KERNEL}})"
+    @just _prepare-source {{MAIN_PROFILE_DIR}}
+    @PRE="true"; HEAD="auto"; if [ "{{MODE}}" = "dkms" ]; then PRE="false"; HEAD="true"; fi; \
+    just render-main-profile $PRE {{KERNEL}} $HEAD true
+    @echo "Building testing ISO from rendered profile..."
+    sudo mkarchiso -v -r -w {{ISO_WORK_DIR}} -o {{ISO_OUT_DIR}} {{TEMP_PROFILE_DIR}}
+    @just _cleanup-source {{MAIN_PROFILE_DIR}}
+
+# Back-compat wrappers (deprecated)
+build-main-iso:
+    @echo "[DEPRECATION] Use: just build-main [pre|dkms] [kernel]"
+    @just build-main pre linux-lts
+
+build-main-iso-dkms:
+    @echo "[DEPRECATION] Use: just build-main [pre|dkms] [kernel]"
+    @just build-main dkms linux-lts
+
 build-testing-iso:
-    @just _prepare-source {{TESTING_PROFILE_DIR}}
-    @echo "Building testing ISO from 'baseline' profile..."
-    sudo mkarchiso -v -r -w {{ISO_WORK_DIR}} -o {{ISO_OUT_DIR}} {{TESTING_PROFILE_DIR}}
-    @just _cleanup-source {{TESTING_PROFILE_DIR}}
+    @echo "[DEPRECATION] Use: just build-test [pre|dkms] [kernel]"
+    @just build-test pre linux-lts
+
+build-testing-iso-dkms:
+    @echo "[DEPRECATION] Use: just build-test [pre|dkms] [kernel]"
+    @just build-test dkms linux-lts
 
 # List available ISO files
 list-isos:
@@ -172,15 +204,25 @@ qemu-refresh:
 qemu-install:
     @if [ ! -f {{DISK_IMAGE}} ]; then just qemu-create-disk; fi
     @if [ ! -f {{UEFI_VARS}} ]; then just qemu-setup-uefi; fi
-    @if [ ! -f {{TESTING_ISO_PATH}} ]; then echo "Testing ISO not found. Run 'just build-testing-iso' first."; exit 1; fi
-    {{QEMU_SCRIPT}} -i {{TESTING_ISO_PATH}} -D {{DISK_IMAGE}} -U {{UEFI_VARS}} -f
+    @ISO_PATH=$(ls -1t {{ISO_OUT_DIR}}/archzfs-*-testing-*.iso 2>/dev/null | head -n 1); \
+      if [ -z "$ISO_PATH" ]; then \
+        echo "Testing ISO not found in {{ISO_OUT_DIR}}. Run 'just build-testing-iso' first."; \
+        exit 1; \
+      fi; \
+      echo "Using testing ISO: $ISO_PATH"; \
+    {{QEMU_SCRIPT}} -i "$ISO_PATH" -D {{DISK_IMAGE}} -U {{UEFI_VARS}}
 
 # Install Arch Linux in QEMU with serial console from the generated testing ISO
 qemu-install-serial:
     @if [ ! -f {{DISK_IMAGE}} ]; then just qemu-create-disk; fi
     @if [ ! -f {{UEFI_VARS}} ]; then just qemu-setup-uefi; fi
-    @if [ ! -f {{TESTING_ISO_PATH}} ]; then echo "Testing ISO not found. Run 'just build-testing-iso' first."; exit 1; fi
-    {{QEMU_SCRIPT}} -i {{TESTING_ISO_PATH}} -D {{DISK_IMAGE}} -U {{UEFI_VARS}} -S -f
+    @ISO_PATH=$(ls -1t {{ISO_OUT_DIR}}/archzfs-*-testing-*.iso 2>/dev/null | head -n 1); \
+      if [ -z "$ISO_PATH" ]; then \
+        echo "Testing ISO not found in {{ISO_OUT_DIR}}. Run 'just build-testing-iso' first."; \
+        exit 1; \
+      fi; \
+      echo "Using testing ISO: $ISO_PATH"; \
+      {{QEMU_SCRIPT}} -i "$ISO_PATH" -D {{DISK_IMAGE}} -U {{UEFI_VARS}} -S
 
 # Run existing Arch Linux installation in QEMU with GUI
 qemu-run:

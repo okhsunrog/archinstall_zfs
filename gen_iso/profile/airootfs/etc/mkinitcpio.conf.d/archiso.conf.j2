@@ -1,0 +1,12 @@
+# Live ISO does not import ZFS pools; omit zfs hook to keep initramfs minimal
+{% if fast_build %}
+HOOKS=(base udev modconf archiso block filesystems)
+COMPRESSION="lz4"
+COMPRESSION_OPTIONS=()
+{% else %}
+HOOKS=(base udev microcode modconf kms memdisk archiso archiso_loop_mnt archiso_pxe_common archiso_pxe_nbd archiso_pxe_http archiso_pxe_nfs block filesystems keyboard)
+COMPRESSION="xz"
+COMPRESSION_OPTIONS=(-9e)
+{% endif %}
+
+

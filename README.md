@@ -97,12 +97,46 @@ just setup   # installs dev deps via uv
 
 ### Build ISOs
 
+Unified templated profile at `gen_iso/profile` is rendered to `/tmp/archzfs-profile` and then built.
+
 ```bash
-just build-main-iso       # Production ISO (releng profile)
-just build-testing-iso    # Dev/testing ISO (baseline profile)
+# Full (main) ISO
+just build-main pre            # Precompiled ZFS, kernel=linux-lts (default)
+just build-main dkms           # DKMS + linux-lts-headers (default kernel)
+just build-main dkms linux     # DKMS + linux-headers, kernel=linux
+
+# Minimal (testing) ISO, faster to build
+just build-test pre             # Precompiled ZFS, kernel=linux-lts, minimal packages
+just build-test dkms            # DKMS + linux-lts-headers, minimal packages
+just build-test dkms linux      # DKMS + linux-headers, minimal packages, kernel=linux
+
+just list-isos                  # List built ISOs in gen_iso/out
 ```
 
-Artifacts land in `gen_iso/out`.
+Notes:
+- Testing builds use a minimal package set for faster iterations.
+- Main builds include the full set. When `kernel=linux`, `broadcom-wl` and `b43-fwcutter` are included; they are omitted for `linux-lts`/others.
+- Artifacts land in `gen_iso/out`.
+
+### Templating model (Jinja2)
+
+We use Jinja2 templates in `gen_iso/profile` to produce a concrete ArchISO profile before building.
+
+- Templates:
+  - `packages.x86_64.j2` (package list)
+  - `pacman.conf.j2`
+  - `profiledef.sh.j2`
+  - `efiboot/loader/entries/01-archiso-x86_64-linux.conf.j2`
+- Builder context keys:
+  - `kernel`: `linux`, `linux-lts`, or `linux-zen`
+  - `use_precompiled_zfs` / `use_dkms` (mutually exclusive)
+  - `include_headers`: whether to add `{{kernel}}-headers` (auto=true for DKMS)
+  - `fast_build`: minimal testing build when true; full main build when false
+- Package split logic:
+  - Testing-only: inside `{% if fast_build %}`
+  - Main-only: inside `{% else %}`
+  - Common to both: present in both branches
+  - Kernel-specific: guarded (e.g., `{% if kernel == "linux" %}` for `broadcom-wl`, `b43-fwcutter`)
 
 ### Test in QEMU
 
@@ -127,7 +161,7 @@ just qemu-run-serial      # Boot existing install (serial)
 just qemu-refresh         # Reset disk + UEFI vars
 ```
 
-The testing ISO is tuned for fast iterations: instant boot, auto‑login as root, full serial console, SSH on port 2222.
+The testing ISO is tuned for faster build times by using a minimal package list. It is rendered from the same profile with a fast mode flag.
 
 ### Inside the ISO
 
@@ -138,7 +172,7 @@ cd /root/archinstall_zfs && python -m archinstall_zfs
 
 The source is available at `/root/archinstall_zfs` in both ISO profiles.
 
-### All `just` recipes
+### All `just` recipes (high level)
 
 ```bash
 # Quality
@@ -149,9 +183,9 @@ just test              # Pytest
 just all               # Run all of the above
 just clean             # Clean caches
 
-# ISO build
-just build-main-iso
-just build-testing-iso
+# ISO build (parametric)
+just build-main [pre|dkms] [linux|linux-lts|linux-zen]
+just build-test [pre|dkms] [linux|linux-lts|linux-zen]
 just list-isos
 just clean-iso
 

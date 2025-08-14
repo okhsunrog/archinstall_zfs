@@ -1,9 +1,6 @@
 name: Build ISO
 
 on:
-  # Trigger on releases
-  release:
-    types: [published]
   # Trigger on version tags like v0.1.0
   push:
     tags:
@@ -12,19 +9,15 @@ on:
   # Allow manual triggering
   workflow_dispatch:
     inputs:
-      profile:
-        description: 'Profile to build (main_profile or testing_profile)'
+      kernel:
+        description: 'Kernel to build (linux, linux-lts, or both)'
         required: true
-        default: 'main_profile'
+        default: 'both'
         type: choice
         options:
-          - main_profile
-          - testing_profile
-      upload_artifact:
-        description: 'Upload ISO as artifact'
-        required: false
-        default: true
-        type: boolean
+          - linux
+          - linux-lts
+          - both
 
 permissions:
   contents: write
@@ -45,20 +38,38 @@ jobs:
         pacman -Syu --noconfirm
         pacman -S --noconfirm archiso git base-devel just rsync grub sudo nodejs
 
-    - name: Set profile for build
+    - name: Set kernel for build
       run: |
-        if [ "${{ github.event_name }}" = "release" ]; then
-          echo "PROFILE=main_profile" >> $GITHUB_ENV
+        if [ "${{ github.event_name }}" = "push" ]; then
+          echo "KERNEL=both" >> $GITHUB_ENV
         else
-          echo "PROFILE=${{ github.event.inputs.profile || 'main_profile' }}" >> $GITHUB_ENV
+          echo "KERNEL=${{ github.event.inputs.kernel || 'both' }}" >> $GITHUB_ENV
         fi
 
-    - name: Build ISO
+    - name: Build ISO with linux kernel (pre-built ZFS, fallback to DKMS)
+      if: env.KERNEL == 'linux' || env.KERNEL == 'both'
       run: |
-        if [ "$PROFILE" = "main_profile" ]; then
-          just build-main-iso
+        echo "Building linux kernel ISO..."
+        
+        # Try pre-built ZFS first
+        if just build-main pre linux; then
+          echo "Successfully built with pre-built ZFS modules"
         else
-          just build-testing-iso
+          echo "Pre-built ZFS failed, trying DKMS..."
+          just build-main dkms linux
+        fi
+
+    - name: Build ISO with linux-lts kernel (pre-built ZFS, fallback to DKMS)
+      if: env.KERNEL == 'linux-lts' || env.KERNEL == 'both'
+      run: |
+        echo "Building linux-lts kernel ISO..."
+        
+        # Try pre-built ZFS first
+        if just build-main pre linux-lts; then
+          echo "Successfully built with pre-built ZFS modules"
+        else
+          echo "Pre-built ZFS failed, trying DKMS..."
+          just build-main dkms linux-lts
         fi
 
     - name: Find and list built ISOs
@@ -66,30 +77,30 @@ jobs:
         echo "Built ISOs:"
         ls -la gen_iso/out/
         
-        # Find the ISO file (should be only one after build)
-        ISO_FILE=$(find gen_iso/out/ -name "*.iso" | head -1)
-        if [ -z "$ISO_FILE" ]; then
-          echo "Error: No ISO file found!"
+        # Find all ISO files
+        ISO_FILES=$(find gen_iso/out/ -name "*.iso" | sort)
+        if [ -z "$ISO_FILES" ]; then
+          echo "Error: No ISO files found!"
           exit 1
         fi
         
-        echo "ISO_FILE=$ISO_FILE" >> $GITHUB_ENV
-        echo "ISO_BASENAME=$(basename $ISO_FILE)" >> $GITHUB_ENV
-        echo "Found ISO: $ISO_FILE ($(du -h $ISO_FILE | cut -f1))"
+        echo "ISO_FILES=$ISO_FILES" >> $GITHUB_ENV
+        echo "Found ISOs:"
+        for iso in $ISO_FILES; do
+          echo "  $iso ($(du -h $iso | cut -f1))"
+        done
 
     - name: Generate checksums
       run: |
         cd gen_iso/out
-        sha256sum *.iso > checksums.sha256
-        cat checksums.sha256
-
-    - name: Upload ISO as artifact
-      if: github.event_name != 'release' && (github.event.inputs.upload_artifact != 'false')
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ISO_BASENAME }}
-        path: ${{ env.ISO_FILE }}
-        retention-days: 30
+        # Generate individual checksum files for each ISO
+        for iso in *.iso; do
+          if [ -f "$iso" ]; then
+            echo "Generating checksum for $iso..."
+            sha256sum "$iso" > "${iso}.sha256"
+            cat "${iso}.sha256"
+          fi
+        done
 
     # Create a release automatically on tag push and upload assets
     - name: Create GitHub Release (tag push) and upload assets
@@ -98,29 +109,7 @@ jobs:
       with:
         generate_release_notes: true
         files: |
-          ${{ env.ISO_FILE }}
-          gen_iso/out/checksums.sha256
+          gen_iso/out/*.iso
+          gen_iso/out/*.sha256
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Upload ISO to release
-      if: github.event_name == 'release'
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ github.event.release.upload_url }}
-        asset_path: ${{ env.ISO_FILE }}
-        asset_name: ${{ env.ISO_BASENAME }}
-        asset_content_type: application/octet-stream
-
-    - name: Upload checksums to release
-      if: github.event_name == 'release'
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ github.event.release.upload_url }}
-        asset_path: gen_iso/out/checksums.sha256
-        asset_name: checksums.sha256
-        asset_content_type: text/plain
