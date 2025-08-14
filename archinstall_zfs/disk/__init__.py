@@ -1,4 +1,5 @@
 import os
+import re
 import time
 from pathlib import Path
 from typing import Annotated
@@ -163,8 +164,23 @@ class DiskManagerBuilder:
 
     def build(self) -> DiskManager:
         """Builds manager for existing partition scenarios"""
-        if not self._selected_disk or not self._efi_partition:
-            raise ValueError("Disk and EFI partition must be selected")
+        # For existing/new pool flows, we must have an EFI partition.
+        if not self._efi_partition:
+            raise ValueError("EFI partition must be selected")
+
+        # If a disk wasn't explicitly selected (e.g. Existing Pool mode),
+        # derive it from the selected EFI partition's by-id name.
+        if not self._selected_disk:
+            part_name = self._efi_partition.name
+            match = re.match(r"(.+)-part\d+$", part_name)
+            if not match:
+                raise ValueError(f"EFI partition is not a by-id partition path: {self._efi_partition}")
+            base_name = match.group(1)
+            derived = self._efi_partition.parent / base_name
+            # Validate and normalize the derived disk path
+            self._selected_disk = validate_disk_path(derived)
+            if not self._selected_disk.exists():
+                raise ValueError(f"Derived disk path does not exist: {self._selected_disk}")
 
         # Ensure EFI partition belongs to the selected disk
         if not str(self._efi_partition).startswith(f"{self._selected_disk}-part"):
