@@ -190,8 +190,6 @@ class GlobalConfigMenu:
 
     def _configure_kernels(self, *_: Any) -> None:
         """Enhanced kernel + ZFS combo selector with full precompiled support."""
-        from archinstall_zfs.kernel import get_kernel_registry
-
         registry = get_kernel_registry()
         items = []
 

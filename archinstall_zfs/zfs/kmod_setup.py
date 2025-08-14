@@ -10,6 +10,9 @@ from archinstall import debug, error, info, warn
 from archinstall.lib.exceptions import SysCallError
 from archinstall.lib.general import SysCommand
 
+from archinstall_zfs.kernel import EnhancedZFSInstaller, get_kernel_registry
+from archinstall_zfs.menu.models import ZFSModuleMode
+
 
 def _service_substate(name: str) -> str:
     """Return systemd SubState for a unit, mirroring archinstall's check.
@@ -304,8 +307,6 @@ class ZFSInitializer:
         """Install ZFS using the new kernel-aware system."""
         # Detect running kernel variant
         kernel_name = self._detect_kernel_variant()
-        from archinstall_zfs.kernel import EnhancedZFSInstaller, get_kernel_registry
-        from archinstall_zfs.menu.models import ZFSModuleMode
 
         registry = get_kernel_registry()
 
