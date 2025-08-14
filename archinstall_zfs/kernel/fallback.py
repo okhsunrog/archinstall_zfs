@@ -13,7 +13,7 @@ from typing import Any
 from archinstall import debug, error, info, warn
 from archinstall.lib.general import SysCommand
 
-from ..menu.models import ZFSModuleMode
+from ..shared import ZFSModuleMode
 from .package_manager import InstallationResult, ZFSPackageManager
 from .registry import KernelRegistry
 from .variants import KernelVariant

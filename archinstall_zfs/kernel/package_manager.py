@@ -17,7 +17,7 @@ from archinstall import debug, info, warn
 from archinstall.lib.exceptions import SysCallError
 from archinstall.lib.general import SysCommand
 
-from ..menu.models import ZFSModuleMode
+from ..shared import ZFSModuleMode
 from .registry import KernelRegistry
 from .variants import KernelVariant
 

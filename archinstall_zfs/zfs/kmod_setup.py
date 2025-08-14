@@ -11,7 +11,7 @@ from archinstall.lib.exceptions import SysCallError
 from archinstall.lib.general import SysCommand
 
 from archinstall_zfs.kernel import EnhancedZFSInstaller, get_kernel_registry
-from archinstall_zfs.menu.models import ZFSModuleMode
+from archinstall_zfs.shared import ZFSModuleMode
 
 
 def _service_substate(name: str) -> str:

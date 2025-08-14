@@ -12,7 +12,7 @@ from archinstall_zfs.kernel.fallback import EnhancedZFSInstaller, FallbackStrate
 from archinstall_zfs.kernel.package_manager import ZFSPackageManager
 from archinstall_zfs.kernel.registry import KernelRegistry
 from archinstall_zfs.kernel.variants import KernelVariant
-from archinstall_zfs.menu.models import ZFSModuleMode
+from archinstall_zfs.shared import ZFSModuleMode
 
 
 class TestKernelVariant:

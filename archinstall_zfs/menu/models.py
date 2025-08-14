@@ -4,6 +4,8 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from ..shared import ZFSModuleMode
+
 
 class InstallationMode(Enum):
     FULL_DISK = "full_disk"
@@ -14,11 +16,6 @@ class InstallationMode(Enum):
 class InitSystem(Enum):
     DRACUT = "dracut"
     MKINITCPIO = "mkinitcpio"
-
-
-class ZFSModuleMode(Enum):
-    PRECOMPILED = "precompiled"
-    DKMS = "dkms"
 
 
 class ZFSEncryptionMode(Enum):
