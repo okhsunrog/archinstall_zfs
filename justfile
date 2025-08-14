@@ -131,23 +131,6 @@ build-test MODE="pre" KERNEL="linux-lts":
     sudo mkarchiso -v -r -w {{ISO_WORK_DIR}} -o {{ISO_OUT_DIR}} {{TEMP_PROFILE_DIR}}
     @just _cleanup-source {{MAIN_PROFILE_DIR}}
 
-# Back-compat wrappers (deprecated)
-build-main-iso:
-    @echo "[DEPRECATION] Use: just build-main [pre|dkms] [kernel]"
-    @just build-main pre linux-lts
-
-build-main-iso-dkms:
-    @echo "[DEPRECATION] Use: just build-main [pre|dkms] [kernel]"
-    @just build-main dkms linux-lts
-
-build-testing-iso:
-    @echo "[DEPRECATION] Use: just build-test [pre|dkms] [kernel]"
-    @just build-test pre linux-lts
-
-build-testing-iso-dkms:
-    @echo "[DEPRECATION] Use: just build-test [pre|dkms] [kernel]"
-    @just build-test dkms linux-lts
-
 # List available ISO files
 list-isos:
     @echo "Available ISO files:"

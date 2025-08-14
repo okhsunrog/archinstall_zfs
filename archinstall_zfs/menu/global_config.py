@@ -37,7 +37,9 @@ from archinstall.tui.result import ResultType
 from archinstall_zfs.initramfs.base import InitramfsHandler
 from archinstall_zfs.initramfs.dracut import DracutInitramfsHandler
 from archinstall_zfs.initramfs.mkinitcpio import MkinitcpioInitramfsHandler
-from archinstall_zfs.menu.models import GlobalConfig, InitSystem, InstallationMode, SwapMode, ZFSEncryptionMode, ZFSModuleMode
+from archinstall_zfs.kernel import get_kernel_registry
+from archinstall_zfs.menu.models import GlobalConfig, InitSystem, InstallationMode, SwapMode, ZFSEncryptionMode
+from archinstall_zfs.shared import ZFSModuleMode
 from archinstall_zfs.zfs import detect_pool_encryption, verify_pool_passphrase
 
 
@@ -189,13 +191,23 @@ class GlobalConfigMenu:
         self.config.app_config = app_menu.run()
 
     def _configure_kernels(self, *_: Any) -> None:
-        # Custom kernel + ZFS combo selector
-        items = [
-            MenuItem("Linux LTS + precompiled ZFS (recommended)", ("linux-lts", "precompiled"), key="lts_pre"),
-            MenuItem("Linux LTS + ZFS DKMS", ("linux-lts", "dkms"), key="lts_dkms"),
-            MenuItem("Linux + ZFS DKMS", ("linux", "dkms"), key="linux_dkms"),
-            MenuItem("Linux-zen + ZFS DKMS", ("linux-zen", "dkms"), key="zen_dkms"),
-        ]
+        """Enhanced kernel + ZFS combo selector with full precompiled support."""
+        registry = get_kernel_registry()
+        items = []
+
+        # Generate menu items from registry
+        for variant in registry.get_supported_variants():
+            if variant.supports_precompiled:
+                items.append(
+                    MenuItem(
+                        f"{variant.display_name} + precompiled ZFS" + (" (recommended)" if variant.is_default else ""),
+                        (variant.name, "precompiled"),
+                        key=f"{variant.name}_pre",
+                    )
+                )
+
+            items.append(MenuItem(f"{variant.display_name} + ZFS DKMS", (variant.name, "dkms"), key=f"{variant.name}_dkms"))
+
         # Focus current selection if possible
         focus_item = None
         cur_kernel = self.config.kernels[0] if self.config.kernels else "linux-lts"
@@ -211,11 +223,14 @@ class GlobalConfigMenu:
         result = SelectMenu(
             MenuItemGroup(items, focus_item=focus_item) if focus_item else MenuItemGroup(items), header="Select kernel and ZFS module mode"
         ).run()
-        if result.item():
-            kernel, mode = result.item().value
-            self.config.kernels = [kernel]
-            # Sync ZFS module mode based on selection
-            self.cfg.zfs_module_mode = ZFSModuleMode.PRECOMPILED if mode == "precompiled" else ZFSModuleMode.DKMS
+
+        if result.item() and result.item().value:
+            value = result.item().value
+            KERNEL_MODE_TUPLE_LENGTH = 2
+            if value is not None and len(value) == KERNEL_MODE_TUPLE_LENGTH:
+                kernel, mode = value
+                self.config.kernels = [kernel]
+                self.cfg.zfs_module_mode = ZFSModuleMode.PRECOMPILED if mode == "precompiled" else ZFSModuleMode.DKMS
 
     def _configure_parallel_downloads(self, *_: Any) -> None:
         val = add_number_of_parallel_downloads(self.config.parallel_downloads)
@@ -443,8 +458,10 @@ class GlobalConfigMenu:
             ),
             header="Select swap mode",
         ).run()
-        if result.item():
-            self.cfg.swap_mode = result.item().value
+        if result.item() and result.item().value is not None:
+            swap_mode_value = result.item().value
+            if swap_mode_value is not None:
+                self.cfg.swap_mode = swap_mode_value
 
         # If ZRAM, optionally allow size or fraction edit later; for now keep defaults
         if self.cfg.swap_mode == SwapMode.ZRAM:

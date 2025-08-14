@@ -8,7 +8,15 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from archinstall import debug
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
+
+# Import kernel registry at top level to avoid PLC0415
+try:
+    from archinstall_zfs.kernel import get_kernel_registry
+except ImportError:
+    # Type annotation for fallback when import fails
+    get_kernel_registry = None  # type: ignore
 
 
 @dataclass
@@ -24,15 +32,48 @@ class BuildOptions:
 
 
 def compute_headers_package(kernel: str) -> str:
-    # linux -> linux-headers; linux-lts -> linux-lts-headers; linux-zen -> linux-zen-headers
+    """Get headers package using kernel registry."""
+    if get_kernel_registry is not None:
+        try:
+            registry = get_kernel_registry()
+            variant = registry.get_variant(kernel)
+
+            if variant:
+                return variant.headers_package
+        except Exception as e:
+            debug(f"Failed to get kernel variant: {e}")
+
+    # Fallback to convention
     return f"{kernel}-headers"
 
 
 def build_context(opts: BuildOptions) -> dict:
+    if get_kernel_registry is not None:
+        try:
+            registry = get_kernel_registry()
+            variant = registry.get_variant(opts.kernel)
+
+            if variant:
+                use_dkms = opts.zfs_mode == "dkms"
+                use_precompiled = not use_dkms and variant.supports_precompiled
+                include_headers = opts.include_headers if opts.include_headers is not None else use_dkms
+
+                return {
+                    "kernel": opts.kernel,
+                    "use_dkms": use_dkms,
+                    "use_precompiled_zfs": use_precompiled,
+                    "include_headers": include_headers,
+                    "headers": variant.headers_package,
+                    "fast_build": opts.fast_build,
+                }
+        except Exception as e:
+            debug(f"Failed to get kernel variant: {e}")
+
+    # Fallback if kernel module not available or variant not found
     use_dkms = opts.zfs_mode == "dkms"
     use_precompiled = not use_dkms
     include_headers = opts.include_headers if opts.include_headers is not None else use_dkms
-    headers_pkg = compute_headers_package(opts.kernel)
+    headers_pkg = f"{opts.kernel}-headers"
 
     return {
         "kernel": opts.kernel,

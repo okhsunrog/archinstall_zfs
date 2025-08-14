@@ -10,6 +10,9 @@ from archinstall import debug, error, info, warn
 from archinstall.lib.exceptions import SysCallError
 from archinstall.lib.general import SysCommand
 
+from archinstall_zfs.kernel import EnhancedZFSInstaller, get_kernel_registry
+from archinstall_zfs.shared import ZFSModuleMode
+
 
 def _service_substate(name: str) -> str:
     """Return systemd SubState for a unit, mirroring archinstall's check.
@@ -301,6 +304,44 @@ class ZFSInitializer:
         raise ValueError("Could not extract zfs-utils version from package info")
 
     def install_zfs(self) -> bool:
+        """Install ZFS using the new kernel-aware system."""
+        # Detect running kernel variant
+        kernel_name = self._detect_kernel_variant()
+
+        registry = get_kernel_registry()
+
+        # Try precompiled first, fallback to DKMS with same kernel
+        installer = EnhancedZFSInstaller(registry)
+        result = installer.install_with_fallback(
+            kernel_name,
+            ZFSModuleMode.PRECOMPILED,  # Always try precompiled first
+            None,  # Host installation, not target
+        )
+
+        if result.success:
+            info(result.get_summary())
+            return True
+        error(f"ZFS installation failed: {result.get_summary()}")
+        return False
+
+    def _detect_kernel_variant(self) -> str:
+        """Detect kernel variant from running kernel version."""
+        kernel_version = self.kernel_version.lower()
+
+        if "lts" in kernel_version:
+            return "linux-lts"
+        if "zen" in kernel_version:
+            return "linux-zen"
+        if "hardened" in kernel_version:
+            return "linux-hardened"
+        if "rt" in kernel_version:
+            if "lts" in kernel_version:
+                return "linux-rt-lts"
+            return "linux-rt"
+        return "linux"
+
+    def _install_zfs_legacy(self) -> bool:
+        """Legacy ZFS installation method (kept for rollback capability)."""
         kernel_version_fixed = self.kernel_version.replace("-", ".")
 
         # Detect kernel type and search for appropriate ZFS package

@@ -20,8 +20,9 @@ from archinstall.tui.menu_item import MenuItem
 from archinstall_zfs.config_io import load_combined_configuration, save_combined_configuration
 from archinstall_zfs.disk import DiskManagerBuilder
 from archinstall_zfs.installer import ZFSInstaller
+from archinstall_zfs.kernel import EnhancedZFSInstaller, get_kernel_registry
 from archinstall_zfs.menu import GlobalConfigMenu
-from archinstall_zfs.menu.models import InstallationMode, SwapMode, ZFSEncryptionMode, ZFSModuleMode
+from archinstall_zfs.menu.models import InstallationMode, SwapMode, ZFSEncryptionMode
 from archinstall_zfs.zfs import ZFS_SERVICES, EncryptionMode, ZFSManagerBuilder
 from archinstall_zfs.zfs.kmod_setup import add_archzfs_repo, initialize_zfs
 
@@ -135,9 +136,18 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
         # Create initramfs handler based on menu selection
         initramfs_handler = installer_menu.create_initramfs_handler(mountpoint, bool(zfs_manager.encryption_handler.password))
 
-        # Determine selected kernels and corresponding headers (for DKMS path)
+        # NEW: Use enhanced kernel registry for package management
         selected_kernels: list[str] = arch_config.kernels if arch_config.kernels else ["linux-lts"]
-        kernel_headers: list[str] = [f"{k}-headers" for k in selected_kernels]
+        primary_kernel = selected_kernels[0]  # Use first kernel as primary
+
+        registry = get_kernel_registry()
+        zfs_installer = EnhancedZFSInstaller(registry)
+
+        # Validate installation plan before proceeding
+        validation_errors = zfs_installer.validate_installation_plan(primary_kernel, installer_menu.cfg.zfs_module_mode)
+        if validation_errors:
+            for error_msg in validation_errors:
+                info(f"Validation warning: {error_msg}")
 
         # ZFSInstaller will use its own default base packages optimized for ZFS
         disk_cfg = arch_config.disk_config or DiskLayoutConfiguration(DiskLayoutType.Pre_mount, mountpoint=mountpoint)
@@ -167,21 +177,16 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
             # Ensure the target has refreshed keyring and synced DBs before package install
             add_archzfs_repo(installation.target, installation)
 
-            # Precompiled preferred path (only offered for LTS in the menu) with fallback to DKMS
-            if installer_menu.cfg.zfs_module_mode == ZFSModuleMode.PRECOMPILED:
-                try:
-                    installation.add_additional_packages(["zfs-utils", "zfs-linux-lts"])
-                except Exception:
-                    # Fallback to DKMS using headers matching the selected kernel(s)
-                    packages = ["zfs-utils", "zfs-dkms", *kernel_headers]
-                    # Deduplicate while preserving order
-                    dedup_packages = list(dict.fromkeys(packages))
-                    installation.add_additional_packages(dedup_packages)
-            else:
-                # DKMS path using headers matching the selected kernel(s)
-                packages = ["zfs-utils", "zfs-dkms", *kernel_headers]
-                dedup_packages = list(dict.fromkeys(packages))
-                installation.add_additional_packages(dedup_packages)
+            # NEW: Install ZFS packages using enhanced system with proper fallback
+            result = zfs_installer.install_with_fallback(primary_kernel, installer_menu.cfg.zfs_module_mode, installation)
+
+            if not result.success:
+                raise RuntimeError(f"ZFS package installation failed: {result.get_summary()}")
+
+            # Log what was actually installed
+            info(result.get_summary())
+            if result.fallback_occurred and result.actual_mode:
+                info(f"Note: Fallback occurred from {result.requested_mode.value} to {result.actual_mode.value}")
 
             # Ensure initramfs is generated once the right modules are present
             installation.regenerate_initramfs()
