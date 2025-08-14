@@ -7,6 +7,7 @@ ZFS-specific configuration, allowing for better maintainability and version inde
 
 import re
 import sys
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -617,6 +618,9 @@ class GlobalConfigMenu:
     # --- Wizard flow ---
     def run_storage_wizard(self) -> None:
         """Run the gated Storage & ZFS wizard."""
+        # Store original configuration to allow discarding changes
+        original_config = deepcopy(self.cfg)
+
         while True:
             summary = self._preview_wizard_line(None)
             items = [
@@ -625,12 +629,14 @@ class GlobalConfigMenu:
                 MenuItem("3) Swap", "swap", key="w_swap"),
                 MenuItem("4) ZFS specifics", "zfs", key="w_zfs"),
                 MenuItem("5) Summary & Confirm", "summary", key="w_summary"),
-                MenuItem("Done", "done", key="w_done"),
+                MenuItem("Back", "back", key="w_back"),
             ]
 
             menu = SelectMenu(MenuItemGroup(items), header=f"Storage & ZFS Wizard\n{summary}")
             res = menu.run()
             if not res.item():
+                # User cancelled - discard changes
+                self.cfg = original_config
                 return
             choice = res.item().value
             if choice == "mode":
@@ -643,8 +649,11 @@ class GlobalConfigMenu:
                 self._wizard_step_zfs()
             elif choice == "summary":
                 if self._wizard_step_summary():
+                    # User confirmed - keep changes
                     return
-            else:
+            elif choice == "back":
+                # User chose back - discard changes
+                self.cfg = original_config
                 return
 
     def _mode_change_reset(self) -> None:
@@ -848,7 +857,6 @@ class GlobalConfigMenu:
             self._preview_disk_configuration(None) or "",
             self._preview_swap(None) or "",
             self._preview_zfs_configuration(None) or "",
-            f"Init system: {self.cfg.init_system.value}",
         ]
         ch = SelectMenu(MenuItemGroup([MenuItem("Proceed with installation", True), MenuItem("Back", False)]), header="\n".join(lines)).run()
         return bool(ch.item() and ch.item().value)
