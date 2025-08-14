@@ -301,6 +301,49 @@ class ZFSInitializer:
         raise ValueError("Could not extract zfs-utils version from package info")
 
     def install_zfs(self) -> bool:
+        """Install ZFS using the new kernel-aware system."""
+        from archinstall_zfs.kernel import get_kernel_registry, EnhancedZFSInstaller
+        from archinstall_zfs.menu.models import ZFSModuleMode
+        
+        # Detect running kernel variant
+        kernel_name = self._detect_kernel_variant()
+        registry = get_kernel_registry()
+        
+        # Try precompiled first, fallback to DKMS with same kernel
+        installer = EnhancedZFSInstaller(registry)
+        result = installer.install_with_fallback(
+            kernel_name,
+            ZFSModuleMode.PRECOMPILED,  # Always try precompiled first
+            None  # Host installation, not target
+        )
+        
+        if result.success:
+            info(result.get_summary())
+            return True
+        else:
+            error(f"ZFS installation failed: {result.get_summary()}")
+            return False
+    
+    def _detect_kernel_variant(self) -> str:
+        """Detect kernel variant from running kernel version."""
+        kernel_version = self.kernel_version.lower()
+        
+        if "lts" in kernel_version:
+            return "linux-lts"
+        elif "zen" in kernel_version:
+            return "linux-zen"
+        elif "hardened" in kernel_version:
+            return "linux-hardened"
+        elif "rt" in kernel_version:
+            if "lts" in kernel_version:
+                return "linux-rt-lts"
+            else:
+                return "linux-rt"
+        else:
+            return "linux"
+    
+    def _install_zfs_legacy(self) -> bool:
+        """Legacy ZFS installation method (kept for rollback capability)."""
         kernel_version_fixed = self.kernel_version.replace("-", ".")
 
         # Detect kernel type and search for appropriate ZFS package

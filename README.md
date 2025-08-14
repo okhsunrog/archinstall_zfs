@@ -63,6 +63,25 @@ This path takes a bit longer because it installs ZFS modules on the fly. The pre
 - 🔐 ZFS encryption: Pool or per‑dataset
 - 🧾 Robust logs and error handling
 
+### 🚀 Enhanced Kernel Support (v2.0)
+
+**Precompiled ZFS for All Kernels:**
+- `linux-lts` + `zfs-linux-lts` (recommended)
+- `linux` + `zfs-linux` ✨ **NEW!**
+- `linux-zen` + `zfs-linux-zen` ✨ **NEW!**
+
+**Intelligent Fallback Logic:**
+- Maintains kernel consistency during fallback
+- `linux-lts` precompiled fails → `linux-lts` + DKMS ✅
+- No more unexpected kernel changes during installation
+
+**Extensible Architecture:**
+- Easy to add support for new kernel variants
+- Centralized kernel configuration management
+- Comprehensive error handling and reporting
+
+See [KERNEL_ARCHITECTURE.md](docs/KERNEL_ARCHITECTURE.md) for detailed technical information.
+
 ## Swap options
 
 - **No swap**: Skip configuring swap.
