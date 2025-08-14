@@ -43,12 +43,12 @@ clean:
     rm -rf *.egg-info/
     find . -type d -name __pycache__ -exec rm -rf {} +
     find . -type f -name "*.pyc" -delete
-    rm -rf {{ISO_WORK_DIR}}
+    sudo rm -rf {{ISO_WORK_DIR}}
 
 # Clean up ISO build artifacts only
 clean-iso:
     sudo rm -rf {{ISO_OUT_DIR}}
-    rm -rf {{ISO_WORK_DIR}}
+    sudo rm -rf {{ISO_WORK_DIR}}
 
 # Install development dependencies
 install-dev:
