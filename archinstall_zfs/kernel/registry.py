@@ -246,8 +246,33 @@ class KernelRegistry:
         return f"KernelRegistry with {len(variants)} variants:\n{variant_list}"
 
 
-# Global instance for singleton pattern
-_kernel_registry_instance: KernelRegistry | None = None
+class _KernelRegistrySingleton:
+    """Singleton wrapper for KernelRegistry to avoid global statement warnings."""
+
+    def __init__(self) -> None:
+        self._instance: KernelRegistry | None = None
+
+    def get_instance(self) -> KernelRegistry:
+        """Get the singleton instance, creating it if necessary."""
+        if self._instance is None:
+            self._instance = KernelRegistry()
+
+            # Try to load custom configurations
+            config_paths = [Path("/etc/archinstall-zfs/kernel-variants.json"), Path.home() / ".config" / "archinstall-zfs" / "kernel-variants.json"]
+
+            for config_path in config_paths:
+                with contextlib.suppress(Exception):
+                    self._instance.load_from_file(config_path)
+
+            # Auto-detect additional variants
+            with contextlib.suppress(Exception):
+                self._instance.auto_detect_variants()
+
+        return self._instance
+
+
+# Global singleton instance
+_kernel_registry_singleton = _KernelRegistrySingleton()
 
 
 def get_kernel_registry() -> KernelRegistry:
@@ -256,20 +281,4 @@ def get_kernel_registry() -> KernelRegistry:
     Returns:
         The global KernelRegistry instance
     """
-    global _kernel_registry_instance
-    
-    if _kernel_registry_instance is None:
-        _kernel_registry_instance = KernelRegistry()
-
-        # Try to load custom configurations
-        config_paths = [Path("/etc/archinstall-zfs/kernel-variants.json"), Path.home() / ".config" / "archinstall-zfs" / "kernel-variants.json"]
-
-        for config_path in config_paths:
-            with contextlib.suppress(Exception):
-                _kernel_registry_instance.load_from_file(config_path)
-
-        # Auto-detect additional variants
-        with contextlib.suppress(Exception):
-            _kernel_registry_instance.auto_detect_variants()
-
-    return _kernel_registry_instance
+    return _kernel_registry_singleton.get_instance()

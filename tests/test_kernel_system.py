@@ -18,7 +18,7 @@ from archinstall_zfs.menu.models import ZFSModuleMode
 class TestKernelVariant:
     """Test the KernelVariant dataclass."""
 
-    def test_valid_kernel_variant(self):
+    def test_valid_kernel_variant(self) -> None:
         """Test creating a valid kernel variant."""
         variant = KernelVariant(
             name="linux-lts",
@@ -34,7 +34,7 @@ class TestKernelVariant:
         assert variant.supports_precompiled is True
         assert variant.is_default is True
 
-    def test_invalid_kernel_variant_empty_name(self):
+    def test_invalid_kernel_variant_empty_name(self) -> None:
         """Test that empty name raises ValueError."""
         with pytest.raises(ValueError, match="Kernel variant name cannot be empty"):
             KernelVariant(
@@ -46,7 +46,7 @@ class TestKernelVariant:
                 supports_precompiled=True,
             )
 
-    def test_invalid_precompiled_config(self):
+    def test_invalid_precompiled_config(self) -> None:
         """Test that claiming precompiled support without package raises ValueError."""
         with pytest.raises(ValueError, match="claims to support precompiled ZFS"):
             KernelVariant(
@@ -58,7 +58,7 @@ class TestKernelVariant:
                 supports_precompiled=True,  # This should fail
             )
 
-    def test_get_dkms_packages(self):
+    def test_get_dkms_packages(self) -> None:
         """Test getting DKMS packages."""
         variant = KernelVariant(
             name="linux-zen",
@@ -73,7 +73,7 @@ class TestKernelVariant:
         expected = ["zfs-utils", "zfs-dkms", "linux-zen-headers"]
         assert packages == expected
 
-    def test_get_precompiled_packages(self):
+    def test_get_precompiled_packages(self) -> None:
         """Test getting precompiled packages."""
         variant = KernelVariant(
             name="linux-lts",
@@ -88,7 +88,7 @@ class TestKernelVariant:
         expected = ["zfs-utils", "zfs-linux-lts"]
         assert packages == expected
 
-    def test_get_precompiled_packages_not_supported(self):
+    def test_get_precompiled_packages_not_supported(self) -> None:
         """Test that getting precompiled packages fails when not supported."""
         variant = KernelVariant(
             name="linux-custom",
@@ -106,7 +106,7 @@ class TestKernelVariant:
 class TestKernelRegistry:
     """Test the KernelRegistry class."""
 
-    def test_default_variants_loaded(self):
+    def test_default_variants_loaded(self) -> None:
         """Test that default variants are loaded."""
         registry = KernelRegistry()
 
@@ -124,7 +124,7 @@ class TestKernelRegistry:
         assert zen_variant is not None
         assert zen_variant.supports_precompiled is True
 
-    def test_register_custom_variant(self):
+    def test_register_custom_variant(self) -> None:
         """Test registering a custom kernel variant."""
         registry = KernelRegistry()
 
@@ -144,7 +144,7 @@ class TestKernelRegistry:
         assert retrieved.name == "linux-custom"
         assert retrieved.supports_precompiled is False
 
-    def test_get_precompiled_variants(self):
+    def test_get_precompiled_variants(self) -> None:
         """Test getting variants that support precompiled ZFS."""
         registry = KernelRegistry()
 
@@ -156,7 +156,7 @@ class TestKernelRegistry:
         assert "linux" in variant_names
         assert "linux-zen" in variant_names
 
-    def test_get_default_variant(self):
+    def test_get_default_variant(self) -> None:
         """Test getting the default variant."""
         registry = KernelRegistry()
 
@@ -169,7 +169,7 @@ class TestKernelRegistry:
 class TestFallbackStrategy:
     """Test the FallbackStrategy class."""
 
-    def test_precompiled_fallback_chain(self):
+    def test_precompiled_fallback_chain(self) -> None:
         """Test fallback chain for precompiled request."""
         variant = KernelVariant(
             name="linux-lts",
@@ -187,7 +187,7 @@ class TestFallbackStrategy:
         assert chain[0] == (variant, ZFSModuleMode.PRECOMPILED)
         assert chain[1] == (variant, ZFSModuleMode.DKMS)
 
-    def test_dkms_fallback_chain(self):
+    def test_dkms_fallback_chain(self) -> None:
         """Test fallback chain for direct DKMS request."""
         variant = KernelVariant(
             name="linux-zen",
@@ -204,7 +204,7 @@ class TestFallbackStrategy:
         assert len(chain) == 1
         assert chain[0] == (variant, ZFSModuleMode.DKMS)
 
-    def test_precompiled_not_supported_fallback(self):
+    def test_precompiled_not_supported_fallback(self) -> None:
         """Test fallback when precompiled is not supported."""
         variant = KernelVariant(
             name="linux-custom",
@@ -221,7 +221,7 @@ class TestFallbackStrategy:
         assert len(chain) == 1
         assert chain[0] == (variant, ZFSModuleMode.DKMS)
 
-    def test_should_attempt_precompiled(self):
+    def test_should_attempt_precompiled(self) -> None:
         """Test logic for determining if precompiled should be attempted."""
         variant_with_precompiled = KernelVariant(
             name="linux-lts",
@@ -254,14 +254,14 @@ class TestFallbackStrategy:
 class TestZFSPackageManager:
     """Test the ZFSPackageManager class."""
 
-    def setup_method(self):
+    def setup_method(self) -> None:
         """Set up test fixtures."""
         self.registry = KernelRegistry()
         self.package_manager = ZFSPackageManager(self.registry)
 
     @pytest.mark.usefixtures("_mock_syscmd")
     @patch("archinstall_zfs.kernel.package_manager.SysCommand")
-    def test_install_precompiled_success(self):
+    def test_install_precompiled_success(self) -> None:
         """Test successful precompiled installation."""
         # Mock successful installation
         mock_installation = Mock()
@@ -276,7 +276,7 @@ class TestZFSPackageManager:
 
     @pytest.mark.usefixtures("_mock_syscmd")
     @patch("archinstall_zfs.kernel.package_manager.SysCommand")
-    def test_install_with_fallback(self):
+    def test_install_with_fallback(self) -> None:
         """Test installation with fallback from precompiled to DKMS."""
         # Mock failed precompiled, successful DKMS
         mock_installation = Mock()
@@ -293,7 +293,7 @@ class TestZFSPackageManager:
         assert result.actual_mode == ZFSModuleMode.DKMS
         assert result.fallback_occurred is True
 
-    def test_install_unsupported_kernel(self):
+    def test_install_unsupported_kernel(self) -> None:
         """Test installation with unsupported kernel."""
         result = self.package_manager.install_zfs_packages("linux-nonexistent", ZFSModuleMode.PRECOMPILED, None)
 
@@ -304,12 +304,12 @@ class TestZFSPackageManager:
 class TestEnhancedZFSInstaller:
     """Test the EnhancedZFSInstaller class."""
 
-    def setup_method(self):
+    def setup_method(self) -> None:
         """Set up test fixtures."""
         self.registry = KernelRegistry()
         self.installer = EnhancedZFSInstaller(self.registry)
 
-    def test_detect_running_kernel_variant(self):
+    def test_detect_running_kernel_variant(self) -> None:
         """Test kernel variant detection."""
         with patch("archinstall_zfs.kernel.fallback.SysCommand") as mock_syscmd:
             # Test LTS detection
@@ -324,14 +324,14 @@ class TestEnhancedZFSInstaller:
             mock_syscmd.return_value.decode.return_value.strip.return_value = "5.19.0-arch1"
             assert self.installer.detect_running_kernel_variant() == "linux"
 
-    def test_get_recommended_configuration(self):
+    def test_get_recommended_configuration(self) -> None:
         """Test getting recommended configuration."""
         with patch.object(self.installer, "detect_running_kernel_variant", return_value="linux-lts"):
             kernel, mode = self.installer.get_recommended_configuration()
             assert kernel == "linux-lts"
             assert mode == ZFSModuleMode.PRECOMPILED
 
-    def test_validate_installation_plan(self):
+    def test_validate_installation_plan(self) -> None:
         """Test installation plan validation."""
         # Valid plan should have no errors
         errors = self.installer.validate_installation_plan("linux-lts", ZFSModuleMode.PRECOMPILED)
@@ -342,7 +342,7 @@ class TestEnhancedZFSInstaller:
         assert len(errors) > 0
         assert "Unsupported kernel" in errors[0]
 
-    def test_get_installation_summary(self):
+    def test_get_installation_summary(self) -> None:
         """Test getting installation summary."""
         summary = self.installer.get_installation_summary("linux-lts", ZFSModuleMode.PRECOMPILED)
 
@@ -354,7 +354,7 @@ class TestEnhancedZFSInstaller:
 class TestBackwardCompatibility:
     """Test backward compatibility with existing configurations."""
 
-    def test_existing_kernel_selections_work(self):
+    def test_existing_kernel_selections_work(self) -> None:
         """Test that existing kernel selections continue to work."""
         registry = KernelRegistry()
 
@@ -363,7 +363,7 @@ class TestBackwardCompatibility:
         assert registry.get_variant("linux") is not None
         assert registry.get_variant("linux-zen") is not None
 
-    def test_precompiled_now_available_for_all_kernels(self):
+    def test_precompiled_now_available_for_all_kernels(self) -> None:
         """Test that precompiled ZFS is now available for all default kernels."""
         registry = KernelRegistry()
 
@@ -373,7 +373,7 @@ class TestBackwardCompatibility:
             assert variant.supports_precompiled is True
             assert variant.zfs_precompiled_package is not None
 
-    def test_fallback_maintains_kernel_consistency(self):
+    def test_fallback_maintains_kernel_consistency(self) -> None:
         """Test that fallback maintains kernel consistency."""
         registry = KernelRegistry()
 

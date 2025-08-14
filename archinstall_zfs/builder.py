@@ -15,7 +15,8 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 try:
     from archinstall_zfs.kernel import get_kernel_registry
 except ImportError:
-    get_kernel_registry = None
+    # Type annotation for fallback when import fails
+    get_kernel_registry = None  # type: ignore
 
 
 @dataclass
