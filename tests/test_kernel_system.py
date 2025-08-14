@@ -5,6 +5,7 @@ This test suite validates the new kernel registry, package management,
 and fallback logic to ensure proper functionality and backward compatibility.
 """
 
+from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
@@ -259,9 +260,8 @@ class TestZFSPackageManager:
         self.registry = KernelRegistry()
         self.package_manager = ZFSPackageManager(self.registry)
 
-    @pytest.mark.usefixtures("_mock_syscmd")
     @patch("archinstall_zfs.kernel.package_manager.SysCommand")
-    def test_install_precompiled_success(self) -> None:
+    def test_install_precompiled_success(self, mock_syscmd: Any) -> None:  # noqa: ARG002
         """Test successful precompiled installation."""
         # Mock successful installation
         mock_installation = Mock()
@@ -274,9 +274,8 @@ class TestZFSPackageManager:
         assert result.fallback_occurred is False
         assert "zfs-utils" in result.installed_packages
 
-    @pytest.mark.usefixtures("_mock_syscmd")
     @patch("archinstall_zfs.kernel.package_manager.SysCommand")
-    def test_install_with_fallback(self) -> None:
+    def test_install_with_fallback(self, mock_syscmd: Any) -> None:  # noqa: ARG002
         """Test installation with fallback from precompiled to DKMS."""
         # Mock failed precompiled, successful DKMS
         mock_installation = Mock()
@@ -348,7 +347,7 @@ class TestEnhancedZFSInstaller:
 
         assert "Linux LTS" in summary
         assert "precompiled" in summary
-        assert "fallback" in summary
+        assert "Fallback" in summary
 
 
 class TestBackwardCompatibility:
