@@ -15,7 +15,7 @@ arch="x86_64"
 pacman_conf="pacman.conf"
 airootfs_image_type="{{ 'erofs' if fast_build else 'squashfs' }}"
 {% if fast_build %}
-airootfs_image_tool_options=(' -zlz4 ')
+airootfs_image_tool_options=('-zlz4')
 bootstrap_tarball_compression=('cat')
 {% else %}
 airootfs_image_tool_options=('-comp' 'xz' '-Xbcj' 'x86' '-b' '1M' '-Xdict-size' '1M')

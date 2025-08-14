@@ -52,7 +52,7 @@ clean-iso:
 
 # Install development dependencies
 install-dev:
-    uv pip install -e .[dev]
+    uv pip install -e '.[dev]'
 
 # Setup development environment
 setup: install-dev
@@ -102,15 +102,17 @@ _cleanup-source PROFILE_DIR:
     @rm -rf {{PROFILE_DIR}}/airootfs/root/archinstall_zfs
     @rm -f {{PROFILE_DIR}}/airootfs/root/installer
 
-render-main-profile PRECOMPILED="true" KERNEL="linux-lts" HEADERS="auto" FAST="false":
+render-main-profile PRECOMPILED KERNEL HEADERS FAST:
     @echo "Rendering main profile (precompiled={{PRECOMPILED}}, kernel={{KERNEL}}, headers={{HEADERS}}, fast={{FAST}}) into {{TEMP_PROFILE_DIR}}..."
     @rm -rf {{TEMP_PROFILE_DIR}}
-    uv run python -m archinstall_zfs.builder --profile-dir {{MAIN_PROFILE_DIR}} --out-dir {{TEMP_PROFILE_DIR}} --kernel {{KERNEL}} --zfs {{ if eq PRECOMPILED "true" }}precompiled{{ else }}dkms{{ end }} --headers {{HEADERS}} {{ if eq FAST "true" }}--fast{{ end }}
+    @ZFS_MODE="precompiled"; if [ "{{PRECOMPILED}}" != "true" ]; then ZFS_MODE="dkms"; fi; \
+    FAST_FLAG=""; if [ "{{FAST}}" = "true" ]; then FAST_FLAG="--fast"; fi; \
+    uv run python archinstall_zfs/builder.py --profile-dir {{MAIN_PROFILE_DIR}} --out-dir {{TEMP_PROFILE_DIR}} --kernel "{{KERNEL}}" --zfs "$ZFS_MODE" --headers "{{HEADERS}}" $FAST_FLAG
 
 # Build the main ISO for production release (precompiled ZFS by default)
 build-main-iso:
     @just _prepare-source {{MAIN_PROFILE_DIR}}
-    @just render-main-profile PRECOMPILED="true" KERNEL="linux-lts" HEADERS="auto"
+    @just render-main-profile true linux-lts auto false
     @echo "Building main ISO from rendered profile..."
     sudo mkarchiso -v -r -w {{ISO_WORK_DIR}} -o {{ISO_OUT_DIR}} {{TEMP_PROFILE_DIR}}
     @just _cleanup-source {{MAIN_PROFILE_DIR}}
@@ -118,7 +120,7 @@ build-main-iso:
 # Build the main ISO using DKMS and headers
 build-main-iso-dkms:
     @just _prepare-source {{MAIN_PROFILE_DIR}}
-    @just render-main-profile PRECOMPILED="false" KERNEL="linux-lts" HEADERS="true"
+    @just render-main-profile false linux-lts true false
     @echo "Building main ISO (DKMS) from rendered profile..."
     sudo mkarchiso -v -r -w {{ISO_WORK_DIR}} -o {{ISO_OUT_DIR}} {{TEMP_PROFILE_DIR}}
     @just _cleanup-source {{MAIN_PROFILE_DIR}}
@@ -126,7 +128,7 @@ build-main-iso-dkms:
 # Build the testing ISO for QEMU (precompiled by default)
 build-testing-iso:
     @just _prepare-source {{MAIN_PROFILE_DIR}}
-    @just render-main-profile PRECOMPILED="true" KERNEL="linux-lts" HEADERS="auto" FAST="true"
+    @just render-main-profile true linux-lts auto true
     @echo "Building testing ISO from rendered profile..."
     sudo mkarchiso -v -r -w {{ISO_WORK_DIR}} -o {{ISO_OUT_DIR}} {{TEMP_PROFILE_DIR}}
     @just _cleanup-source {{MAIN_PROFILE_DIR}}
@@ -134,7 +136,7 @@ build-testing-iso:
 # Build the testing ISO using DKMS and headers
 build-testing-iso-dkms:
     @just _prepare-source {{MAIN_PROFILE_DIR}}
-    @just render-main-profile PRECOMPILED="false" KERNEL="linux-lts" HEADERS="true" FAST="true"
+    @just render-main-profile false linux-lts true true
     @echo "Building testing ISO (DKMS) from rendered profile..."
     sudo mkarchiso -v -r -w {{ISO_WORK_DIR}} -o {{ISO_OUT_DIR}} {{TEMP_PROFILE_DIR}}
     @just _cleanup-source {{MAIN_PROFILE_DIR}}
