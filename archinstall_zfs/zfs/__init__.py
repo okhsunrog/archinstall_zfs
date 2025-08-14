@@ -1,4 +1,6 @@
+import contextlib
 import os
+import tempfile
 import time
 from enum import Enum
 from pathlib import Path
@@ -211,6 +213,53 @@ class ZFSEncryption:
                 return password
 
 
+def detect_pool_encryption(pool_name: str) -> bool:
+    """Detect whether a pool is encrypted using an early, ephemeral import.
+
+    Returns True if encryption property is present and not off.
+    Always attempts to unload key and export the pool afterward (best-effort).
+    """
+    try:
+        SysCommand(f"zpool import -fN {pool_name}")
+        out = SysCommand(f"zfs get -H -o value encryption {pool_name}").decode().strip()
+        with contextlib.suppress(SysCallError):
+            SysCommand(f"zfs unload-key {pool_name}")
+        with contextlib.suppress(SysCallError):
+            SysCommand(f"zpool export {pool_name}")
+        return out not in ("-", "off")
+    except SysCallError:
+        return False
+
+
+def verify_pool_passphrase(pool_name: str, password: str) -> bool:
+    """Verify a pool passphrase non-interactively using a temporary key file.
+
+    Returns True on successful load-key, False otherwise. Always attempts to
+    unload key and export the pool and remove the temporary file.
+    """
+    try:
+        SysCommand(f"zpool import -fN {pool_name}")
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as tf:
+            tf.write(password)
+            tf.flush()
+            key_path = Path(tf.name)
+        try:
+            SysCommand(f"chmod 000 {key_path}")
+            SysCommand(f"zfs load-key -L file://{key_path} {pool_name}")
+            return True
+        except SysCallError:
+            return False
+        finally:
+            with contextlib.suppress(Exception):
+                SysCommand(f"zfs unload-key {pool_name}")
+            with contextlib.suppress(Exception):
+                key_path.unlink(missing_ok=True)
+            with contextlib.suppress(Exception):
+                SysCommand(f"zpool export {pool_name}")
+    except SysCallError:
+        return False
+
+
 class ZFSPool:
     """Handles ZFS pool operations"""
 
@@ -252,11 +301,11 @@ class ZFSPool:
             error(f"Failed to create pool: {e!s}")
             raise
 
-    def load_key(self) -> None:
-        """Load encryption key for encrypted pools"""
+    def load_key(self, key_path: Path) -> None:
+        """Load encryption key for encrypted pools (non-interactive)"""
         debug(f"Loading encryption key for pool {self.config.pool_name}")
         try:
-            SysCommand(f"zfs load-key {self.config.pool_name}")
+            SysCommand(f"zfs load-key -L file://{key_path} {self.config.pool_name}")
             info("Pool encryption key loaded successfully")
         except SysCallError as e:
             error(f"Failed to load pool encryption key: {e!s}")
@@ -281,7 +330,7 @@ class ZFSPool:
             SysCommand(f"zpool import -N -R {mountpoint} {self.config.pool_name}")
             info("Pool imported successfully")
             if encryption_handler.password:
-                self.load_key()
+                self.load_key(encryption_handler.key_path)
         except SysCallError as e:
             error(f"Failed to import pool: {e!s}")
             raise
