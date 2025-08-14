@@ -36,7 +36,13 @@ jobs:
     - name: Install system dependencies
       run: |
         pacman -Syu --noconfirm
-        pacman -S --noconfirm archiso git base-devel just rsync grub sudo nodejs uv parted python-pyparted
+        pacman -S --noconfirm archiso base-devel git grub just nodejs parted python-pyparted rsync sudo uv
+
+    - name: Setup Python environment
+      run: |
+        uv venv
+        source .venv/bin/activate
+        uv pip install jinja2
 
     - name: Set kernel for build
       run: |
@@ -50,6 +56,7 @@ jobs:
       if: env.KERNEL == 'linux' || env.KERNEL == 'both'
       run: |
         echo "Building linux kernel ISO..."
+        source .venv/bin/activate
         
         # Try pre-built ZFS first
         if just build-main pre linux; then
@@ -63,6 +70,7 @@ jobs:
       if: env.KERNEL == 'linux-lts' || env.KERNEL == 'both'
       run: |
         echo "Building linux-lts kernel ISO..."
+        source .venv/bin/activate
         
         # Try pre-built ZFS first
         if just build-main pre linux-lts; then

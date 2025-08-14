@@ -107,7 +107,7 @@ render-main-profile PRECOMPILED KERNEL HEADERS FAST:
     @rm -rf {{TEMP_PROFILE_DIR}}
     @ZFS_MODE="precompiled"; if [ "{{PRECOMPILED}}" != "true" ]; then ZFS_MODE="dkms"; fi; \
     FAST_FLAG=""; if [ "{{FAST}}" = "true" ]; then FAST_FLAG="--fast"; fi; \
-    uv run python archinstall_zfs/builder.py --profile-dir {{MAIN_PROFILE_DIR}} --out-dir {{TEMP_PROFILE_DIR}} --kernel "{{KERNEL}}" --zfs "$ZFS_MODE" --headers "{{HEADERS}}" $FAST_FLAG
+    uv run python archinstall_zfs/iso_builder.py --profile-dir {{MAIN_PROFILE_DIR}} --out-dir {{TEMP_PROFILE_DIR}} --kernel "{{KERNEL}}" --zfs "$ZFS_MODE" --headers "{{HEADERS}}" $FAST_FLAG
 
 # Build main ISO (parametric)
 # Usage: just build-main [pre|dkms] [linux|linux-lts|linux-zen]
