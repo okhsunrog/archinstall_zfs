@@ -109,37 +109,44 @@ render-main-profile PRECOMPILED KERNEL HEADERS FAST:
     FAST_FLAG=""; if [ "{{FAST}}" = "true" ]; then FAST_FLAG="--fast"; fi; \
     uv run python archinstall_zfs/builder.py --profile-dir {{MAIN_PROFILE_DIR}} --out-dir {{TEMP_PROFILE_DIR}} --kernel "{{KERNEL}}" --zfs "$ZFS_MODE" --headers "{{HEADERS}}" $FAST_FLAG
 
-# Build the main ISO for production release (precompiled ZFS by default)
-build-main-iso:
+# Build main ISO (parametric)
+# Usage: just build-main [pre|dkms] [linux|linux-lts|linux-zen]
+build-main MODE="pre" KERNEL="linux-lts":
+    @echo "Building main ISO (mode={{MODE}}, kernel={{KERNEL}})"
     @just _prepare-source {{MAIN_PROFILE_DIR}}
-    @just render-main-profile true linux-lts auto false
+    @PRE="true"; HEAD="auto"; if [ "{{MODE}}" = "dkms" ]; then PRE="false"; HEAD="true"; fi; \
+    just render-main-profile $PRE {{KERNEL}} $HEAD false
     @echo "Building main ISO from rendered profile..."
     sudo mkarchiso -v -r -w {{ISO_WORK_DIR}} -o {{ISO_OUT_DIR}} {{TEMP_PROFILE_DIR}}
     @just _cleanup-source {{MAIN_PROFILE_DIR}}
 
-# Build the main ISO using DKMS and headers
-build-main-iso-dkms:
+# Build testing ISO (parametric)
+# Usage: just build-test [pre|dkms] [linux|linux-lts|linux-zen]
+build-test MODE="pre" KERNEL="linux-lts":
+    @echo "Building testing ISO (mode={{MODE}}, kernel={{KERNEL}})"
     @just _prepare-source {{MAIN_PROFILE_DIR}}
-    @just render-main-profile false linux-lts true false
-    @echo "Building main ISO (DKMS) from rendered profile..."
-    sudo mkarchiso -v -r -w {{ISO_WORK_DIR}} -o {{ISO_OUT_DIR}} {{TEMP_PROFILE_DIR}}
-    @just _cleanup-source {{MAIN_PROFILE_DIR}}
-
-# Build the testing ISO for QEMU (precompiled by default)
-build-testing-iso:
-    @just _prepare-source {{MAIN_PROFILE_DIR}}
-    @just render-main-profile true linux-lts auto true
+    @PRE="true"; HEAD="auto"; if [ "{{MODE}}" = "dkms" ]; then PRE="false"; HEAD="true"; fi; \
+    just render-main-profile $PRE {{KERNEL}} $HEAD true
     @echo "Building testing ISO from rendered profile..."
     sudo mkarchiso -v -r -w {{ISO_WORK_DIR}} -o {{ISO_OUT_DIR}} {{TEMP_PROFILE_DIR}}
     @just _cleanup-source {{MAIN_PROFILE_DIR}}
 
-# Build the testing ISO using DKMS and headers
+# Back-compat wrappers (deprecated)
+build-main-iso:
+    @echo "[DEPRECATION] Use: just build-main [pre|dkms] [kernel]"
+    @just build-main pre linux-lts
+
+build-main-iso-dkms:
+    @echo "[DEPRECATION] Use: just build-main [pre|dkms] [kernel]"
+    @just build-main dkms linux-lts
+
+build-testing-iso:
+    @echo "[DEPRECATION] Use: just build-test [pre|dkms] [kernel]"
+    @just build-test pre linux-lts
+
 build-testing-iso-dkms:
-    @just _prepare-source {{MAIN_PROFILE_DIR}}
-    @just render-main-profile false linux-lts true true
-    @echo "Building testing ISO (DKMS) from rendered profile..."
-    sudo mkarchiso -v -r -w {{ISO_WORK_DIR}} -o {{ISO_OUT_DIR}} {{TEMP_PROFILE_DIR}}
-    @just _cleanup-source {{MAIN_PROFILE_DIR}}
+    @echo "[DEPRECATION] Use: just build-test [pre|dkms] [kernel]"
+    @just build-test dkms linux-lts
 
 # List available ISO files
 list-isos:
