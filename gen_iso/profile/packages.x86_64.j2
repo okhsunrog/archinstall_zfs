@@ -1,3 +1,31 @@
+{% if fast_build %}
+base
+{{ kernel }}
+{% if use_precompiled_zfs %}
+archzfs-{{ kernel }}
+zfs-utils
+{% else %}
+zfs-dkms
+zfs-utils
+{% if include_headers %}
+{{ headers }}
+{% endif %}
+{% endif %}
+mkinitcpio
+mkinitcpio-archiso
+openssh
+rsync
+syslinux
+arch-install-scripts
+archinstall
+reflector
+gptfdisk
+python-pyparted
+parted
+dosfstools
+efibootmgr
+cryptsetup
+{% else %}
 alsa-utils
 amd-ucode
 arch-install-scripts
@@ -8,10 +36,8 @@ bind
 bolt
 brltty
 btrfs-progs
-{% if not fast_build %}
 clonezilla
 cloud-init
-{% endif %}
 cryptsetup
 darkhttpd
 ddrescue
@@ -88,9 +114,7 @@ nmap
 ntfs-3g
 nvme-cli
 open-iscsi
-{% if not fast_build %}
 open-vm-tools
-{% endif %}
 openconnect
 openpgp-card-tools
 openssh
@@ -128,9 +152,7 @@ usb_modeswitch
 usbmuxd
 usbutils
 vim
-{% if not fast_build %}
 virtualbox-guest-utils-nox
-{% endif %}
 vpnc
 wireless-regdb
 wireless_tools
@@ -144,5 +166,4 @@ python-pyparted
 git
 curl
 neovim
-
-
+{% endif %}
