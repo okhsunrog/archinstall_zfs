@@ -4,9 +4,9 @@ import argparse
 import os
 import shutil
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
@@ -65,7 +65,9 @@ def render_template(env: Environment, src_file: Path, dst_file: Path, ctx: dict)
     # Convert to template name relative to loader root
     # The loader is rooted at profile_dir; so use relative POSIX path
     # to support Windows path separators if needed.
-    rel_template = src_file.relative_to(Path(env.loader.searchpath[0])).as_posix()  # type: ignore[arg-type]
+    loader = env.loader
+    assert isinstance(loader, FileSystemLoader), "Expected FileSystemLoader"
+    rel_template = src_file.relative_to(Path(loader.searchpath[0])).as_posix()
     template = env.get_template(rel_template)
     rendered: str = template.render(**ctx)
     if rendered.strip() == "":
@@ -90,7 +92,7 @@ def stage_profile(opts: BuildOptions) -> None:
     env = Environment(
         loader=FileSystemLoader(str(src_root)),
         undefined=StrictUndefined,
-        autoescape=False,
+        autoescape=False,  # We're generating shell scripts, not HTML  # noqa: S701
         keep_trailing_newline=True,
         lstrip_blocks=False,
         trim_blocks=False,
@@ -104,7 +106,7 @@ def stage_profile(opts: BuildOptions) -> None:
         dst = dst_root / rel
 
         try:
-            st = src.lstat()
+            src.lstat()
         except FileNotFoundError:
             continue
 
