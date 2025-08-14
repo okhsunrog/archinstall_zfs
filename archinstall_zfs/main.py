@@ -54,15 +54,10 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
         # Merge ZFS config into the same user_configuration.json
         save_combined_configuration(config, config._default_save_path, installer_menu.to_json())
 
-        # Dry-run/silence not currently sourced from ArchConfig; default to normal run
-        if False:
-            sys.exit(0)
-
-        if True:
-            with Tui():
-                if not config.confirm_config():
-                    debug("Installation aborted")
-                    return False
+        with Tui():
+            if not config.confirm_config():
+                debug("Installation aborted")
+                return False
 
         # Perform actual installation
         info("Starting installation...")
