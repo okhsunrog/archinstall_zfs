@@ -45,7 +45,7 @@ fi
 
 # Set default menu entry
 default=archlinux
-timeout=15
+timeout={% if fast_build %}0{% else %}15{% endif %}
 timeout_style=menu
 
 
@@ -53,13 +53,13 @@ timeout_style=menu
 
 menuentry "Arch Linux install medium (%ARCH%, ${archiso_platform})" --class arch --class gnu-linux --class gnu --class os --id 'archlinux' {
     set gfxpayload=keep
-    linux /%INSTALL_DIR%/boot/%ARCH%/vmlinuz-{{ kernel }} archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID%
+    linux /%INSTALL_DIR%/boot/%ARCH%/vmlinuz-{{ kernel }} archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID%{% if fast_build %} console=tty0 console=ttyS0,115200{% endif %}
 initrd /%INSTALL_DIR%/boot/%ARCH%/initramfs-{{ kernel }}.img
 }
 
 menuentry "Arch Linux install medium with speakup screen reader (%ARCH%, ${archiso_platform})" --hotkey s --class arch --class gnu-linux --class gnu --class os --id 'archlinux-accessibility' {
     set gfxpayload=keep
-    linux /%INSTALL_DIR%/boot/%ARCH%/vmlinuz-{{ kernel }} archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID% accessibility=on
+    linux /%INSTALL_DIR%/boot/%ARCH%/vmlinuz-{{ kernel }} archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID% accessibility=on{% if fast_build %} console=tty0 console=ttyS0,115200{% endif %}
 initrd /%INSTALL_DIR%/boot/%ARCH%/initramfs-{{ kernel }}.img
 }
 
