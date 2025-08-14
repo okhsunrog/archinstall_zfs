@@ -37,6 +37,7 @@ from archinstall.tui.result import ResultType
 from archinstall_zfs.initramfs.base import InitramfsHandler
 from archinstall_zfs.initramfs.dracut import DracutInitramfsHandler
 from archinstall_zfs.initramfs.mkinitcpio import MkinitcpioInitramfsHandler
+from archinstall_zfs.kernel import get_kernel_registry
 from archinstall_zfs.menu.models import GlobalConfig, InitSystem, InstallationMode, SwapMode, ZFSEncryptionMode, ZFSModuleMode
 from archinstall_zfs.zfs import detect_pool_encryption, verify_pool_passphrase
 
@@ -223,9 +224,11 @@ class GlobalConfigMenu:
         ).run()
 
         if result.item() and result.item().value:
-            kernel, mode = result.item().value
-            self.config.kernels = [kernel]
-            self.cfg.zfs_module_mode = ZFSModuleMode.PRECOMPILED if mode == "precompiled" else ZFSModuleMode.DKMS
+            value = result.item().value
+            if value is not None and len(value) == 2:
+                kernel, mode = value
+                self.config.kernels = [kernel]
+                self.cfg.zfs_module_mode = ZFSModuleMode.PRECOMPILED if mode == "precompiled" else ZFSModuleMode.DKMS
 
     def _configure_parallel_downloads(self, *_: Any) -> None:
         val = add_number_of_parallel_downloads(self.config.parallel_downloads)
@@ -454,7 +457,9 @@ class GlobalConfigMenu:
             header="Select swap mode",
         ).run()
         if result.item() and result.item().value is not None:
-            self.cfg.swap_mode = result.item().value
+            swap_mode_value = result.item().value
+            if swap_mode_value is not None:
+                self.cfg.swap_mode = swap_mode_value
 
         # If ZRAM, optionally allow size or fraction edit later; for now keep defaults
         if self.cfg.swap_mode == SwapMode.ZRAM:

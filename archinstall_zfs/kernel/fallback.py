@@ -222,25 +222,30 @@ class EnhancedZFSInstaller:
         Returns:
             The name of the detected kernel variant
         """
+        kernel_variant = "linux-lts"  # Safe default
+
         try:
-            kernel_version = SysCommand("uname -r").decode().strip()
+            kernel_version = SysCommand("uname -r").decode().strip().lower()
 
             # Use simple heuristics to detect kernel variant
-            if "lts" in kernel_version.lower():
-                return "linux-lts"
-            if "zen" in kernel_version.lower():
-                return "linux-zen"
-            if "hardened" in kernel_version.lower():
-                return "linux-hardened"
-            if "rt" in kernel_version.lower():
-                if "lts" in kernel_version.lower():
-                    return "linux-rt-lts"
-                return "linux-rt"
-            return "linux"
+            if "lts" in kernel_version:
+                kernel_variant = "linux-lts"
+            elif "zen" in kernel_version:
+                kernel_variant = "linux-zen"
+            elif "hardened" in kernel_version:
+                kernel_variant = "linux-hardened"
+            elif "rt" in kernel_version:
+                if "lts" in kernel_version:
+                    kernel_variant = "linux-rt-lts"
+                else:
+                    kernel_variant = "linux-rt"
+            else:
+                kernel_variant = "linux"
 
         except Exception as e:
             warn(f"Failed to detect running kernel variant: {e}")
-            return "linux-lts"  # Safe default
+
+        return kernel_variant
 
     def get_recommended_configuration(self) -> tuple[str, ZFSModuleMode]:
         """Get recommended kernel and ZFS mode configuration.
@@ -248,19 +253,21 @@ class EnhancedZFSInstaller:
         Returns:
             Tuple of (kernel_name, zfs_mode) representing the recommended configuration
         """
+        kernel_name = "linux-lts"
+        zfs_mode = ZFSModuleMode.PRECOMPILED
+
         # Try to detect running kernel first
         running_kernel = self.detect_running_kernel_variant()
         variant = self.kernel_registry.get_variant(running_kernel)
 
         if variant:
-            recommended_mode = self.fallback_strategy.get_recommended_mode(variant)
-            return running_kernel, recommended_mode
+            kernel_name = running_kernel
+            zfs_mode = self.fallback_strategy.get_recommended_mode(variant)
+        else:
+            # Fall back to default variant
+            default_variant = self.kernel_registry.get_default_variant()
+            if default_variant:
+                kernel_name = default_variant.name
+                zfs_mode = self.fallback_strategy.get_recommended_mode(default_variant)
 
-        # Fall back to default variant
-        default_variant = self.kernel_registry.get_default_variant()
-        if default_variant:
-            recommended_mode = self.fallback_strategy.get_recommended_mode(default_variant)
-            return default_variant.name, recommended_mode
-
-        # Ultimate fallback
-        return "linux-lts", ZFSModuleMode.PRECOMPILED
+        return kernel_name, zfs_mode
