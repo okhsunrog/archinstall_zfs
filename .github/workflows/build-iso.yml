@@ -36,7 +36,7 @@ jobs:
     - name: Install system dependencies
       run: |
         pacman -Syu --noconfirm
-        pacman -S --noconfirm archiso git base-devel just rsync grub sudo nodejs uv
+        pacman -S --noconfirm archiso git base-devel just rsync grub sudo nodejs uv parted python-pyparted
 
     - name: Set kernel for build
       run: |
