@@ -262,6 +262,9 @@ just ssh-only
    - zrepl support: guided setup for backup/replication
    - Archinstall language selection in the menu
 
+3. User Experience Improvements
+   - [Proactive DKMS compatibility validation](docs/TODO_PROACTIVE_DKMS_VALIDATION.md) - Prevent kernel/ZFS compatibility issues before they occur
+
 ## Contributing 🤝
 
 Issues and PRs are welcome. Typical flow: fork → branch → PR.
