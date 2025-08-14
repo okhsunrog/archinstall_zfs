@@ -1,6 +1,7 @@
 import contextlib
 import re
 import tempfile
+import time
 from pathlib import Path
 from shutil import which
 from typing import Any, cast
@@ -8,6 +9,51 @@ from typing import Any, cast
 from archinstall import debug, error, info, warn
 from archinstall.lib.exceptions import SysCallError
 from archinstall.lib.general import SysCommand
+
+
+def _service_substate(name: str) -> str:
+    """Return systemd SubState for a unit, mirroring archinstall's check.
+
+    Accepts plain unit base name (e.g. "reflector") and appends .service by default.
+    """
+    if not name.endswith((".service", ".target", ".timer")):
+        name += ".service"
+    return cast(
+        str,
+        SysCommand(
+            f"systemctl show --no-pager -p SubState --value {name}",
+            environment_vars={"SYSTEMD_COLORS": "0"},
+        ).decode(),
+    )
+
+
+def wait_for_reflector_to_finish() -> None:
+    """Block until reflector has reached a finished state.
+
+    Finished states follow archinstall's logic: 'dead', 'failed', or 'exited'.
+    """
+    info("Waiting for automatic mirror selection (reflector) to complete.")
+    while _service_substate("reflector") not in ("dead", "failed", "exited"):
+        time.sleep(1)
+
+
+def stop_reflector_units() -> None:
+    """Stop reflector service and timer to keep it inactive during installation."""
+    for unit in ("reflector.service", "reflector.timer"):
+        with contextlib.suppress(SysCallError):
+            SysCommand(f"systemctl stop {unit}", peek_output=True)
+    info("Ensured reflector.service and reflector.timer are stopped")
+
+
+def ensure_reflector_finished_and_stopped() -> None:
+    """Wait for reflector to finish, then stop it and its timer.
+
+    This keeps reflector inactive and avoids it racing with repository/mirror changes.
+    """
+    with contextlib.suppress(Exception):
+        wait_for_reflector_to_finish()
+    with contextlib.suppress(Exception):
+        stop_reflector_units()
 
 
 def check_zfs_module() -> bool:
@@ -32,6 +78,9 @@ def initialize_zfs() -> None:
     - Otherwise, add archzfs repo and install precompiled or DKMS fallback
     - Finally, load the module
     """
+    # Make reflector behavior simple and robust: wait for completion, then stop it
+    ensure_reflector_finished_and_stopped()
+
     if check_zfs_module() and check_zfs_utils():
         info("ZFS already available on host")
         return
@@ -182,58 +231,6 @@ class ZFSInitializer:
         self._mirrorlist_path: Path = Path("/etc/pacman.d/mirrorlist")
         self._mirrorlist_backup: str | None = self._mirrorlist_path.read_text() if self._mirrorlist_path.exists() else None
         self._archive_set: bool = False
-        # Reflector service state tracking
-        self._reflector_changed: bool = False
-        self._reflector_was_active: bool = False
-        self._reflector_was_enabled: bool = False
-
-    def _is_service_active(self, name: str) -> bool:
-        try:
-            SysCommand(f"systemctl is-active --quiet {name}")
-            return True
-        except SysCallError:
-            return False
-
-    def _is_service_enabled(self, name: str) -> bool:
-        try:
-            SysCommand(f"systemctl is-enabled --quiet {name}")
-            return True
-        except SysCallError:
-            return False
-
-    def _stop_reflector_for_archive(self) -> None:
-        """Stop/disable reflector while we pin mirrorlist to the Archive.
-
-        Saves original state so we can restore later.
-        """
-        try:
-            self._reflector_was_active = self._is_service_active("reflector.service")
-            self._reflector_was_enabled = self._is_service_enabled("reflector.service")
-            # Disable and stop to avoid auto-restart loops during repo pinning/downgrade
-            SysCommand("systemctl disable --now reflector.service", peek_output=True)
-            SysCommand("systemctl reset-failed reflector.service", peek_output=True)
-            self._reflector_changed = True
-            info("Temporarily disabled reflector.service during Archive pinning")
-        except Exception as e:
-            warn(f"Failed to disable reflector.service: {e!s}")
-
-    def _restore_reflector(self) -> None:
-        if not self._reflector_changed:
-            return
-        try:
-            # Restore previous enabled/active state
-            if self._reflector_was_enabled:
-                SysCommand("systemctl enable reflector.service", peek_output=True)
-            else:
-                # Ensure it's not enabled if it wasn't
-                SysCommand("systemctl disable reflector.service", peek_output=True)
-            if self._reflector_was_active:
-                SysCommand("systemctl start reflector.service", peek_output=True)
-            else:
-                SysCommand("systemctl stop reflector.service", peek_output=True)
-            info("Restored reflector.service to previous state")
-        except Exception as e:
-            warn(f"Failed to restore reflector.service: {e!s}")
 
     def _get_running_kernel_version(self) -> str:
         return cast(str, SysCommand("uname -r").decode().strip())
@@ -270,8 +267,8 @@ class ZFSInitializer:
             archive_url = f"https://archive.archlinux.org/repos/{archive_date}/"
             info(f"Using Archlinux Archive date: {archive_date}")
 
-            # Stop reflector while we pin mirrorlist and downgrade to the archive snapshot
-            self._stop_reflector_for_archive()
+            # Ensure reflector is finished and stopped before pinning mirrorlist
+            ensure_reflector_finished_and_stopped()
 
             # Force mirrorlist to archive and full downgrade/upgrade to that snapshot
             mirrorlist_content = f"Server={archive_url}$repo/os/$arch\n"
@@ -294,45 +291,7 @@ class ZFSInitializer:
                 info("Restored current repositories")
             except Exception as e:
                 warn(f"Failed to restore mirrorlist: {e!s}")
-        # Regardless of archive pin, restore reflector if we changed it
-        self._restore_reflector()
-
-    def _finalize_reflector_and_mirrors(self) -> None:
-        """Best-effort guard to exit with sane mirrorlist and reflector state.
-
-        This is called after normal restoration to cover edge cases where the
-        process was interrupted mid-way or network flakiness left the service
-        in a failed state. It avoids changing the user's preferences unless we
-        explicitly altered them earlier in this run.
-        """
-        try:
-            # If mirrorlist still points at the Archive unexpectedly and we have
-            # a backup, restore it and resync databases.
-            try:
-                current_ml = self._mirrorlist_path.read_text()
-            except Exception:
-                current_ml = ""
-
-            if "archive.archlinux.org/repos/" in current_ml and self._mirrorlist_backup:
-                info("Detected Archive mirrorlist still active; restoring backup")
-                try:
-                    self._mirrorlist_path.write_text(self._mirrorlist_backup)
-                    SysCommand("pacman -Syy --noconfirm", peek_output=True)
-                except Exception as e:
-                    warn(f"Failed to restore backup mirrorlist: {e!s}")
-
-            # Clear failed state and attempt to return reflector to its previous state
-            with contextlib.suppress(Exception):
-                SysCommand("systemctl reset-failed reflector.service", peek_output=True)
-
-            # If we changed reflector earlier, we already tried to restore it.
-            # As an extra safety, if it was previously active, try to restart it
-            # to avoid lingering 'failed' status in logs.
-            if self._reflector_was_active:
-                with contextlib.suppress(Exception):
-                    SysCommand("systemctl try-restart reflector.service", peek_output=True)
-        except Exception as e:
-            warn(f"Finalization of mirrors/reflector encountered an issue: {e!s}")
+        # Intentionally keep reflector stopped; no restart attempts here
 
     def extract_pkginfo(self, package_path: Path) -> str:
         pkginfo = SysCommand(f"bsdtar -qxO -f {package_path} .PKGINFO").decode()
@@ -450,9 +409,7 @@ class ZFSInitializer:
         finally:
             # Always attempt to restore mirrorlist so pacstrap uses stock repos
             self._restore_archive_mirrorlist()
-            # And best-effort ensure reflector/mirrorlist are in a sane state
-            with contextlib.suppress(Exception):
-                self._finalize_reflector_and_mirrors()
+            # Keep reflector stopped; do not try to restart it
 
     def search_zfs_package(self, package_name: str, version: str) -> tuple[str, str] | None:
         urls = ["https://github.com/archzfs/archzfs/releases/download/experimental/"]
