@@ -210,7 +210,7 @@ qemu-install:
         exit 1; \
       fi; \
       echo "Using testing ISO: $ISO_PATH"; \
-      {{QEMU_SCRIPT}} -i "$ISO_PATH" -D {{DISK_IMAGE}} -U {{UEFI_VARS}} -f
+    {{QEMU_SCRIPT}} -i "$ISO_PATH" -D {{DISK_IMAGE}} -U {{UEFI_VARS}}
 
 # Install Arch Linux in QEMU with serial console from the generated testing ISO
 qemu-install-serial:
@@ -222,7 +222,7 @@ qemu-install-serial:
         exit 1; \
       fi; \
       echo "Using testing ISO: $ISO_PATH"; \
-      {{QEMU_SCRIPT}} -i "$ISO_PATH" -D {{DISK_IMAGE}} -U {{UEFI_VARS}} -S -f
+      {{QEMU_SCRIPT}} -i "$ISO_PATH" -D {{DISK_IMAGE}} -U {{UEFI_VARS}} -S
 
 # Run existing Arch Linux installation in QEMU with GUI
 qemu-run:
