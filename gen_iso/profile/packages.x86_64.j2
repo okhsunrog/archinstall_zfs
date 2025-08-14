@@ -78,6 +78,10 @@ libusb-compat
 {{ kernel }}
 linux-atm
 linux-firmware
+{% if kernel == "linux" %}
+broadcom-wl
+b43-fwcutter
+{% endif %}
 {% if use_precompiled_zfs %}
 archzfs-{{ kernel }}
 zfs-utils
