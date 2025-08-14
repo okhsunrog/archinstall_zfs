@@ -1,6 +1,6 @@
 [project]
 name = "archinstall-zfs"
-version = "0.2.1"
+version = "0.2.2"
 description = "ZFS support for Arch Linux installer"
 authors = [
     {name = "okhsunrog", email = "me@okhsunrog.dev"}

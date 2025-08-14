@@ -88,7 +88,7 @@ _prepare-source PROFILE_DIR:
     @rsync -a --exclude='.git' --exclude='__pycache__' --exclude='.pytest_cache' \
         --exclude='.mypy_cache' --exclude='.ruff_cache' --exclude='build' \
         --exclude='dist' --exclude='*.egg-info' --exclude='gen_iso' \
-        --exclude='tests' archinstall_zfs/ {{PROFILE_DIR}}/airootfs/root/archinstall_zfs/
+        --exclude='tests' archinstall_zfs {{PROFILE_DIR}}/airootfs/root/archinstall_zfs/
     @cp pyproject.toml README.md LICENSE {{PROFILE_DIR}}/airootfs/root/archinstall_zfs/
     @echo '#!/bin/bash' > {{PROFILE_DIR}}/airootfs/root/installer
     @echo 'set -euo pipefail' >> {{PROFILE_DIR}}/airootfs/root/installer
@@ -194,12 +194,15 @@ qemu-run-serial:
 
 # Sync source code and SSH into running QEMU VM
 ssh:
-    @echo "Syncing archinstall_zfs source code to VM..."
+    @echo "Syncing archinstall_zfs repo to VM (incremental, in-place)..."
+    @ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost -p 2222 "mkdir -p /root/archinstall_zfs/archinstall_zfs"
     @if rsync -av --delete -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222" \
         --exclude='.git' --exclude='__pycache__' --exclude='.pytest_cache' \
         --exclude='.mypy_cache' --exclude='.ruff_cache' --exclude='build' \
         --exclude='dist' --exclude='*.egg-info' --exclude='gen_iso' \
-        --exclude='tests' archinstall_zfs/ root@localhost:/root/archinstall_zfs/ 2>/dev/null; then \
+        --exclude='tests' archinstall_zfs/ root@localhost:/root/archinstall_zfs/archinstall_zfs/ 2>/dev/null \
+        && rsync -av -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222" \
+        pyproject.toml README.md LICENSE root@localhost:/root/archinstall_zfs/ 2>/dev/null; then \
         echo "Source code synced with rsync!"; \
     else \
         echo "rsync not available in VM, using scp fallback..."; \
@@ -210,10 +213,10 @@ ssh:
 
 # Sync source code using scp (fallback when rsync not available)
 ssh-scp:
-    @echo "Syncing source code using scp..."
-    @ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost -p 2222 "rm -rf /root/archinstall_zfs_new"
-    scp -r -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P 2222 archinstall_zfs root@localhost:/root/archinstall_zfs_new
-    @ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost -p 2222 "rm -rf /root/archinstall_zfs && mv /root/archinstall_zfs_new /root/archinstall_zfs"
+    @echo "Syncing source code using scp (in-place)..."
+    @ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost -p 2222 "mkdir -p /root/archinstall_zfs/archinstall_zfs"
+    scp -r -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P 2222 archinstall_zfs/* root@localhost:/root/archinstall_zfs/archinstall_zfs/
+    scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P 2222 pyproject.toml README.md LICENSE root@localhost:/root/archinstall_zfs/
 
 # SSH into running QEMU VM without syncing source code
 ssh-only:
