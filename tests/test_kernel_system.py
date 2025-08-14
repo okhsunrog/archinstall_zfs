@@ -332,9 +332,11 @@ class TestEnhancedZFSInstaller:
 
     def test_validate_installation_plan(self) -> None:
         """Test installation plan validation."""
-        # Valid plan should have no errors
-        errors = self.installer.validate_installation_plan("linux-lts", ZFSModuleMode.PRECOMPILED)
-        assert len(errors) == 0
+        # Mock package availability to simulate a working environment
+        with patch.object(self.installer.package_manager, "verify_packages_available", return_value=True):
+            # Valid plan should have no errors
+            errors = self.installer.validate_installation_plan("linux-lts", ZFSModuleMode.PRECOMPILED)
+            assert len(errors) == 0
 
         # Invalid kernel should have errors
         errors = self.installer.validate_installation_plan("linux-nonexistent", ZFSModuleMode.PRECOMPILED)

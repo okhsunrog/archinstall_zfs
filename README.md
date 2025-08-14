@@ -82,6 +82,27 @@ This path takes a bit longer because it installs ZFS modules on the fly. The pre
 
 See [KERNEL_ARCHITECTURE.md](docs/KERNEL_ARCHITECTURE.md) for detailed technical information.
 
+## Troubleshooting 🔧
+
+### ZFS Package Dependency Issues
+
+If you encounter an error like this during installation:
+
+```
+warning: cannot resolve "linux-lts=6.12.41-1", a dependency of "zfs-linux-lts"
+:: The following package cannot be upgraded due to unresolvable dependencies:
+      zfs-linux-lts
+
+:: Do you want to skip the above package for this upgrade? [y/N] 
+error: failed to prepare transaction (could not satisfy dependencies)
+:: unable to satisfy dependency 'linux-lts=6.12.41-1' required by zfs-linux-lts
+==> ERROR: Failed to install packages to new root
+```
+
+**What's happening:** The precompiled ZFS package for your kernel version isn't available or compatible with the current kernel.
+
+**Solution:** Press `N` when prompted. The installer will automatically detect this issue and switch to the DKMS fallback path, which will install ZFS using DKMS instead of the precompiled package. This ensures your installation continues successfully while maintaining kernel consistency.
+
 ## Swap options
 
 - **No swap**: Skip configuring swap.
