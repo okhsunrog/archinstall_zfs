@@ -68,8 +68,6 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
         info("Starting installation...")
 
         # Build managers and perform disk/ZFS preparation now (after confirm)
-        print("Preparing live system for ZFS support (this may take a minute)...")
-        initialize_zfs()
         # Installation mode comes from the menu's config (use enum directly)
         assert installer_menu.cfg.installation_mode is not None
         mode = installer_menu.cfg.installation_mode
@@ -375,6 +373,7 @@ def main() -> bool:
 
     # Pre-initialize ZFS (tools + kernel module) before launching the menu
     try:
+        print("Preparing live system for ZFS support (this may take a minute)...")
         initialize_zfs()
     except Exception as e:
         error(f"Failed to initialize ZFS on live system: {e!s}")
