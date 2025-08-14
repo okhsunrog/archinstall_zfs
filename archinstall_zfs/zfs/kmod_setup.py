@@ -2,6 +2,7 @@ import contextlib
 import re
 import tempfile
 from pathlib import Path
+from shutil import which
 from typing import Any, cast
 
 from archinstall import debug, error, info, warn
@@ -21,12 +22,7 @@ def check_zfs_module() -> bool:
 
 def check_zfs_utils() -> bool:
     """Return True if zfs/zpool utilities are available on the host."""
-    try:
-        SysCommand("command -v zpool")
-        SysCommand("command -v zfs")
-        return True
-    except SysCallError:
-        return False
+    return bool(which("zpool") and which("zfs"))
 
 
 def initialize_zfs() -> None:

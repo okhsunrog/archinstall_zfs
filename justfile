@@ -91,8 +91,10 @@ _prepare-source PROFILE_DIR:
         --exclude='tests' archinstall_zfs/ {{PROFILE_DIR}}/airootfs/root/archinstall_zfs/
     @cp pyproject.toml README.md LICENSE {{PROFILE_DIR}}/airootfs/root/archinstall_zfs/
     @echo '#!/bin/bash' > {{PROFILE_DIR}}/airootfs/root/installer
-    @echo 'export PYTHONPATH="/root:$PYTHONPATH"' >> {{PROFILE_DIR}}/airootfs/root/installer
-    @echo 'python -m archinstall_zfs' >> {{PROFILE_DIR}}/airootfs/root/installer
+    @echo 'set -euo pipefail' >> {{PROFILE_DIR}}/airootfs/root/installer
+    @echo 'cd /root/archinstall_zfs' >> {{PROFILE_DIR}}/airootfs/root/installer
+    @echo 'exec python -m archinstall_zfs' >> {{PROFILE_DIR}}/airootfs/root/installer
+    @chmod +x {{PROFILE_DIR}}/airootfs/root/installer
 
 # Clean up source code copy
 _cleanup-source PROFILE_DIR:

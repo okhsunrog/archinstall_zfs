@@ -28,7 +28,7 @@ Requirements: UEFI firmware and internet connectivity (both are validated by the
 ```bash
 ./installer
 # or
-cd archinstall_zfs && python -m archinstall_zfs
+cd /root/archinstall_zfs && python -m archinstall_zfs
 ```
 
 Notes:
@@ -132,8 +132,8 @@ The testing ISO is tuned for fast iterations: instant boot, auto‑login as root
 ### Inside the ISO
 
 ```bash
-./installer           # Shortcut wrapper
-python -m archinstall_zfs
+./installer           # Shortcut wrapper (cds into /root/archinstall_zfs)
+cd /root/archinstall_zfs && python -m archinstall_zfs
 ```
 
 The source is available at `/root/archinstall_zfs` in both ISO profiles.
