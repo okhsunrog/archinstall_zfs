@@ -7,12 +7,15 @@ ZFS-specific configuration, allowing for better maintainability and version inde
 
 import re
 import sys
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from archinstall.lib.applications.application_menu import ApplicationMenu
 from archinstall.lib.args import ArchConfig
 from archinstall.lib.authentication.authentication_menu import AuthenticationMenu
+from archinstall.lib.exceptions import SysCallError
+from archinstall.lib.general import SysCommand
 from archinstall.lib.interactions.general_conf import (
     add_number_of_parallel_downloads,
     ask_additional_packages_to_install,
@@ -35,6 +38,7 @@ from archinstall_zfs.initramfs.base import InitramfsHandler
 from archinstall_zfs.initramfs.dracut import DracutInitramfsHandler
 from archinstall_zfs.initramfs.mkinitcpio import MkinitcpioInitramfsHandler
 from archinstall_zfs.menu.models import GlobalConfig, InitSystem, InstallationMode, SwapMode, ZFSEncryptionMode, ZFSModuleMode
+from archinstall_zfs.zfs import detect_pool_encryption, verify_pool_passphrase
 
 
 class GlobalConfigMenu:
@@ -92,31 +96,16 @@ class GlobalConfigMenu:
             MenuItem(text=tr("Additional packages"), preview_action=self._preview_packages, key="packages"),
             # Separator
             MenuItem(text=""),
-            # ZFS-specific options
+            # Storage & ZFS wizard
             MenuItem(
-                text="ZFS Configuration",
-                preview_action=self._preview_zfs_configuration,
-                key="zfs_config",
-            ),
-            MenuItem(
-                text="Installation Mode",
-                preview_action=self._preview_installation_mode,
-                key="install_mode",
-            ),
-            MenuItem(
-                text="Disk Configuration",
-                preview_action=self._preview_disk_configuration,
-                key="disk_config",
+                text="Storage & ZFS (Wizard)",
+                preview_action=self._preview_wizard_line,
+                key="storage_wizard",
             ),
             MenuItem(
                 text="Init System",
                 preview_action=lambda _: f"Init system: {self.cfg.init_system.value}",
                 key="init_system",
-            ),
-            MenuItem(
-                text="Swap",
-                preview_action=self._preview_swap,
-                key="swap",
             ),
             # Separator
             MenuItem(text=""),
@@ -162,12 +151,9 @@ class GlobalConfigMenu:
             "timezone": self._configure_timezone,
             "ntp": self._configure_ntp,
             "packages": self._configure_packages,
-            "zfs_config": self._configure_zfs_configuration,
-            "install_mode": self._configure_installation_mode,
-            "disk_config": self._configure_disk_configuration,
+            "storage_wizard": self.run_storage_wizard,
             "pool_name": self._configure_pool_name,
             "init_system": self._configure_init_system,
-            "swap": self._configure_swap,
         }
         handler = handlers.get(choice)
         if handler:
@@ -352,13 +338,16 @@ class GlobalConfigMenu:
             # Partitions will be derived during full-disk partitioning
             return
 
-        # For new/existing pool, we need an EFI partition and optionally ZFS partition (new pool)
-        if not self._configure_disk_by_id():
-            return
-        if not self._configure_efi_partition_by_id():
-            return
         if mode is InstallationMode.NEW_POOL:
+            # For new pool, we need the disk, EFI partition, and ZFS partition
+            if not self._configure_disk_by_id():
+                return
+            if not self._configure_efi_partition_by_id():
+                return
             self._configure_zfs_partition_by_id()
+        else:
+            # EXISTING_POOL: only require EFI partition selection
+            self._configure_efi_partition_by_id()
 
     def _configure_pool_name(self, *_: Any) -> None:
         result = EditMenu(
@@ -615,8 +604,262 @@ class GlobalConfigMenu:
             return (
                 f"Disk: {self.cfg.disk_by_id or 'Not set'}; EFI: {self.cfg.efi_partition_by_id or 'Not set'}; ZFS: {self.cfg.zfs_partition_by_id or 'Not set'}"
             )
-        # The only remaining valid enum value is EXISTING_POOL
-        return f"Disk: {self.cfg.disk_by_id or 'Not set'}; EFI: {self.cfg.efi_partition_by_id or 'Not set'}"
+        # EXISTING_POOL summary shows only EFI
+        return f"EFI: {self.cfg.efi_partition_by_id or 'Not set'}"
+
+    def _preview_wizard_line(self, *_: Any) -> str:
+        mode = self.cfg.installation_mode.value if self.cfg.installation_mode else "not_set"
+        efi = self.cfg.efi_partition_by_id or "-"
+        pool = self.cfg.pool_name or "-"
+        prefix = self.cfg.dataset_prefix or "-"
+        swap = self.cfg.swap_mode.value if self.cfg.swap_mode else "none"
+        return f"Mode: {mode}; EFI: {efi}; Pool: {pool}; Prefix: {prefix}; Swap: {swap}"
+
+    # --- Wizard flow ---
+    def run_storage_wizard(self) -> None:
+        """Run the gated Storage & ZFS wizard."""
+        # Store original configuration to allow discarding changes
+        original_config = deepcopy(self.cfg)
+
+        while True:
+            summary = self._preview_wizard_line(None)
+            items = [
+                MenuItem("1) Installation Mode", "mode", key="w_mode"),
+                MenuItem("2) Disks/Partitions", "disks", key="w_disks"),
+                MenuItem("3) Swap", "swap", key="w_swap"),
+                MenuItem("4) ZFS specifics", "zfs", key="w_zfs"),
+                MenuItem("5) Summary & Confirm", "summary", key="w_summary"),
+                MenuItem("Back", "back", key="w_back"),
+            ]
+
+            menu = SelectMenu(MenuItemGroup(items), header=f"Storage & ZFS Wizard\n{summary}")
+            res = menu.run()
+            if not res.item():
+                # User cancelled - discard changes
+                self.cfg = original_config
+                return
+            choice = res.item().value
+            if choice == "mode":
+                self._wizard_step_mode()
+            elif choice == "disks":
+                self._wizard_step_disks()
+            elif choice == "swap":
+                self._wizard_step_swap()
+            elif choice == "zfs":
+                self._wizard_step_zfs()
+            elif choice == "summary":
+                if self._wizard_step_summary():
+                    # User confirmed - keep changes
+                    return
+            elif choice == "back":
+                # User chose back - discard changes
+                self.cfg = original_config
+                return
+
+    def _mode_change_reset(self) -> None:
+        """Clear incompatible fields on mode change."""
+        self.cfg.disk_by_id = None
+        self.cfg.efi_partition_by_id = None
+        self.cfg.zfs_partition_by_id = None
+        # Swap-specific selections
+        self.cfg.swap_partition_size = None
+        self.cfg.swap_partition_by_id = None
+
+    def _wizard_step_mode(self) -> None:
+        prev = self.cfg.installation_mode
+        self._configure_installation_mode()
+        if prev is not self.cfg.installation_mode:
+            self._mode_change_reset()
+
+    def _wizard_step_disks(self) -> None:
+        self._configure_disk_configuration()
+
+    def _wizard_step_swap(self) -> None:
+        self._configure_swap()
+
+    def _is_zfs_step_ready(self) -> tuple[bool, str | None, str | None]:
+        mode = self.cfg.installation_mode
+        ok: bool = True
+        msg: str | None = None
+        jump: str | None = None
+
+        if not mode:
+            ok, msg, jump = False, "Select an installation mode first.", "mode"
+        elif mode is InstallationMode.FULL_DISK:
+            if not self.cfg.disk_by_id:
+                ok, msg, jump = False, "Select a target disk before configuring ZFS (Full Disk).", "disks"
+            elif self.cfg.swap_mode in {SwapMode.ZSWAP_PARTITION, SwapMode.ZSWAP_PARTITION_ENCRYPTED} and not self.cfg.swap_partition_size:
+                ok, msg, jump = False, "Enter swap size for ZSWAP partition (Full Disk).", "swap"
+        elif mode is InstallationMode.NEW_POOL:
+            if not self.cfg.disk_by_id:
+                ok, msg, jump = False, "Select a target disk (New Pool).", "disks"
+            elif not self.cfg.efi_partition_by_id:
+                ok, msg, jump = False, "Select an EFI partition (New Pool).", "disks"
+            elif not self.cfg.zfs_partition_by_id:
+                ok, msg, jump = False, "Select a ZFS partition (New Pool).", "disks"
+            elif self.cfg.swap_mode in {SwapMode.ZSWAP_PARTITION, SwapMode.ZSWAP_PARTITION_ENCRYPTED} and not self.cfg.swap_partition_by_id:
+                ok, msg, jump = False, "Select a swap partition for ZSWAP mode (New Pool).", "swap"
+        elif not self.cfg.efi_partition_by_id:  # EXISTING_POOL
+            ok, msg, jump = False, "Select an EFI partition (Existing Pool).", "disks"
+        elif self.cfg.swap_mode in {SwapMode.ZSWAP_PARTITION, SwapMode.ZSWAP_PARTITION_ENCRYPTED} and not self.cfg.swap_partition_by_id:
+            ok, msg, jump = False, "Select a swap partition for ZSWAP mode (Existing Pool).", "swap"
+        return ok, msg, jump
+
+    def _discover_importable_pools(self) -> list[str]:
+        try:
+            out = SysCommand("zpool import").decode()
+        except Exception:
+            return []
+        names: list[str] = []
+        for ln in out.splitlines():
+            text = ln.strip()
+            if text.startswith("pool: "):
+                names.append(text.split("pool: ", 1)[1].strip())
+        return names
+
+    def _validate_dataset_prefix_available(self, pool: str, prefix: str) -> bool:
+        base = f"{pool}/{prefix}"
+        try:
+            SysCommand(f"zfs list {base}")
+            # Command succeeded -> dataset exists
+            SelectMenu(MenuItemGroup([MenuItem("OK", None)]), header=f"Dataset {base} already exists. Choose another prefix.").run()
+            return False
+        except SysCallError:
+            return True
+        except Exception:
+            # Tools may be unavailable; accept and continue
+            return True
+
+    def _wizard_step_zfs(self) -> None:
+        ok, msg, jump = self._is_zfs_step_ready()
+        if not ok:
+            hdr = f"{msg}\nPress Enter to configure {jump} now."
+            SelectMenu(MenuItemGroup([MenuItem("OK", None)]), header=hdr).run()
+            if jump == "mode":
+                self._wizard_step_mode()
+            elif jump == "disks":
+                self._wizard_step_disks()
+            else:
+                self._wizard_step_swap()
+            return
+
+        mode = self.cfg.installation_mode
+        if mode is InstallationMode.EXISTING_POOL:
+            # Pool selection with Refresh and Manual entry
+            while True:
+                pools = self._discover_importable_pools()
+                items = [MenuItem(p, p) for p in pools]
+                items.extend([MenuItem("Refresh", "__refresh__"), MenuItem("Enter manually", "__manual__")])
+                focus = None
+                if self.cfg.pool_name:
+                    for it in items:
+                        if it.value == self.cfg.pool_name:
+                            focus = it
+                            break
+                sel = SelectMenu(MenuItemGroup(items, focus_item=focus) if focus else MenuItemGroup(items), header="Select importable ZFS pool").run()
+                if not sel.item():
+                    return
+                val = sel.item().value
+                if val == "__refresh__":
+                    continue
+                if val == "__manual__":
+                    inp = EditMenu("Pool name", header="Enter ZFS pool name").input()
+                    if inp.text():
+                        self.cfg.pool_name = inp.text()
+                        break
+                else:
+                    self.cfg.pool_name = val
+                    break
+
+            assert self.cfg.pool_name is not None
+            pool = self.cfg.pool_name
+
+            # Detect encryption and verify passphrase if needed
+            if detect_pool_encryption(pool):
+                while True:
+                    pw = EditMenu("ZFS Passphrase", header="Enter pool passphrase", hide_input=True).input().text()
+                    if not pw:
+                        # allow cancel
+                        break
+                    if verify_pool_passphrase(pool, pw):
+                        self.cfg.zfs_encryption_mode = ZFSEncryptionMode.POOL
+                        self.cfg.zfs_encryption_password = pw
+                        break
+                    SelectMenu(MenuItemGroup([MenuItem("OK", None)]), header="Passphrase verification failed. Try again.").run()
+            else:
+                choice = SelectMenu(
+                    MenuItemGroup([MenuItem("Yes - Encrypt new base dataset", True), MenuItem("No - Skip encryption", False)]),
+                    header="Encrypt the new base dataset?",
+                ).run()
+                if choice.item() and choice.item().value:
+                    while True:
+                        pw1 = EditMenu("ZFS Encryption Password", header="Enter password", hide_input=True).input().text()
+                        if not pw1:
+                            break
+                        pw2 = EditMenu("Verify Password", header="Enter again", hide_input=True).input().text()
+                        if pw1 == pw2:
+                            self.cfg.zfs_encryption_mode = ZFSEncryptionMode.DATASET
+                            self.cfg.zfs_encryption_password = pw1
+                            break
+
+            # Dataset prefix with availability validation
+            while True:
+                inp = EditMenu("Dataset Prefix", header="Enter dataset prefix (alphanumeric)", default_text=self.cfg.dataset_prefix).input()
+                if not inp.text():
+                    break
+                prefix = inp.text()
+                if not prefix.isalnum():
+                    SelectMenu(MenuItemGroup([MenuItem("OK", None)]), header="Prefix must be alphanumeric.").run()
+                    continue
+                if self._validate_dataset_prefix_available(pool, prefix):
+                    self.cfg.dataset_prefix = prefix
+                    break
+
+        else:
+            # NEW_POOL or FULL_DISK: ask for pool name, dataset prefix, and encryption
+            # Pool name
+            while True:
+                inp = EditMenu("ZFS Pool Name", header="Enter alphanumeric pool name", default_text=self.cfg.pool_name or "zroot").input()
+                if not inp.text():
+                    break
+                name = inp.text()
+                if not name.isalnum():
+                    SelectMenu(MenuItemGroup([MenuItem("OK", None)]), header="Pool name must be alphanumeric.").run()
+                    continue
+                self.cfg.pool_name = name
+                break
+
+            # Dataset prefix
+            while True:
+                inp = EditMenu("Dataset Prefix", header="Enter dataset prefix (alphanumeric)", default_text=self.cfg.dataset_prefix).input()
+                if not inp.text():
+                    break
+                prefix = inp.text()
+                if not prefix.isalnum():
+                    SelectMenu(MenuItemGroup([MenuItem("OK", None)]), header="Prefix must be alphanumeric.").run()
+                    continue
+                self.cfg.dataset_prefix = prefix
+                break
+
+            # Encryption
+            self._configure_zfs_encryption()
+
+    def _wizard_step_summary(self) -> bool:
+        """Show a compact summary and confirm."""
+        # Reuse model validation
+        errs = self.cfg.validate_for_install()
+        if errs:
+            hdr = "Configuration errors:\n" + "\n".join(f"• {e}" for e in errs)
+            SelectMenu(MenuItemGroup([MenuItem("OK", None)]), header=hdr).run()
+            return False
+        lines = [
+            self._preview_installation_mode(None) or "",
+            self._preview_disk_configuration(None) or "",
+            self._preview_swap(None) or "",
+            self._preview_zfs_configuration(None) or "",
+        ]
+        ch = SelectMenu(MenuItemGroup([MenuItem("Proceed with installation", True), MenuItem("Back", False)]), header="\n".join(lines)).run()
+        return bool(ch.item() and ch.item().value)
 
     # --- by-id listing helpers for global menu ---
     @staticmethod

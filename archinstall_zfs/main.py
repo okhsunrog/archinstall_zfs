@@ -1,7 +1,6 @@
 # Standard library imports
 import contextlib
 import socket
-import sys
 from pathlib import Path
 from shutil import copy2
 from typing import cast
@@ -24,7 +23,7 @@ from archinstall_zfs.installer import ZFSInstaller
 from archinstall_zfs.menu import GlobalConfigMenu
 from archinstall_zfs.menu.models import InstallationMode, SwapMode, ZFSEncryptionMode, ZFSModuleMode
 from archinstall_zfs.zfs import ZFS_SERVICES, EncryptionMode, ZFSManagerBuilder
-from archinstall_zfs.zfs.kmod_setup import add_archzfs_repo, ensure_reflector_finished_and_stopped, initialize_zfs
+from archinstall_zfs.zfs.kmod_setup import add_archzfs_repo, initialize_zfs
 
 
 def check_internet() -> bool:
@@ -54,24 +53,15 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
         # Merge ZFS config into the same user_configuration.json
         save_combined_configuration(config, config._default_save_path, installer_menu.to_json())
 
-        # Dry-run/silence not currently sourced from ArchConfig; default to normal run
-        if False:
-            sys.exit(0)
-
-        if True:
-            with Tui():
-                if not config.confirm_config():
-                    debug("Installation aborted")
-                    return False
+        with Tui():
+            if not config.confirm_config():
+                debug("Installation aborted")
+                return False
 
         # Perform actual installation
         info("Starting installation...")
 
         # Build managers and perform disk/ZFS preparation now (after confirm)
-        # Ensure reflector has fully finished and is stopped before any ZFS-related setup
-        ensure_reflector_finished_and_stopped()
-        print("Preparing live system for ZFS support (this may take a minute)...")
-        initialize_zfs()
         # Installation mode comes from the menu's config (use enum directly)
         assert installer_menu.cfg.installation_mode is not None
         mode = installer_menu.cfg.installation_mode
@@ -375,7 +365,13 @@ def main() -> bool:
         error("EFI boot mode required")
         return False
 
-    # initialize_zfs()
+    # Pre-initialize ZFS (tools + kernel module) before launching the menu
+    try:
+        print("Preparing live system for ZFS support (this may take a minute)...")
+        initialize_zfs()
+    except Exception as e:
+        error(f"Failed to initialize ZFS on live system: {e!s}")
+        return False
 
     try:
         debug("Starting installation preparation")

@@ -35,6 +35,7 @@ Options:
     -C [file]       Path to UEFI code file (e.g. OVMF_CODE.4m.fd)
     -m [memory]     Set VM memory in MB (default: 4096)
     -p [cores]      Set VM CPU core count (default: 2)
+    -f              Force boot from CD/DVD (ignore UEFI boot entries)
 EOF
     printf '%s' "${usagetext}"
 }
@@ -92,9 +93,14 @@ check_images() {
 }
 
 run_image() {
-    local boot_order='d'
+    local boot_order='dc'
     if [[ -z "${iso_image}" ]] && [[ -n "${disk_image}" ]]; then
         boot_order='c'
+    fi
+    
+    # Force boot from CD/DVD if requested
+    if [[ "${force_boot}" == 'on' ]] && [[ -n "${iso_image}" ]]; then
+        boot_order='d'
     fi
 
     if [[ "$boot_type" == 'uefi' ]]; then
@@ -113,11 +119,16 @@ run_image() {
         fi
 
         # Handle UEFI Vars file
-        if [[ -z "${uefi_vars_file}" ]]; then
+        if [[ "${force_boot}" == 'on' ]]; then
+            # Ignore provided vars file and use a fresh template to avoid persistent Boot#### entries
             copy_ovmf_vars
-        elif [[ ! -f "${uefi_vars_file}" ]]; then
-            printf 'ERROR: %s\n' "UEFI vars file (${uefi_vars_file}) does not exist."
-            exit 1
+        else
+            if [[ -z "${uefi_vars_file}" ]]; then
+                copy_ovmf_vars
+            elif [[ ! -f "${uefi_vars_file}" ]]; then
+                printf 'ERROR: %s\n' "UEFI vars file (${uefi_vars_file}) does not exist."
+                exit 1
+            fi
         fi
 
         qemu_options+=(
@@ -137,13 +148,23 @@ run_image() {
     fi
 
     if [[ -n "${iso_image}" ]]; then
-         qemu_options+=('-cdrom' "${iso_image}")
+        # Create explicit CDROM device so we can assign bootindex when needed
+        qemu_options+=('-drive' "id=cdrom0,if=none,format=raw,media=cdrom,read-only=on,file=${iso_image}")
+        local cd_device='ide-cd,drive=cdrom0'
+        if [[ -n "${disk_image}" || "${force_boot}" == 'on' ]]; then
+            cd_device="${cd_device},bootindex=1"
+        fi
+        qemu_options+=('-device' "${cd_device}")
     fi
 
     if [[ -n "${disk_image}" ]]; then
         # Add serial number to create stable /dev/disk/by-id path  
         qemu_options+=('-drive' "file=${disk_image},format=qcow2,if=none,id=disk0")
-        qemu_options+=('-device' "virtio-blk-pci,drive=disk0,serial=archzfs-test-disk")
+        local disk_device="virtio-blk-pci,drive=disk0,serial=archzfs-test-disk"
+        if [[ -n "${iso_image}" ]]; then
+            disk_device="${disk_device},bootindex=2"
+        fi
+        qemu_options+=('-device' "${disk_device}")
     fi
 
     if [[ -n "${oddimage}" ]]; then
@@ -163,11 +184,17 @@ run_image() {
         serial_options+=('-serial' 'stdio')
     fi
 
+    # Build boot args; when forcing ISO boot, request one-time boot from CD and strict behavior
+    local boot_args="order=${boot_order},menu=on,reboot-timeout=5000"
+    if [[ "${force_boot}" == 'on' && -n "${iso_image}" ]]; then
+        boot_args="order=${boot_order},menu=on,once=d,strict=on,reboot-timeout=5000"
+    fi
+
     qemu-system-x86_64 \
         -enable-kvm \
         -cpu host \
         -m "${memory}" -smp "${cpu_cores}" \
-        -boot "order=${boot_order},menu=on,reboot-timeout=5000" \
+        -boot "${boot_args}" \
         -name "archinstall-zfs-vm,process=archinstall-zfs-vm" \
         -vga virtio \
         -display ${display} \
@@ -189,6 +216,7 @@ boot_type='uefi'
 secure_boot='off'
 display='sdl'
 serial_console='off'
+force_boot='off'
 uefi_vars_file=''
 uefi_code_file=''
 memory=4096
@@ -202,7 +230,7 @@ if (( ${#} == 0 )); then
     exit 1
 fi
 
-while getopts 'abhi:sD:uvSc:U:C:m:p:' flag; do
+while getopts 'abhi:sD:uvSc:U:C:m:p:f' flag; do
     case "$flag" in
         a)
             accessibility='on'
@@ -246,6 +274,9 @@ while getopts 'abhi:sD:uvSc:U:C:m:p:' flag; do
             ;;
         p)
             cpu_cores="$OPTARG"
+            ;;
+        f)
+            force_boot='on'
             ;;
         *)
             print_help
