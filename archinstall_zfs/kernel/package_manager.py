@@ -201,12 +201,12 @@ class ZFSPackageManager:
             result.add_error(f"Precompiled installation failed: {e}")
             return False
 
-    def _install_precompiled_host(self, variant: KernelVariant, packages: list[str], result: InstallationResult) -> bool:
+    def _install_precompiled_host(self, variant: KernelVariant, _packages: list[str], result: InstallationResult) -> bool:
         """Install precompiled packages on host system with package search.
 
         Args:
             variant: The kernel variant
-            packages: List of packages to install (unused, kept for compatibility)
+            _packages: List of packages to install (unused, kept for compatibility)
             result: Result object to update
 
         Returns:

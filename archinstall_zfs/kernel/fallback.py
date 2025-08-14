@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from archinstall import debug, error, info, warn
+from archinstall.lib.general import SysCommand
 
 from ..menu.models import ZFSModuleMode
 from .package_manager import InstallationResult, ZFSPackageManager
@@ -222,8 +223,6 @@ class EnhancedZFSInstaller:
             The name of the detected kernel variant
         """
         try:
-            from archinstall.lib.general import SysCommand
-
             kernel_version = SysCommand("uname -r").decode().strip()
 
             # Use simple heuristics to detect kernel variant

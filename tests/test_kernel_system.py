@@ -259,8 +259,9 @@ class TestZFSPackageManager:
         self.registry = KernelRegistry()
         self.package_manager = ZFSPackageManager(self.registry)
 
+    @pytest.mark.usefixtures("_mock_syscmd")
     @patch("archinstall_zfs.kernel.package_manager.SysCommand")
-    def test_install_precompiled_success(self, _mock_syscmd):
+    def test_install_precompiled_success(self):
         """Test successful precompiled installation."""
         # Mock successful installation
         mock_installation = Mock()
@@ -273,8 +274,9 @@ class TestZFSPackageManager:
         assert result.fallback_occurred is False
         assert "zfs-utils" in result.installed_packages
 
+    @pytest.mark.usefixtures("_mock_syscmd")
     @patch("archinstall_zfs.kernel.package_manager.SysCommand")
-    def test_install_with_fallback(self, _mock_syscmd):
+    def test_install_with_fallback(self):
         """Test installation with fallback from precompiled to DKMS."""
         # Mock failed precompiled, successful DKMS
         mock_installation = Mock()

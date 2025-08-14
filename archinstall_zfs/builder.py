@@ -8,6 +8,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from archinstall import debug
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 # Import kernel registry at top level to avoid PLC0415
