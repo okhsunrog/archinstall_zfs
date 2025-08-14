@@ -1,0 +1,56 @@
+#
+# /etc/pacman.conf
+#
+# See the pacman.conf(5) manpage for option and repository directives
+
+#
+# GENERAL OPTIONS
+#
+[options]
+# The following paths are commented out with their default values listed.
+# If you wish to use different paths, uncomment and update the paths.
+#RootDir     = /
+#DBPath      = /var/lib/pacman/
+#CacheDir    = /var/cache/pacman/pkg/
+#LogFile     = /var/log/pacman.log
+#GPGDir      = /etc/pacman.d/gnupg/
+#HookDir     = /etc/pacman.d/hooks/
+HoldPkg     = pacman glibc
+#XferCommand = /usr/bin/curl -L -C - -f -o %o %u
+#XferCommand = /usr/bin/wget --passive-ftp -c -O %o %u
+#CleanMethod = KeepInstalled
+Architecture = auto
+
+# Misc options
+#UseSyslog
+#Color
+#NoProgressBar
+# We cannot check disk space from within a chroot environment
+#CheckSpace
+#VerbosePkgLists
+ParallelDownloads = 5
+#DownloadUser = alpm
+#DisableSandbox
+
+# By default, pacman accepts packages signed by keys that its local keyring
+# trusts (see pacman-key and its man page), as well as unsigned packages.
+SigLevel    = Required DatabaseOptional
+LocalFileSigLevel = Optional
+#RemoteFileSigLevel = Required
+
+#
+# REPOSITORIES
+#
+[core]
+Include = /etc/pacman.d/mirrorlist
+
+[extra]
+Include = /etc/pacman.d/mirrorlist
+
+# archzfs repository for ZFS packages (DKMS + utils)
+[archzfs]
+# TODO: Change this to `Required` once it's announced that the signing system is finalized.
+SigLevel = Never
+Server = https://github.com/archzfs/archzfs/releases/download/experimental
+
+
