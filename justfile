@@ -5,7 +5,6 @@ ISO_OUT_DIR := "gen_iso/out"
 DISK_IMAGE := "gen_iso/arch.qcow2"
 UEFI_VARS := "gen_iso/my_vars.fd"
 MAIN_PROFILE_DIR := "gen_iso/profile"
-TESTING_ISO_PATH := "gen_iso/out/archzfs-testing-x86_64.iso"
 ISO_WORK_DIR := "/tmp/archiso-tmp"
 TEMP_PROFILE_DIR := "/tmp/archzfs-profile"
 
@@ -49,6 +48,7 @@ clean:
 clean-iso:
     sudo rm -rf {{ISO_OUT_DIR}}
     sudo rm -rf {{ISO_WORK_DIR}}
+    sudo rm -rf {{TEMP_PROFILE_DIR}}
 
 # Install development dependencies
 install-dev:
@@ -204,15 +204,25 @@ qemu-refresh:
 qemu-install:
     @if [ ! -f {{DISK_IMAGE}} ]; then just qemu-create-disk; fi
     @if [ ! -f {{UEFI_VARS}} ]; then just qemu-setup-uefi; fi
-    @if [ ! -f {{TESTING_ISO_PATH}} ]; then echo "Testing ISO not found. Run 'just build-testing-iso' first."; exit 1; fi
-    {{QEMU_SCRIPT}} -i {{TESTING_ISO_PATH}} -D {{DISK_IMAGE}} -U {{UEFI_VARS}} -f
+    @ISO_PATH=$(ls -1t {{ISO_OUT_DIR}}/archzfs-*-testing-*.iso 2>/dev/null | head -n 1); \
+      if [ -z "$ISO_PATH" ]; then \
+        echo "Testing ISO not found in {{ISO_OUT_DIR}}. Run 'just build-testing-iso' first."; \
+        exit 1; \
+      fi; \
+      echo "Using testing ISO: $ISO_PATH"; \
+      {{QEMU_SCRIPT}} -i "$ISO_PATH" -D {{DISK_IMAGE}} -U {{UEFI_VARS}} -f
 
 # Install Arch Linux in QEMU with serial console from the generated testing ISO
 qemu-install-serial:
     @if [ ! -f {{DISK_IMAGE}} ]; then just qemu-create-disk; fi
     @if [ ! -f {{UEFI_VARS}} ]; then just qemu-setup-uefi; fi
-    @if [ ! -f {{TESTING_ISO_PATH}} ]; then echo "Testing ISO not found. Run 'just build-testing-iso' first."; exit 1; fi
-    {{QEMU_SCRIPT}} -i {{TESTING_ISO_PATH}} -D {{DISK_IMAGE}} -U {{UEFI_VARS}} -S -f
+    @ISO_PATH=$(ls -1t {{ISO_OUT_DIR}}/archzfs-*-testing-*.iso 2>/dev/null | head -n 1); \
+      if [ -z "$ISO_PATH" ]; then \
+        echo "Testing ISO not found in {{ISO_OUT_DIR}}. Run 'just build-testing-iso' first."; \
+        exit 1; \
+      fi; \
+      echo "Using testing ISO: $ISO_PATH"; \
+      {{QEMU_SCRIPT}} -i "$ISO_PATH" -D {{DISK_IMAGE}} -U {{UEFI_VARS}} -S -f
 
 # Run existing Arch Linux installation in QEMU with GUI
 qemu-run:

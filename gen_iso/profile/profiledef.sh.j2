@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034
 
-iso_name="archzfs"
+iso_name="archzfs-{{ kernel }}-{{ 'dkms' if use_dkms else 'pre' }}{{ '-testing' if fast_build else '' }}"
 iso_label="ARCHZFS_$(date --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y%m)"
 iso_publisher="ArchZFS Project <https://github.com/okhsunrog/archinstall_zfs>"
 iso_application="Arch Linux with ZFS Live/Installation DVD"
