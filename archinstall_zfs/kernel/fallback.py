@@ -235,10 +235,7 @@ class EnhancedZFSInstaller:
             elif "hardened" in kernel_version:
                 kernel_variant = "linux-hardened"
             elif "rt" in kernel_version:
-                if "lts" in kernel_version:
-                    kernel_variant = "linux-rt-lts"
-                else:
-                    kernel_variant = "linux-rt"
+                kernel_variant = "linux-rt-lts" if "lts" in kernel_version else "linux-rt"
             else:
                 kernel_variant = "linux"
 

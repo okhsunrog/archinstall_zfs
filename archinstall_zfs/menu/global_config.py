@@ -225,7 +225,8 @@ class GlobalConfigMenu:
 
         if result.item() and result.item().value:
             value = result.item().value
-            if value is not None and len(value) == 2:
+            KERNEL_MODE_TUPLE_LENGTH = 2
+            if value is not None and len(value) == KERNEL_MODE_TUPLE_LENGTH:
                 kernel, mode = value
                 self.config.kernels = [kernel]
                 self.cfg.zfs_module_mode = ZFSModuleMode.PRECOMPILED if mode == "precompiled" else ZFSModuleMode.DKMS

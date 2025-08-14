@@ -246,24 +246,30 @@ class KernelRegistry:
         return f"KernelRegistry with {len(variants)} variants:\n{variant_list}"
 
 
+# Global instance for singleton pattern
+_kernel_registry_instance: KernelRegistry | None = None
+
+
 def get_kernel_registry() -> KernelRegistry:
     """Get the global kernel registry instance.
 
     Returns:
         The global KernelRegistry instance
     """
-    if not hasattr(get_kernel_registry, "_instance"):
-        get_kernel_registry._instance = KernelRegistry()
+    global _kernel_registry_instance
+    
+    if _kernel_registry_instance is None:
+        _kernel_registry_instance = KernelRegistry()
 
         # Try to load custom configurations
         config_paths = [Path("/etc/archinstall-zfs/kernel-variants.json"), Path.home() / ".config" / "archinstall-zfs" / "kernel-variants.json"]
 
         for config_path in config_paths:
             with contextlib.suppress(Exception):
-                get_kernel_registry._instance.load_from_file(config_path)
+                _kernel_registry_instance.load_from_file(config_path)
 
         # Auto-detect additional variants
         with contextlib.suppress(Exception):
-            get_kernel_registry._instance.auto_detect_variants()
+            _kernel_registry_instance.auto_detect_variants()
 
-    return get_kernel_registry._instance
+    return _kernel_registry_instance
