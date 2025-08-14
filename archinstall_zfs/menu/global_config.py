@@ -191,26 +191,23 @@ class GlobalConfigMenu:
     def _configure_kernels(self, *_: Any) -> None:
         """Enhanced kernel + ZFS combo selector with full precompiled support."""
         from archinstall_zfs.kernel import get_kernel_registry
-        
+
         registry = get_kernel_registry()
         items = []
-        
+
         # Generate menu items from registry
         for variant in registry.get_supported_variants():
             if variant.supports_precompiled:
-                items.append(MenuItem(
-                    f"{variant.display_name} + precompiled ZFS" +
-                    (" (recommended)" if variant.is_default else ""),
-                    (variant.name, "precompiled"),
-                    key=f"{variant.name}_pre"
-                ))
-            
-            items.append(MenuItem(
-                f"{variant.display_name} + ZFS DKMS",
-                (variant.name, "dkms"),
-                key=f"{variant.name}_dkms"
-            ))
-        
+                items.append(
+                    MenuItem(
+                        f"{variant.display_name} + precompiled ZFS" + (" (recommended)" if variant.is_default else ""),
+                        (variant.name, "precompiled"),
+                        key=f"{variant.name}_pre",
+                    )
+                )
+
+            items.append(MenuItem(f"{variant.display_name} + ZFS DKMS", (variant.name, "dkms"), key=f"{variant.name}_dkms"))
+
         # Focus current selection if possible
         focus_item = None
         cur_kernel = self.config.kernels[0] if self.config.kernels else "linux-lts"
@@ -224,10 +221,9 @@ class GlobalConfigMenu:
                 break
 
         result = SelectMenu(
-            MenuItemGroup(items, focus_item=focus_item) if focus_item else MenuItemGroup(items),
-            header="Select kernel and ZFS module mode"
+            MenuItemGroup(items, focus_item=focus_item) if focus_item else MenuItemGroup(items), header="Select kernel and ZFS module mode"
         ).run()
-        
+
         if result.item() and result.item().value:
             kernel, mode = result.item().value
             self.config.kernels = [kernel]

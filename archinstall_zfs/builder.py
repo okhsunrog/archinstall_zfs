@@ -10,6 +10,12 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+# Import kernel registry at top level to avoid PLC0415
+try:
+    from archinstall_zfs.kernel import get_kernel_registry
+except ImportError:
+    get_kernel_registry = None
+
 
 @dataclass
 class BuildOptions:
@@ -25,59 +31,56 @@ class BuildOptions:
 
 def compute_headers_package(kernel: str) -> str:
     """Get headers package using kernel registry."""
-    try:
-        from archinstall_zfs.kernel import get_kernel_registry
-        
-        registry = get_kernel_registry()
-        variant = registry.get_variant(kernel)
-        
-        if variant:
-            return variant.headers_package
-        else:
-            # Fallback to convention
-            return f"{kernel}-headers"
-    except ImportError:
-        # Fallback if kernel module not available
-        return f"{kernel}-headers"
+    if get_kernel_registry is not None:
+        try:
+            registry = get_kernel_registry()
+            variant = registry.get_variant(kernel)
+
+            if variant:
+                return variant.headers_package
+        except Exception as e:
+            debug(f"Failed to get kernel variant: {e}")
+
+    # Fallback to convention
+    return f"{kernel}-headers"
 
 
 def build_context(opts: BuildOptions) -> dict:
-    try:
-        from archinstall_zfs.kernel import get_kernel_registry
-        
-        registry = get_kernel_registry()
-        variant = registry.get_variant(opts.kernel)
-        
-        if not variant:
-            raise ValueError(f"Unsupported kernel: {opts.kernel}")
-        
-        use_dkms = opts.zfs_mode == "dkms"
-        use_precompiled = not use_dkms and variant.supports_precompiled
-        include_headers = opts.include_headers if opts.include_headers is not None else use_dkms
-        
-        return {
-            "kernel": opts.kernel,
-            "use_dkms": use_dkms,
-            "use_precompiled_zfs": use_precompiled,
-            "include_headers": include_headers,
-            "headers": variant.headers_package,
-            "fast_build": opts.fast_build,
-        }
-    except ImportError:
-        # Fallback if kernel module not available
-        use_dkms = opts.zfs_mode == "dkms"
-        use_precompiled = not use_dkms
-        include_headers = opts.include_headers if opts.include_headers is not None else use_dkms
-        headers_pkg = f"{opts.kernel}-headers"
+    if get_kernel_registry is not None:
+        try:
+            registry = get_kernel_registry()
+            variant = registry.get_variant(opts.kernel)
 
-        return {
-            "kernel": opts.kernel,
-            "use_dkms": use_dkms,
-            "use_precompiled_zfs": use_precompiled,
-            "include_headers": include_headers,
-            "headers": headers_pkg,
-            "fast_build": opts.fast_build,
-        }
+            if variant:
+                use_dkms = opts.zfs_mode == "dkms"
+                use_precompiled = not use_dkms and variant.supports_precompiled
+                include_headers = opts.include_headers if opts.include_headers is not None else use_dkms
+
+                return {
+                    "kernel": opts.kernel,
+                    "use_dkms": use_dkms,
+                    "use_precompiled_zfs": use_precompiled,
+                    "include_headers": include_headers,
+                    "headers": variant.headers_package,
+                    "fast_build": opts.fast_build,
+                }
+        except Exception as e:
+            debug(f"Failed to get kernel variant: {e}")
+
+    # Fallback if kernel module not available or variant not found
+    use_dkms = opts.zfs_mode == "dkms"
+    use_precompiled = not use_dkms
+    include_headers = opts.include_headers if opts.include_headers is not None else use_dkms
+    headers_pkg = f"{opts.kernel}-headers"
+
+    return {
+        "kernel": opts.kernel,
+        "use_dkms": use_dkms,
+        "use_precompiled_zfs": use_precompiled,
+        "include_headers": include_headers,
+        "headers": headers_pkg,
+        "fast_build": opts.fast_build,
+    }
 
 
 def walk_all_paths(root: Path) -> Iterable[Path]:

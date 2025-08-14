@@ -20,8 +20,9 @@ from archinstall.tui.menu_item import MenuItem
 from archinstall_zfs.config_io import load_combined_configuration, save_combined_configuration
 from archinstall_zfs.disk import DiskManagerBuilder
 from archinstall_zfs.installer import ZFSInstaller
+from archinstall_zfs.kernel import EnhancedZFSInstaller, get_kernel_registry
 from archinstall_zfs.menu import GlobalConfigMenu
-from archinstall_zfs.menu.models import InstallationMode, SwapMode, ZFSEncryptionMode, ZFSModuleMode
+from archinstall_zfs.menu.models import InstallationMode, SwapMode, ZFSEncryptionMode
 from archinstall_zfs.zfs import ZFS_SERVICES, EncryptionMode, ZFSManagerBuilder
 from archinstall_zfs.zfs.kmod_setup import add_archzfs_repo, initialize_zfs
 
@@ -136,19 +137,14 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
         initramfs_handler = installer_menu.create_initramfs_handler(mountpoint, bool(zfs_manager.encryption_handler.password))
 
         # NEW: Use enhanced kernel registry for package management
-        from archinstall_zfs.kernel import get_kernel_registry, EnhancedZFSInstaller
-        
         selected_kernels: list[str] = arch_config.kernels if arch_config.kernels else ["linux-lts"]
         primary_kernel = selected_kernels[0]  # Use first kernel as primary
-        
+
         registry = get_kernel_registry()
         zfs_installer = EnhancedZFSInstaller(registry)
-        
+
         # Validate installation plan before proceeding
-        validation_errors = zfs_installer.validate_installation_plan(
-            primary_kernel,
-            installer_menu.cfg.zfs_module_mode
-        )
+        validation_errors = zfs_installer.validate_installation_plan(primary_kernel, installer_menu.cfg.zfs_module_mode)
         if validation_errors:
             for error_msg in validation_errors:
                 info(f"Validation warning: {error_msg}")
@@ -182,15 +178,11 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
             add_archzfs_repo(installation.target, installation)
 
             # NEW: Install ZFS packages using enhanced system with proper fallback
-            result = zfs_installer.install_with_fallback(
-                primary_kernel,
-                installer_menu.cfg.zfs_module_mode,
-                installation
-            )
-            
+            result = zfs_installer.install_with_fallback(primary_kernel, installer_menu.cfg.zfs_module_mode, installation)
+
             if not result.success:
                 raise RuntimeError(f"ZFS package installation failed: {result.get_summary()}")
-            
+
             # Log what was actually installed
             info(result.get_summary())
             if result.fallback_occurred and result.actual_mode:
