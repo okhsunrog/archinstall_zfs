@@ -173,14 +173,14 @@ qemu-install:
     @if [ ! -f {{DISK_IMAGE}} ]; then just qemu-create-disk; fi
     @if [ ! -f {{UEFI_VARS}} ]; then just qemu-setup-uefi; fi
     @if [ ! -f {{TESTING_ISO_PATH}} ]; then echo "Testing ISO not found. Run 'just build-testing-iso' first."; exit 1; fi
-    {{QEMU_SCRIPT}} -i {{TESTING_ISO_PATH}} -D {{DISK_IMAGE}} -U {{UEFI_VARS}}
+    {{QEMU_SCRIPT}} -i {{TESTING_ISO_PATH}} -D {{DISK_IMAGE}} -U {{UEFI_VARS}} -f
 
 # Install Arch Linux in QEMU with serial console from the generated testing ISO
 qemu-install-serial:
     @if [ ! -f {{DISK_IMAGE}} ]; then just qemu-create-disk; fi
     @if [ ! -f {{UEFI_VARS}} ]; then just qemu-setup-uefi; fi
     @if [ ! -f {{TESTING_ISO_PATH}} ]; then echo "Testing ISO not found. Run 'just build-testing-iso' first."; exit 1; fi
-    {{QEMU_SCRIPT}} -i {{TESTING_ISO_PATH}} -D {{DISK_IMAGE}} -U {{UEFI_VARS}} -S
+    {{QEMU_SCRIPT}} -i {{TESTING_ISO_PATH}} -D {{DISK_IMAGE}} -U {{UEFI_VARS}} -S -f
 
 # Run existing Arch Linux installation in QEMU with GUI
 qemu-run:
