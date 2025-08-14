@@ -297,6 +297,43 @@ class ZFSInitializer:
         # Regardless of archive pin, restore reflector if we changed it
         self._restore_reflector()
 
+    def _finalize_reflector_and_mirrors(self) -> None:
+        """Best-effort guard to exit with sane mirrorlist and reflector state.
+
+        This is called after normal restoration to cover edge cases where the
+        process was interrupted mid-way or network flakiness left the service
+        in a failed state. It avoids changing the user's preferences unless we
+        explicitly altered them earlier in this run.
+        """
+        try:
+            # If mirrorlist still points at the Archive unexpectedly and we have
+            # a backup, restore it and resync databases.
+            try:
+                current_ml = self._mirrorlist_path.read_text()
+            except Exception:
+                current_ml = ""
+
+            if "archive.archlinux.org/repos/" in current_ml and self._mirrorlist_backup:
+                info("Detected Archive mirrorlist still active; restoring backup")
+                try:
+                    self._mirrorlist_path.write_text(self._mirrorlist_backup)
+                    SysCommand("pacman -Syy --noconfirm", peek_output=True)
+                except Exception as e:
+                    warn(f"Failed to restore backup mirrorlist: {e!s}")
+
+            # Clear failed state and attempt to return reflector to its previous state
+            with contextlib.suppress(Exception):
+                SysCommand("systemctl reset-failed reflector.service", peek_output=True)
+
+            # If we changed reflector earlier, we already tried to restore it.
+            # As an extra safety, if it was previously active, try to restart it
+            # to avoid lingering 'failed' status in logs.
+            if self._reflector_was_active:
+                with contextlib.suppress(Exception):
+                    SysCommand("systemctl try-restart reflector.service", peek_output=True)
+        except Exception as e:
+            warn(f"Finalization of mirrors/reflector encountered an issue: {e!s}")
+
     def extract_pkginfo(self, package_path: Path) -> str:
         pkginfo = SysCommand(f"bsdtar -qxO -f {package_path} .PKGINFO").decode()
         match = re.search(r"depend = zfs-utils=(.*)", pkginfo)
@@ -413,6 +450,9 @@ class ZFSInitializer:
         finally:
             # Always attempt to restore mirrorlist so pacstrap uses stock repos
             self._restore_archive_mirrorlist()
+            # And best-effort ensure reflector/mirrorlist are in a sane state
+            with contextlib.suppress(Exception):
+                self._finalize_reflector_and_mirrors()
 
     def search_zfs_package(self, package_name: str, version: str) -> tuple[str, str] | None:
         urls = ["https://github.com/archzfs/archzfs/releases/download/experimental/"]
