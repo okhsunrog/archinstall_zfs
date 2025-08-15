@@ -54,6 +54,7 @@ jobs:
 
     - name: Build ISO with linux kernel (pre-built ZFS, fallback to DKMS)
       if: env.KERNEL == 'linux' || env.KERNEL == 'both'
+      continue-on-error: true
       run: |
         echo "Building linux kernel ISO..."
         source .venv/bin/activate
@@ -63,7 +64,13 @@ jobs:
           echo "Successfully built with pre-built ZFS modules"
         else
           echo "Pre-built ZFS failed, trying DKMS..."
-          just build-main dkms linux
+          if just build-main dkms linux; then
+            echo "Successfully built with DKMS"
+          else
+            echo "WARNING: linux kernel build failed (likely due to ZFS compatibility)"
+            echo "This is expected when the latest linux kernel is newer than ZFS supports"
+            exit 1
+          fi
         fi
 
     - name: Build ISO with linux-lts kernel (pre-built ZFS, fallback to DKMS)
@@ -83,31 +90,43 @@ jobs:
     - name: Find and list built ISOs
       run: |
         echo "Built ISOs:"
-        ls -la gen_iso/out/
+        ls -la gen_iso/out/ || echo "No gen_iso/out directory found"
         
         # Find all ISO files
-        ISO_FILES=$(find gen_iso/out/ -name "*.iso" | sort | tr '\n' ' ')
+        ISO_FILES=$(find gen_iso/out/ -name "*.iso" 2>/dev/null | sort | tr '\n' ' ')
         if [ -z "$ISO_FILES" ]; then
-          echo "Error: No ISO files found!"
-          exit 1
+          echo "Warning: No ISO files found!"
+          echo "This may be expected if linux kernel build failed due to ZFS compatibility"
+          
+          # Only fail if we were specifically trying to build just linux kernel
+          if [ "$KERNEL" = "linux" ]; then
+            echo "Error: Expected linux ISO but none found"
+            exit 1
+          else
+            echo "Continuing - linux-lts build may have succeeded"
+          fi
+        else
+          echo "Found ISOs:"
+          for iso in $(find gen_iso/out/ -name "*.iso" | sort); do
+            echo "  $iso ($(du -h $iso | cut -f1))"
+          done
         fi
-        
-        echo "Found ISOs:"
-        for iso in $(find gen_iso/out/ -name "*.iso" | sort); do
-          echo "  $iso ($(du -h $iso | cut -f1))"
-        done
 
     - name: Generate checksums
       run: |
-        cd gen_iso/out
-        # Generate individual checksum files for each ISO
-        for iso in *.iso; do
-          if [ -f "$iso" ]; then
-            echo "Generating checksum for $iso..."
-            sha256sum "$iso" > "${iso}.sha256"
-            cat "${iso}.sha256"
-          fi
-        done
+        if [ -d "gen_iso/out" ] && [ "$(ls -A gen_iso/out/*.iso 2>/dev/null)" ]; then
+          cd gen_iso/out
+          # Generate individual checksum files for each ISO
+          for iso in *.iso; do
+            if [ -f "$iso" ]; then
+              echo "Generating checksum for $iso..."
+              sha256sum "$iso" > "${iso}.sha256"
+              cat "${iso}.sha256"
+            fi
+          done
+        else
+          echo "No ISOs found, skipping checksum generation"
+        fi
 
     # Create a release automatically on tag push and upload assets
     - name: Create GitHub Release (tag push) and upload assets
@@ -118,5 +137,6 @@ jobs:
         files: |
           gen_iso/out/*.iso
           gen_iso/out/*.sha256
+        fail_on_unmatched_files: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

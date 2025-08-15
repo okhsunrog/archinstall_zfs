@@ -7,10 +7,13 @@ and standalone scripts like iso_builder.
 """
 
 import json
+import lzma
 import os
 import re
 import subprocess
 import sys
+import tarfile
+from io import BytesIO
 
 
 def debug_print(msg: str) -> None:
@@ -24,9 +27,75 @@ def warn_print(msg: str) -> None:
     print(f"WARN: {msg}", file=sys.stderr)
 
 
-def get_package_version(package_name: str) -> str | None:
+def get_archzfs_package_version(package_name: str) -> str | None:
+    """
+    Gets package version from archzfs repository database by downloading and parsing it directly.
+
+    This method works even when the archzfs repository is not configured locally,
+    making it suitable for CI environments.
+
+    Args:
+        package_name: Name of the package to query (e.g., "zfs-dkms")
+
+    Returns:
+        Package version string if found, None otherwise
+    """
+    archzfs_db_url = "https://github.com/archzfs/archzfs/releases/download/experimental/archzfs.db"
+
+    try:
+        debug_print(f"Downloading archzfs database from {archzfs_db_url}")
+        result = subprocess.run(["curl", "-sL", archzfs_db_url], capture_output=True, check=False)  # noqa: S603, S607
+
+        if result.returncode != 0:
+            debug_print(f"Failed to download archzfs.db: {result.stderr.decode('utf-8', errors='ignore')}")
+            return None
+
+        # Decompress the XZ data
+        debug_print("Decompressing archzfs database")
+        decompressed_data = lzma.decompress(result.stdout)
+
+        # Parse the tar archive
+        with tarfile.open(fileobj=BytesIO(decompressed_data), mode="r") as tar:
+            # Look for package directories that match our package name
+            for member in tar.getmembers():
+                if member.isdir() and member.name.startswith(f"{package_name}-"):
+                    # Extract the desc file for this package
+                    desc_path = f"{member.name}/desc"
+                    try:
+                        desc_file = tar.extractfile(desc_path)
+                        if desc_file:
+                            desc_content = desc_file.read().decode("utf-8")
+
+                            # Parse the package description format
+                            lines = desc_content.strip().split("\n")
+                            in_version_section = False
+
+                            for line in lines:
+                                if line.strip() == "%VERSION%":
+                                    in_version_section = True
+                                    continue
+                                if line.startswith("%") and in_version_section:
+                                    # End of version section
+                                    break
+                                if in_version_section and line.strip():
+                                    version = line.strip()
+                                    debug_print(f"Found {package_name} version from archzfs.db: {version}")
+                                    return version
+                    except KeyError:
+                        continue  # No desc file for this entry
+
+        debug_print(f"Package {package_name} not found in archzfs database")
+        return None
+
+    except Exception as e:
+        debug_print(f"Failed to parse archzfs database: {e}")
+        return None
+
+
+def get_package_version(package_name: str) -> str | None:  # noqa: PLR0911
     """
     Gets the version of a package from the pacman sync database.
+    For ZFS packages, falls back to downloading archzfs.db directly if pacman fails.
 
     Args:
         package_name: Name of the package to query
@@ -38,7 +107,13 @@ def get_package_version(package_name: str) -> str | None:
         # Use -Si to get sync database info without requiring root
         result = subprocess.run(["pacman", "-Si", package_name], capture_output=True, text=True, check=False)  # noqa: S603, S607
         if result.returncode != 0:
-            debug_print(f"pacman query failed for {package_name}")
+            debug_print(f"pacman -Si {package_name} failed with exit code {result.returncode}")
+
+            # For ZFS packages, try fallback to archzfs database
+            if package_name.startswith(("zfs-", "spl-")):
+                debug_print(f"Trying archzfs database fallback for {package_name}")
+                return get_archzfs_package_version(package_name)
+
             return None
 
         match = re.search(r"Version\s*:\s*(.+)", result.stdout)
@@ -46,8 +121,21 @@ def get_package_version(package_name: str) -> str | None:
             version = match.group(1).strip()
             debug_print(f"Found {package_name} version: {version}")
             return version
+        debug_print(f"No version line found in pacman output for {package_name}")
+
+        # For ZFS packages, try fallback to archzfs database
+        if package_name.startswith(("zfs-", "spl-")):
+            debug_print(f"Trying archzfs database fallback for {package_name}")
+            return get_archzfs_package_version(package_name)
+
     except Exception as e:
         debug_print(f"Failed to get version for {package_name}: {e}")
+
+        # For ZFS packages, try fallback to archzfs database
+        if package_name.startswith(("zfs-", "spl-")):
+            debug_print(f"Trying archzfs database fallback for {package_name}")
+            return get_archzfs_package_version(package_name)
+
         return None
     return None
 
@@ -143,7 +231,7 @@ def validate_kernel_zfs_compatibility(kernel_name: str, zfs_mode: str) -> tuple[
 
     Returns:
         Tuple of (is_compatible, warnings_list)
-        - is_compatible: True if compatible or validation couldn't be performed
+        - is_compatible: True if compatible, False if incompatible or validation failed
         - warnings_list: List of warning messages
     """
     warnings: list[str] = []
@@ -160,16 +248,16 @@ def validate_kernel_zfs_compatibility(kernel_name: str, zfs_mode: str) -> tuple[
     kernel_pkg_ver = get_package_version(kernel_name)
     compatibility_range = fetch_zfs_kernel_compatibility(zfs_pkg_ver) if zfs_pkg_ver else None
 
-    # Handle cases where we can't get required information (fail open)
+    # Handle cases where we can't get required information (fail hard for critical data)
     if not zfs_pkg_ver:
-        warnings.append("Could not determine zfs-dkms version - assuming compatible")
-        return True, warnings
+        warnings.append("Could not determine zfs-dkms version - ZFS repository may not be configured or package unavailable")
+        return False, warnings
     if not kernel_pkg_ver:
-        warnings.append(f"Could not determine {kernel_name} version - assuming compatible")
-        return True, warnings
+        warnings.append(f"Could not determine {kernel_name} version - package repository issue")
+        return False, warnings
     if not compatibility_range:
-        warnings.append("Could not fetch ZFS kernel compatibility - assuming compatible")
-        return True, warnings
+        warnings.append("Could not fetch ZFS kernel compatibility data from GitHub API - network or API issue")
+        return False, warnings
 
     min_kernel_ver, max_kernel_ver = compatibility_range
 
@@ -191,8 +279,8 @@ def validate_kernel_zfs_compatibility(kernel_name: str, zfs_mode: str) -> tuple[
 
     except Exception as e:
         warn_print(f"Error parsing version information: {e}")
-        warnings.append("Version parsing failed - assuming compatible")
-        return True, warnings
+        warnings.append("Version parsing failed - cannot determine compatibility")
+        return False, warnings
 
 
 def get_compatible_kernels(kernel_names: list[str]) -> tuple[list[str], list[str]]:
