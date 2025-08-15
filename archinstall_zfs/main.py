@@ -20,7 +20,7 @@ from archinstall.tui.menu_item import MenuItem
 from archinstall_zfs.config_io import load_combined_configuration, save_combined_configuration
 from archinstall_zfs.disk import DiskManagerBuilder
 from archinstall_zfs.installer import ZFSInstaller
-from archinstall_zfs.kernel_simple import install_zfs_with_fallback, validate_kernel_zfs_plan
+from archinstall_zfs.kernel import install_zfs_with_fallback, validate_kernel_zfs_plan
 from archinstall_zfs.menu import GlobalConfigMenu
 from archinstall_zfs.menu.models import InstallationMode, SwapMode, ZFSEncryptionMode
 from archinstall_zfs.zfs import ZFS_SERVICES, EncryptionMode, ZFSManagerBuilder

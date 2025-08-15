@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from archinstall.lib.exceptions import SysCallError
-from archinstall_zfs.kernel_simple import (
+from archinstall_zfs.kernel import (
     AVAILABLE_KERNELS,
     get_kernel_display_name,
     get_kernel_info,
@@ -94,7 +94,7 @@ class TestPackageSelection:
 class TestPackageInstallation:
     """Test package installation functions."""
 
-    @patch("archinstall_zfs.kernel_simple.SysCommand")
+    @patch("archinstall_zfs.kernel.SysCommand")
     def test_install_zfs_packages_host_success(self, mock_syscmd: Mock) -> None:
         """Test successful host package installation."""
         result = install_zfs_packages("linux-lts", ZFSModuleMode.PRECOMPILED, None)
@@ -108,7 +108,7 @@ class TestPackageInstallation:
         assert result is True
         mock_installation.arch_chroot.assert_called_once_with("pacman -S --noconfirm zfs-utils zfs-dkms linux-zen-headers")
 
-    @patch("archinstall_zfs.kernel_simple.SysCommand")
+    @patch("archinstall_zfs.kernel.SysCommand")
     def test_install_zfs_packages_failure(self, mock_syscmd: Mock) -> None:
         """Test package installation failure."""
         mock_syscmd.side_effect = SysCallError("Installation failed")
@@ -119,7 +119,7 @@ class TestPackageInstallation:
 class TestFallbackLogic:
     """Test fallback installation logic."""
 
-    @patch("archinstall_zfs.kernel_simple.install_zfs_packages")
+    @patch("archinstall_zfs.kernel.install_zfs_packages")
     def test_install_with_fallback_precompiled_success(self, mock_install: Mock) -> None:
         """Test successful precompiled installation."""
         mock_install.return_value = True
@@ -128,7 +128,7 @@ class TestFallbackLogic:
         assert mode == ZFSModuleMode.PRECOMPILED
         mock_install.assert_called_once_with("linux-lts", ZFSModuleMode.PRECOMPILED, None)
 
-    @patch("archinstall_zfs.kernel_simple.install_zfs_packages")
+    @patch("archinstall_zfs.kernel.install_zfs_packages")
     def test_install_with_fallback_precompiled_fails_dkms_succeeds(self, mock_install: Mock) -> None:
         """Test precompiled fails, DKMS succeeds."""
         # First call (precompiled) fails, second call (DKMS) succeeds
@@ -138,7 +138,7 @@ class TestFallbackLogic:
         assert mode == ZFSModuleMode.DKMS
         assert mock_install.call_count == 2
 
-    @patch("archinstall_zfs.kernel_simple.install_zfs_packages")
+    @patch("archinstall_zfs.kernel.install_zfs_packages")
     def test_install_with_fallback_dkms_preferred(self, mock_install: Mock) -> None:
         """Test DKMS preferred mode."""
         mock_install.return_value = True
@@ -147,7 +147,7 @@ class TestFallbackLogic:
         assert mode == ZFSModuleMode.DKMS
         mock_install.assert_called_once_with("linux-lts", ZFSModuleMode.DKMS, None)
 
-    @patch("archinstall_zfs.kernel_simple.install_zfs_packages")
+    @patch("archinstall_zfs.kernel.install_zfs_packages")
     def test_install_with_fallback_all_fail(self, mock_install: Mock) -> None:
         """Test all installation methods fail."""
         mock_install.return_value = False
@@ -187,9 +187,11 @@ class TestValidation:
 class TestMenuOptions:
     """Test menu option generation."""
 
-    def test_get_menu_options(self) -> None:
-        """Test menu option generation."""
-        options = get_menu_options()
+    @patch("archinstall_zfs.validation.should_filter_kernel_options")
+    def test_get_menu_options_no_filtering(self, mock_should_filter: Mock) -> None:
+        """Test menu option generation without filtering."""
+        mock_should_filter.return_value = False
+        options, filtered_kernels = get_menu_options()
 
         # Should have options for all kernels
         kernel_names = [opt[1] for opt in options]
@@ -205,3 +207,30 @@ class TestMenuOptions:
         # Check that recommended option is marked
         lts_precompiled = next(opt for opt in options if opt[1] == "linux-lts" and opt[2] == ZFSModuleMode.PRECOMPILED)
         assert "recommended" in lts_precompiled[0]
+
+        # No kernels should be filtered
+        assert filtered_kernels == []
+
+    @patch("archinstall_zfs.validation.get_compatible_kernels")
+    @patch("archinstall_zfs.validation.should_filter_kernel_options")
+    def test_get_menu_options_with_filtering(self, mock_should_filter: Mock, mock_get_compatible: Mock) -> None:
+        """Test menu option generation with filtering."""
+        mock_should_filter.return_value = True
+        mock_get_compatible.return_value = (["linux-lts", "linux"], ["linux-zen"])
+
+        options, filtered_kernels = get_menu_options()
+
+        # Should have precompiled options for all kernels (precompiled is always compatible)
+        precompiled_kernels = [opt[1] for opt in options if opt[2] == ZFSModuleMode.PRECOMPILED]
+        assert "linux-lts" in precompiled_kernels
+        assert "linux" in precompiled_kernels
+        assert "linux-zen" in precompiled_kernels
+
+        # Should only have DKMS options for compatible kernels
+        dkms_kernels = [opt[1] for opt in options if opt[2] == ZFSModuleMode.DKMS]
+        assert "linux-lts" in dkms_kernels
+        assert "linux" in dkms_kernels
+        assert "linux-zen" not in dkms_kernels  # Filtered out
+
+        # Should report filtered kernels
+        assert "Linux Zen" in filtered_kernels
