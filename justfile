@@ -89,7 +89,7 @@ _prepare-source PROFILE_DIR:
         --exclude='.mypy_cache' --exclude='.ruff_cache' --exclude='build' \
         --exclude='dist' --exclude='*.egg-info' --exclude='gen_iso' \
         --exclude='tests' archinstall_zfs {{PROFILE_DIR}}/airootfs/root/archinstall_zfs/
-    @cp pyproject.toml README.md LICENSE {{PROFILE_DIR}}/airootfs/root/archinstall_zfs/
+    @cp pyproject.toml README.md LICENSE validation_core.py {{PROFILE_DIR}}/airootfs/root/archinstall_zfs/
     @echo '#!/bin/bash' > {{PROFILE_DIR}}/airootfs/root/installer
     @echo 'set -euo pipefail' >> {{PROFILE_DIR}}/airootfs/root/installer
     @echo 'cd /root/archinstall_zfs' >> {{PROFILE_DIR}}/airootfs/root/installer
@@ -227,7 +227,7 @@ ssh:
         --exclude='dist' --exclude='*.egg-info' --exclude='gen_iso' \
         --exclude='tests' archinstall_zfs/ root@localhost:/root/archinstall_zfs/archinstall_zfs/ 2>/dev/null \
         && rsync -av -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222" \
-        pyproject.toml README.md LICENSE root@localhost:/root/archinstall_zfs/ 2>/dev/null; then \
+        pyproject.toml README.md LICENSE validation_core.py root@localhost:/root/archinstall_zfs/ 2>/dev/null; then \
         echo "Source code synced with rsync!"; \
     else \
         echo "rsync not available in VM, using scp fallback..."; \
@@ -241,7 +241,7 @@ ssh-scp:
     @echo "Syncing source code using scp (in-place)..."
     @ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost -p 2222 "mkdir -p /root/archinstall_zfs/archinstall_zfs"
     scp -r -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P 2222 archinstall_zfs/* root@localhost:/root/archinstall_zfs/archinstall_zfs/
-    scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P 2222 pyproject.toml README.md LICENSE root@localhost:/root/archinstall_zfs/
+    scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P 2222 pyproject.toml README.md LICENSE validation_core.py root@localhost:/root/archinstall_zfs/
 
 # SSH into running QEMU VM without syncing source code
 ssh-only:
