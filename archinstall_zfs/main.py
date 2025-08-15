@@ -185,6 +185,30 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
                 info(f"Note: Fallback occurred from {installer_menu.cfg.zfs_module_mode.value} to {actual_mode.value}")
             info(f"Successfully installed ZFS packages for {primary_kernel} using {actual_mode.value}")
 
+            # Copy custom ZED hook after ZFS packages are installed, then make it immutable
+            try:
+                repo_asset = Path(__file__).resolve().parent / "assets" / "zed" / "history_event-zfs-list-cacher.sh"
+                if repo_asset.exists():
+                    zed_dst_dir = installation.target / "etc" / "zfs" / "zed.d"
+                    zed_dst_dir.mkdir(parents=True, exist_ok=True)
+                    zed_dst = zed_dst_dir / repo_asset.name
+                    # Ensure destination is replaced cleanly even if identical path/device
+                    with contextlib.suppress(Exception):
+                        installation.arch_chroot("chattr -i /etc/zfs/zed.d/history_event-zfs-list-cacher.sh")
+                    try:
+                        if zed_dst.exists():
+                            zed_dst.unlink(missing_ok=True)
+                    except Exception:
+                        # Fallback: remove inside chroot in case of attribute/permission issues
+                        installation.arch_chroot("rm -f /etc/zfs/zed.d/history_event-zfs-list-cacher.sh")
+                    copy2(repo_asset, zed_dst)
+                    installation.arch_chroot("chattr +i /etc/zfs/zed.d/history_event-zfs-list-cacher.sh")
+                    info("Successfully installed custom ZED history cacher hook")
+                else:
+                    error(f"Custom ZED script not found at {repo_asset}, cannot install boot environment aware caching")
+            except Exception as e:
+                error(f"Failed to install ZED history cacher hook: {e!s}")
+
             # Ensure initramfs is generated once the right modules are present
             installation.regenerate_initramfs()
 
@@ -291,31 +315,6 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
                             f.write("/dev/mapper/cryptswap none swap defaults 0 0\n")
 
             zfs_manager.copy_misc_files()
-
-            # Copy custom ZED hook, then make it immutable
-            try:
-                repo_asset = Path(__file__).resolve().parent.parent / "assets" / "zed" / "history_event-zfs-list-cacher.sh"
-                host_path = Path("/etc/zfs/zed.d/history_event-zfs-list-cacher.sh")
-                zed_src = repo_asset if repo_asset.exists() else host_path
-                if zed_src.exists():
-                    zed_dst_dir = installation.target / "etc" / "zfs" / "zed.d"
-                    zed_dst_dir.mkdir(parents=True, exist_ok=True)
-                    zed_dst = zed_dst_dir / zed_src.name
-                    # Ensure destination is replaced cleanly even if identical path/device
-                    with contextlib.suppress(Exception):
-                        installation.arch_chroot("chattr -i /etc/zfs/zed.d/history_event-zfs-list-cacher.sh")
-                    try:
-                        if zed_dst.exists():
-                            zed_dst.unlink(missing_ok=True)
-                    except Exception:
-                        # Fallback: remove inside chroot in case of attribute/permission issues
-                        installation.arch_chroot("rm -f /etc/zfs/zed.d/history_event-zfs-list-cacher.sh")
-                    copy2(zed_src, zed_dst)
-                    installation.arch_chroot("chattr +i /etc/zfs/zed.d/history_event-zfs-list-cacher.sh")
-                else:
-                    debug(f"Custom ZED script not found at {repo_asset} or {host_path}, skipping copy")
-            except Exception as e:
-                error(f"Failed to install ZED history cacher hook: {e!s}")
 
             if disk_manager.config.efi_partition:
                 zfs_manager.setup_bootloader(disk_manager.config.efi_partition)

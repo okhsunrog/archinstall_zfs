@@ -16,7 +16,7 @@ import sys
 import subprocess
 import fcntl
 
-DEBUG = False
+DEBUG = True
 
 def log(message):
     if DEBUG:
