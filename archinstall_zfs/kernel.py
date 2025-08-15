@@ -156,25 +156,45 @@ def validate_kernel_zfs_plan(kernel_name: str, mode: ZFSModuleMode) -> list[str]
     return warnings
 
 
-def get_menu_options() -> list[tuple[str, str, ZFSModuleMode]]:
+def get_menu_options() -> tuple[list[tuple[str, str, ZFSModuleMode]], list[str]]:
     """
-    Get menu options for kernel/ZFS combinations.
+    Get menu options for kernel/ZFS combinations with compatibility filtering.
 
     Returns:
-        List of (display_text, kernel_name, mode) tuples
+        Tuple of (available_options, filtered_kernels)
+        - available_options: List of (display_text, kernel_name, mode) tuples for compatible kernels
+        - filtered_kernels: List of kernel display names that were filtered out due to incompatibility
     """
+    from archinstall_zfs.validation import get_compatible_kernels, should_filter_kernel_options
+    
     options = []
+    filtered_kernels = []
+    
+    # Get compatibility information if filtering is enabled
+    if should_filter_kernel_options():
+        available_kernel_names = list(AVAILABLE_KERNELS.keys())
+        compatible_kernels, incompatible_kernels = get_compatible_kernels(available_kernel_names)
+        
+        # Track which kernels were filtered for display
+        for incompatible_kernel in incompatible_kernels:
+            if incompatible_kernel in AVAILABLE_KERNELS:
+                filtered_kernels.append(AVAILABLE_KERNELS[incompatible_kernel].display_name)
+    else:
+        # No filtering - all kernels are considered compatible
+        compatible_kernels = list(AVAILABLE_KERNELS.keys())
+        incompatible_kernels = []
 
     for kernel_name, kernel_info in AVAILABLE_KERNELS.items():
-        # Add precompiled option if available
+        # Add precompiled option if available (precompiled is always compatible)
         if kernel_info.precompiled_package:
             display = f"{kernel_info.display_name} + precompiled ZFS"
             if kernel_name == "linux-lts":
                 display += " (recommended)"
             options.append((display, kernel_name, ZFSModuleMode.PRECOMPILED))
 
-        # Add DKMS option (always available)
-        display = f"{kernel_info.display_name} + ZFS DKMS"
-        options.append((display, kernel_name, ZFSModuleMode.DKMS))
+        # Add DKMS option only if kernel is compatible (or filtering is disabled)
+        if kernel_name in compatible_kernels:
+            display = f"{kernel_info.display_name} + ZFS DKMS"
+            options.append((display, kernel_name, ZFSModuleMode.DKMS))
 
-    return options
+    return options, filtered_kernels

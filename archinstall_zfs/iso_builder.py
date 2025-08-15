@@ -222,6 +222,30 @@ def parse_args(argv: list[str]) -> BuildOptions:
 
 def main() -> int:
     opts = parse_args(sys.argv[1:])
+    
+    # Validate kernel/ZFS compatibility for DKMS builds
+    if opts.zfs_mode == "dkms":
+        try:
+            from archinstall_zfs.validation import validate_kernel_zfs_compatibility
+        except ImportError:
+            # Fallback for standalone execution
+            import sys as system
+            import os
+            system.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+            from archinstall_zfs.validation import validate_kernel_zfs_compatibility
+        
+        is_compatible, warnings = validate_kernel_zfs_compatibility(opts.kernel, opts.zfs_mode)
+        
+        if warnings:
+            for warning in warnings:
+                print(f"WARNING: {warning}", file=sys.stderr)
+        
+        if not is_compatible:
+            print(f"ERROR: Kernel {opts.kernel} is not compatible with ZFS DKMS.", file=sys.stderr)
+            print("The ISO build would fail during DKMS module compilation.", file=sys.stderr)
+            print("Please choose a different kernel or use precompiled ZFS modules.", file=sys.stderr)
+            return 1
+    
     stage_profile(opts)
     print(str(opts.out_dir))
     return 0

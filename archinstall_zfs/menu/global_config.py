@@ -37,7 +37,7 @@ from archinstall.tui.result import ResultType
 from archinstall_zfs.initramfs.base import InitramfsHandler
 from archinstall_zfs.initramfs.dracut import DracutInitramfsHandler
 from archinstall_zfs.initramfs.mkinitcpio import MkinitcpioInitramfsHandler
-from archinstall_zfs.kernel_simple import get_menu_options
+from archinstall_zfs.kernel import get_menu_options
 from archinstall_zfs.menu.models import GlobalConfig, InitSystem, InstallationMode, SwapMode, ZFSEncryptionMode
 from archinstall_zfs.shared import ZFSModuleMode
 from archinstall_zfs.zfs import detect_pool_encryption, verify_pool_passphrase
@@ -191,11 +191,14 @@ class GlobalConfigMenu:
         self.config.app_config = app_menu.run()
 
     def _configure_kernels(self, *_: Any) -> None:
-        """Simple kernel + ZFS combo selector."""
+        """Simple kernel + ZFS combo selector with compatibility filtering."""
+        # Get menu options and filtered kernels
+        menu_options, filtered_kernels = get_menu_options()
+        
         items = []
 
-        # Generate menu items from simple kernel options
-        for display_text, kernel_name, zfs_mode in get_menu_options():
+        # Generate menu items from available options
+        for display_text, kernel_name, zfs_mode in menu_options:
             mode_str = "precompiled" if zfs_mode == ZFSModuleMode.PRECOMPILED else "dkms"
             items.append(
                 MenuItem(
@@ -204,6 +207,17 @@ class GlobalConfigMenu:
                     key=f"{kernel_name}_{mode_str}",
                 )
             )
+
+        # Build header with filtering information
+        header = "Select kernel and ZFS module mode"
+        if filtered_kernels:
+            filtered_list = ", ".join(filtered_kernels)
+            warning_msg = (
+                f"\n\nNOTICE: The following kernels are temporarily unavailable for DKMS\n"
+                f"as they are not yet supported by the current ZFS version:\n"
+                f"  - {filtered_list}"
+            )
+            header += warning_msg
 
         # Focus current selection if possible
         focus_item = None
@@ -217,8 +231,17 @@ class GlobalConfigMenu:
                 focus_item = it
                 break
 
+        # Handle edge case where no kernels are compatible
+        if not items:
+            SelectMenu(
+                MenuItemGroup([MenuItem("OK", None)]), 
+                header="No compatible kernel options available. Please check your system configuration."
+            ).run()
+            return
+
         result = SelectMenu(
-            MenuItemGroup(items, focus_item=focus_item) if focus_item else MenuItemGroup(items), header="Select kernel and ZFS module mode"
+            MenuItemGroup(items, focus_item=focus_item) if focus_item else MenuItemGroup(items), 
+            header=header
         ).run()
 
         if result.item() and result.item().value:

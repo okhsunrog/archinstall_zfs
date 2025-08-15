@@ -141,7 +141,9 @@ python -m archinstall_zfs
 - **Mirror configuration**: Full archinstall mirror selection integration
 
 #### **📦 Smart Package Management**
-- **Automatic package validation**: Verifies kernel/ZFS compatibility before installation
+- **Proactive DKMS compatibility validation**: Checks kernel/ZFS version compatibility using OpenZFS GitHub API before installation begins
+- **Intelligent kernel filtering**: Automatically hides incompatible DKMS options in the TUI menu with clear explanations
+- **ISO build validation**: Prevents building ISOs with incompatible kernel/ZFS combinations
 - **Repository management**: Handles archzfs repo setup on both host and target
 - **Fallback messaging**: Clear feedback when switching from precompiled to DKMS
 
@@ -228,6 +230,33 @@ warning: cannot resolve "linux-lts=6.12.41-1", a dependency of "zfs-linux-lts"
 **What's happening:** The precompiled ZFS package isn't available for your exact kernel version.
 
 **Solution:** Press `N` when prompted. The installer will automatically switch to DKMS mode and continue installation successfully.
+
+</details>
+
+<details>
+<summary><strong>⚠️ Kernel Options Missing from Menu</strong></summary>
+
+**Problem:** Some kernel DKMS options are missing from the installer menu.
+
+**What's happening:** The installer automatically validates kernel/ZFS compatibility using the OpenZFS GitHub API and hides incompatible combinations to prevent installation failures.
+
+**You'll see a notice like:**
+```
+NOTICE: The following kernels are temporarily unavailable for DKMS
+as they are not yet supported by the current ZFS version:
+  - Linux Zen
+```
+
+**Solutions:**
+1. **Choose a compatible kernel** (like `linux-lts` which is usually most compatible)
+2. **Use precompiled ZFS** instead of DKMS (if available for your kernel)
+3. **Disable validation** (advanced users only):
+   ```bash
+   export ARCHINSTALL_ZFS_SKIP_DKMS_VALIDATION=1
+   ./installer
+   ```
+
+**Note:** Disabling validation may result in DKMS compilation failures during installation.
 
 </details>
 
