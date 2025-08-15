@@ -194,31 +194,53 @@ def fetch_zfs_kernel_compatibility(zfs_version: str) -> tuple[str, str] | None:
 
 def parse_version(version_str: str) -> tuple[int, ...]:
     """
-    Parse version string into comparable tuple.
+    Parse version string into comparable tuple, normalizing for kernel compatibility.
 
-    Uses packaging library if available, falls back to simple parsing.
+    For kernel compatibility, we only care about major.minor for range checking,
+    since patch versions (6.15.x) should be compatible with 6.15.
 
     Args:
         version_str: Version string to parse (e.g., "6.8.arch1", "2.3.3")
 
     Returns:
-        Tuple of version components (e.g., (6, 8, 0))
+        Tuple of version components, normalized for compatibility checking
     """
     try:
         from packaging.version import parse as _parse_packaging  # noqa: PLC0415
 
         try:
             parsed = _parse_packaging(version_str)
-            return (parsed.major, parsed.minor, parsed.micro)
+            # For kernel compatibility, only use major.minor (ignore patch/micro)
+            # This treats 6.15.9 as equivalent to 6.15.0 for range checking
+            return (parsed.major, parsed.minor, 0)
         except Exception:
             # Fallback to simple parsing if packaging fails
-            version_str = re.sub(r"[^\d.]", "", version_str.split("-")[0])
-            return tuple(int(x) for x in version_str.split(".") if x.isdigit())
+            return _parse_version_fallback(version_str)
     except ImportError:
         # Fallback for systems without packaging library
-        # Extract numeric parts only
-        version_str = re.sub(r"[^\d.]", "", version_str.split("-")[0])
-        return tuple(int(x) for x in version_str.split(".") if x.isdigit())
+        return _parse_version_fallback(version_str)
+
+
+def _parse_version_fallback(version_str: str) -> tuple[int, ...]:
+    """
+    Fallback version parsing when packaging library is unavailable.
+    
+    Normalizes to major.minor.0 for kernel compatibility checking.
+    """
+    # Remove non-numeric chars except dots, handle kernel suffixes
+    clean_version = re.sub(r"[^\d.]", "", version_str.split("-")[0])
+    parts = [int(x) for x in clean_version.split(".") if x.isdigit()]
+    
+    if len(parts) == 0:
+        return (0, 0, 0)
+    elif len(parts) == 1:
+        return (parts[0], 0, 0)
+    elif len(parts) == 2:
+        return (parts[0], parts[1], 0)
+    else:
+        # For kernel compatibility, normalize patch versions to 0
+        # This makes 6.15.9 equivalent to 6.15.0 for range checking
+        return (parts[0], parts[1], 0)
 
 
 def validate_kernel_zfs_compatibility(kernel_name: str, zfs_mode: str) -> tuple[bool, list[str]]:  # noqa: PLR0911
@@ -304,6 +326,62 @@ def get_compatible_kernels(kernel_names: list[str]) -> tuple[list[str], list[str
             incompatible_kernels.append(kernel_name)
 
     return compatible_kernels, incompatible_kernels
+
+
+def validate_precompiled_zfs_compatibility(kernel_name: str) -> tuple[bool, list[str]]:
+    """
+    Validate compatibility between a kernel and its precompiled ZFS package.
+    
+    Args:
+        kernel_name: Name of the kernel (e.g., "linux-zen")
+        
+    Returns:
+        Tuple of (is_compatible, warnings)
+    """
+    warnings = []
+    
+    # Get the precompiled package name
+    precompiled_pkg_name = f"zfs-{kernel_name}"
+    
+    # Get versions
+    kernel_pkg_ver = get_package_version(kernel_name)
+    zfs_pkg_ver = get_package_version(precompiled_pkg_name)
+    
+    if not kernel_pkg_ver:
+        warnings.append(f"Could not determine {kernel_name} version")
+        return False, warnings
+        
+    if not zfs_pkg_ver:
+        warnings.append(f"Could not determine {precompiled_pkg_name} version - precompiled package may not be available")
+        return False, warnings
+    
+    try:
+        # Keep full kernel version including package release
+        kernel_full_ver = kernel_pkg_ver
+        
+        # Parse ZFS package version: format is {zfs_version}_{supported_kernel_version}-{pkg_release}
+        # Example: "2.3.3_6.15.9.zen1.1-1" -> supported kernel is "6.15.9.zen1.1-1"
+        if "_" not in zfs_pkg_ver:
+            warnings.append(f"Unexpected {precompiled_pkg_name} version format: {zfs_pkg_ver}")
+            return False, warnings
+            
+        _, supported_kernel_part = zfs_pkg_ver.split("_", 1)
+        # Keep the full supported kernel version including package release
+        supported_kernel_ver = supported_kernel_part
+        
+        # Compare versions - precompiled ZFS must match EXACTLY
+        if kernel_full_ver == supported_kernel_ver:
+            debug_print(f"Kernel {kernel_name} ({kernel_full_ver}) matches exactly with precompiled ZFS ({supported_kernel_ver})")
+            return True, warnings
+        else:
+            warning_msg = f"Kernel {kernel_name} ({kernel_full_ver}) does not match precompiled ZFS (requires exactly {supported_kernel_ver})"
+            warnings.append(warning_msg)
+            return False, warnings
+            
+    except Exception as e:
+        warn_print(f"Error parsing precompiled ZFS version information: {e}")
+        warnings.append("Version parsing failed - cannot determine precompiled ZFS compatibility")
+        return False, warnings
 
 
 def should_filter_kernel_options() -> bool:

@@ -21,6 +21,7 @@ from archinstall_zfs.config_io import load_combined_configuration, save_combined
 from archinstall_zfs.disk import DiskManagerBuilder
 from archinstall_zfs.installer import ZFSInstaller
 from archinstall_zfs.kernel import install_zfs_with_fallback, validate_kernel_zfs_plan
+from archinstall_zfs.kernel_scanner import scan_kernel_compatibility
 from archinstall_zfs.menu import GlobalConfigMenu
 from archinstall_zfs.menu.models import InstallationMode, SwapMode, ZFSEncryptionMode
 from archinstall_zfs.zfs import ZFS_SERVICES, EncryptionMode, ZFSManagerBuilder
@@ -373,6 +374,16 @@ def main() -> bool:
     except Exception as e:
         error(f"Failed to initialize ZFS on live system: {e!s}")
         return False
+
+    # Scan kernel compatibility before showing the menu
+    try:
+        print("Scanning kernel compatibility...")
+        scan_kernel_compatibility()
+        print("Kernel compatibility scan complete")
+    except Exception as e:
+        error(f"Failed to scan kernel compatibility: {e!s}")
+        # Continue anyway - the menu will handle missing data
+        print("Continuing with reduced functionality...")
 
     try:
         debug("Starting installation preparation")

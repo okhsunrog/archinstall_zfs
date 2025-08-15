@@ -20,6 +20,7 @@ _core_get_package_version = validation_core.get_package_version
 _core_fetch_zfs_kernel_compatibility = validation_core.fetch_zfs_kernel_compatibility
 _core_validate_kernel_zfs_compatibility = validation_core.validate_kernel_zfs_compatibility
 _core_get_compatible_kernels = validation_core.get_compatible_kernels
+_core_validate_precompiled_zfs_compatibility = validation_core.validate_precompiled_zfs_compatibility
 _core_should_filter_kernel_options = validation_core.should_filter_kernel_options
 
 try:
@@ -81,6 +82,23 @@ def get_compatible_kernels(kernel_names: list[str]) -> tuple[list[str], list[str
     debug(f"Compatible kernels: {compatible}")
     debug(f"Incompatible kernels: {incompatible}")
     return compatible, incompatible
+
+
+def validate_precompiled_zfs_compatibility(kernel_name: str) -> tuple[bool, list[str]]:
+    """Validates compatibility between a kernel and its precompiled ZFS package."""
+    debug(f"Validating {kernel_name} + precompiled ZFS compatibility")
+    is_compatible, warnings = _core_validate_precompiled_zfs_compatibility(kernel_name)
+
+    # Log warnings using archinstall's warn function
+    for warning in warnings:
+        warn(warning)
+
+    if is_compatible:
+        debug(f"Kernel {kernel_name} is compatible with precompiled ZFS")
+    else:
+        warn(f"Kernel {kernel_name} is NOT compatible with precompiled ZFS")
+
+    return is_compatible, warnings
 
 
 def should_filter_kernel_options() -> bool:
