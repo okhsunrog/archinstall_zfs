@@ -10,10 +10,11 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+# Import validation from shared core module
 try:
-    from archinstall_zfs.validation import validate_kernel_zfs_compatibility
+    from validation_core import validate_kernel_zfs_compatibility
 except ImportError:
-    # For standalone execution outside the package
+    # Fallback if validation_core is not available
     validate_kernel_zfs_compatibility = None  # type: ignore[assignment]
 
 
@@ -231,6 +232,7 @@ def main() -> int:
 
     # Validate kernel/ZFS compatibility for DKMS builds
     if opts.zfs_mode == "dkms" and validate_kernel_zfs_compatibility is not None:
+        print(f"🔍 Validating kernel/ZFS compatibility: {opts.kernel} + {opts.zfs_mode}", file=sys.stderr)
         is_compatible, warnings = validate_kernel_zfs_compatibility(opts.kernel, opts.zfs_mode)
 
         if warnings:
@@ -242,6 +244,7 @@ def main() -> int:
             print("The ISO build would fail during DKMS module compilation.", file=sys.stderr)
             print("Please choose a different kernel or use precompiled ZFS modules.", file=sys.stderr)
             return 1
+        print(f"✅ Validation passed: {opts.kernel} is compatible with ZFS DKMS", file=sys.stderr)
 
     stage_profile(opts)
     print(str(opts.out_dir))
