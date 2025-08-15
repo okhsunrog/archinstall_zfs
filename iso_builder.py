@@ -11,11 +11,7 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 # Import validation from shared core module
-try:
-    from validation_core import validate_kernel_zfs_compatibility
-except ImportError:
-    # Fallback if validation_core is not available
-    validate_kernel_zfs_compatibility = None  # type: ignore[assignment]
+from validation_core import validate_kernel_zfs_compatibility, validate_precompiled_zfs_compatibility
 
 
 @dataclass
@@ -230,9 +226,29 @@ def parse_args(argv: list[str]) -> BuildOptions:
 def main() -> int:
     opts = parse_args(sys.argv[1:])
 
-    # Validate kernel/ZFS compatibility for DKMS builds
-    if opts.zfs_mode == "dkms" and validate_kernel_zfs_compatibility is not None:
-        print(f"🔍 Validating kernel/ZFS compatibility: {opts.kernel} + {opts.zfs_mode}", file=sys.stderr)
+    # Validate kernel/ZFS compatibility
+    print(f"🔍 Validating kernel/ZFS compatibility: {opts.kernel} + {opts.zfs_mode}", file=sys.stderr)
+
+    validation_passed = True
+
+    if opts.zfs_mode == "precompiled":
+        # Validate precompiled ZFS compatibility
+        is_compatible, warnings = validate_precompiled_zfs_compatibility(opts.kernel)
+
+        if warnings:
+            for warning in warnings:
+                print(f"WARNING: {warning}", file=sys.stderr)
+
+        if not is_compatible:
+            print(f"ERROR: Kernel {opts.kernel} is not compatible with precompiled ZFS modules.", file=sys.stderr)
+            print("The precompiled ZFS package requires a different kernel version.", file=sys.stderr)
+            print("Please use DKMS mode or choose a compatible kernel version.", file=sys.stderr)
+            validation_passed = False
+        else:
+            print(f"✅ Validation passed: {opts.kernel} is compatible with precompiled ZFS", file=sys.stderr)
+
+    elif opts.zfs_mode == "dkms":
+        # Validate DKMS compatibility
         is_compatible, warnings = validate_kernel_zfs_compatibility(opts.kernel, opts.zfs_mode)
 
         if warnings:
@@ -243,8 +259,12 @@ def main() -> int:
             print(f"ERROR: Kernel {opts.kernel} is not compatible with ZFS DKMS.", file=sys.stderr)
             print("The ISO build would fail during DKMS module compilation.", file=sys.stderr)
             print("Please choose a different kernel or use precompiled ZFS modules.", file=sys.stderr)
-            return 1
-        print(f"✅ Validation passed: {opts.kernel} is compatible with ZFS DKMS", file=sys.stderr)
+            validation_passed = False
+        else:
+            print(f"✅ Validation passed: {opts.kernel} is compatible with ZFS DKMS", file=sys.stderr)
+
+    if not validation_passed:
+        return 1
 
     stage_profile(opts)
     print(str(opts.out_dir))

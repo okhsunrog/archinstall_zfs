@@ -52,39 +52,52 @@ jobs:
           echo "KERNEL=${{ github.event.inputs.kernel || 'both' }}" >> $GITHUB_ENV
         fi
 
-    - name: Build ISO with linux kernel (pre-built ZFS, fallback to DKMS)
+    - name: Build ISO with linux kernel (smart ZFS mode selection)
       if: env.KERNEL == 'linux' || env.KERNEL == 'both'
       continue-on-error: true
       run: |
         echo "Building linux kernel ISO..."
         source .venv/bin/activate
         
-        # Try pre-built ZFS first
-        if just build-main pre linux; then
-          echo "Successfully built with pre-built ZFS modules"
+        # Smart validation-based approach: check precompiled first, fallback to DKMS
+        echo "🔍 Checking precompiled ZFS compatibility..."
+        if python iso_builder.py --profile-dir gen_iso/profile --out-dir /tmp/validation-test --kernel linux --zfs precompiled --fast >/dev/null 2>&1; then
+          echo "✅ Precompiled ZFS is compatible - building with precompiled modules"
+          just build-main pre linux
         else
-          echo "Pre-built ZFS failed, trying DKMS..."
-          if just build-main dkms linux; then
-            echo "Successfully built with DKMS"
+          echo "❌ Precompiled ZFS incompatible, checking DKMS..."
+          if python iso_builder.py --profile-dir gen_iso/profile --out-dir /tmp/validation-test --kernel linux --zfs dkms --fast >/dev/null 2>&1; then
+            echo "✅ DKMS is compatible - building with DKMS"
+            just build-main dkms linux
           else
-            echo "WARNING: linux kernel build failed (likely due to ZFS compatibility)"
+            echo "❌ Neither precompiled nor DKMS compatible with linux kernel"
+            echo "WARNING: linux kernel build skipped (ZFS compatibility issue)"
             echo "This is expected when the latest linux kernel is newer than ZFS supports"
             exit 1
           fi
         fi
 
-    - name: Build ISO with linux-lts kernel (pre-built ZFS, fallback to DKMS)
+    - name: Build ISO with linux-lts kernel (smart ZFS mode selection)
       if: env.KERNEL == 'linux-lts' || env.KERNEL == 'both'
       run: |
         echo "Building linux-lts kernel ISO..."
         source .venv/bin/activate
         
-        # Try pre-built ZFS first
-        if just build-main pre linux-lts; then
-          echo "Successfully built with pre-built ZFS modules"
+        # Smart validation-based approach: check precompiled first, fallback to DKMS
+        echo "🔍 Checking precompiled ZFS compatibility..."
+        if python iso_builder.py --profile-dir gen_iso/profile --out-dir /tmp/validation-test --kernel linux-lts --zfs precompiled --fast >/dev/null 2>&1; then
+          echo "✅ Precompiled ZFS is compatible - building with precompiled modules"
+          just build-main pre linux-lts
         else
-          echo "Pre-built ZFS failed, trying DKMS..."
-          just build-main dkms linux-lts
+          echo "❌ Precompiled ZFS incompatible, checking DKMS..."
+          if python iso_builder.py --profile-dir gen_iso/profile --out-dir /tmp/validation-test --kernel linux-lts --zfs dkms --fast >/dev/null 2>&1; then
+            echo "✅ DKMS is compatible - building with DKMS"
+            just build-main dkms linux-lts
+          else
+            echo "❌ Neither precompiled nor DKMS compatible with linux-lts kernel"
+            echo "ERROR: linux-lts should always be compatible with at least DKMS"
+            exit 1
+          fi
         fi
 
     - name: Find and list built ISOs
