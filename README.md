@@ -63,24 +63,19 @@ This path takes a bit longer because it installs ZFS modules on the fly. The pre
 - 🔐 ZFS encryption: Pool or per‑dataset
 - 🧾 Robust logs and error handling
 
-### 🚀 Enhanced Kernel Support (v2.0)
+### 🚀 Smart Kernel Support
 
-**Precompiled ZFS for All Kernels:**
+**Precompiled ZFS for All Major Kernels:**
 - `linux-lts` + `zfs-linux-lts` (recommended)
-- `linux` + `zfs-linux` ✨ **NEW!**
-- `linux-zen` + `zfs-linux-zen` ✨ **NEW!**
+- `linux` + `zfs-linux`
+- `linux-zen` + `zfs-linux-zen`  
+- `linux-hardened` + `zfs-linux-hardened`
 
 **Intelligent Fallback Logic:**
+- Automatic fallback from precompiled to DKMS if needed
 - Maintains kernel consistency during fallback
-- `linux-lts` precompiled fails → `linux-lts` + DKMS ✅
-- No more unexpected kernel changes during installation
-
-**Extensible Architecture:**
-- Easy to add support for new kernel variants
-- Centralized kernel configuration management
-- Comprehensive error handling and reporting
-
-See [KERNEL_ARCHITECTURE.md](docs/KERNEL_ARCHITECTURE.md) for detailed technical information.
+- Example: `linux-lts` precompiled fails → `linux-lts` + DKMS ✅
+- Clear user feedback about what installation method was used
 
 ## Troubleshooting 🔧
 
@@ -263,7 +258,8 @@ just ssh-only
    - Archinstall language selection in the menu
 
 3. User Experience Improvements
-   - [Proactive DKMS compatibility validation](docs/TODO_PROACTIVE_DKMS_VALIDATION.md) - Prevent kernel/ZFS compatibility issues before they occur
+   - Enhanced system tuning options
+   - Better error messages and user guidance
 
 ## Contributing 🤝
 
