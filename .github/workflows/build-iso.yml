@@ -86,15 +86,14 @@ jobs:
         ls -la gen_iso/out/
         
         # Find all ISO files
-        ISO_FILES=$(find gen_iso/out/ -name "*.iso" | sort)
+        ISO_FILES=$(find gen_iso/out/ -name "*.iso" | sort | tr '\n' ' ')
         if [ -z "$ISO_FILES" ]; then
           echo "Error: No ISO files found!"
           exit 1
         fi
         
-        echo "ISO_FILES=$ISO_FILES" >> $GITHUB_ENV
         echo "Found ISOs:"
-        for iso in $ISO_FILES; do
+        for iso in $(find gen_iso/out/ -name "*.iso" | sort); do
           echo "  $iso ($(du -h $iso | cut -f1))"
         done
 
