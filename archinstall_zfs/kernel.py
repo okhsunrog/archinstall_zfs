@@ -167,5 +167,5 @@ def get_menu_options() -> tuple[list[tuple[str, str, ZFSModuleMode]], list[str]]
     """
     # Import here to avoid circular imports
     from archinstall_zfs.kernel_scanner import get_menu_options as scanner_get_menu_options  # noqa: PLC0415
-    
+
     return scanner_get_menu_options()
