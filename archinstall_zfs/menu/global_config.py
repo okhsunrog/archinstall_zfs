@@ -194,7 +194,7 @@ class GlobalConfigMenu:
         """Simple kernel + ZFS combo selector with compatibility filtering."""
         # Get menu options and filtered kernels
         menu_options, filtered_kernels = get_menu_options()
-        
+
         items = []
 
         # Generate menu items from available options
@@ -233,16 +233,10 @@ class GlobalConfigMenu:
 
         # Handle edge case where no kernels are compatible
         if not items:
-            SelectMenu(
-                MenuItemGroup([MenuItem("OK", None)]), 
-                header="No compatible kernel options available. Please check your system configuration."
-            ).run()
+            SelectMenu(MenuItemGroup([MenuItem("OK", None)]), header="No compatible kernel options available. Please check your system configuration.").run()
             return
 
-        result = SelectMenu(
-            MenuItemGroup(items, focus_item=focus_item) if focus_item else MenuItemGroup(items), 
-            header=header
-        ).run()
+        result = SelectMenu(MenuItemGroup(items, focus_item=focus_item) if focus_item else MenuItemGroup(items), header=header).run()
 
         if result.item() and result.item().value:
             value = result.item().value

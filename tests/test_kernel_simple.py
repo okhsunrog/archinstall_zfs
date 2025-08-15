@@ -217,7 +217,7 @@ class TestMenuOptions:
         """Test menu option generation with filtering."""
         mock_should_filter.return_value = True
         mock_get_compatible.return_value = (["linux-lts", "linux"], ["linux-zen"])
-        
+
         options, filtered_kernels = get_menu_options()
 
         # Should have precompiled options for all kernels (precompiled is always compatible)

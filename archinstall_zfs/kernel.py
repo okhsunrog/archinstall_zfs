@@ -165,16 +165,17 @@ def get_menu_options() -> tuple[list[tuple[str, str, ZFSModuleMode]], list[str]]
         - available_options: List of (display_text, kernel_name, mode) tuples for compatible kernels
         - filtered_kernels: List of kernel display names that were filtered out due to incompatibility
     """
-    from archinstall_zfs.validation import get_compatible_kernels, should_filter_kernel_options
-    
+    # Import here to avoid circular imports and enable proper mocking in tests
+    from archinstall_zfs.validation import get_compatible_kernels, should_filter_kernel_options  # noqa: PLC0415
+
     options = []
     filtered_kernels = []
-    
+
     # Get compatibility information if filtering is enabled
     if should_filter_kernel_options():
         available_kernel_names = list(AVAILABLE_KERNELS.keys())
         compatible_kernels, incompatible_kernels = get_compatible_kernels(available_kernel_names)
-        
+
         # Track which kernels were filtered for display
         for incompatible_kernel in incompatible_kernels:
             if incompatible_kernel in AVAILABLE_KERNELS:
