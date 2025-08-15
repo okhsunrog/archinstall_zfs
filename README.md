@@ -70,7 +70,8 @@ python -m archinstall_zfs
 - **`linux-zen`** + `zfs-linux-zen` *(desktop optimized)*  
 - **`linux-hardened`** + `zfs-linux-hardened` *(security focused)*
 
-**Intelligent fallback:** If precompiled fails → automatic DKMS with same kernel ✅
+**🔍 Proactive validation:** Real-time compatibility checking against OpenZFS API  
+**🔄 Intelligent fallback:** If precompiled fails → automatic DKMS with same kernel ✅
 
 ### 🔐 **ZFS Encryption Options**
 - **Pool-wide**: Everything encrypted from the start
@@ -140,12 +141,13 @@ python -m archinstall_zfs
 - **Archzfs repository**: Automatic setup of ZFS package repositories
 - **Mirror configuration**: Full archinstall mirror selection integration
 
-#### **📦 Smart Package Management**
-- **Proactive DKMS compatibility validation**: Checks kernel/ZFS version compatibility using OpenZFS GitHub API before installation begins
-- **Intelligent kernel filtering**: Automatically hides incompatible DKMS options in the TUI menu with clear explanations
-- **ISO build validation**: Prevents building ISOs with incompatible kernel/ZFS combinations
-- **Repository management**: Handles archzfs repo setup on both host and target
-- **Fallback messaging**: Clear feedback when switching from precompiled to DKMS
+#### **📦 Smart Package Management & Compatibility Validation**
+- **🔍 Proactive compatibility checking**: Real-time validation against OpenZFS GitHub API prevents installation failures
+- **🎯 Smart kernel selection**: Automatically filters incompatible kernel/ZFS combinations in TUI with clear explanations
+- **⚡ Fail-fast ISO builds**: Pre-validates compatibility before building ISOs, saving time on doomed builds
+- **🔄 Intelligent fallbacks**: Seamless precompiled → DKMS switching when kernel versions don't match
+- **📦 Repository management**: Handles archzfs repo setup with fallback to direct GitHub release parsing
+- **💡 User-friendly feedback**: Clear warnings and suggestions when compatibility issues are detected
 
 #### **💽 Disk Management Excellence**  
 - **By-ID partition handling**: Uses `/dev/disk/by-id` for stable device references
@@ -229,7 +231,9 @@ warning: cannot resolve "linux-lts=6.12.41-1", a dependency of "zfs-linux-lts"
 
 **What's happening:** The precompiled ZFS package isn't available for your exact kernel version.
 
-**Solution:** Press `N` when prompted. The installer will automatically switch to DKMS mode and continue installation successfully.
+**Solution:** Press `N` when prompted. The installer will automatically detect this and switch to DKMS mode.
+
+**🎯 Note:** With our new validation system, this scenario should be much rarer as incompatible combinations are detected upfront and handled automatically!
 
 </details>
 
