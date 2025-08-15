@@ -10,7 +10,7 @@ from archinstall import debug, error, info, warn
 from archinstall.lib.exceptions import SysCallError
 from archinstall.lib.general import SysCommand
 
-from archinstall_zfs.kernel import EnhancedZFSInstaller, get_kernel_registry
+from archinstall_zfs.kernel_simple import install_zfs_with_fallback
 from archinstall_zfs.shared import ZFSModuleMode
 
 
@@ -304,24 +304,21 @@ class ZFSInitializer:
         raise ValueError("Could not extract zfs-utils version from package info")
 
     def install_zfs(self) -> bool:
-        """Install ZFS using the new kernel-aware system."""
+        """Install ZFS using the simple kernel management system."""
         # Detect running kernel variant
         kernel_name = self._detect_kernel_variant()
 
-        registry = get_kernel_registry()
-
         # Try precompiled first, fallback to DKMS with same kernel
-        installer = EnhancedZFSInstaller(registry)
-        result = installer.install_with_fallback(
+        success, actual_mode = install_zfs_with_fallback(
             kernel_name,
             ZFSModuleMode.PRECOMPILED,  # Always try precompiled first
             None,  # Host installation, not target
         )
 
-        if result.success:
-            info(result.get_summary())
+        if success:
+            info(f"Successfully installed ZFS for {kernel_name} using {actual_mode.value}")
             return True
-        error(f"ZFS installation failed: {result.get_summary()}")
+        error(f"ZFS installation failed for kernel {kernel_name}")
         return False
 
     def _detect_kernel_variant(self) -> str:
