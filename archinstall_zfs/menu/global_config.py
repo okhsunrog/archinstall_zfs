@@ -37,7 +37,7 @@ from archinstall.tui.result import ResultType
 from archinstall_zfs.initramfs.base import InitramfsHandler
 from archinstall_zfs.initramfs.dracut import DracutInitramfsHandler
 from archinstall_zfs.initramfs.mkinitcpio import MkinitcpioInitramfsHandler
-from archinstall_zfs.kernel import get_kernel_registry
+from archinstall_zfs.kernel_simple import get_menu_options
 from archinstall_zfs.menu.models import GlobalConfig, InitSystem, InstallationMode, SwapMode, ZFSEncryptionMode
 from archinstall_zfs.shared import ZFSModuleMode
 from archinstall_zfs.zfs import detect_pool_encryption, verify_pool_passphrase
@@ -191,22 +191,19 @@ class GlobalConfigMenu:
         self.config.app_config = app_menu.run()
 
     def _configure_kernels(self, *_: Any) -> None:
-        """Enhanced kernel + ZFS combo selector with full precompiled support."""
-        registry = get_kernel_registry()
+        """Simple kernel + ZFS combo selector."""
         items = []
 
-        # Generate menu items from registry
-        for variant in registry.get_supported_variants():
-            if variant.supports_precompiled:
-                items.append(
-                    MenuItem(
-                        f"{variant.display_name} + precompiled ZFS" + (" (recommended)" if variant.is_default else ""),
-                        (variant.name, "precompiled"),
-                        key=f"{variant.name}_pre",
-                    )
+        # Generate menu items from simple kernel options
+        for display_text, kernel_name, zfs_mode in get_menu_options():
+            mode_str = "precompiled" if zfs_mode == ZFSModuleMode.PRECOMPILED else "dkms"
+            items.append(
+                MenuItem(
+                    display_text,
+                    (kernel_name, mode_str),
+                    key=f"{kernel_name}_{mode_str}",
                 )
-
-            items.append(MenuItem(f"{variant.display_name} + ZFS DKMS", (variant.name, "dkms"), key=f"{variant.name}_dkms"))
+            )
 
         # Focus current selection if possible
         focus_item = None
