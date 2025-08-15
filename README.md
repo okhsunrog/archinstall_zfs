@@ -1,4 +1,4 @@
-# Archinstall‑ZFS ⚡
+<h1 align="center">Archinstall‑ZFS 🚀</h1>
 
 > **ZFS‑first Arch Linux installer with batteries included**  
 > Effortless ZFS root, automatic ZFSBootMenu, and a fast, friendly TUI.
@@ -77,10 +77,44 @@ python -m archinstall_zfs
 - **Per-dataset**: Selective encryption (e.g., encrypt `/home`, leave `/var/log` plain)
 - **No encryption**: Maximum performance
 
-### 🧯 **Boot Environment Features**
-- **ZFSBootMenu** with recovery options out of the box
-- **Smart mounting** via custom ZED hook (only mounts active BE + shared datasets)
-- **Snapshot-aware** filesystem navigation
+### 🧯 **ZFSBootMenu & Boot Environments** *(The Main Feature!)*
+
+**🎯 This is what sets this installer apart** - complete ZFSBootMenu integration with boot environment support:
+
+#### **Automatic ZFSBootMenu Setup**
+- **Zero-config installation**: Downloads and installs ZFSBootMenu EFI files automatically
+- **Dual boot entries**: Main (`ZFSBootMenu`) + Recovery (`ZFSBootMenu-Recovery`) 
+- **UEFI integration**: Automatically adds boot entries to firmware
+- **Online updates**: Downloads latest ZFSBootMenu from official releases
+
+#### **Production-Ready Boot Environment Architecture**
+- **Structured datasets**: Automatic creation of optimal ZFS dataset hierarchy:
+  ```
+  pool/prefix/root       → /          (root filesystem, canmount=noauto)
+  pool/prefix/data/home  → /home      (user data)
+  pool/prefix/data/root  → /root      (root user data)  
+  pool/prefix/vm         → /vm        (virtual machines)
+  ```
+- **Boot environment isolation**: Each installation becomes a separate boot environment
+- **Snapshot navigation**: ZFSBootMenu automatically discovers all snapshots and clones
+
+#### **Smart Dataset Mounting (Custom ZED Hook)**
+- **Boot environment aware**: Only mounts datasets from the active boot environment
+- **Shared data handling**: Automatically mounts shared datasets (like `/home`) across all BEs
+- **Clean isolation**: Prevents cross-BE contamination and surprises
+- **Zero configuration**: Works out of the box with optimal defaults
+
+#### **ZFS Properties Optimization**
+- **ZFSBootMenu integration**: Automatically sets `org.zfsbootmenu:commandline` and `org.zfsbootmenu:rootprefix`
+- **Kernel parameter optimization**: Includes `spl.spl_hostid=$(hostid)` and optimal `zswap` settings
+- **Init system awareness**: Configures `root=ZFS=` (dracut) or `zfs=` (mkinitcpio) automatically
+- **fstab stability**: Adds root dataset to `/etc/fstab` to prevent snapshot navigation bugs
+
+#### **What This Means for You**
+- **🔄 Easy rollbacks**: Boot from any snapshot if an update breaks your system
+- **🏠 Multiple environments**: Install different Arch configurations on the same pool
+- **🛡️ System isolation**: Boot environments don't interfere with each other
+- **📸 Snapshot workflows**: Take snapshots before major changes, rollback instantly if needed
 
 ### 💾 **Swap Configurations**
 | Type | Description | Best For |
@@ -90,6 +124,39 @@ python -m archinstall_zfs
 | **Swap Partition** | Traditional partition swap | Servers, hibernation needs |
 
 > 📝 **Note:** Swap-on-ZFS (zvol/swapfiles) not supported. Hibernation not supported in current release.
+
+### ⚙️ **Advanced Features**
+
+#### **🔧 Initramfs Optimization**
+- **Dracut support**: Optimized dracut configuration with ZFS-specific settings
+- **Mkinitcpio support**: Alternative initramfs with proper ZFS integration
+- **Smart compression**: Disables double compression (ZFS + initramfs)
+- **Encryption key handling**: Automatic inclusion of ZFS encryption keys
+- **Minimal footprint**: Excludes unnecessary modules (network, plymouth, etc.)
+
+#### **🌐 Network & Connectivity**
+- **Internet validation**: Checks connectivity before starting installation
+- **Network config preservation**: Option to copy live ISO network settings to target
+- **Archzfs repository**: Automatic setup of ZFS package repositories
+- **Mirror configuration**: Full archinstall mirror selection integration
+
+#### **📦 Smart Package Management**
+- **ZFS-optimized base packages**: Includes `linux-firmware-marvell`, `sof-firmware`
+- **Automatic package validation**: Verifies kernel/ZFS compatibility before installation
+- **Repository management**: Handles archzfs repo setup on both host and target
+- **Fallback messaging**: Clear feedback when switching from precompiled to DKMS
+
+#### **💽 Disk Management Excellence**  
+- **By-ID partition handling**: Uses `/dev/disk/by-id` for stable device references
+- **Smart partition waiting**: Waits for udev to create partition symlinks
+- **EFI integration**: Automatic EFI partition mounting and configuration
+- **Signature cleaning**: Proper disk signature clearing to prevent conflicts
+
+#### **🔐 Security & Reliability**
+- **Static hostid**: Generates consistent system identification
+- **Secure key storage**: Proper file permissions (000) for encryption keys
+- **Cache management**: Smart ZFS cache file handling and mountpoint modification
+- **Service integration**: Enables all necessary ZFS systemd services
 
 ---
 
