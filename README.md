@@ -141,7 +141,6 @@ python -m archinstall_zfs
 - **Mirror configuration**: Full archinstall mirror selection integration
 
 #### **📦 Smart Package Management**
-- **ZFS-optimized base packages**: Includes `linux-firmware-marvell`, `sof-firmware`
 - **Automatic package validation**: Verifies kernel/ZFS compatibility before installation
 - **Repository management**: Handles archzfs repo setup on both host and target
 - **Fallback messaging**: Clear feedback when switching from precompiled to DKMS
@@ -166,8 +165,7 @@ python -m archinstall_zfs
 
 **Prerequisites** (Arch Linux host):
 ```bash
-sudo pacman -S qemu-desktop edk2-ovmf archiso grub just rsync
-curl -LsSf https://astral.sh/uv/install.sh | sh  # Optional: fast Python workflow
+sudo pacman -S qemu-desktop edk2-ovmf archiso grub just rsync uv
 just setup  # Install dev dependencies
 ```
 
