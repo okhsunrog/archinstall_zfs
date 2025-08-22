@@ -3,6 +3,12 @@
 > **ZFS‑first Arch Linux installer with batteries included**  
 > Effortless ZFS root, automatic ZFSBootMenu, and a fast, friendly TUI.
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/okhsunrog/archinstall_zfs)
+[![GitHub](https://img.shields.io/github/license/okhsunrog/archinstall_zfs)](https://github.com/okhsunrog/archinstall_zfs/blob/main/LICENSE)
+[![GitHub Release](https://img.shields.io/github/v/release/okhsunrog/archinstall_zfs)](https://github.com/okhsunrog/archinstall_zfs/releases)
+[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/okhsunrog/archinstall_zfs/ci.yml)](https://github.com/okhsunrog/archinstall_zfs/actions)
+[![Python Version](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/)
+
 [![Demo](assets/archinstall-demo.svg)](https://asciinema.org/a/IgofIGOQP9AXUCVbDHIAstlPz)
 
 ---
