@@ -38,7 +38,7 @@ from archinstall_zfs.initramfs.base import InitramfsHandler
 from archinstall_zfs.initramfs.dracut import DracutInitramfsHandler
 from archinstall_zfs.initramfs.mkinitcpio import MkinitcpioInitramfsHandler
 from archinstall_zfs.kernel import get_menu_options
-from archinstall_zfs.menu.models import GlobalConfig, InitSystem, InstallationMode, SwapMode, ZFSEncryptionMode
+from archinstall_zfs.menu.models import CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, SwapMode, ZFSEncryptionMode
 from archinstall_zfs.shared import ZFSModuleMode
 from archinstall_zfs.zfs import detect_pool_encryption, verify_pool_passphrase
 
@@ -418,6 +418,24 @@ class GlobalConfigMenu:
             if self.cfg.zfs_encryption_mode != ZFSEncryptionMode.NONE:
                 self._get_encryption_password()
 
+    def _configure_zfs_compression(self, *_: Any) -> None:
+        items = [
+            MenuItem("Off", CompressionAlgo.OFF),
+            MenuItem("lz4 (default)", CompressionAlgo.LZ4),
+            MenuItem("zstd", CompressionAlgo.ZSTD),
+            MenuItem("zstd-5", CompressionAlgo.ZSTD_5),
+            MenuItem("zstd-10", CompressionAlgo.ZSTD_10),
+        ]
+        # Try to focus current selection
+        focus = None
+        for it in items:
+            if it.value == self.cfg.compression:
+                focus = it
+                break
+        res = SelectMenu(MenuItemGroup(items, focus_item=focus) if focus else MenuItemGroup(items), header="Select ZFS compression").run()
+        if res.item() and res.item().value is not None:
+            self.cfg.compression = res.item().value
+
     def _configure_zfs_configuration(self, *_: Any) -> None:
         """Grouped flow for ZFS settings: dataset prefix and encryption."""
         while True:
@@ -426,6 +444,7 @@ class GlobalConfigMenu:
             submenu_items = [
                 MenuItem("Pool Name", "pool_name", key="pool_name"),
                 MenuItem("Dataset Prefix", "prefix", key="prefix"),
+                MenuItem("Compression", "compression", key="compression"),
                 MenuItem("Encryption", "encryption", key="encryption"),
                 MenuItem("Done", "done", key="done"),
             ]
@@ -454,6 +473,8 @@ class GlobalConfigMenu:
                 self._configure_pool_name()
             elif choice == "prefix":
                 self._configure_dataset_prefix()
+            elif choice == "compression":
+                self._configure_zfs_compression()
             elif choice == "encryption":
                 self._configure_zfs_encryption()
             else:
@@ -606,7 +627,8 @@ class GlobalConfigMenu:
     def _preview_zfs_configuration(self, *_: Any) -> str | None:
         enc = self._preview_zfs_encryption(None) or ""
         pool = f"Pool: {self.cfg.pool_name or 'Not set'}"
-        return f"{pool}\nDataset prefix: {self.cfg.dataset_prefix}\n{enc}"
+        comp = f"Compression: {self.cfg.compression.value}"
+        return f"{pool}\nDataset prefix: {self.cfg.dataset_prefix}\n{comp}\n{enc}"
 
     def _preview_installation_mode(self, *_: Any) -> str | None:
         if not self.cfg.installation_mode:
@@ -872,8 +894,9 @@ class GlobalConfigMenu:
                 self.cfg.dataset_prefix = prefix
                 break
 
-            # Encryption
+            # Encryption and compression
             self._configure_zfs_encryption()
+            self._configure_zfs_compression()
 
     def _wizard_step_summary(self) -> bool:
         """Show a compact summary and confirm."""

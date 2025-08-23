@@ -24,6 +24,14 @@ class ZFSEncryptionMode(Enum):
     DATASET = "dataset"
 
 
+class CompressionAlgo(Enum):
+    OFF = "off"
+    LZ4 = "lz4"
+    ZSTD = "zstd"
+    ZSTD_5 = "zstd-5"
+    ZSTD_10 = "zstd-10"
+
+
 class SwapMode(Enum):
     NONE = "none"
     ZRAM = "zram"
@@ -53,6 +61,7 @@ class GlobalConfig(BaseModel):
     zfs_module_mode: ZFSModuleMode = ZFSModuleMode.PRECOMPILED
     zfs_encryption_mode: ZFSEncryptionMode = ZFSEncryptionMode.NONE
     zfs_encryption_password: str | None = None
+    compression: CompressionAlgo = CompressionAlgo.LZ4
 
     # Swap settings
     swap_mode: SwapMode = SwapMode.NONE
