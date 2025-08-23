@@ -38,7 +38,7 @@ from archinstall_zfs.initramfs.base import InitramfsHandler
 from archinstall_zfs.initramfs.dracut import DracutInitramfsHandler
 from archinstall_zfs.initramfs.mkinitcpio import MkinitcpioInitramfsHandler
 from archinstall_zfs.kernel import get_menu_options
-from archinstall_zfs.menu.models import GlobalConfig, InitSystem, InstallationMode, SwapMode, ZFSEncryptionMode
+from archinstall_zfs.menu.models import CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, SwapMode, ZFSEncryptionMode
 from archinstall_zfs.shared import ZFSModuleMode
 from archinstall_zfs.zfs import detect_pool_encryption, verify_pool_passphrase
 
@@ -58,6 +58,8 @@ class GlobalConfigMenu:
         self._last_selected_key: str | None = None
         # Remember last selected ZFS submenu item key to restore cursor position
         self._last_selected_zfs_key: str | None = None
+        # Remember last selected Storage & ZFS wizard step key
+        self._last_selected_wizard_key: str | None = None
 
     def run(self) -> None:
         """Run the main installer menu loop."""
@@ -272,16 +274,18 @@ class GlobalConfigMenu:
 
     # ZFS-specific configuration methods
     def _configure_installation_mode(self, *_: Any) -> None:
-        mode_menu = SelectMenu(
-            MenuItemGroup(
-                [
-                    MenuItem("Full Disk Installation", InstallationMode.FULL_DISK),
-                    MenuItem("New ZFS Pool", InstallationMode.NEW_POOL),
-                    MenuItem("Existing ZFS Pool", InstallationMode.EXISTING_POOL),
-                ]
-            ),
-            header="Select installation mode",
-        )
+        items = [
+            MenuItem("Full Disk Installation", InstallationMode.FULL_DISK),
+            MenuItem("New ZFS Pool", InstallationMode.NEW_POOL),
+            MenuItem("Existing ZFS Pool", InstallationMode.EXISTING_POOL),
+        ]
+        focus_item = None
+        if self.cfg.installation_mode is not None:
+            for it in items:
+                if it.value == self.cfg.installation_mode:
+                    focus_item = it
+                    break
+        mode_menu = SelectMenu(MenuItemGroup(items, focus_item=focus_item) if focus_item else MenuItemGroup(items), header="Select installation mode")
         result = mode_menu.run()
         if result.type_ != ResultType.Skip and result.item():
             self.cfg.installation_mode = result.item().value
@@ -398,14 +402,19 @@ class GlobalConfigMenu:
             self.cfg.dataset_prefix = result.text()
 
     def _configure_zfs_encryption(self, *_: Any) -> None:
+        enc_items = [
+            MenuItem("No encryption", ZFSEncryptionMode.NONE),
+            MenuItem("Encrypt entire pool", ZFSEncryptionMode.POOL),
+            MenuItem("Encrypt base dataset only", ZFSEncryptionMode.DATASET),
+        ]
+        enc_focus = None
+        if self.cfg.zfs_encryption_mode is not None:
+            for it in enc_items:
+                if it.value == self.cfg.zfs_encryption_mode:
+                    enc_focus = it
+                    break
         encryption_menu = SelectMenu(
-            MenuItemGroup(
-                [
-                    MenuItem("No encryption", ZFSEncryptionMode.NONE),
-                    MenuItem("Encrypt entire pool", ZFSEncryptionMode.POOL),
-                    MenuItem("Encrypt base dataset only", ZFSEncryptionMode.DATASET),
-                ]
-            ),
+            MenuItemGroup(enc_items, focus_item=enc_focus) if enc_focus else MenuItemGroup(enc_items),
             header="Select ZFS encryption mode",
         )
 
@@ -418,6 +427,24 @@ class GlobalConfigMenu:
             if self.cfg.zfs_encryption_mode != ZFSEncryptionMode.NONE:
                 self._get_encryption_password()
 
+    def _configure_zfs_compression(self, *_: Any) -> None:
+        items = [
+            MenuItem("Off", CompressionAlgo.OFF),
+            MenuItem("lz4 (default)", CompressionAlgo.LZ4),
+            MenuItem("zstd", CompressionAlgo.ZSTD),
+            MenuItem("zstd-5", CompressionAlgo.ZSTD_5),
+            MenuItem("zstd-10", CompressionAlgo.ZSTD_10),
+        ]
+        # Try to focus current selection
+        focus = None
+        for it in items:
+            if it.value == self.cfg.compression:
+                focus = it
+                break
+        res = SelectMenu(MenuItemGroup(items, focus_item=focus) if focus else MenuItemGroup(items), header="Select ZFS compression").run()
+        if res.item() and res.item().value is not None:
+            self.cfg.compression = res.item().value
+
     def _configure_zfs_configuration(self, *_: Any) -> None:
         """Grouped flow for ZFS settings: dataset prefix and encryption."""
         while True:
@@ -426,6 +453,7 @@ class GlobalConfigMenu:
             submenu_items = [
                 MenuItem("Pool Name", "pool_name", key="pool_name"),
                 MenuItem("Dataset Prefix", "prefix", key="prefix"),
+                MenuItem("Compression", "compression", key="compression"),
                 MenuItem("Encryption", "encryption", key="encryption"),
                 MenuItem("Done", "done", key="done"),
             ]
@@ -454,6 +482,8 @@ class GlobalConfigMenu:
                 self._configure_pool_name()
             elif choice == "prefix":
                 self._configure_dataset_prefix()
+            elif choice == "compression":
+                self._configure_zfs_compression()
             elif choice == "encryption":
                 self._configure_zfs_encryption()
             else:
@@ -461,15 +491,20 @@ class GlobalConfigMenu:
 
     def _configure_swap(self, *_: Any) -> None:
         # Pick mode first
+        swap_items = [
+            MenuItem("None", SwapMode.NONE),
+            MenuItem("ZRAM only (disable zswap)", SwapMode.ZRAM),
+            MenuItem("ZSWAP + swap partition", SwapMode.ZSWAP_PARTITION),
+            MenuItem("ZSWAP + encrypted swap partition", SwapMode.ZSWAP_PARTITION_ENCRYPTED),
+        ]
+        swap_focus = None
+        if self.cfg.swap_mode is not None:
+            for it in swap_items:
+                if it.value == self.cfg.swap_mode:
+                    swap_focus = it
+                    break
         result = SelectMenu(
-            MenuItemGroup(
-                [
-                    MenuItem("None", SwapMode.NONE),
-                    MenuItem("ZRAM only (disable zswap)", SwapMode.ZRAM),
-                    MenuItem("ZSWAP + swap partition", SwapMode.ZSWAP_PARTITION),
-                    MenuItem("ZSWAP + encrypted swap partition", SwapMode.ZSWAP_PARTITION_ENCRYPTED),
-                ]
-            ),
+            MenuItemGroup(swap_items, focus_item=swap_focus) if swap_focus else MenuItemGroup(swap_items),
             header="Select swap mode",
         ).run()
         if result.item() and result.item().value is not None:
@@ -524,9 +559,14 @@ class GlobalConfigMenu:
                 break
 
     def _configure_init_system(self, *_: Any) -> None:
-        init_menu = SelectMenu(
-            MenuItemGroup([MenuItem("Dracut", InitSystem.DRACUT), MenuItem("Mkinitcpio", InitSystem.MKINITCPIO)]), header="Select init system"
-        )
+        init_items = [MenuItem("Dracut", InitSystem.DRACUT), MenuItem("Mkinitcpio", InitSystem.MKINITCPIO)]
+        init_focus = None
+        if self.cfg.init_system is not None:
+            for it in init_items:
+                if it.value == self.cfg.init_system:
+                    init_focus = it
+                    break
+        init_menu = SelectMenu(MenuItemGroup(init_items, focus_item=init_focus) if init_focus else MenuItemGroup(init_items), header="Select init system")
 
         result = init_menu.run()
         if result.type_ != ResultType.Skip:
@@ -606,7 +646,8 @@ class GlobalConfigMenu:
     def _preview_zfs_configuration(self, *_: Any) -> str | None:
         enc = self._preview_zfs_encryption(None) or ""
         pool = f"Pool: {self.cfg.pool_name or 'Not set'}"
-        return f"{pool}\nDataset prefix: {self.cfg.dataset_prefix}\n{enc}"
+        comp = f"Compression: {self.cfg.compression.value}"
+        return f"{pool}\nDataset prefix: {self.cfg.dataset_prefix}\n{comp}\n{enc}"
 
     def _preview_installation_mode(self, *_: Any) -> str | None:
         if not self.cfg.installation_mode:
@@ -662,9 +703,18 @@ class GlobalConfigMenu:
                 MenuItem("5) Summary & Confirm", "summary", key="w_summary"),
                 MenuItem("Back", "back", key="w_back"),
             ]
+            # Restore focus to previously selected wizard item if available
+            focus_item = None
+            if self._last_selected_wizard_key is not None:
+                for it in items:
+                    if getattr(it, "key", None) == self._last_selected_wizard_key:
+                        focus_item = it
+                        break
 
-            menu = SelectMenu(MenuItemGroup(items), header=f"Storage & ZFS Wizard\n{summary}")
+            menu = SelectMenu(MenuItemGroup(items, focus_item=focus_item) if focus_item else MenuItemGroup(items), header=f"Storage & ZFS Wizard\n{summary}")
             res = menu.run()
+            if res.item() and hasattr(res.item(), "key"):
+                self._last_selected_wizard_key = res.item().key
             if not res.item():
                 # User cancelled - discard changes
                 self.cfg = original_config
@@ -872,8 +922,9 @@ class GlobalConfigMenu:
                 self.cfg.dataset_prefix = prefix
                 break
 
-            # Encryption
+            # Encryption and compression
             self._configure_zfs_encryption()
+            self._configure_zfs_compression()
 
     def _wizard_step_summary(self) -> bool:
         """Show a compact summary and confirm."""

@@ -80,7 +80,7 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
 
         zfs_builder.with_dataset_prefix(installer_menu.cfg.dataset_prefix).with_mountpoint(mountpoint).with_init_system(
             installer_menu.cfg.init_system.value
-        ).with_encryption(selected_mode, installer_menu.cfg.zfs_encryption_password)
+        ).with_encryption(selected_mode, installer_menu.cfg.zfs_encryption_password).with_compression(installer_menu.cfg.compression.value)
 
         # Configure disk builder strictly from global menu
         if installer_menu.cfg.disk_by_id:
@@ -105,6 +105,7 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
                 zfs_builder.with_mountpoint(mountpoint)
                 .with_dataset_prefix(installer_menu.cfg.dataset_prefix)
                 .with_encryption(selected_mode, installer_menu.cfg.zfs_encryption_password)
+                .with_compression(installer_menu.cfg.compression.value)
                 .set_new_pool(zfs_partition, cast(str, installer_menu.cfg.pool_name))
                 .build()
             )
@@ -115,6 +116,7 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
                 zfs_builder.with_mountpoint(mountpoint)
                 .with_dataset_prefix(installer_menu.cfg.dataset_prefix)
                 .with_encryption(selected_mode, installer_menu.cfg.zfs_encryption_password)
+                .with_compression(installer_menu.cfg.compression.value)
                 .set_new_pool(zfs_partition, cast(str, installer_menu.cfg.pool_name))
                 .build()
             )
@@ -124,6 +126,7 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
                 zfs_builder.with_mountpoint(mountpoint)
                 .with_dataset_prefix(installer_menu.cfg.dataset_prefix)
                 .with_encryption(selected_mode, installer_menu.cfg.zfs_encryption_password)
+                .with_compression(installer_menu.cfg.compression.value)
                 .set_existing_pool(cast(str, installer_menu.cfg.pool_name))
                 .build()
             )

@@ -287,6 +287,9 @@ class ZFSPool:
         debug(f"Creating ZFS pool {self.config.pool_name} on {device}")
 
         options = self.DEFAULT_POOL_OPTIONS.copy()
+        # Set pool-level compression to ensure inheritance for datasets
+        if self.config.compression:
+            options.append(f"-O compression={self.config.compression}")
         if encryption_props:
             for key, value in encryption_props.items():
                 options.append(f"-O {key}={value}")
@@ -468,6 +471,10 @@ class ZFSManagerBuilder:
 
     def with_init_system(self, init_system: str) -> "ZFSManagerBuilder":
         self._init_system = init_system
+        return self
+
+    def with_compression(self, algo: str) -> "ZFSManagerBuilder":
+        self._compression = algo
         return self
 
     def build(self) -> "ZFSManager":
