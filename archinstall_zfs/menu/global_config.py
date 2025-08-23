@@ -58,6 +58,8 @@ class GlobalConfigMenu:
         self._last_selected_key: str | None = None
         # Remember last selected ZFS submenu item key to restore cursor position
         self._last_selected_zfs_key: str | None = None
+        # Remember last selected Storage & ZFS wizard step key
+        self._last_selected_wizard_key: str | None = None
 
     def run(self) -> None:
         """Run the main installer menu loop."""
@@ -272,16 +274,18 @@ class GlobalConfigMenu:
 
     # ZFS-specific configuration methods
     def _configure_installation_mode(self, *_: Any) -> None:
-        mode_menu = SelectMenu(
-            MenuItemGroup(
-                [
-                    MenuItem("Full Disk Installation", InstallationMode.FULL_DISK),
-                    MenuItem("New ZFS Pool", InstallationMode.NEW_POOL),
-                    MenuItem("Existing ZFS Pool", InstallationMode.EXISTING_POOL),
-                ]
-            ),
-            header="Select installation mode",
-        )
+        items = [
+            MenuItem("Full Disk Installation", InstallationMode.FULL_DISK),
+            MenuItem("New ZFS Pool", InstallationMode.NEW_POOL),
+            MenuItem("Existing ZFS Pool", InstallationMode.EXISTING_POOL),
+        ]
+        focus_item = None
+        if self.cfg.installation_mode is not None:
+            for it in items:
+                if it.value == self.cfg.installation_mode:
+                    focus_item = it
+                    break
+        mode_menu = SelectMenu(MenuItemGroup(items, focus_item=focus_item) if focus_item else MenuItemGroup(items), header="Select installation mode")
         result = mode_menu.run()
         if result.type_ != ResultType.Skip and result.item():
             self.cfg.installation_mode = result.item().value
@@ -398,14 +402,19 @@ class GlobalConfigMenu:
             self.cfg.dataset_prefix = result.text()
 
     def _configure_zfs_encryption(self, *_: Any) -> None:
+        enc_items = [
+            MenuItem("No encryption", ZFSEncryptionMode.NONE),
+            MenuItem("Encrypt entire pool", ZFSEncryptionMode.POOL),
+            MenuItem("Encrypt base dataset only", ZFSEncryptionMode.DATASET),
+        ]
+        enc_focus = None
+        if self.cfg.zfs_encryption_mode is not None:
+            for it in enc_items:
+                if it.value == self.cfg.zfs_encryption_mode:
+                    enc_focus = it
+                    break
         encryption_menu = SelectMenu(
-            MenuItemGroup(
-                [
-                    MenuItem("No encryption", ZFSEncryptionMode.NONE),
-                    MenuItem("Encrypt entire pool", ZFSEncryptionMode.POOL),
-                    MenuItem("Encrypt base dataset only", ZFSEncryptionMode.DATASET),
-                ]
-            ),
+            MenuItemGroup(enc_items, focus_item=enc_focus) if enc_focus else MenuItemGroup(enc_items),
             header="Select ZFS encryption mode",
         )
 
@@ -482,15 +491,20 @@ class GlobalConfigMenu:
 
     def _configure_swap(self, *_: Any) -> None:
         # Pick mode first
+        swap_items = [
+            MenuItem("None", SwapMode.NONE),
+            MenuItem("ZRAM only (disable zswap)", SwapMode.ZRAM),
+            MenuItem("ZSWAP + swap partition", SwapMode.ZSWAP_PARTITION),
+            MenuItem("ZSWAP + encrypted swap partition", SwapMode.ZSWAP_PARTITION_ENCRYPTED),
+        ]
+        swap_focus = None
+        if self.cfg.swap_mode is not None:
+            for it in swap_items:
+                if it.value == self.cfg.swap_mode:
+                    swap_focus = it
+                    break
         result = SelectMenu(
-            MenuItemGroup(
-                [
-                    MenuItem("None", SwapMode.NONE),
-                    MenuItem("ZRAM only (disable zswap)", SwapMode.ZRAM),
-                    MenuItem("ZSWAP + swap partition", SwapMode.ZSWAP_PARTITION),
-                    MenuItem("ZSWAP + encrypted swap partition", SwapMode.ZSWAP_PARTITION_ENCRYPTED),
-                ]
-            ),
+            MenuItemGroup(swap_items, focus_item=swap_focus) if swap_focus else MenuItemGroup(swap_items),
             header="Select swap mode",
         ).run()
         if result.item() and result.item().value is not None:
@@ -545,9 +559,14 @@ class GlobalConfigMenu:
                 break
 
     def _configure_init_system(self, *_: Any) -> None:
-        init_menu = SelectMenu(
-            MenuItemGroup([MenuItem("Dracut", InitSystem.DRACUT), MenuItem("Mkinitcpio", InitSystem.MKINITCPIO)]), header="Select init system"
-        )
+        init_items = [MenuItem("Dracut", InitSystem.DRACUT), MenuItem("Mkinitcpio", InitSystem.MKINITCPIO)]
+        init_focus = None
+        if self.cfg.init_system is not None:
+            for it in init_items:
+                if it.value == self.cfg.init_system:
+                    init_focus = it
+                    break
+        init_menu = SelectMenu(MenuItemGroup(init_items, focus_item=init_focus) if init_focus else MenuItemGroup(init_items), header="Select init system")
 
         result = init_menu.run()
         if result.type_ != ResultType.Skip:
@@ -684,9 +703,18 @@ class GlobalConfigMenu:
                 MenuItem("5) Summary & Confirm", "summary", key="w_summary"),
                 MenuItem("Back", "back", key="w_back"),
             ]
+            # Restore focus to previously selected wizard item if available
+            focus_item = None
+            if self._last_selected_wizard_key is not None:
+                for it in items:
+                    if getattr(it, "key", None) == self._last_selected_wizard_key:
+                        focus_item = it
+                        break
 
-            menu = SelectMenu(MenuItemGroup(items), header=f"Storage & ZFS Wizard\n{summary}")
+            menu = SelectMenu(MenuItemGroup(items, focus_item=focus_item) if focus_item else MenuItemGroup(items), header=f"Storage & ZFS Wizard\n{summary}")
             res = menu.run()
+            if res.item() and hasattr(res.item(), "key"):
+                self._last_selected_wizard_key = res.item().key
             if not res.item():
                 # User cancelled - discard changes
                 self.cfg = original_config
