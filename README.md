@@ -35,6 +35,8 @@
 ### 📦 Option A: Prebuilt ISO *(Recommended)*
 
 1. **Download** the latest ISO from [**Releases**](https://github.com/okhsunrog/archinstall_zfs/releases)
+   - 🆕 **Monthly automated builds** on the 4th of each month
+   - Both `linux` and `linux-lts` kernels with smart ZFS mode selection
 2. **Boot** it on your UEFI machine and connect to network
 3. **Run** the installer:
 
@@ -376,8 +378,9 @@ just qemu-install-serial         # Test in VM
 - 🗂️ **Languages**: Python, Shell, Jinja2
 - 🧪 **Testing**: Pytest, MyPy, Ruff
 - 📦 **Dependencies**: archinstall, ZFS utilities
-- 🏗️ **Build**: ArchISO, QEMU
+- 🏗️ **Build**: ArchISO, QEMU, GitHub Actions
 - 📄 **License**: GPL-3.0
+- 🚀 **CI/CD**: Automated tag releases + monthly builds
 
 ---
 
