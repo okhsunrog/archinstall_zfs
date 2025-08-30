@@ -635,13 +635,13 @@ class GlobalConfigMenu:
             if selected is not None:
                 self.cfg.zrepl_enabled = selected
 
-                # Automatically manage zrepl in system AUR packages list
-                if selected and "zrepl" not in self.cfg._system_aur_packages:
-                    # Add zrepl to system AUR packages when enabled
-                    self.cfg._system_aur_packages.append("zrepl")
-                elif not selected and "zrepl" in self.cfg._system_aur_packages:
-                    # Remove zrepl from system AUR packages when disabled
-                    self.cfg._system_aur_packages.remove("zrepl")
+                # Automatically manage zrepl-bin in system AUR packages list
+                if selected and "zrepl-bin" not in self.cfg._system_aur_packages:
+                    # Add zrepl-bin to system AUR packages when enabled
+                    self.cfg._system_aur_packages.append("zrepl-bin")
+                elif not selected and "zrepl-bin" in self.cfg._system_aur_packages:
+                    # Remove zrepl-bin from system AUR packages when disabled
+                    self.cfg._system_aur_packages.remove("zrepl-bin")
 
     # Removed separate ZFS modules selector; controlled by Kernel selection
 
