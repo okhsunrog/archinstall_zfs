@@ -281,13 +281,22 @@ class GlobalConfigMenu:
             self.config.packages = packages
 
     def _configure_aur_packages(self, *_: Any) -> None:
-        """Configure AUR packages to install."""
-        current_packages = ", ".join(self.cfg.aur_packages) if self.cfg.aur_packages else ""
+        """Configure user-selected AUR packages to install."""
+        current_packages = " ".join(self.cfg.aur_packages) if self.cfg.aur_packages else ""
+
+        # Build header with system package info
+        header_parts = ["Enter AUR package names separated by spaces\n(e.g., yay paru-bin htop-git)"]
+
+        if self.cfg._system_aur_packages:
+            system_list = ", ".join(self.cfg._system_aur_packages)
+            header_parts.append(f"\nSystem packages (auto-managed): {system_list}")
+
+        header_parts.append("\nThis is for additional packages you want to install.")
 
         result = EditMenu(
-            "AUR Packages",
-            header="Enter AUR package names separated by spaces\n(e.g., yay paru-bin zrepl)",
-            default_text=current_packages.replace(",", ""),
+            "User AUR Packages",
+            header="\n".join(header_parts),
+            default_text=current_packages,
         ).input()
 
         if result.text() is not None:
@@ -613,7 +622,7 @@ class GlobalConfigMenu:
             "Configure zrepl (ZFS replication)\n\n"
             "zrepl provides automated ZFS snapshot creation and replication.\n"
             "When enabled, it will create periodic snapshots and manage pruning.\n"
-            "Note: zrepl will be automatically added to AUR packages list."
+            "Note: zrepl will be automatically installed from AUR when enabled."
         )
         zrepl_menu = SelectMenu(
             MenuItemGroup(zrepl_items, focus_item=zrepl_focus) if zrepl_focus else MenuItemGroup(zrepl_items),
@@ -626,13 +635,13 @@ class GlobalConfigMenu:
             if selected is not None:
                 self.cfg.zrepl_enabled = selected
 
-                # Automatically manage zrepl in AUR packages list
-                if selected and "zrepl" not in self.cfg.aur_packages:
-                    # Add zrepl to AUR packages when enabled
-                    self.cfg.aur_packages.append("zrepl")
-                elif not selected and "zrepl" in self.cfg.aur_packages:
-                    # Remove zrepl from AUR packages when disabled
-                    self.cfg.aur_packages.remove("zrepl")
+                # Automatically manage zrepl in system AUR packages list
+                if selected and "zrepl" not in self.cfg._system_aur_packages:
+                    # Add zrepl to system AUR packages when enabled
+                    self.cfg._system_aur_packages.append("zrepl")
+                elif not selected and "zrepl" in self.cfg._system_aur_packages:
+                    # Remove zrepl from system AUR packages when disabled
+                    self.cfg._system_aur_packages.remove("zrepl")
 
     # Removed separate ZFS modules selector; controlled by Kernel selection
 
@@ -697,12 +706,25 @@ class GlobalConfigMenu:
         return "Additional packages: None"
 
     def _preview_aur_packages(self, *_: Any) -> str | None:
-        if self.cfg.aur_packages:
-            MAX_PREVIEW = 3
-            preview_list = ", ".join(self.cfg.aur_packages[:MAX_PREVIEW])
-            suffix = "..." if len(self.cfg.aur_packages) > MAX_PREVIEW else ""
-            return f"AUR packages: {len(self.cfg.aur_packages)} selected ({preview_list}{suffix})"
-        return "AUR packages: None"
+        user_packages = self.cfg.aur_packages
+        system_packages = self.cfg._system_aur_packages
+        total_packages = self.cfg.get_all_aur_packages()
+
+        if not total_packages:
+            return "AUR packages: None"
+
+        parts = []
+        if user_packages:
+            parts.append(f"{len(user_packages)} user")
+        if system_packages:
+            parts.append(f"{len(system_packages)} system")
+
+        MAX_PREVIEW = 3
+        preview_list = ", ".join(total_packages[:MAX_PREVIEW])
+        suffix = "..." if len(total_packages) > MAX_PREVIEW else ""
+
+        summary = " + ".join(parts) if parts else "0"
+        return f"AUR packages: {len(total_packages)} total ({summary}) - {preview_list}{suffix}"
 
     def _preview_zfs_encryption(self, *_: Any) -> str | None:
         mode_text = self.cfg.zfs_encryption_mode.value

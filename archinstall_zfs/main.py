@@ -243,12 +243,13 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
             if arch_config.packages:
                 installation.add_additional_packages(arch_config.packages)
 
-            # Install AUR packages if any are configured
+            # Install AUR packages if any are configured (user + system)
             zfs_config = installer_menu.get_zfs_config()
-            aur_packages = zfs_config.get("aur_packages", [])
-            if aur_packages:
-                info(f"Installing AUR packages: {', '.join(aur_packages)}")
-                installation.install_aur_packages(aur_packages)
+            # Get combined list of user and system AUR packages
+            all_aur_packages = installer_menu.cfg.get_all_aur_packages()
+            if all_aur_packages:
+                info(f"Installing AUR packages: {', '.join(all_aur_packages)}")
+                installation.install_aur_packages(all_aur_packages)
 
             if arch_config.timezone:
                 installation.set_timezone(arch_config.timezone)
