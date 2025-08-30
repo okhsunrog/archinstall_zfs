@@ -321,12 +321,14 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
 
             zfs_manager.copy_misc_files()
 
-            # Setup zrepl if enabled
+            # Setup zrepl if enabled (install package, create config, enable service)
             zfs_config = installer_menu.get_zfs_config()
             if zfs_config.get("zrepl_enabled", False):
                 pool_name = zfs_config.get("pool_name", "zroot")
                 dataset_prefix = zfs_config.get("dataset_prefix", "arch0")
                 setup_zrepl(installation, pool_name, dataset_prefix)
+                # Enable zrepl service using standard archinstall pattern
+                installation.enable_service(["zrepl.service"])
 
             if disk_manager.config.efi_partition:
                 zfs_manager.setup_bootloader(disk_manager.config.efi_partition)

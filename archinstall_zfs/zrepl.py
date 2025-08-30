@@ -1,8 +1,9 @@
 """
 zrepl integration for archinstall_zfs.
 
-This module provides zrepl configuration generation, package installation,
-and service management for ZFS replication and snapshot management.
+This module provides zrepl configuration generation and package installation
+for ZFS replication and snapshot management. Service enablement is handled
+by the main installer using the standard archinstall pattern.
 """
 
 from archinstall import info
@@ -64,26 +65,6 @@ def install_zrepl_package(installation: Installer) -> bool:
         return False
 
 
-def enable_zrepl_service(installation: Installer) -> bool:
-    """
-    Enable and start zrepl systemd service.
-
-    Args:
-        installation: Installer instance for target installation
-
-    Returns:
-        True if service was enabled successfully, False otherwise
-    """
-    try:
-        info("Enabling zrepl systemd service")
-        installation.arch_chroot("systemctl enable zrepl.service")
-        info("Successfully enabled zrepl service")
-        return True
-    except Exception as e:
-        info(f"Failed to enable zrepl service: {e}")
-        return False
-
-
 def setup_zrepl_config(installation: Installer, pool_name: str, dataset_prefix: str) -> bool:
     """
     Create zrepl configuration file in the target system.
@@ -122,7 +103,9 @@ def setup_zrepl_config(installation: Installer, pool_name: str, dataset_prefix: 
 
 def setup_zrepl(installation: Installer, pool_name: str, dataset_prefix: str) -> bool:
     """
-    Complete zrepl setup: install package, create config, enable service.
+    Complete zrepl setup: install package and create config.
+
+    Note: Service enablement is handled separately using the standard archinstall pattern.
 
     Args:
         installation: Installer instance for target installation
@@ -140,10 +123,6 @@ def setup_zrepl(installation: Installer, pool_name: str, dataset_prefix: str) ->
 
     # Create configuration
     if not setup_zrepl_config(installation, pool_name, dataset_prefix):
-        success = False
-
-    # Enable service
-    if not enable_zrepl_service(installation):
         success = False
 
     if success:
