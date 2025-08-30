@@ -21,8 +21,8 @@ class AURManager:
     """Manages AUR package installation in the target system."""
 
     TEMP_USER: ClassVar[str] = "aurinstall"
-    AUR_HELPER: ClassVar[str] = "paru"
-    AUR_HELPER_REPO: ClassVar[str] = "https://aur.archlinux.org/paru-bin.git"
+    AUR_HELPER: ClassVar[str] = "yay"
+    AUR_HELPER_REPO: ClassVar[str] = "https://aur.archlinux.org/yay-bin.git"
     DEPENDENCIES: ClassVar[list[str]] = ["git", "base-devel"]
 
     def __init__(self, installer: Installer):
@@ -77,19 +77,30 @@ class AURManager:
         self._sudo_modified = True
 
     def _install_aur_helper(self) -> None:
-        """Install paru AUR helper."""
+        """Install yay AUR helper."""
         info(f"Installing {self.AUR_HELPER} AUR helper")
 
-        # Clone and build paru in temporary directory
-        build_cmd = f"su {self.TEMP_USER} -c 'cd $(mktemp -d) && git clone {self.AUR_HELPER_REPO} . && makepkg -sim --noconfirm'"
-        self.installer.arch_chroot(build_cmd)
+        # Build yay package as regular user, then install as root
+        # Use mktemp for secure temporary directory
+        build_commands = [
+            "BUILD_DIR=$(mktemp -d)",
+            f"chown {self.TEMP_USER}:{self.TEMP_USER} $BUILD_DIR",
+            f"su {self.TEMP_USER} -c 'cd $BUILD_DIR && git clone {self.AUR_HELPER_REPO} .'",
+            f"su {self.TEMP_USER} -c 'cd $BUILD_DIR && makepkg --noconfirm'",
+            "pacman -U --noconfirm $BUILD_DIR/*.pkg.tar.*",
+            "rm -rf $BUILD_DIR",
+        ]
+
+        # Execute as a single command to preserve BUILD_DIR variable
+        full_command = " && ".join(build_commands)
+        self.installer.arch_chroot(full_command)
 
     def _install_aur_packages(self, packages: list[str]) -> None:
-        """Install the actual AUR packages using paru."""
+        """Install the actual AUR packages using yay."""
         info(f"Installing AUR packages: {', '.join(packages)}")
 
-        # Install packages with paru
-        install_cmd = f"su {self.TEMP_USER} -c '{self.AUR_HELPER} -Sy --nosudoloop --needed --noconfirm {' '.join(packages)}'"
+        # Install packages with yay
+        install_cmd = f"su {self.TEMP_USER} -c '{self.AUR_HELPER} -Sy --noconfirm --needed {' '.join(packages)}'"
         self.installer.arch_chroot(install_cmd)
 
     def _cleanup_aur_environment(self) -> None:
@@ -106,7 +117,8 @@ class AURManager:
             # Remove temporary user
             if self._temp_user_created:
                 info(f"Removing temporary user: {self.TEMP_USER}")
-                self.installer.arch_chroot(f"userdel -r {self.TEMP_USER} 2>/dev/null || true")
+                # Use proper shell command for error handling
+                self.installer.arch_chroot(f"userdel -r {self.TEMP_USER} || true")
                 self._temp_user_created = False
 
         except Exception as e:
