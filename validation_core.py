@@ -359,7 +359,8 @@ def validate_precompiled_zfs_compatibility(kernel_name: str) -> tuple[bool, list
         kernel_full_ver = kernel_pkg_ver
 
         # Parse ZFS package version: format is {zfs_version}_{supported_kernel_version}-{pkg_release}
-        # Example: "2.3.3_6.15.9.zen1.1-1" -> supported kernel is "6.15.9.zen1.1-1"
+        # Example: "2.3.4_6.16.4.arch1.1-1" -> supported kernel is "6.16.4.arch1.1-1"
+        # Note: The ZFS package may have an extra build number (e.g., .1) that should be ignored
         if "_" not in zfs_pkg_ver:
             warnings.append(f"Unexpected {precompiled_pkg_name} version format: {zfs_pkg_ver}")
             return False, warnings
@@ -368,9 +369,30 @@ def validate_precompiled_zfs_compatibility(kernel_name: str) -> tuple[bool, list
         # Keep the full supported kernel version including package release
         supported_kernel_ver = supported_kernel_part
 
-        # Compare versions - precompiled ZFS must match EXACTLY
-        if kernel_full_ver == supported_kernel_ver:
-            debug_print(f"Kernel {kernel_name} ({kernel_full_ver}) matches exactly with precompiled ZFS ({supported_kernel_ver})")
+        # Handle ZFS build suffixes: if ZFS version has extra .N suffix, try matching without it
+        # Example: kernel "6.16.4.arch1-1" should match ZFS "6.16.4.arch1.1-1"
+        def versions_match(kernel_ver: str, zfs_ver: str) -> bool:
+            if kernel_ver == zfs_ver:
+                return True
+
+            # Try removing ZFS build suffix (.N) before the package release
+            # Split by '-' to separate version from package release
+            if "-" in zfs_ver:
+                zfs_version_part, zfs_release_part = zfs_ver.rsplit("-", 1)
+                # Check if there's a build suffix (.N) at the end of version part
+                if "." in zfs_version_part:
+                    zfs_parts = zfs_version_part.split(".")
+                    # If last part is a single digit, it might be a build suffix
+                    if len(zfs_parts) > 1 and zfs_parts[-1].isdigit() and len(zfs_parts[-1]) == 1:
+                        # Try matching without the build suffix
+                        zfs_without_suffix = ".".join(zfs_parts[:-1]) + "-" + zfs_release_part
+                        if kernel_ver == zfs_without_suffix:
+                            return True
+            return False
+
+        # Compare versions with build suffix handling
+        if versions_match(kernel_full_ver, supported_kernel_ver):
+            debug_print(f"Kernel {kernel_name} ({kernel_full_ver}) matches with precompiled ZFS ({supported_kernel_ver})")
             return True, warnings
         warning_msg = f"Kernel {kernel_name} ({kernel_full_ver}) does not match precompiled ZFS (requires exactly {supported_kernel_ver})"
         warnings.append(warning_msg)
