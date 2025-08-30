@@ -45,24 +45,8 @@ def generate_zrepl_config(pool_name: str, dataset_prefix: str) -> str:
 """
 
 
-def install_zrepl_package(installation: Installer) -> bool:
-    """
-    Install zrepl package in the target system.
-
-    Args:
-        installation: Installer instance for target installation
-
-    Returns:
-        True if installation succeeded, False otherwise
-    """
-    try:
-        info("Installing zrepl package")
-        installation.arch_chroot("pacman -S --noconfirm zrepl")
-        info("Successfully installed zrepl package")
-        return True
-    except Exception as e:
-        info(f"Failed to install zrepl package: {e}")
-        return False
+# Package installation is now handled by the AUR system
+# zrepl is automatically added to aur_packages when enabled
 
 
 def setup_zrepl_config(installation: Installer, pool_name: str, dataset_prefix: str) -> bool:
@@ -103,8 +87,9 @@ def setup_zrepl_config(installation: Installer, pool_name: str, dataset_prefix: 
 
 def setup_zrepl(installation: Installer, pool_name: str, dataset_prefix: str) -> bool:
     """
-    Complete zrepl setup: install package and create config.
+    Complete zrepl setup: create configuration only.
 
+    Note: Package installation is handled by the AUR system.
     Note: Service enablement is handled separately using the standard archinstall pattern.
 
     Args:
@@ -113,21 +98,14 @@ def setup_zrepl(installation: Installer, pool_name: str, dataset_prefix: str) ->
         dataset_prefix: Dataset prefix (e.g., "arch0")
 
     Returns:
-        True if all setup steps succeeded, False otherwise
+        True if configuration was created successfully, False otherwise
     """
-    success = True
-
-    # Install package
-    if not install_zrepl_package(installation):
-        success = False
-
-    # Create configuration
-    if not setup_zrepl_config(installation, pool_name, dataset_prefix):
-        success = False
+    # Only create configuration - package installation handled by AUR system
+    success = setup_zrepl_config(installation, pool_name, dataset_prefix)
 
     if success:
-        info("zrepl setup completed successfully")
+        info("zrepl configuration created successfully")
     else:
-        info("zrepl setup completed with some errors")
+        info("zrepl configuration creation failed")
 
     return success

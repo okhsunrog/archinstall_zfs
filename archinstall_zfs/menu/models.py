@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..shared import ZFSModuleMode
 
@@ -72,6 +72,9 @@ class GlobalConfig(BaseModel):
 
     # zrepl settings
     zrepl_enabled: bool = False
+
+    # AUR package support
+    aur_packages: list[str] = Field(default_factory=list)
 
     @field_validator("pool_name")
     @classmethod

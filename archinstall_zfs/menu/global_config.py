@@ -98,6 +98,7 @@ class GlobalConfigMenu:
                 key="ntp",
             ),
             MenuItem(text=tr("Additional packages"), preview_action=self._preview_packages, key="packages"),
+            MenuItem(text="AUR packages", preview_action=self._preview_aur_packages, key="aur_packages"),
             # Separator
             MenuItem(text=""),
             # Storage & ZFS wizard
@@ -160,6 +161,7 @@ class GlobalConfigMenu:
             "timezone": self._configure_timezone,
             "ntp": self._configure_ntp,
             "packages": self._configure_packages,
+            "aur_packages": self._configure_aur_packages,
             "storage_wizard": self.run_storage_wizard,
             "pool_name": self._configure_pool_name,
             "init_system": self._configure_init_system,
@@ -277,6 +279,21 @@ class GlobalConfigMenu:
         packages = ask_additional_packages_to_install(self.config.packages)
         if packages is not None:
             self.config.packages = packages
+
+    def _configure_aur_packages(self, *_: Any) -> None:
+        """Configure AUR packages to install."""
+        current_packages = ", ".join(self.cfg.aur_packages) if self.cfg.aur_packages else ""
+
+        result = EditMenu(
+            "AUR Packages",
+            header="Enter AUR package names separated by spaces\n(e.g., yay paru-bin zrepl)",
+            default_text=current_packages.replace(",", ""),
+        ).input()
+
+        if result.text() is not None:
+            # Parse space-separated package names
+            packages = [pkg.strip() for pkg in result.text().split() if pkg.strip()]
+            self.cfg.aur_packages = packages
 
     # ZFS-specific configuration methods
     def _configure_installation_mode(self, *_: Any) -> None:
@@ -595,7 +612,8 @@ class GlobalConfigMenu:
         header_text = (
             "Configure zrepl (ZFS replication)\n\n"
             "zrepl provides automated ZFS snapshot creation and replication.\n"
-            "When enabled, it will create periodic snapshots and manage pruning."
+            "When enabled, it will create periodic snapshots and manage pruning.\n"
+            "Note: zrepl will be automatically added to AUR packages list."
         )
         zrepl_menu = SelectMenu(
             MenuItemGroup(zrepl_items, focus_item=zrepl_focus) if zrepl_focus else MenuItemGroup(zrepl_items),
@@ -607,6 +625,14 @@ class GlobalConfigMenu:
             selected = result.item().value if result.item() else None
             if selected is not None:
                 self.cfg.zrepl_enabled = selected
+
+                # Automatically manage zrepl in AUR packages list
+                if selected and "zrepl" not in self.cfg.aur_packages:
+                    # Add zrepl to AUR packages when enabled
+                    self.cfg.aur_packages.append("zrepl")
+                elif not selected and "zrepl" in self.cfg.aur_packages:
+                    # Remove zrepl from AUR packages when disabled
+                    self.cfg.aur_packages.remove("zrepl")
 
     # Removed separate ZFS modules selector; controlled by Kernel selection
 
@@ -669,6 +695,14 @@ class GlobalConfigMenu:
         if self.config.packages:
             return f"Additional packages: {len(self.config.packages)} selected"
         return "Additional packages: None"
+
+    def _preview_aur_packages(self, *_: Any) -> str | None:
+        if self.cfg.aur_packages:
+            MAX_PREVIEW = 3
+            preview_list = ", ".join(self.cfg.aur_packages[:MAX_PREVIEW])
+            suffix = "..." if len(self.cfg.aur_packages) > MAX_PREVIEW else ""
+            return f"AUR packages: {len(self.cfg.aur_packages)} selected ({preview_list}{suffix})"
+        return "AUR packages: None"
 
     def _preview_zfs_encryption(self, *_: Any) -> str | None:
         mode_text = self.cfg.zfs_encryption_mode.value
