@@ -98,6 +98,7 @@ class GlobalConfigMenu:
                 key="ntp",
             ),
             MenuItem(text=tr("Additional packages"), preview_action=self._preview_packages, key="packages"),
+            MenuItem(text="AUR packages", preview_action=self._preview_aur_packages, key="aur_packages"),
             # Separator
             MenuItem(text=""),
             # Storage & ZFS wizard
@@ -110,6 +111,11 @@ class GlobalConfigMenu:
                 text="Init System",
                 preview_action=lambda _: f"Init system: {self.cfg.init_system.value}",
                 key="init_system",
+            ),
+            MenuItem(
+                text="zrepl (ZFS replication)",
+                preview_action=lambda _: f"zrepl: {'Enabled' if self.cfg.zrepl_enabled else 'Disabled'}",
+                key="zrepl",
             ),
             # Separator
             MenuItem(text=""),
@@ -155,9 +161,11 @@ class GlobalConfigMenu:
             "timezone": self._configure_timezone,
             "ntp": self._configure_ntp,
             "packages": self._configure_packages,
+            "aur_packages": self._configure_aur_packages,
             "storage_wizard": self.run_storage_wizard,
             "pool_name": self._configure_pool_name,
             "init_system": self._configure_init_system,
+            "zrepl": self._configure_zrepl,
         }
         handler = handlers.get(choice)
         if handler:
@@ -271,6 +279,30 @@ class GlobalConfigMenu:
         packages = ask_additional_packages_to_install(self.config.packages)
         if packages is not None:
             self.config.packages = packages
+
+    def _configure_aur_packages(self, *_: Any) -> None:
+        """Configure user-selected AUR packages to install."""
+        current_packages = " ".join(self.cfg.aur_packages) if self.cfg.aur_packages else ""
+
+        # Build header with system package info
+        header_parts = ["Enter AUR package names separated by spaces\n(e.g., yay paru-bin htop-git)"]
+
+        if self.cfg._system_aur_packages:
+            system_list = ", ".join(self.cfg._system_aur_packages)
+            header_parts.append(f"\nSystem packages (auto-managed): {system_list}")
+
+        header_parts.append("\nThis is for additional packages you want to install.")
+
+        result = EditMenu(
+            "User AUR Packages",
+            header="\n".join(header_parts),
+            default_text=current_packages,
+        ).input()
+
+        if result.text() is not None:
+            # Parse space-separated package names
+            packages = [pkg.strip() for pkg in result.text().split() if pkg.strip()]
+            self.cfg.aur_packages = packages
 
     # ZFS-specific configuration methods
     def _configure_installation_mode(self, *_: Any) -> None:
@@ -574,6 +606,43 @@ class GlobalConfigMenu:
             if selected is not None:
                 self.cfg.init_system = selected
 
+    def _configure_zrepl(self, *_: Any) -> None:
+        """Configure zrepl (ZFS replication) settings."""
+        zrepl_items = [
+            MenuItem("Enable zrepl", True),
+            MenuItem("Disable zrepl", False),
+        ]
+        zrepl_focus = None
+        for it in zrepl_items:
+            if it.value == self.cfg.zrepl_enabled:
+                zrepl_focus = it
+                break
+
+        header_text = (
+            "Configure zrepl (ZFS replication)\n\n"
+            "zrepl provides automated ZFS snapshot creation and replication.\n"
+            "When enabled, it will create periodic snapshots and manage pruning.\n"
+            "Note: zrepl will be automatically installed from AUR when enabled."
+        )
+        zrepl_menu = SelectMenu(
+            MenuItemGroup(zrepl_items, focus_item=zrepl_focus) if zrepl_focus else MenuItemGroup(zrepl_items),
+            header=header_text,
+        )
+
+        result = zrepl_menu.run()
+        if result.type_ != ResultType.Skip:
+            selected = result.item().value if result.item() else None
+            if selected is not None:
+                self.cfg.zrepl_enabled = selected
+
+                # Automatically manage zrepl-bin in system AUR packages list
+                if selected and "zrepl-bin" not in self.cfg._system_aur_packages:
+                    # Add zrepl-bin to system AUR packages when enabled
+                    self.cfg._system_aur_packages.append("zrepl-bin")
+                elif not selected and "zrepl-bin" in self.cfg._system_aur_packages:
+                    # Remove zrepl-bin from system AUR packages when disabled
+                    self.cfg._system_aur_packages.remove("zrepl-bin")
+
     # Removed separate ZFS modules selector; controlled by Kernel selection
 
     # Preview methods
@@ -635,6 +704,27 @@ class GlobalConfigMenu:
         if self.config.packages:
             return f"Additional packages: {len(self.config.packages)} selected"
         return "Additional packages: None"
+
+    def _preview_aur_packages(self, *_: Any) -> str | None:
+        user_packages = self.cfg.aur_packages
+        system_packages = self.cfg._system_aur_packages
+        total_packages = self.cfg.get_all_aur_packages()
+
+        if not total_packages:
+            return "AUR packages: None"
+
+        parts = []
+        if user_packages:
+            parts.append(f"{len(user_packages)} user")
+        if system_packages:
+            parts.append(f"{len(system_packages)} system")
+
+        MAX_PREVIEW = 3
+        preview_list = ", ".join(total_packages[:MAX_PREVIEW])
+        suffix = "..." if len(total_packages) > MAX_PREVIEW else ""
+
+        summary = " + ".join(parts) if parts else "0"
+        return f"AUR packages: {len(total_packages)} total ({summary}) - {preview_list}{suffix}"
 
     def _preview_zfs_encryption(self, *_: Any) -> str | None:
         mode_text = self.cfg.zfs_encryption_mode.value

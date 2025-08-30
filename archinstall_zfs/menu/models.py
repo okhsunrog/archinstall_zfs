@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from ..shared import ZFSModuleMode
 
@@ -70,6 +70,15 @@ class GlobalConfig(BaseModel):
     zram_size_expr: str | None = "min(ram / 2, 4096)"
     zram_fraction: float | None = None
 
+    # zrepl settings
+    zrepl_enabled: bool = False
+
+    # AUR package support
+    aur_packages: list[str] = Field(default_factory=list)  # User-selected AUR packages
+
+    # Private attribute for system-managed AUR packages (not saved to JSON)
+    _system_aur_packages: list[str] = PrivateAttr(default_factory=list)
+
     @field_validator("pool_name")
     @classmethod
     def _validate_pool_name(cls, v: str | None) -> str | None:
@@ -124,6 +133,18 @@ class GlobalConfig(BaseModel):
                 errors.append("Swap partition (/dev/disk/by-id) must be selected for ZSWAP modes in existing pool installation")
 
         return errors
+
+    def get_all_aur_packages(self) -> list[str]:
+        """Get combined list of user-selected and system-managed AUR packages, removing duplicates."""
+        combined = self.aur_packages + self._system_aur_packages
+        # Remove duplicates while preserving order
+        seen = set()
+        result = []
+        for pkg in combined:
+            if pkg not in seen:
+                seen.add(pkg)
+                result.append(pkg)
+        return result
 
     def to_json(self) -> dict:
         return self.model_dump(mode="json", exclude_none=True)

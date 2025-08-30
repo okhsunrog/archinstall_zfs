@@ -10,6 +10,7 @@ from pathlib import Path
 from archinstall.lib.installer import Installer
 from archinstall.lib.models.device import DiskLayoutConfiguration
 
+from archinstall_zfs.aur import AURManager
 from archinstall_zfs.initramfs.base import InitramfsHandler
 
 
@@ -70,3 +71,19 @@ class ZFSInstaller(Installer):
             return all(self.initramfs_handler.generate_initramfs(kernel) for kernel in self.kernels)
         except Exception:
             return False
+
+    def install_aur_packages(self, packages: list[str]) -> bool:
+        """
+        Install AUR packages using the AUR manager.
+
+        Args:
+            packages: List of AUR package names to install
+
+        Returns:
+            True if all packages installed successfully, False otherwise
+        """
+        if not packages:
+            return True
+
+        aur_manager = AURManager(self)
+        return aur_manager.install_packages(packages)

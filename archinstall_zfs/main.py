@@ -26,6 +26,7 @@ from archinstall_zfs.menu import GlobalConfigMenu
 from archinstall_zfs.menu.models import InstallationMode, SwapMode, ZFSEncryptionMode
 from archinstall_zfs.zfs import ZFS_SERVICES, EncryptionMode, ZFSManagerBuilder
 from archinstall_zfs.zfs.kmod_setup import add_archzfs_repo, initialize_zfs
+from archinstall_zfs.zrepl import setup_zrepl
 
 
 def check_internet() -> bool:
@@ -242,6 +243,14 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
             if arch_config.packages:
                 installation.add_additional_packages(arch_config.packages)
 
+            # Install AUR packages if any are configured (user + system)
+            zfs_config = installer_menu.get_zfs_config()
+            # Get combined list of user and system AUR packages
+            all_aur_packages = installer_menu.cfg.get_all_aur_packages()
+            if all_aur_packages:
+                info(f"Installing AUR packages: {', '.join(all_aur_packages)}")
+                installation.install_aur_packages(all_aur_packages)
+
             if arch_config.timezone:
                 installation.set_timezone(arch_config.timezone)
 
@@ -319,6 +328,24 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
                             f.write("/dev/mapper/cryptswap none swap defaults 0 0\n")
 
             zfs_manager.copy_misc_files()
+
+            # Setup zrepl if enabled (create config and enable service if package was installed)
+            zfs_config = installer_menu.get_zfs_config()
+            if zfs_config.get("zrepl_enabled", False):
+                pool_name = zfs_config.get("pool_name", "zroot")
+                dataset_prefix = zfs_config.get("dataset_prefix", "arch0")
+                setup_zrepl(installation, pool_name, dataset_prefix)
+
+                # Only enable service if zrepl package was successfully installed
+                try:
+                    # Check if zrepl is installed by trying to find the service file
+                    installation.arch_chroot("systemctl list-unit-files zrepl.service")
+                    # Enable zrepl service using standard archinstall pattern
+                    installation.enable_service(["zrepl.service"])
+                    info("zrepl service enabled successfully")
+                except Exception as e:
+                    error(f"zrepl service not available (package may not be installed): {e}")
+                    info("Skipping zrepl service enablement - install zrepl manually if needed")
 
             if disk_manager.config.efi_partition:
                 zfs_manager.setup_bootloader(disk_manager.config.efi_partition)

@@ -66,6 +66,17 @@ class TestPrecompiledCompatibility:
         assert is_compatible is False
         assert any("Could not determine" in w for w in warnings)
 
+    @patch("validation_core.get_package_version")
+    def test_precompiled_zfs_build_suffix_match(self, mock_get_version: Mock) -> None:
+        """Test precompiled compatibility with ZFS build suffix (.1, .2, etc.)."""
+        # Real-world case: kernel 6.16.4.arch1-1 should match ZFS 2.3.4_6.16.4.arch1.1-1
+        mock_get_version.side_effect = lambda pkg: {"linux": "6.16.4.arch1-1", "zfs-linux": "2.3.4_6.16.4.arch1.1-1"}.get(pkg)
+
+        is_compatible, warnings = validation_core.validate_precompiled_zfs_compatibility("linux")
+
+        assert is_compatible is True
+        assert len(warnings) == 0
+
 
 class TestDKMSCompatibility:
     """Test DKMS ZFS compatibility validation."""
