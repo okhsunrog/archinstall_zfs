@@ -591,10 +591,15 @@ class GlobalConfigMenu:
             if it.value == self.cfg.zrepl_enabled:
                 zrepl_focus = it
                 break
-        
+
+        header_text = (
+            "Configure zrepl (ZFS replication)\n\n"
+            "zrepl provides automated ZFS snapshot creation and replication.\n"
+            "When enabled, it will create periodic snapshots and manage pruning."
+        )
         zrepl_menu = SelectMenu(
-            MenuItemGroup(zrepl_items, focus_item=zrepl_focus) if zrepl_focus else MenuItemGroup(zrepl_items), 
-            header="Configure zrepl (ZFS replication)\n\nzrepl provides automated ZFS snapshot creation and replication.\nWhen enabled, it will create periodic snapshots and manage pruning."
+            MenuItemGroup(zrepl_items, focus_item=zrepl_focus) if zrepl_focus else MenuItemGroup(zrepl_items),
+            header=header_text,
         )
 
         result = zrepl_menu.run()

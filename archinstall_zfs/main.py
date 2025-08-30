@@ -25,8 +25,8 @@ from archinstall_zfs.kernel_scanner import scan_kernel_compatibility
 from archinstall_zfs.menu import GlobalConfigMenu
 from archinstall_zfs.menu.models import InstallationMode, SwapMode, ZFSEncryptionMode
 from archinstall_zfs.zfs import ZFS_SERVICES, EncryptionMode, ZFSManagerBuilder
-from archinstall_zfs.zrepl import setup_zrepl
 from archinstall_zfs.zfs.kmod_setup import add_archzfs_repo, initialize_zfs
+from archinstall_zfs.zrepl import setup_zrepl
 
 
 def check_internet() -> bool:

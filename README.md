@@ -309,7 +309,6 @@ as they are not yet supported by the current ZFS version:
 ### 🚀 **Future Enhancements**
 - [ ] **Advanced ZFS tuning** (compression algorithms, block sizes)
 - [ ] **Multi-language support** (archinstall integration)
-- [ ] **Enhanced monitoring** (ZED notification setup)
 
 ---
 

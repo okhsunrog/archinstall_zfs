@@ -5,9 +5,6 @@ This module provides zrepl configuration generation, package installation,
 and service management for ZFS replication and snapshot management.
 """
 
-from pathlib import Path
-from typing import Any
-
 from archinstall import info
 from archinstall.lib.installer import Installer
 
@@ -15,15 +12,15 @@ from archinstall.lib.installer import Installer
 def generate_zrepl_config(pool_name: str, dataset_prefix: str) -> str:
     """
     Generate a default zrepl configuration file with reasonable defaults.
-    
+
     Args:
         pool_name: Name of the ZFS pool
         dataset_prefix: Dataset prefix (e.g., "arch0")
-        
+
     Returns:
         zrepl configuration as a string
     """
-    config = f"""jobs:
+    return f"""jobs:
 
 # This job creates snapshots locally and prunes them aggressively.
 - name: snapshot_{dataset_prefix}
@@ -45,16 +42,15 @@ def generate_zrepl_config(pool_name: str, dataset_prefix: str) -> str:
       negate: true
       regex: "^zrepl_.*"
 """
-    return config
 
 
 def install_zrepl_package(installation: Installer) -> bool:
     """
     Install zrepl package in the target system.
-    
+
     Args:
         installation: Installer instance for target installation
-        
+
     Returns:
         True if installation succeeded, False otherwise
     """
@@ -71,10 +67,10 @@ def install_zrepl_package(installation: Installer) -> bool:
 def enable_zrepl_service(installation: Installer) -> bool:
     """
     Enable and start zrepl systemd service.
-    
+
     Args:
         installation: Installer instance for target installation
-        
+
     Returns:
         True if service was enabled successfully, False otherwise
     """
@@ -91,32 +87,32 @@ def enable_zrepl_service(installation: Installer) -> bool:
 def setup_zrepl_config(installation: Installer, pool_name: str, dataset_prefix: str) -> bool:
     """
     Create zrepl configuration file in the target system.
-    
+
     Args:
         installation: Installer instance for target installation
         pool_name: Name of the ZFS pool
         dataset_prefix: Dataset prefix (e.g., "arch0")
-        
+
     Returns:
         True if configuration was created successfully, False otherwise
     """
     try:
         info("Creating zrepl configuration")
-        
+
         # Generate configuration
         config_content = generate_zrepl_config(pool_name, dataset_prefix)
-        
+
         # Create config directory
         config_dir = installation.target / "etc" / "zrepl"
         config_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Write configuration file
         config_file = config_dir / "zrepl.yml"
         config_file.write_text(config_content)
-        
+
         # Set proper permissions
-        installation.arch_chroot(f"chmod 644 /etc/zrepl/zrepl.yml")
-        
+        installation.arch_chroot("chmod 644 /etc/zrepl/zrepl.yml")
+
         info("Successfully created zrepl configuration")
         return True
     except Exception as e:
@@ -127,32 +123,32 @@ def setup_zrepl_config(installation: Installer, pool_name: str, dataset_prefix: 
 def setup_zrepl(installation: Installer, pool_name: str, dataset_prefix: str) -> bool:
     """
     Complete zrepl setup: install package, create config, enable service.
-    
+
     Args:
         installation: Installer instance for target installation
-        pool_name: Name of the ZFS pool  
+        pool_name: Name of the ZFS pool
         dataset_prefix: Dataset prefix (e.g., "arch0")
-        
+
     Returns:
         True if all setup steps succeeded, False otherwise
     """
     success = True
-    
+
     # Install package
     if not install_zrepl_package(installation):
         success = False
-    
+
     # Create configuration
     if not setup_zrepl_config(installation, pool_name, dataset_prefix):
         success = False
-        
+
     # Enable service
     if not enable_zrepl_service(installation):
         success = False
-    
+
     if success:
         info("zrepl setup completed successfully")
     else:
         info("zrepl setup completed with some errors")
-        
+
     return success
