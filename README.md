@@ -23,6 +23,8 @@
 - 🛡️ **Production-ready**: ZFSBootMenu, encryption, boot environments
 - 🧩 **Arch-native**: Full archinstall integration with profiles
 - 🔧 **Just works**: Smart kernel/ZFS matching with automatic fallbacks
+- 📸 **Snapshot management**: Built-in zrepl support for automated snapshots
+- 📦 **AUR integration**: Seamless AUR package installation during setup
 
 **Perfect for:** Home labs, servers, workstations, or anyone who wants ZFS on Arch without the headaches.
 
@@ -154,6 +156,14 @@ python -m archinstall_zfs
 - **🔄 Intelligent fallbacks**: Seamless precompiled → DKMS switching when kernel versions don't match
 - **📦 Repository management**: Handles archzfs repo setup with fallback to direct GitHub release parsing
 - **💡 User-friendly feedback**: Clear warnings and suggestions when compatibility issues are detected
+- **🏗️ AUR integration**: Built-in AUR helper (yay) with secure temporary user management for AUR package installation
+
+#### **📸 ZFS Snapshot Management**
+- **🔄 zrepl support**: Automated ZFS snapshot creation and replication with sensible defaults
+- **⏰ Smart scheduling**: 15-minute snapshot intervals with intelligent pruning (4×15m, 24×1h, 3×1d retention)
+- **🎛️ Zero-config**: Automatically generates configuration based on your ZFS pool and dataset layout
+- **🔧 Service management**: Automatic package installation and systemd service enablement
+- **📋 Flexible configuration**: Uses your actual pool name and dataset prefix for targeted snapshots
 
 #### **💽 Disk Management Excellence**  
 - **By-ID partition handling**: Uses `/dev/disk/by-id` for stable device references
