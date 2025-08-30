@@ -6,6 +6,10 @@ on:
     tags:
       - 'v*'
   
+  # Monthly automated builds (4th of each month at 4:30 AM UTC)
+  schedule:
+    - cron: '30 4 4 * *'
+  
   # Allow manual triggering
   workflow_dispatch:
     inputs:
@@ -18,6 +22,11 @@ on:
           - linux
           - linux-lts
           - both
+      create_release:
+        description: 'Create GitHub release (manual trigger only)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -44,12 +53,21 @@ jobs:
         source .venv/bin/activate
         uv pip install jinja2
 
-    - name: Set kernel for build
+    - name: Set build parameters
       run: |
-        if [ "${{ github.event_name }}" = "push" ]; then
+        # Set kernel choice
+        if [ "${{ github.event_name }}" = "push" ] || [ "${{ github.event_name }}" = "schedule" ]; then
           echo "KERNEL=both" >> $GITHUB_ENV
         else
           echo "KERNEL=${{ github.event.inputs.kernel || 'both' }}" >> $GITHUB_ENV
+        fi
+        
+        # Set release date for scheduled/manual builds
+        if [ "${{ github.event_name }}" = "schedule" ]; then
+          echo "RELEASE_DATE=$(date +'%Y.%m.%d')" >> $GITHUB_ENV
+          echo "IS_SCHEDULED=true" >> $GITHUB_ENV
+        elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "RELEASE_DATE=manual-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
         fi
 
     - name: Build ISO with linux kernel (smart ZFS mode selection)
@@ -141,12 +159,17 @@ jobs:
           echo "No ISOs found, skipping checksum generation"
         fi
 
-    # Create a release automatically on tag push and upload assets
-    - name: Create GitHub Release (tag push) and upload assets
-      if: github.event_name == 'push'
+    # Create a release for tag pushes and scheduled builds
+    - name: Create GitHub Release and upload assets
+      if: github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
       uses: softprops/action-gh-release@v2
       with:
-        generate_release_notes: true
+        tag_name: ${{ github.event_name == 'push' && github.ref_name || env.RELEASE_DATE }}
+        name: ${{ github.event_name == 'push' && format('Release {0}', github.ref_name) || (github.event_name == 'schedule' && format('Monthly Release - {0}', env.RELEASE_DATE) || format('Manual Release - {0}', env.RELEASE_DATE)) }}
+        generate_release_notes: ${{ github.event_name == 'push' }}
+        body: ${{ github.event_name != 'push' && 'Automated build with latest packages and ZFS modules.' || '' }}
+        draft: ${{ github.event_name == 'workflow_dispatch' }}
+        prerelease: ${{ github.event_name == 'workflow_dispatch' }}
         files: |
           gen_iso/out/*.iso
           gen_iso/out/*.sha256
