@@ -91,9 +91,9 @@ class AURManager:
             "rm -rf $BUILD_DIR",
         ]
 
-        # Execute as a single command to preserve BUILD_DIR variable
+        # Execute as a single shell command using sh -c to preserve variables
         full_command = " && ".join(build_commands)
-        self.installer.arch_chroot(full_command)
+        self.installer.arch_chroot(f"sh -c '{full_command}'")
 
     def _install_aur_packages(self, packages: list[str]) -> None:
         """Install the actual AUR packages using yay."""
@@ -117,8 +117,8 @@ class AURManager:
             # Remove temporary user
             if self._temp_user_created:
                 info(f"Removing temporary user: {self.TEMP_USER}")
-                # Use proper shell command for error handling
-                self.installer.arch_chroot(f"userdel -r {self.TEMP_USER} || true")
+                # Use sh -c for proper shell command with error handling
+                self.installer.arch_chroot(f"sh -c 'userdel -r {self.TEMP_USER} || true'")
                 self._temp_user_created = False
 
         except Exception as e:
