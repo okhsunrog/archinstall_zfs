@@ -111,6 +111,11 @@ class GlobalConfigMenu:
                 preview_action=lambda _: f"Init system: {self.cfg.init_system.value}",
                 key="init_system",
             ),
+            MenuItem(
+                text="zrepl (ZFS replication)",
+                preview_action=lambda _: f"zrepl: {'Enabled' if self.cfg.zrepl_enabled else 'Disabled'}",
+                key="zrepl",
+            ),
             # Separator
             MenuItem(text=""),
             # Actions
@@ -158,6 +163,7 @@ class GlobalConfigMenu:
             "storage_wizard": self.run_storage_wizard,
             "pool_name": self._configure_pool_name,
             "init_system": self._configure_init_system,
+            "zrepl": self._configure_zrepl,
         }
         handler = handlers.get(choice)
         if handler:
@@ -573,6 +579,29 @@ class GlobalConfigMenu:
             selected = result.item().value if result.item() else None
             if selected is not None:
                 self.cfg.init_system = selected
+
+    def _configure_zrepl(self, *_: Any) -> None:
+        """Configure zrepl (ZFS replication) settings."""
+        zrepl_items = [
+            MenuItem("Enable zrepl", True),
+            MenuItem("Disable zrepl", False),
+        ]
+        zrepl_focus = None
+        for it in zrepl_items:
+            if it.value == self.cfg.zrepl_enabled:
+                zrepl_focus = it
+                break
+        
+        zrepl_menu = SelectMenu(
+            MenuItemGroup(zrepl_items, focus_item=zrepl_focus) if zrepl_focus else MenuItemGroup(zrepl_items), 
+            header="Configure zrepl (ZFS replication)\n\nzrepl provides automated ZFS snapshot creation and replication.\nWhen enabled, it will create periodic snapshots and manage pruning."
+        )
+
+        result = zrepl_menu.run()
+        if result.type_ != ResultType.Skip:
+            selected = result.item().value if result.item() else None
+            if selected is not None:
+                self.cfg.zrepl_enabled = selected
 
     # Removed separate ZFS modules selector; controlled by Kernel selection
 

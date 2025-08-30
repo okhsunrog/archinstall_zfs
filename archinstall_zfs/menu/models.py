@@ -70,6 +70,9 @@ class GlobalConfig(BaseModel):
     zram_size_expr: str | None = "min(ram / 2, 4096)"
     zram_fraction: float | None = None
 
+    # zrepl settings
+    zrepl_enabled: bool = False
+
     @field_validator("pool_name")
     @classmethod
     def _validate_pool_name(cls, v: str | None) -> str | None:

@@ -25,6 +25,7 @@ from archinstall_zfs.kernel_scanner import scan_kernel_compatibility
 from archinstall_zfs.menu import GlobalConfigMenu
 from archinstall_zfs.menu.models import InstallationMode, SwapMode, ZFSEncryptionMode
 from archinstall_zfs.zfs import ZFS_SERVICES, EncryptionMode, ZFSManagerBuilder
+from archinstall_zfs.zrepl import setup_zrepl
 from archinstall_zfs.zfs.kmod_setup import add_archzfs_repo, initialize_zfs
 
 
@@ -319,6 +320,13 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
                             f.write("/dev/mapper/cryptswap none swap defaults 0 0\n")
 
             zfs_manager.copy_misc_files()
+
+            # Setup zrepl if enabled
+            zfs_config = installer_menu.get_zfs_config()
+            if zfs_config.get("zrepl_enabled", False):
+                pool_name = zfs_config.get("pool_name", "zroot")
+                dataset_prefix = zfs_config.get("dataset_prefix", "arch0")
+                setup_zrepl(installation, pool_name, dataset_prefix)
 
             if disk_manager.config.efi_partition:
                 zfs_manager.setup_bootloader(disk_manager.config.efi_partition)
