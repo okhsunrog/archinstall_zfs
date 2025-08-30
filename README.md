@@ -120,6 +120,7 @@ python -m archinstall_zfs
 - **Kernel parameter optimization**: Includes `spl.spl_hostid=$(hostid)` and optimal `zswap` settings
 - **Init system awareness**: Configures `root=ZFS=` (dracut) or `zfs=` (mkinitcpio) automatically
 - **fstab stability**: Adds root dataset to `/etc/fstab` to prevent snapshot navigation bugs
+- **Configurable ZFS compression**: Choose compression in TUI — `lz4` (default), `zstd` (levels), or `off`
 
 #### **What This Means for You**
 - **🔄 Easy rollbacks**: Boot from any snapshot if an update breaks your system
