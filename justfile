@@ -162,7 +162,7 @@ qemu-reset-uefi:
 # A setup recipe for qemu
 qemu-setup: qemu-create-disk qemu-setup-uefi
     @echo "QEMU environment is set up."
-    @echo "Now run 'just build-testing-iso'"
+    @echo "Now run 'just build-test'"
     @echo "Then 'just qemu-install' or 'just qemu-install-serial'"
 
 # Remove existing QEMU artifacts and set up fresh ones
@@ -185,7 +185,7 @@ qemu-install:
     @if [ ! -f {{UEFI_VARS}} ]; then just qemu-setup-uefi; fi
     @ISO_PATH=$(ls -1t {{ISO_OUT_DIR}}/archzfs-*-testing-*.iso 2>/dev/null | head -n 1); \
       if [ -z "$ISO_PATH" ]; then \
-        echo "Testing ISO not found in {{ISO_OUT_DIR}}. Run 'just build-testing-iso' first."; \
+        echo "Testing ISO not found in {{ISO_OUT_DIR}}. Run 'just build-test' first."; \
         exit 1; \
       fi; \
       echo "Using testing ISO: $ISO_PATH"; \
@@ -197,7 +197,7 @@ qemu-install-serial:
     @if [ ! -f {{UEFI_VARS}} ]; then just qemu-setup-uefi; fi
     @ISO_PATH=$(ls -1t {{ISO_OUT_DIR}}/archzfs-*-testing-*.iso 2>/dev/null | head -n 1); \
       if [ -z "$ISO_PATH" ]; then \
-        echo "Testing ISO not found in {{ISO_OUT_DIR}}. Run 'just build-testing-iso' first."; \
+        echo "Testing ISO not found in {{ISO_OUT_DIR}}. Run 'just build-test' first."; \
         exit 1; \
       fi; \
       echo "Using testing ISO: $ISO_PATH"; \
