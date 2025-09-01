@@ -52,12 +52,8 @@ clean-iso:
 
 # Install development dependencies
 install-dev:
+    @if [ ! -d .venv ]; then uv venv; fi
     uv pip install -e '.[dev]'
-
-# Setup development environment
-setup: install-dev
-    @echo "Development environment setup complete!"
-    @echo "Run 'just all' to check code quality"
 
 # Run a quick check (format + lint only)
 quick: format lint

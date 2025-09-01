@@ -189,7 +189,7 @@ python -m archinstall_zfs
 **Prerequisites** (Arch Linux host):
 ```bash
 sudo pacman -S qemu-desktop edk2-ovmf archiso grub just rsync uv
-just setup  # Install dev dependencies
+just install-dev  # Install dev dependencies
 ```
 
 **Build commands:**
@@ -365,7 +365,7 @@ just qemu-install-serial         # Complex QEMU setups
 ```bash
 git clone https://github.com/okhsunrog/archinstall_zfs
 cd archinstall_zfs
-just setup                       # Install dependencies
+just install-dev                 # Install dependencies
 just qemu-setup                  # Set up test environment
 # Make your changes
 just all                         # Run quality checks
