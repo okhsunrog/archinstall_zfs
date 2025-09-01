@@ -53,11 +53,14 @@ python -m archinstall_zfs
 ### Device naming: uses `/dev/disk/by-id` for stable device references.
 
 ### Installation modes
-| Mode | Description | Use case |
+
+| Mode | Description | Best for |
 |------|-------------|----------|
-| Full disk | Wipe disk, auto‑partition, new ZFS pool | Clean installs, single‑purpose machines |
-| New pool | Create ZFS pool on an existing partition | Dual‑boot, custom partitioning |
-| Existing pool | Install to an existing ZFS pool | Additional boot environments |
+| **Full Disk** | Complete disk takeover with automated partitioning. Clears GPT/MBR signatures, creates fresh GPT table, partitions (EFI 500MB, optional swap, remainder for ZFS) | Clean installs, single-purpose machines, maximum automation |
+| **New Pool** | Creates ZFS pool on an existing partition. Uses your existing partition layout, creates ZFS pool on selected partition | Dual-boot scenarios, custom partitioning schemes, preserving existing OS installations |
+| **Existing Pool** | Installs into an existing ZFS pool as a new boot environment. Creates new BE datasets within your existing pool structure | Experiments, testing different configurations, multiple Arch installations |
+
+> **Pro tip**: Existing Pool mode is excellent for trying different desktop environments or system configurations without risk - each installation becomes its own boot environment selectable from ZFSBootMenu.
 
 ### Kernel support
 - `linux-lts` + `zfs-linux-lts`
@@ -65,12 +68,54 @@ python -m archinstall_zfs
 - `linux-zen` + `zfs-linux-zen`
 - `linux-hardened` + `zfs-linux-hardened`
 
-The installer validates kernel/ZFS compatibility (via the OpenZFS API) and selects precompiled packages when available, falling back to DKMS when required.
+### Kernel/ZFS compatibility validation
+
+One of the key challenges with ZFS on Arch is compatibility between kernel versions and ZFS modules. The installer includes a sophisticated validation system that:
+
+- **Parses OpenZFS releases**: Checks https://github.com/openzfs/zfs/releases for supported kernel version ranges
+- **Validates current packages**: Cross-references with actual kernel versions available in Arch repositories
+- **Checks precompiled availability**: Determines if precompiled ZFS modules exist for your chosen kernel
+- **Assesses DKMS feasibility**: Analyzes whether DKMS compilation will work with bleeding-edge kernels
+- **Provides smart fallbacks**: Automatically suggests compatible alternatives when conflicts are detected
+
+The validation runs in two places:
+1. **In the installer TUI** - Shows only compatible kernel options and warns about potential issues
+2. **During ISO building** - Ensures ISOs are built with working kernel/ZFS combinations
+
+This prevents common installation failures like:
+```
+warning: cannot resolve "linux-lts=6.12.41-1", a dependency of "zfs-linux-lts"
+:: Do you want to skip the above package for this upgrade? [y/N]
+```
+
+Advanced users can bypass validation with `export ARCHINSTALL_ZFS_SKIP_DKMS_VALIDATION=1`, but this may result in DKMS compilation failures.
 
 ### Encryption options
 - Pool‑wide encryption
-- Per‑dataset encryption (for example, encrypt `/home`, leave `/var/log` plain)
+- Per‑boot environment encryption (encrypts the base dataset, all datasets within the boot environment inherit encryption)
 - No encryption
+
+### Swap and memory management
+The installer offers flexible swap configuration options:
+
+**No swap + ZRAM (recommended)**
+- Uses compressed swap in RAM via `systemd-zram-generator`
+- Default size: `min(ram / 2, 4096)` MB configured in `/etc/systemd/zram-generator.conf`
+- zswap is disabled to avoid double compression
+- Best for most desktop/laptop scenarios
+
+**Classical swap partition**
+- Creates dedicated swap partition on disk
+- Enables zswap for compressed swap cache in RAM
+- For full disk mode: specify swap size during installation
+- For other modes: select existing partition in TUI
+- Supports encryption via `cryptswap` in `/etc/crypttab`
+
+**No swap**
+- Pure RAM-only operation
+- Suitable for systems with abundant RAM or specific workloads
+
+> **Note**: Swap on ZFS (zvol/swapfile) is not supported due to potential deadlock issues. Hibernation is not currently supported.
 
 ### Boot environments and layout
 
@@ -238,9 +283,17 @@ Recovery: Boot from the installer USB and run repair commands via chroot.
 
 ## Links 🔗
 
+### Project
 - Releases: `https://github.com/okhsunrog/archinstall_zfs/releases`
 - Issues: `https://github.com/okhsunrog/archinstall_zfs/issues`
 - Discussions: `https://github.com/okhsunrog/archinstall_zfs/discussions`
+
+### Articles
+- [Arch Linux on ZFS for humans: new TUI installer archinstall_zfs](https://okhsunrog.dev/posts/archinstall-zfs/) (English)
+- [Arch Linux на ZFS для людей: новый TUI-установщик archinstall_zfs](https://habr.com/ru/articles/942396/) (Habr, Russian)
+- [Arch Linux на ZFS для людей: новый TUI-установщик archinstall_zfs](https://okhsunrog.dev/ru/posts/archinstall-zfs/) (Russian)
+
+### References
 - Arch Wiki: `https://wiki.archlinux.org/title/ZFS`
 
 ---
