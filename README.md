@@ -293,8 +293,12 @@ Recovery: Boot from the installer USB and run repair commands via chroot.
 - [Arch Linux на ZFS для людей: новый TUI-установщик archinstall_zfs](https://habr.com/ru/articles/942396/) (Habr, Russian)
 - [Arch Linux на ZFS для людей: новый TUI-установщик archinstall_zfs](https://okhsunrog.dev/ru/posts/archinstall-zfs/) (Russian)
 
-### References
-- Arch Wiki: `https://wiki.archlinux.org/title/ZFS`
+### Resources
+- [Arch Wiki: ZFS](https://wiki.archlinux.org/title/ZFS)
+- [Arch Wiki: Install Arch Linux on ZFS](https://wiki.archlinux.org/title/Install_Arch_Linux_on_ZFS)
+- [ZFSBootMenu: Boot Environments and You](https://docs.zfsbootmenu.org/en/v2.3.x/general/bootenvs-and-you.html)
+- [Awesome ZFS](https://github.com/ankek/awesome-zfs)
+- [OpenZFS Documentation](https://openzfs.github.io/openzfs-docs/)
 
 ---
 
