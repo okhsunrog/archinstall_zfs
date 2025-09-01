@@ -1,7 +1,6 @@
 <h1 align="center">Archinstall‑ZFS 🚀</h1>
 
-> **ZFS‑first Arch Linux installer with batteries included**  
-> Effortless ZFS root, automatic ZFSBootMenu, and a fast, friendly TUI.
+> ZFS‑first Arch Linux installer with ZFSBootMenu and a straightforward TUI.
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/okhsunrog/archinstall_zfs)
 [![GitHub](https://img.shields.io/github/license/okhsunrog/archinstall_zfs)](https://github.com/okhsunrog/archinstall_zfs/blob/main/LICENSE)
@@ -13,32 +12,18 @@
 
 ---
 
-## 🌟 Why Archinstall-ZFS?
+## Overview
 
-**Traditional ZFS on Arch setup is complex** — managing kernel compatibility, ZFS modules, bootloaders, and encryption by hand. **This installer handles all of that for you.**
-
-✨ **What you get:**
-- 🚀 **One-command install** from bare metal to working ZFS system
-- 🧰 **Flexible deployment**: Full-disk, partition, or existing pool
-- 🛡️ **Production-ready**: ZFSBootMenu, encryption, boot environments
-- 🧩 **Arch-native**: Full archinstall integration with profiles
-- 🔧 **Just works**: Smart kernel/ZFS matching with automatic fallbacks
-- 📸 **Snapshot management**: Built-in zrepl support for automated snapshots
-- 📦 **AUR integration**: Seamless AUR package installation during setup
-
-**Perfect for:** Home labs, servers, workstations, or anyone who wants ZFS on Arch without the headaches.
+Setting up ZFS on Arch involves kernel selection, ZFS module installation, bootloader configuration, and optional encryption. Archinstall‑ZFS automates these steps, integrates with archinstall profiles, and provides a TUI‑based workflow. It can build ISOs for repeatable installs and includes helpers for QEMU testing.
 
 ---
 
-## ⚡ Quick Start
+## Quick start ⚡
 
-### 📦 Option A: Prebuilt ISO *(Recommended)*
-
-1. **Download** the latest ISO from [**Releases**](https://github.com/okhsunrog/archinstall_zfs/releases)
-   - 🆕 **Monthly automated builds** on the 4th of each month
-   - Both `linux` and `linux-lts` kernels with smart ZFS mode selection
-2. **Boot** it on your UEFI machine and connect to network
-3. **Run** the installer:
+### Option A: Prebuilt ISO (recommended)
+1. Download the latest ISO from the releases page.
+2. Boot on a UEFI machine and connect to the network.
+3. Run:
 
 ```bash
 ./installer
@@ -46,252 +31,178 @@
 cd /root/archinstall_zfs && python -m archinstall_zfs
 ```
 
-> 💡 **Why the prebuilt ISO?** It includes ZFS modules and this installer pre-configured, saving you 5-10 minutes of setup time.
+> Why recommended: the ISO already contains ZFS components and this installer, so startup is faster and avoids on-the-fly package installation.
 
-### 🛠️ Option B: Official Arch ISO
-
+### Option B: Official Arch ISO
 ```bash
-# 1. Boot official Arch ISO and connect to network
+# 1) Boot the official Arch ISO and connect to the network
 pacman -Sy git
 
-# 2. Get the installer
+# 2) Get the installer
 git clone --depth 1 https://github.com/okhsunrog/archinstall_zfs
 cd archinstall_zfs
 python -m archinstall_zfs
 ```
 
-> ⏱️ This takes a bit longer as it installs ZFS modules on the fly.
+> Note: This path installs ZFS components during the run, so it usually takes longer than Option A.
 
 ---
 
-## 🎯 Core Features
+## Features 🧩
 
-### 🖥️ **Installation Modes**
-| Mode | Description | Use Case |
+### Device naming: uses `/dev/disk/by-id` for stable device references.
+
+### Installation modes
+| Mode | Description | Use case |
 |------|-------------|----------|
-| **Full Disk** | Wipe disk, auto-partition, new ZFS pool | Clean installs, single-purpose machines |
-| **New Pool** | Create ZFS pool on existing partition | Dual-boot, custom partitioning |
-| **Existing Pool** | Install to existing ZFS pool | Upgrades, additional boot environments |
+| Full disk | Wipe disk, auto‑partition, new ZFS pool | Clean installs, single‑purpose machines |
+| New pool | Create ZFS pool on an existing partition | Dual‑boot, custom partitioning |
+| Existing pool | Install to an existing ZFS pool | Additional boot environments |
 
-### 🧭 **Smart Kernel Support**
-**Precompiled ZFS for all major kernels:**
-- **`linux-lts`** + `zfs-linux-lts` *(recommended for stability)*
-- **`linux`** + `zfs-linux` *(latest features)*
-- **`linux-zen`** + `zfs-linux-zen` *(desktop optimized)*  
-- **`linux-hardened`** + `zfs-linux-hardened` *(security focused)*
+### Kernel support
+- `linux-lts` + `zfs-linux-lts`
+- `linux` + `zfs-linux`
+- `linux-zen` + `zfs-linux-zen`
+- `linux-hardened` + `zfs-linux-hardened`
 
-**🔍 Proactive validation:** Real-time compatibility checking against OpenZFS API  
-**🔄 Intelligent fallback:** If precompiled fails → automatic DKMS with same kernel ✅
+The installer validates kernel/ZFS compatibility (via the OpenZFS API) and selects precompiled packages when available, falling back to DKMS when required.
 
-### 🔐 **ZFS Encryption Options**
-- **Pool-wide**: Everything encrypted from the start
-- **Per-dataset**: Selective encryption (e.g., encrypt `/home`, leave `/var/log` plain)
-- **No encryption**: Maximum performance
+### Encryption options
+- Pool‑wide encryption
+- Per‑dataset encryption (for example, encrypt `/home`, leave `/var/log` plain)
+- No encryption
 
-### 🧯 **ZFSBootMenu & Boot Environments** *(The Main Feature!)*
+### Boot environments and layout
 
-**🎯 This is what sets this installer apart** - complete ZFSBootMenu integration with boot environment support:
+Boot Environments (BE) are a way to maintain multiple independent systems on a single ZFS pool. Each system is housed in its own root dataset and can be selected at boot through ZFSBootMenu. For multi-boot scenarios, you can install multiple distributions in one pool — each becomes a separate BE.
 
-#### **Automatic ZFSBootMenu Setup**
-- **Zero-config installation**: Downloads and installs ZFSBootMenu EFI files automatically
-- **Dual boot entries**: Main (`ZFSBootMenu`) + Recovery (`ZFSBootMenu-Recovery`) 
-- **UEFI integration**: Automatically adds boot entries to firmware
-- **Online updates**: Downloads latest ZFSBootMenu from official releases
+ZFSBootMenu is a bootloader designed specifically for ZFS. Unlike traditional bootloaders, it natively understands ZFS structure and can display boot environments in a beautiful ncurses menu, create snapshots, and clone boot environments directly at boot time. Need to roll back to a week-old snapshot? Simply select it from the menu and the system boots in that exact state. Want to experiment without breaking your current system? Clone a boot environment right from the bootloader and boot into the copy.
 
-#### **Production-Ready Boot Environment Architecture**
-- **Structured datasets**: Automatic creation of optimal ZFS dataset hierarchy:
-  ```
-  pool/prefix/root       → /          (root filesystem, canmount=noauto)
-  pool/prefix/data/home  → /home      (user data)
-  pool/prefix/data/root  → /root      (root user data)  
-  pool/prefix/vm         → /vm        (virtual machines)
-  ```
-- **Boot environment isolation**: Each installation becomes a separate boot environment
-- **Snapshot navigation**: ZFSBootMenu automatically discovers all snapshots and clones
+#### Dataset structure
+The installer creates a consistent dataset layout for each boot environment:
 
-#### **Smart Dataset Mounting (Custom ZED Hook)**
-- **Boot environment aware**: Only mounts datasets from the active boot environment
-- **Shared data handling**: Automatically mounts shared datasets (like `/home`) across all BEs
-- **Clean isolation**: Prevents cross-BE contamination and surprises
-- **Zero configuration**: Works out of the box with optimal defaults
+**Real example from a production system:**
+```bash
+❯ zfs list
+NAME                       USED  AVAIL  REFER  MOUNTPOINT
+novafs                    1.09T   361G   192K  none
 
-#### **ZFS Properties Optimization**
-- **ZFSBootMenu integration**: Automatically sets `org.zfsbootmenu:commandline` and `org.zfsbootmenu:rootprefix`
-- **Kernel parameter optimization**: Includes `spl.spl_hostid=$(hostid)` and optimal `zswap` settings
-- **Init system awareness**: Configures `root=ZFS=` (dracut) or `zfs=` (mkinitcpio) automatically
-- **fstab stability**: Adds root dataset to `/etc/fstab` to prevent snapshot navigation bugs
-- **Configurable ZFS compression**: Choose compression in TUI — `lz4` (default), `zstd` (levels), or `off`
+# Current active BE "arch0" (container, not mounted itself)
+novafs/arch0               609G   361G   192K  none
+novafs/arch0/data          421G   361G   192K  none
+novafs/arch0/data/home     421G   361G   344G  /home    # /home dataset for arch0
+novafs/arch0/data/root     120M   361G  45.3M  /root    # root user data for current BE
+novafs/arch0/root          170G   361G   142G  /        # root filesystem of active BE
+novafs/arch0/vm           18.8G   361G  18.8G  /vm      # separate dataset for VMs
 
-#### **What This Means for You**
-- **🔄 Easy rollbacks**: Boot from any snapshot if an update breaks your system
-- **🏠 Multiple environments**: Install different Arch configurations on the same pool
-- **🛡️ System isolation**: Boot environments don't interfere with each other
-- **📸 Snapshot workflows**: Take snapshots before major changes, rollback instantly if needed
+# Previous BE "archold" (inactive but ready to boot)
+novafs/archold             227G   361G   192K  none
+novafs/archold/data        143G   361G   192K  none
+novafs/archold/data/home   141G   361G   119G  /home    # /home dataset for archold
+novafs/archold/data/root  1.81G   361G  1.81G  /root    # root user data for second BE
+novafs/archold/root       83.7G   361G  83.7G  /        # root filesystem of second BE
 
-### 💾 **Swap Configurations**
-| Type | Description | Best For |
-|------|-------------|----------|
-| **No Swap** | Skip swap entirely | High-memory systems |
-| **ZRAM** | Compressed RAM-based swap | Most desktops/laptops |
-| **Swap Partition** | Traditional partition swap | Servers, hibernation needs |
+# Global datasets (outside BE, mounted by all boot environments)
+novafs/tmp_zfs            7.08G   361G  7.08G  /tmp_zfs        # temporary data
+```
 
-> 📝 **Note:** Swap-on-ZFS (zvol/swapfiles) not supported. Hibernation not supported in current release.
+**Standard layout created by the installer:**
+```
+pool/prefix/root       → /          (root filesystem, canmount=noauto)
+pool/prefix/data/home  → /home      (user data)
+pool/prefix/data/root  → /root      (root user data)
+pool/prefix/vm         → /vm        (virtual machines)
+```
 
-### ⚙️ **Advanced Features**
+#### Boot process and systemd integration
 
-#### **🔧 Initramfs Optimization**
-- **Dracut support**: Optimized dracut configuration with ZFS-specific settings
-- **Mkinitcpio support**: Alternative initramfs with proper ZFS integration
-- **Smart compression**: Disables double compression (ZFS + initramfs)
-- **Encryption key handling**: Automatic inclusion of ZFS encryption keys
-- **Minimal footprint**: Excludes unnecessary modules (network, plymouth, etc.)
+The boot process works as follows:
 
-#### **🌐 Network & Connectivity**
-- **Internet validation**: Checks connectivity before starting installation
-- **Network config preservation**: Option to copy live ISO network settings to target
-- **Archzfs repository**: Automatic setup of ZFS package repositories
-- **Mirror configuration**: Full archinstall mirror selection integration
+1. **ZFSBootMenu**: Acts as the bootloader; when selecting a boot environment, it launches the Linux kernel via kexec and passes kernel command line parameters
+2. **Root filesystem mounting**: The zfs hook in initramfs mounts the root filesystem according to command line parameters: `root=ZFS=...` (dracut) or `zfs=...` (mkinitcpio)
+3. **Pool import**: systemd handles pool import via `zfs-import-scan.service`; pools are created with `zpool set cachefile=none <pool>` to avoid using `zpool.cache`
+4. **Dataset mounting**: Other datasets are mounted by systemd through `zfs-mount-generator`, which reads `/etc/zfs/zfs-list.cache/<pool>` and generates mount units on the fly
 
-#### **📦 Smart Package Management & Compatibility Validation**
-- **🔍 Proactive compatibility checking**: Real-time validation against OpenZFS GitHub API prevents installation failures
-- **🎯 Smart kernel selection**: Automatically filters incompatible kernel/ZFS combinations in TUI with clear explanations
-- **⚡ Fail-fast ISO builds**: Pre-validates compatibility before building ISOs, saving time on doomed builds
-- **🔄 Intelligent fallbacks**: Seamless precompiled → DKMS switching when kernel versions don't match
-- **📦 Repository management**: Handles archzfs repo setup with fallback to direct GitHub release parsing
-- **💡 User-friendly feedback**: Clear warnings and suggestions when compatibility issues are detected
-- **🏗️ AUR integration**: Built-in AUR helper (yay) with secure temporary user management for AUR package installation
+#### Cross-environment mount prevention
 
-#### **📸 ZFS Snapshot Management**
-- **🔄 zrepl support**: Automated ZFS snapshot creation and replication with sensible defaults
-- **⏰ Smart scheduling**: 15-minute snapshot intervals with intelligent pruning (4×15m, 24×1h, 3×1d retention)
-- **🎛️ Zero-config**: Automatically generates configuration based on your ZFS pool and dataset layout
-- **🔧 Service management**: Automatic package installation and systemd service enablement
-- **📋 Flexible configuration**: Uses your actual pool name and dataset prefix for targeted snapshots
+By default, ZFS sees all datasets in the pool, which could cause systemd to attempt mounting filesystems from other boot environments (e.g., `/home` from a neighboring BE). This is solved by a custom ZED hook (`history_event-zfs-list-cacher.sh`) that:
 
-#### **💽 Disk Management Excellence**  
-- **By-ID partition handling**: Uses `/dev/disk/by-id` for stable device references
-- **Smart partition waiting**: Waits for udev to create partition symlinks
-- **EFI integration**: Automatic EFI partition mounting and configuration
-- **Signature cleaning**: Proper disk signature clearing to prevent conflicts
+- Monitors ZFS events and detects the currently booted root dataset
+- Derives the active boot environment prefix
+- Filters datasets to include only the current BE hierarchy and shared datasets
+- Atomically updates `/etc/zfs/zfs-list.cache/<pool>` when content changes, using locks to prevent races
+- Is installed to `/etc/zfs/zed.d/` and marked immutable (`chattr +i`) to prevent package updates from overwriting it
 
-#### **🔐 Security & Reliability**
-- **Static hostid**: Generates consistent system identification
-- **Secure key storage**: Proper file permissions (000) for encryption keys
-- **Cache management**: Smart ZFS cache file handling and mountpoint modification
-- **Service integration**: Enables all necessary ZFS systemd services
+#### ZFS properties and kernel parameters
+- Sets kernel parameters such as `spl.spl_hostid=$(hostid)` and optional zswap settings
+- Configures `root=ZFS=` (dracut) or `zfs=` (mkinitcpio)
+- Adds the root dataset to `/etc/fstab` to support snapshot navigation
+- Compression options in the TUI: `lz4` (default), `zstd` (levels), or `off`
+
+### Snapshot management (optional)
+- zrepl support for automatic snapshot creation and retention
+- Schedules: 15‑minute intervals with tiered retention (4×15m, 24×1h, 3×1d)
+- Generates configuration based on your pool and dataset prefix
+- Installs zrepl-bin package and enables relevant systemd service
+
+### AUR packages (optional)
+- Installs an AUR helper (`yay`) and selected AUR packages during installation (if chosen in the installer)
+- Builds using a temporary user (`aurinstall`) with temporary passwordless sudo for package builds
+- Restores sudo configuration and removes the temporary user after installation; build artifacts are cleaned up
+
 
 ---
 
-## 🛠️ Development
+## Development 🛠️
 
-### 🏗️ **Building Custom ISOs**
+For detailed development information, architecture notes, and contribution guidelines, see [**DEVELOPMENT.md**](docs/DEVELOPMENT.md).
 
-**Prerequisites** (Arch Linux host):
-```bash
-sudo pacman -S qemu-desktop edk2-ovmf archiso grub just rsync uv
-just install-dev  # Install dev dependencies
-```
 
-**Build commands:**
-```bash
-# Production ISOs
-just build-main pre              # Precompiled ZFS + linux-lts
-just build-main dkms linux       # DKMS + linux kernel
-
-# Development ISOs (faster builds)
-just build-test pre              # Minimal package set for testing
-just build-test dkms linux-zen   # Test with zen kernel
-
-just list-isos                   # See what you've built
-```
-
-### 🧪 **QEMU Testing Workflow**
-
-**Quick development loop:**
-```bash
-just qemu-setup                  # Create test disk + UEFI vars
-just build-test pre              # Build minimal testing ISO
-just qemu-install-serial         # Boot with serial console
-
-# In another terminal:
-just ssh                         # Sync source code and connect
-./installer                      # Test your changes
-```
-
-**Other QEMU commands:**
-```bash
-just qemu-install                # GUI install flow
-just qemu-run                    # Boot existing installation
-just qemu-refresh                # Reset test environment
-```
-
-### ⚙️ **Quality Assurance**
-
-```bash
-just format                      # Format code (ruff)
-just lint                        # Lint and auto-fix
-just type-check                  # MyPy type checking
-just test                        # Run test suite
-just all                         # All quality checks
-```
 
 ---
 
-## 🔧 Troubleshooting
+## Troubleshooting 🔧
 
 <details>
-<summary><strong>🚨 ZFS Package Dependency Issues</strong></summary>
+<summary><strong>ZFS package dependency issues</strong></summary>
 
-**Problem:** You see an error like:
+If a precompiled ZFS package for your exact kernel version is not available, you may see:
 ```
 warning: cannot resolve "linux-lts=6.12.41-1", a dependency of "zfs-linux-lts"
-:: Do you want to skip the above package for this upgrade? [y/N] 
+:: Do you want to skip the above package for this upgrade? [y/N]
 ```
 
-**What's happening:** The precompiled ZFS package isn't available for your exact kernel version.
-
-**Solution:** Press `N` when prompted. The installer will automatically detect this and switch to DKMS mode.
-
-**🎯 Note:** With our new validation system, this scenario should be much rarer as incompatible combinations are detected upfront and handled automatically!
+Choose `N`. The installer will detect this and switch to DKMS mode. The validation step reduces the chance of encountering this, but it can still occur right after kernel releases.
 
 </details>
 
 <details>
-<summary><strong>⚠️ Kernel Options Missing from Menu</strong></summary>
+<summary><strong>Kernel options missing from the menu</strong></summary>
 
-**Problem:** Some kernel DKMS options are missing from the installer menu.
+The installer validates kernel/ZFS compatibility using the OpenZFS API and hides combinations that are not available. When that happens, you will see a notice in the TUI.
 
-**What's happening:** The installer automatically validates kernel/ZFS compatibility using the OpenZFS GitHub API and hides incompatible combinations to prevent installation failures.
-
-**You'll see a notice like:**
-```
-NOTICE: The following kernels are temporarily unavailable for DKMS
-as they are not yet supported by the current ZFS version:
-  - Linux Zen
-```
-
-**Solutions:**
-1. **Choose a compatible kernel** (like `linux-lts` which is usually most compatible)
-2. **Use precompiled ZFS** instead of DKMS (if available for your kernel)
-3. **Disable validation** (advanced users only):
+Options:
+1. Choose a compatible kernel (for example, `linux-lts`)
+2. Use precompiled ZFS instead of DKMS (if available)
+3. Disable validation (advanced users only):
    ```bash
    export ARCHINSTALL_ZFS_SKIP_DKMS_VALIDATION=1
    ./installer
    ```
 
-**Note:** Disabling validation may result in DKMS compilation failures during installation.
+Disabling validation may result in DKMS compilation failures during installation.
 
 </details>
 
 <details>
-<summary><strong>🐛 Installation Fails in QEMU</strong></summary>
+<summary><strong>Installation fails in QEMU</strong></summary>
 
-**Common causes:**
+Common causes:
 - UEFI not enabled in VM settings
 - Insufficient RAM (< 2GB)
-- Network not connected
+- No network connectivity
 
-**Debug steps:**
+Tips:
 1. Use `just qemu-install-serial` for better error visibility
 2. Check QEMU logs in the terminal
 3. Verify UEFI firmware is loaded
@@ -299,104 +210,44 @@ as they are not yet supported by the current ZFS version:
 </details>
 
 <details>
-<summary><strong>⚡ Boot Issues After Installation</strong></summary>
+<summary><strong>Boot issues after installation</strong></summary>
 
-**If ZFSBootMenu doesn't appear:**
+If ZFSBootMenu does not appear:
 1. Check UEFI boot order in firmware
-2. Verify EFI partition is properly mounted
-3. Check if ZFSBootMenu EFI files exist in `/boot/efi/EFI/ZBM/`
+2. Verify the EFI partition is mounted
+3. Confirm ZFSBootMenu files exist in `/boot/efi/EFI/ZBM/`
 
-**Recovery:** Boot from installer USB and run repair commands via chroot.
+Recovery: Boot from the installer USB and run repair commands via chroot.
 
 </details>
 
 ---
 
-## 🗺️ Roadmap
+## Roadmap 🗺️
 
-### 🎯 **Next Release**
-- [ ] **Secure Boot support** (sign kernels/ZBM, manage keys)
-- [ ] **Local ZFSBootMenu builds** (no internet dependency)
-- [ ] **Smarter hostid generation** (hostname-based)
+### Next release
+- [ ] Secure Boot support (sign kernels/ZBM, manage keys)
+- [ ] Local ZFSBootMenu builds (no internet dependency)
+- [ ] Hostid improvements (hostname‑based)
 
-### 🚀 **Future Enhancements**
-- [ ] **Advanced ZFS tuning** (compression algorithms, block sizes)
-- [ ] **Multi-language support** (archinstall integration)
-
----
-
-## 💡 Architecture Insights
-
-### 🧩 **Templating System**
-We use **Jinja2 templates** to generate ISO profiles dynamically:
-
-**Template variables:**
-- `kernel`: Target kernel variant
-- `use_precompiled_zfs` / `use_dkms`: ZFS installation method
-- `include_headers`: Whether to include kernel headers
-- `fast_build`: Minimal vs full package set
-
-**Key templates:**
-- `packages.x86_64.j2` → Package selection
-- `profiledef.sh.j2` → ISO metadata  
-- `pacman.conf.j2` → Repository configuration
-
-### 🏗️ **Just Task Runner**
-All workflows orchestrated via [`just`](https://github.com/casey/just) recipes:
-
-```bash
-just --list                      # See all available commands
-just build-main pre linux-zen    # Parameterized builds
-just qemu-install-serial         # Complex QEMU setups
-```
+### Future enhancements
+- [ ] Advanced ZFS tuning (compression algorithms, block sizes)
+- [ ] Multi‑language support (archinstall integration)
 
 ---
 
-## 🤝 Contributing
+## Links 🔗
 
-**We welcome contributions!** Here's how to help:
-
-1. **🐛 Bug Reports**: Include system info, error logs, and reproduction steps
-2. **💡 Feature Requests**: Describe your use case and proposed solution  
-3. **🔧 Code Contributions**: Fork → branch → test → pull request
-4. **📖 Documentation**: Help improve this README or add examples
-
-**Development flow:**
-```bash
-git clone https://github.com/okhsunrog/archinstall_zfs
-cd archinstall_zfs
-just install-dev                 # Install dependencies
-just qemu-setup                  # Set up test environment
-# Make your changes
-just all                         # Run quality checks
-just qemu-install-serial         # Test in VM
-```
+- Releases: `https://github.com/okhsunrog/archinstall_zfs/releases`
+- Issues: `https://github.com/okhsunrog/archinstall_zfs/issues`
+- Discussions: `https://github.com/okhsunrog/archinstall_zfs/discussions`
+- Arch Wiki: `https://wiki.archlinux.org/title/ZFS`
 
 ---
 
-## 📊 Project Stats
+## License 📄
 
-- 🗂️ **Languages**: Python, Shell, Jinja2
-- 🧪 **Testing**: Pytest, MyPy, Ruff
-- 📦 **Dependencies**: archinstall, ZFS utilities
-- 🏗️ **Build**: ArchISO, QEMU, GitHub Actions
-- 📄 **License**: GPL-3.0
-- 🚀 **CI/CD**: Automated tag releases + monthly builds
-
----
-
-## 🔗 Links & Resources
-
-- 📦 **Releases**: [Download ISOs](https://github.com/okhsunrog/archinstall_zfs/releases)
-- 🐛 **Issues**: [Report bugs](https://github.com/okhsunrog/archinstall_zfs/issues)
-- 💬 **Discussions**: [Get help](https://github.com/okhsunrog/archinstall_zfs/discussions)
-- 📖 **Arch Wiki**: [ZFS on Arch Linux](https://wiki.archlinux.org/title/ZFS)
-
----
-
-## 📄 License
-
-**GPL-3.0** - See [`LICENSE`](LICENSE) file for details.
+GPL‑3.0 — see [`LICENSE`](LICENSE).
 
 ---
 
