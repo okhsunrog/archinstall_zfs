@@ -284,9 +284,9 @@ Recovery: Boot from the installer USB and run repair commands via chroot.
 ## Links 🔗
 
 ### Project
-- Releases: `https://github.com/okhsunrog/archinstall_zfs/releases`
-- Issues: `https://github.com/okhsunrog/archinstall_zfs/issues`
-- Discussions: `https://github.com/okhsunrog/archinstall_zfs/discussions`
+- [Releases](https://github.com/okhsunrog/archinstall_zfs/releases)
+- [Issues](https://github.com/okhsunrog/archinstall_zfs/issues)
+- [Discussions](https://github.com/okhsunrog/archinstall_zfs/discussions)
 
 ### Articles
 - [Arch Linux on ZFS for humans: new TUI installer archinstall_zfs](https://okhsunrog.dev/posts/archinstall-zfs/) (English)
