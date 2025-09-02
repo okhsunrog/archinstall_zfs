@@ -8,6 +8,7 @@ from typing import cast
 from archinstall import SysInfo, debug, error, info
 from archinstall.lib.applications.application_handler import application_handler
 from archinstall.lib.args import ArchConfig, Arguments, arch_config_handler
+from archinstall.lib.authentication.authentication_handler import auth_handler
 from archinstall.lib.configuration import ConfigurationOutput
 from archinstall.lib.general import SysCommand
 from archinstall.lib.installer import accessibility_tools_in_use, run_custom_user_commands
@@ -224,6 +225,8 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
 
             if arch_config.auth_config and arch_config.auth_config.users:
                 installation.create_users(arch_config.auth_config.users)
+                # Setup authentication (U2F hardware keys, etc.)
+                auth_handler.setup_auth(installation, arch_config.auth_config, arch_config.hostname)
 
             # Set root password if provided
             if arch_config.auth_config and arch_config.auth_config.root_enc_password:
@@ -260,6 +263,14 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
             # Enable accessibility services if used on the live ISO
             if accessibility_tools_in_use():
                 installation.enable_espeakup()
+
+            # Run profile post-install hooks for database initialization, etc.
+            if arch_config.profile_config and arch_config.profile_config.profile:
+                arch_config.profile_config.profile.post_install(installation)
+
+            # Enable user-specified services
+            if arch_config.services:
+                installation.enable_service(arch_config.services)
 
             # Run any custom post-install commands if provided
             if arch_config.custom_commands:
