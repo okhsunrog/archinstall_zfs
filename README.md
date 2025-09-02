@@ -23,6 +23,7 @@ Setting up ZFS on Arch involves kernel selection, ZFS module installation, bootl
 ### Option A: Prebuilt ISO (recommended)
 1. Download the latest ISO from the releases page.
 2. Boot on a UEFI machine and connect to the network.
+   > **Ventoy users**: When selecting the image, choose GRUB2 boot mode for proper UEFI booting.
 3. Run:
 
 ```bash
@@ -67,6 +68,8 @@ python -m archinstall_zfs
 - `linux` + `zfs-linux`
 - `linux-zen` + `zfs-linux-zen`
 - `linux-hardened` + `zfs-linux-hardened`
+
+> All kernel options automatically fall back to `zfs-dkms` if precompiled modules are unavailable.
 
 ### Kernel/ZFS compatibility validation
 
