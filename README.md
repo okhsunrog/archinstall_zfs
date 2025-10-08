@@ -310,10 +310,10 @@ Recovery: Boot from the installer USB and run repair commands via chroot.
 
 GPL‑3.0 — see [`LICENSE`](LICENSE).
 
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fokhsunrog%2Farchinstall_zfs.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fokhsunrog%2Farchinstall_zfs?ref=badge_large)
+
 ---
 
 <p align="center">
 <sub>Demo animation created with <a href="https://asciinema.org/">asciinema</a>, edited with <a href="https://github.com/jdum/asciinema-scene">asciinema-scene</a>, and converted to SVG with <a href="https://github.com/okhsunrog/svg-term-cli">svg-term-cli</a>.</sub>
 </p>
-
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fokhsunrog%2Farchinstall_zfs.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fokhsunrog%2Farchinstall_zfs?ref=badge_large)
