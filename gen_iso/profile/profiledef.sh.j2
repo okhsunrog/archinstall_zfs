@@ -8,19 +8,8 @@ iso_application="Arch Linux with ZFS Live/Installation DVD"
 iso_version="$(date --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y.%m.%d)"
 install_dir="arch"
 buildmodes=('iso')
-{% if fast_build %}
-# Testing: reduced bootmodes to speed up build and reduce size
-bootmodes=(
-           'bios.syslinux.eltorito'
-           'uefi-x64.systemd-boot.eltorito'
-          )
-{% else %}
-bootmodes=(
-           'bios.syslinux.mbr' 'bios.syslinux.eltorito'
-           'uefi-ia32.systemd-boot.esp' 'uefi-x64.systemd-boot.esp'
-           'uefi-ia32.systemd-boot.eltorito' 'uefi-x64.systemd-boot.eltorito'
-          )
-{% endif %}
+bootmodes=('bios.syslinux'
+           'uefi.systemd-boot')
 arch="x86_64"
 pacman_conf="pacman.conf"
 airootfs_image_type="{{ 'erofs' if fast_build else 'squashfs' }}"
