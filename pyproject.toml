@@ -17,7 +17,7 @@ dev = [
     "ruff>=0.8.0",
     "mypy>=1.14.0",
     "pytest>=8.0.0",
-    "pytest-cov>=4.0.0",
+    "pytest-cov>=7.0.0",
 ]
 
 # Ruff configuration - replaces flake8, black, isort, pyupgrade, autoflake
