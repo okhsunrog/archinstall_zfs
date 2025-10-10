@@ -7,6 +7,7 @@
 [![GitHub Release](https://img.shields.io/github/v/release/okhsunrog/archinstall_zfs)](https://github.com/okhsunrog/archinstall_zfs/releases)
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/okhsunrog/archinstall_zfs/ci.yml)](https://github.com/okhsunrog/archinstall_zfs/actions)
 [![Python Version](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fokhsunrog%2Farchinstall_zfs.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fokhsunrog%2Farchinstall_zfs?ref=badge_shield)
 
 [![Demo](assets/archinstall-demo.svg)](https://asciinema.org/a/IgofIGOQP9AXUCVbDHIAstlPz)
 
@@ -308,6 +309,8 @@ Recovery: Boot from the installer USB and run repair commands via chroot.
 ## License 📄
 
 GPL‑3.0 — see [`LICENSE`](LICENSE).
+
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fokhsunrog%2Farchinstall_zfs.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fokhsunrog%2Farchinstall_zfs?ref=badge_large)
 
 ---
 
