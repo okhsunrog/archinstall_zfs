@@ -77,7 +77,8 @@ class GlobalConfig(BaseModel):
     aur_packages: list[str] = Field(default_factory=list)  # User-selected AUR packages
 
     # Private attribute for system-managed AUR packages (not saved to JSON)
-    _system_aur_packages: list[str] = PrivateAttr(default_factory=list)
+    # zfsbootmenu is always included for local bootloader builds
+    _system_aur_packages: list[str] = PrivateAttr(default_factory=lambda: ["zfsbootmenu"])
 
     @field_validator("pool_name")
     @classmethod
