@@ -1,10 +1,15 @@
+from __future__ import annotations
+
 import contextlib
 import os
 import tempfile
 import time
 from enum import Enum
 from pathlib import Path
-from typing import ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar, cast
+
+if TYPE_CHECKING:
+    from archinstall.lib.installer import Installer
 
 from archinstall import debug, error, info
 from archinstall.lib.exceptions import SysCallError
@@ -88,7 +93,7 @@ class ZFSPaths(BaseModel):
         return self.cache_dir / self.pool_name
 
     @classmethod
-    def create_mounted(cls, base_paths: "ZFSPaths", mountpoint: Path) -> "ZFSPaths":
+    def create_mounted(cls, base_paths: ZFSPaths, mountpoint: Path) -> ZFSPaths:
         new_paths = cls(
             base_zfs=mountpoint / str(base_paths.base_zfs).lstrip("/"),
             cache_dir=mountpoint / str(base_paths.cache_dir).lstrip("/"),
@@ -426,7 +431,7 @@ class ZFSManagerBuilder:
         self._preselected_encryption_password: str | None = None
         self._init_system: str = "dracut"
 
-    def set_new_pool(self, device: Path, pool_name: str) -> "ZFSManagerBuilder":
+    def set_new_pool(self, device: Path, pool_name: str) -> ZFSManagerBuilder:
         """Configure builder for a new pool without interactive prompts.
 
         Sets the target device and desired pool name and marks the flow as a new pool
@@ -439,7 +444,7 @@ class ZFSManagerBuilder:
         self._is_new_pool = True
         return self
 
-    def set_existing_pool(self, pool_name: str) -> "ZFSManagerBuilder":
+    def set_existing_pool(self, pool_name: str) -> ZFSManagerBuilder:
         """Configure builder for an existing pool without interactive prompts.
 
         Sets the pool name and marks the flow as using an existing pool. Callers must
@@ -451,33 +456,33 @@ class ZFSManagerBuilder:
         self._is_new_pool = False
         return self
 
-    def with_pool_name(self, name: str) -> "ZFSManagerBuilder":
+    def with_pool_name(self, name: str) -> ZFSManagerBuilder:
         self._pool_name = name
         self._paths.pool_name = name
         return self
 
-    def with_dataset_prefix(self, prefix: str) -> "ZFSManagerBuilder":
+    def with_dataset_prefix(self, prefix: str) -> ZFSManagerBuilder:
         self._dataset_prefix = prefix
         return self
 
-    def with_mountpoint(self, path: Path) -> "ZFSManagerBuilder":
+    def with_mountpoint(self, path: Path) -> ZFSManagerBuilder:
         self._mountpoint = path
         return self
 
-    def with_encryption(self, mode: EncryptionMode | None, password: str | None) -> "ZFSManagerBuilder":
+    def with_encryption(self, mode: EncryptionMode | None, password: str | None) -> ZFSManagerBuilder:
         self._preselected_encryption_mode = mode
         self._preselected_encryption_password = password
         return self
 
-    def with_init_system(self, init_system: str) -> "ZFSManagerBuilder":
+    def with_init_system(self, init_system: str) -> ZFSManagerBuilder:
         self._init_system = init_system
         return self
 
-    def with_compression(self, algo: str) -> "ZFSManagerBuilder":
+    def with_compression(self, algo: str) -> ZFSManagerBuilder:
         self._compression = algo
         return self
 
-    def build(self) -> "ZFSManager":
+    def build(self) -> ZFSManager:
         if not self._pool_name:
             raise ValueError("Pool name must be set before building ZFS manager")
         if not self._dataset_prefix:
@@ -669,32 +674,69 @@ class ZFSManager:
         SysCommand(f"zpool export {self.config.pool_name}")
         info("ZFS cleanup completed")
 
-    def setup_bootloader(self, efi_partition: Path) -> None:
-        """Set up ZFSBootMenu bootloader"""
-        info("Setting up ZFSBootMenu bootloader")
+    def setup_bootloader(self, efi_partition: Path, installer: Installer) -> None:
+        """Set up ZFSBootMenu bootloader by building locally from AUR package"""
 
-        # Create ZBM directory
+        info("Setting up ZFSBootMenu bootloader (local build)")
+
+        # Create ZBM output directory
         zbm_path = self.config.mountpoint / "boot/efi/EFI/ZBM"
         zbm_path.mkdir(parents=True, exist_ok=True)
 
-        # Check if ZBM is already installed
-        if not (zbm_path / "VMLINUZ.EFI").exists():
-            # Download main ZBM image
-            SysCommand(f"curl -o {zbm_path}/VMLINUZ.EFI -L https://get.zfsbootmenu.org/efi")
-            # Download recovery image
-            SysCommand(f"curl -o {zbm_path}/RECOVERY.EFI -L https://get.zfsbootmenu.org/efi/recovery")
+        # Create ZFSBootMenu config based on init system
+        zbm_config_dir = self.config.mountpoint / "etc/zfsbootmenu"
+        zbm_config_dir.mkdir(parents=True, exist_ok=True)
 
-            # Check for existing bootloader entries
-            existing_entries = SysCommand("efibootmgr -v").decode()
+        use_mkinitcpio = self.config.init_system == "mkinitcpio"
 
-            # Add main entry if not exists
-            if "ZFSBootMenu" not in existing_entries:
-                SysCommand(f"efibootmgr -c -d {efi_partition} -L 'ZFSBootMenu' -l '\\EFI\\ZBM\\VMLINUZ.EFI'")
+        # Build config.yaml for generate-zbm
+        config_lines = [
+            "Global:",
+            "  ManageImages: true",
+            "  BootMountPoint: /boot/efi",
+        ]
 
-            # Add recovery entry if not exists
-            if "ZFSBootMenu-Recovery" not in existing_entries:
-                SysCommand(f"efibootmgr -c -d {efi_partition} -L 'ZFSBootMenu-Recovery' -l '\\EFI\\ZBM\\RECOVERY.EFI'")
-
-            info("ZFSBootMenu installed successfully")
+        if use_mkinitcpio:
+            config_lines.append("  InitCPIO: true")
+            config_lines.append("  InitCPIOConfig: /etc/zfsbootmenu/mkinitcpio.conf")
         else:
-            debug("ZFSBootMenu already installed, skipping")
+            config_lines.append("  DracutConfDir: /etc/zfsbootmenu/dracut.conf.d")
+
+        config_lines.extend(
+            [
+                "",
+                "Components:",
+                "  Enabled: false",
+                "",
+                "EFI:",
+                "  ImageDir: /boot/efi/EFI/ZBM",
+                "  Versions: false",
+                "  Enabled: true",
+                "",
+                "Kernel:",
+                "  CommandLine: ro quiet loglevel=0",
+            ]
+        )
+
+        config_file = zbm_config_dir / "config.yaml"
+        config_file.write_text("\n".join(config_lines) + "\n")
+        info(f"Created ZFSBootMenu config for {'mkinitcpio' if use_mkinitcpio else 'dracut'}")
+
+        # Run generate-zbm to build the EFI image
+        info("Building ZFSBootMenu EFI image...")
+        try:
+            installer.arch_chroot("generate-zbm")
+            info("ZFSBootMenu EFI image built successfully")
+        except Exception as e:
+            error(f"Failed to build ZFSBootMenu: {e}")
+            raise
+
+        # Set up EFI boot entries
+        existing_entries = SysCommand("efibootmgr -v").decode()
+
+        # Add main entry if not exists
+        if "ZFSBootMenu" not in existing_entries:
+            SysCommand(f"efibootmgr -c -d {efi_partition} -L 'ZFSBootMenu' -l '\\EFI\\ZBM\\vmlinuz.EFI'")
+            info("Added ZFSBootMenu EFI boot entry")
+
+        info("ZFSBootMenu setup completed")
