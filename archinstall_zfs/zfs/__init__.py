@@ -12,6 +12,7 @@ from archinstall.lib.general import SysCommand
 from archinstall.tui import EditMenu, MenuItem, MenuItemGroup, SelectMenu
 from pydantic import BaseModel, Field, field_validator
 
+from archinstall_zfs.shared import ZFS_PASSPHRASE_MIN_LENGTH
 from archinstall_zfs.utils import modify_zfs_cache_mountpoints
 
 
@@ -200,16 +201,26 @@ class ZFSEncryption:
                 str,
                 EditMenu(
                     "ZFS Encryption Password",
-                    header="Enter password for ZFS encryption",
+                    header=f"Enter password for ZFS encryption (minimum {ZFS_PASSPHRASE_MIN_LENGTH} characters)",
                     hide_input=True,
                 )
                 .input()
                 .text(),
             )
 
+            if not password:
+                continue
+
+            if len(password) < ZFS_PASSPHRASE_MIN_LENGTH:
+                SelectMenu(
+                    MenuItemGroup([MenuItem("OK", None)]),
+                    header=f"Password too short. ZFS requires at least {ZFS_PASSPHRASE_MIN_LENGTH} characters.",
+                ).run()
+                continue
+
             verify = cast(str, EditMenu("Verify Password", header="Enter password again", hide_input=True).input().text())
 
-            if password == verify and password:
+            if password == verify:
                 return password
 
 
