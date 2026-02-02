@@ -39,7 +39,7 @@ from archinstall_zfs.initramfs.dracut import DracutInitramfsHandler
 from archinstall_zfs.initramfs.mkinitcpio import MkinitcpioInitramfsHandler
 from archinstall_zfs.kernel import get_menu_options
 from archinstall_zfs.menu.models import CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, SwapMode, ZFSEncryptionMode
-from archinstall_zfs.shared import ZFSModuleMode
+from archinstall_zfs.shared import ZFS_PASSPHRASE_MIN_LENGTH, ZFSModuleMode
 from archinstall_zfs.zfs import detect_pool_encryption, verify_pool_passphrase
 
 
@@ -579,9 +579,20 @@ class GlobalConfigMenu:
     def _get_encryption_password(self) -> None:
         """Get encryption password for ZFS."""
         while True:
-            password_result = EditMenu("ZFS Encryption Password", header="Enter password for ZFS encryption", hide_input=True).input()
+            password_result = EditMenu(
+                "ZFS Encryption Password",
+                header=f"Enter password for ZFS encryption (minimum {ZFS_PASSPHRASE_MIN_LENGTH} characters)",
+                hide_input=True,
+            ).input()
 
             if not password_result.text():
+                continue
+
+            if len(password_result.text()) < ZFS_PASSPHRASE_MIN_LENGTH:
+                SelectMenu(
+                    MenuItemGroup([MenuItem("OK", None)]),
+                    header=f"Password too short. ZFS requires at least {ZFS_PASSPHRASE_MIN_LENGTH} characters.",
+                ).run()
                 continue
 
             verify_result = EditMenu("Verify Password", header="Enter password again", hide_input=True).input()

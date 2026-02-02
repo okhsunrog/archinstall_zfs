@@ -4,7 +4,7 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
-from ..shared import ZFSModuleMode
+from ..shared import ZFS_PASSPHRASE_MIN_LENGTH, ZFSModuleMode
 
 
 class InstallationMode(Enum):
@@ -97,8 +97,11 @@ class GlobalConfig(BaseModel):
         """Return a list of validation errors; empty when valid."""
         errors: list[str] = []
 
-        if self.zfs_encryption_mode is not ZFSEncryptionMode.NONE and not self.zfs_encryption_password:
-            errors.append("ZFS encryption password is required when encryption is enabled")
+        if self.zfs_encryption_mode is not ZFSEncryptionMode.NONE:
+            if not self.zfs_encryption_password:
+                errors.append("ZFS encryption password is required when encryption is enabled")
+            elif len(self.zfs_encryption_password) < ZFS_PASSPHRASE_MIN_LENGTH:
+                errors.append(f"ZFS encryption password must be at least {ZFS_PASSPHRASE_MIN_LENGTH} characters")
 
         if not self.installation_mode:
             errors.append("Installation mode is required")
