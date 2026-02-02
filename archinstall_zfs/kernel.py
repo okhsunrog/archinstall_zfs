@@ -66,7 +66,7 @@ def get_zfs_packages_for_kernel(kernel_name: str, mode: ZFSModuleMode) -> list[s
     if mode == ZFSModuleMode.PRECOMPILED:
         if not kernel_info.precompiled_package:
             raise ValueError(f"Kernel {kernel_name} does not support precompiled ZFS")
-        return ["zfs-utils", kernel_info.precompiled_package]
+        return ["zfs-utils", kernel_info.precompiled_package, kernel_info.headers_package]
     # DKMS
     return ["zfs-utils", "zfs-dkms", kernel_info.headers_package]
 
