@@ -63,12 +63,12 @@ class TestPackageSelection:
     """Test package selection logic."""
 
     def test_get_zfs_packages_precompiled(self) -> None:
-        """Test getting packages for precompiled mode."""
+        """Test getting packages for precompiled mode (includes headers)."""
         packages = get_zfs_packages_for_kernel("linux-lts", ZFSModuleMode.PRECOMPILED)
-        assert packages == ["zfs-utils", "zfs-linux-lts"]
+        assert packages == ["zfs-utils", "zfs-linux-lts", "linux-lts-headers"]
 
         packages = get_zfs_packages_for_kernel("linux-zen", ZFSModuleMode.PRECOMPILED)
-        assert packages == ["zfs-utils", "zfs-linux-zen"]
+        assert packages == ["zfs-utils", "zfs-linux-zen", "linux-zen-headers"]
 
     def test_get_zfs_packages_dkms(self) -> None:
         """Test getting packages for DKMS mode."""
@@ -99,7 +99,7 @@ class TestPackageInstallation:
         """Test successful host package installation."""
         result = install_zfs_packages("linux-lts", ZFSModuleMode.PRECOMPILED, None)
         assert result is True
-        mock_syscmd.assert_called_once_with("pacman -S --noconfirm zfs-utils zfs-linux-lts")
+        mock_syscmd.assert_called_once_with("pacman -S --noconfirm zfs-utils zfs-linux-lts linux-lts-headers")
 
     def test_install_zfs_packages_target_success(self) -> None:
         """Test successful target package installation."""
