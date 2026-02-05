@@ -276,3 +276,12 @@ Releases are automated via GitHub Actions with sophisticated fallback handling:
 - **Manual releases**: Created via workflow dispatch, marked as draft/prerelease for testing
 
 This approach ensures users always have at least one working ISO (linux-lts), while allowing the latest linux kernel to be skipped when ZFS compatibility issues arise.
+
+---
+
+## TODO / Future improvements
+
+- **Host-to-target (H2T) mode support**: archinstall 3.0.15+ exposes `running_from_host()` to detect if running from an installed system vs ISO. Could be used to:
+  - Warn users about H2T mode limitations
+  - Skip live-ISO-only operations
+  - Better handle ZFS module availability (host might have them pre-loaded)
