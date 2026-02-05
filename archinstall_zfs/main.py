@@ -14,6 +14,7 @@ from archinstall.lib.general import SysCommand
 from archinstall.lib.installer import accessibility_tools_in_use, run_custom_user_commands
 from archinstall.lib.models.device import DiskLayoutConfiguration, DiskLayoutType
 from archinstall.lib.models.users import User
+from archinstall.lib.network.wifi_handler import wifi_handler
 from archinstall.lib.profile.profiles_handler import profile_handler
 from archinstall.tui.curses_menu import MenuItemGroup, SelectMenu, Tui
 from archinstall.tui.menu_item import MenuItem
@@ -30,15 +31,40 @@ from archinstall_zfs.zfs.kmod_setup import add_archzfs_repo, initialize_zfs
 from archinstall_zfs.zrepl import setup_zrepl
 
 
-def check_internet() -> bool:
-    debug("Checking internet connection")
+def _ping_check() -> bool:
+    """Check if we can reach the internet."""
     try:
-        # Use a direct IP and short timeout to avoid DNS-related hangs
         socket.create_connection(("1.1.1.1", 53), timeout=3.0)
+        return True
+    except OSError:
+        return False
+
+
+def check_internet() -> bool:
+    """Check internet connection, offering wifi setup if unavailable."""
+    debug("Checking internet connection")
+
+    if _ping_check():
         info("Internet connection available")
         return True
-    except OSError as e:
-        error(f"No internet connection: {e!s}")
+
+    # No connection - try wifi setup
+    info("No network connection found, attempting wifi setup...")
+
+    try:
+        wifi_connected = wifi_handler.setup()
+        if wifi_connected:
+            # Verify connection after wifi setup
+            if _ping_check():
+                info("Wifi connected successfully")
+                return True
+            error("Wifi connected but no internet access")
+            return False
+        error("Wifi setup cancelled or failed")
+        return False
+    except Exception as e:
+        debug(f"Wifi setup failed: {e!s}")
+        error("No internet connection available")
         return False
 
 
