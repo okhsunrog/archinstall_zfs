@@ -359,7 +359,7 @@ def perform_installation(installer_menu: GlobalConfigMenu, arch_config: ArchConf
                     info("Skipping zrepl service enablement - install zrepl manually if needed")
 
             if disk_manager.config.efi_partition:
-                zfs_manager.setup_bootloader(disk_manager.config.efi_partition)
+                zfs_manager.setup_bootloader(disk_manager.config.efi_partition, installation)
             else:
                 error("EFI partition not found, skipping bootloader setup")
 

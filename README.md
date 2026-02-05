@@ -275,7 +275,6 @@ Recovery: Boot from the installer USB and run repair commands via chroot.
 
 ### Next release
 - [ ] Secure Boot support (sign kernels/ZBM, manage keys)
-- [ ] Local ZFSBootMenu builds (no internet dependency)
 - [ ] Hostid improvements (hostname‑based)
 
 ### Future enhancements
