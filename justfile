@@ -143,10 +143,19 @@ ssh:
 
 # ─── Integration Tests ─────────────────────────────────
 
-# Run integration test: full install + boot verification
+# Full cycle: fresh disk, install, boot, verify
 test-vm:
     just build
-    cargo test --test qemu_integration -- --ignored --test-threads=1 --nocapture
+    cargo xtask test-vm
+
+# Install only: fresh disk, run installer, verify exit code
+test-install:
+    just build
+    cargo xtask test-install
+
+# Boot only: boot existing disk, verify system health
+test-boot:
+    cargo xtask test-boot
 
 # ─── Cleanup ───────────────────────────────────────────
 
