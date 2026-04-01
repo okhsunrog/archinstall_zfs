@@ -117,7 +117,20 @@ pub fn create_child_datasets(
     let mut sorted: Vec<&DatasetConfig> = datasets.iter().collect();
     sorted.sort_by_key(|d| d.name.matches('/').count());
 
+    let mut created: std::collections::HashSet<String> = std::collections::HashSet::new();
+
     for ds in sorted {
+        // Auto-create parent datasets if needed (e.g., "data" before "data/home")
+        let parts: Vec<&str> = ds.name.split('/').collect();
+        if parts.len() > 1 {
+            let parent = parts[..parts.len() - 1].join("/");
+            let parent_full = format!("{pool_name}/{prefix}/{parent}");
+            if !created.contains(&parent_full) {
+                create_dataset(runner, &parent_full, &[("mountpoint", "none")])?;
+                created.insert(parent_full);
+            }
+        }
+
         let full_name = format!("{pool_name}/{prefix}/{}", ds.name);
         let props: Vec<(&str, &str)> = ds
             .properties
@@ -125,6 +138,7 @@ pub fn create_child_datasets(
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
         create_dataset(runner, &full_name, &props)?;
+        created.insert(full_name);
     }
     Ok(())
 }
@@ -133,20 +147,20 @@ pub fn mount_datasets_ordered(
     runner: &dyn CommandRunner,
     pool_name: &str,
     prefix: &str,
-    datasets: &[DatasetConfig],
+    _datasets: &[DatasetConfig],
 ) -> Result<()> {
     // Mount root dataset first (canmount=noauto)
     let root_ds = format!("{pool_name}/{prefix}/root");
     mount_dataset(runner, &root_ds)?;
 
-    // Mount remaining datasets
-    for ds in datasets {
-        if ds.name == "root" {
-            continue;
-        }
-        let full_name = format!("{pool_name}/{prefix}/{}", ds.name);
-        mount_dataset(runner, &full_name)?;
+    // Recursively mount all child datasets
+    let base_ds = format!("{pool_name}/{prefix}");
+    let output = run_zfs(runner, &["mount", "-R", &base_ds]);
+    // -R may not be supported on all versions; fall back to mount -a
+    if output.is_err() || !output.as_ref().unwrap().success() {
+        let _ = run_zfs(runner, &["mount", "-a"]);
     }
+
     Ok(())
 }
 
@@ -193,17 +207,18 @@ mod tests {
             },
         ];
 
-        let responses: Vec<CannedResponse> = (0..datasets.len())
-            .map(|_| CannedResponse::default())
-            .collect();
+        // 3 datasets + 1 auto-created parent "data"
+        let responses: Vec<CannedResponse> = (0..4).map(|_| CannedResponse::default()).collect();
         let runner = RecordingRunner::new(responses);
         create_child_datasets(&runner, "pool", "arch0", &datasets).unwrap();
 
         let calls = runner.calls();
-        assert_eq!(calls.len(), 3);
+        assert_eq!(calls.len(), 4);
         // "root" has 0 slashes, should come first
         assert!(calls[0].args.contains(&"pool/arch0/root".to_string()));
-        // "data/home" and "data/root" have 1 slash each
+        // "data" auto-created as parent
+        assert!(calls[1].args.contains(&"pool/arch0/data".to_string()));
+        // Then data/home and data/root
     }
 
     #[test]

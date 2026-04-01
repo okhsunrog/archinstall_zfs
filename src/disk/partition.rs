@@ -114,12 +114,49 @@ pub fn create_partitions(
         }
     };
 
-    // Format EFI partition
+    // Inform kernel and udev about partition changes
+    let _ = runner.run("partprobe", &[disk_str]);
+    let _ = runner.run("udevadm", &["settle"]);
+
+    // Wait for by-id symlinks to appear
     let efi_dev = format!("{disk_str}-part{}", layout.efi_part_num);
-    let output = runner.run("mkfs.fat", &["-F32", &efi_dev])?;
+    for _ in 0..50 {
+        if std::path::Path::new(&efi_dev).exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+
+    // Format EFI partition
+    let output = runner.run("mkfs.fat", &["-I", "-F32", &efi_dev])?;
     check_exit(&output, "mkfs.fat EFI")?;
 
     Ok(layout)
+}
+
+/// Wait for /dev/disk/by-id partition symlinks to appear after partitioning.
+pub fn wait_for_by_id_partitions(disk: &Path, layout: &PartitionLayout) -> Vec<std::path::PathBuf> {
+    let disk_str = disk.to_str().unwrap();
+    let mut parts = vec![
+        format!("{disk_str}-part{}", layout.efi_part_num),
+        format!("{disk_str}-part{}", layout.zfs_part_num),
+    ];
+    if let Some(swap) = layout.swap_part_num {
+        parts.push(format!("{disk_str}-part{swap}"));
+    }
+
+    let mut result = Vec::new();
+    for part in &parts {
+        let path = std::path::PathBuf::from(part);
+        for _ in 0..50 {
+            if path.exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        result.push(path);
+    }
+    result
 }
 
 pub fn mount_efi(

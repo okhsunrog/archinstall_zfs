@@ -67,7 +67,21 @@ pub fn import_pool(runner: &dyn CommandRunner, name: &str, mountpoint: &Path) ->
     Ok(())
 }
 
+pub fn import_pool_no_mount(
+    runner: &dyn CommandRunner,
+    name: &str,
+    mountpoint: &Path,
+) -> Result<()> {
+    let mount_str = mountpoint.to_str().unwrap();
+    let output = run_zpool(runner, &["import", "-N", "-R", mount_str, name])?;
+    check_exit(&output, "zpool import -N")?;
+    Ok(())
+}
+
 pub fn export_pool(runner: &dyn CommandRunner, name: &str) -> Result<()> {
+    nix::unistd::sync();
+    // Try umount all first
+    let _ = super::cli::run_zfs(runner, &["umount", "-a"]);
     let output = run_zpool(runner, &["export", name])?;
     check_exit(&output, "zpool export")?;
     Ok(())
@@ -159,11 +173,18 @@ mod tests {
 
     #[test]
     fn test_export_pool_command() {
-        let runner = RecordingRunner::new(vec![CannedResponse::default()]);
+        let runner = RecordingRunner::new(vec![
+            CannedResponse::default(), // zfs umount -a
+            CannedResponse::default(), // zpool export
+        ]);
         export_pool(&runner, "mypool").unwrap();
 
         let calls = runner.calls();
-        assert!(calls[0].args.contains(&"export".to_string()));
-        assert!(calls[0].args.contains(&"mypool".to_string()));
+        // First call: zfs umount -a
+        assert_eq!(calls[0].program, "zfs");
+        // Second call: zpool export
+        assert_eq!(calls[1].program, "zpool");
+        assert!(calls[1].args.contains(&"export".to_string()));
+        assert!(calls[1].args.contains(&"mypool".to_string()));
     }
 }
