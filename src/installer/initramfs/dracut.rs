@@ -5,9 +5,12 @@ use color_eyre::eyre::{Context, Result};
 
 use crate::system::cmd::{check_exit, chroot, CommandRunner};
 
-const DRACUT_ZFS_CONF: &str = r#"hostonly=yes
-hostonly_cmdline=no
-compress=cat
+const DRACUT_ZFS_CONF: &str = r#"hostonly="yes"
+hostonly_cmdline="no"
+fscks="no"
+early_microcode="yes"
+# ZFS datasets are already compressed, use uncompressed initramfs to avoid double compression
+compress="cat"
 omit_dracutmodules+=" network btrfs brltty plymouth "
 "#;
 
@@ -15,11 +18,10 @@ const DRACUT_INSTALL_HOOK: &str = r#"[Trigger]
 Type = Path
 Operation = Install
 Operation = Upgrade
-Target = usr/lib/modules/*/vmlinuz
-Target = usr/lib/kernel/install.d/*
+Target = usr/lib/modules/*/pkgbase
 
 [Action]
-Description = Updating linux initramfs with dracut...
+Description = Updating linux initcpios (with dracut!)...
 When = PostTransaction
 Exec = /usr/local/bin/dracut-install.sh
 Depends = dracut
@@ -29,38 +31,34 @@ NeedsTargets
 const DRACUT_REMOVE_HOOK: &str = r#"[Trigger]
 Type = Path
 Operation = Remove
-Target = usr/lib/modules/*/vmlinuz
+Target = usr/lib/modules/*/pkgbase
 
 [Action]
-Description = Removing linux initramfs with dracut...
+Description = Removing linux initcpios...
 When = PreTransaction
 Exec = /usr/local/bin/dracut-remove.sh
 NeedsTargets
 "#;
 
 const DRACUT_INSTALL_SCRIPT: &str = r#"#!/usr/bin/env bash
-set -euo pipefail
-
+args=('--force' '--no-hostonly-cmdline')
 while read -r line; do
-    if [[ "$line" != */vmlinuz ]]; then
-        continue
+    if [[ "$line" == 'usr/lib/modules/'+([^/])'/pkgbase' ]]; then
+        read -r pkgbase < "/${line}"
+        kver="${line#'usr/lib/modules/'}"
+        kver="${kver%'/pkgbase'}"
+        install -Dm0644 "/${line%'/pkgbase'}/vmlinuz" "/boot/vmlinuz-${pkgbase}"
+        dracut "${args[@]}" "/boot/initramfs-${pkgbase}.img" --kver "$kver"
     fi
-    kver="${line#/usr/lib/modules/}"
-    kver="${kver%/vmlinuz}"
-    dracut --force --hostonly --no-hostonly-cmdline "/boot/initramfs-${kver}.img" "$kver"
 done
 "#;
 
 const DRACUT_REMOVE_SCRIPT: &str = r#"#!/usr/bin/env bash
-set -euo pipefail
-
 while read -r line; do
-    if [[ "$line" != */vmlinuz ]]; then
-        continue
+    if [[ "$line" == 'usr/lib/modules/'+([^/])'/pkgbase' ]]; then
+        read -r pkgbase < "/${line}"
+        rm -f "/boot/vmlinuz-${pkgbase}" "/boot/initramfs-${pkgbase}.img"
     fi
-    kver="${line#/usr/lib/modules/}"
-    kver="${kver%/vmlinuz}"
-    rm -f "/boot/initramfs-${kver}.img"
 done
 "#;
 
@@ -100,12 +98,19 @@ pub fn configure(runner: &dyn CommandRunner, target: &Path, encryption: bool) ->
     Ok(())
 }
 
+/// Generate initramfs inside chroot.
+/// Detects kernel version from /usr/lib/modules/ inside the target,
+/// copies vmlinuz to /boot, and runs dracut.
 pub fn generate(runner: &dyn CommandRunner, target: &Path) -> Result<()> {
-    let output = chroot(
-        runner,
-        target,
-        "dracut --force --hostonly --no-hostonly-cmdline /boot/initramfs-linux.img $(uname -r) 2>&1 || dracut --regenerate-all --force --hostonly --no-hostonly-cmdline",
-    )?;
+    // Match Python: detect kver from installed modules, read pkgbase,
+    // copy vmlinuz, then generate initramfs with dracut --force
+    let cmd = concat!(
+        "kver=$(ls -1 /usr/lib/modules | sort | tail -n1); ",
+        "pkgbase=$(cat /usr/lib/modules/$kver/pkgbase 2>/dev/null || echo linux); ",
+        "install -Dm0644 /usr/lib/modules/$kver/vmlinuz /boot/vmlinuz-$pkgbase; ",
+        "dracut --force /boot/initramfs-$pkgbase.img --kver $kver",
+    );
+    let output = chroot(runner, target, cmd)?;
     check_exit(&output, "dracut generate initramfs")?;
     tracing::info!("generated initramfs with dracut");
     Ok(())
@@ -137,8 +142,19 @@ mod tests {
         assert!(dir.path().join("usr/local/bin/dracut-install.sh").exists());
 
         let conf = fs::read_to_string(dir.path().join("etc/dracut.conf.d/zfs.conf")).unwrap();
-        assert!(conf.contains("hostonly=yes"));
+        assert!(conf.contains("hostonly"));
+        assert!(conf.contains("fscks"));
+        assert!(conf.contains("early_microcode"));
         assert!(!conf.contains("zroot.key"));
+
+        let hook = fs::read_to_string(dir.path().join("etc/pacman.d/hooks/90-dracut-install.hook"))
+            .unwrap();
+        assert!(hook.contains("pkgbase"));
+
+        let script =
+            fs::read_to_string(dir.path().join("usr/local/bin/dracut-install.sh")).unwrap();
+        assert!(script.contains("vmlinuz"));
+        assert!(script.contains("pkgbase"));
     }
 
     #[test]
@@ -149,5 +165,19 @@ mod tests {
 
         let conf = fs::read_to_string(dir.path().join("etc/dracut.conf.d/zfs.conf")).unwrap();
         assert!(conf.contains("zroot.key"));
+    }
+
+    #[test]
+    fn test_generate_dracut_command() {
+        let runner = RecordingRunner::new(vec![CannedResponse::default()]);
+        let _ = generate(&runner, Path::new("/mnt"));
+
+        let calls = runner.calls();
+        assert_eq!(calls[0].program, "arch-chroot");
+        let cmd = calls[0].args.join(" ");
+        assert!(cmd.contains("ls -1 /usr/lib/modules"));
+        assert!(cmd.contains("pkgbase"));
+        assert!(cmd.contains("dracut --force"));
+        assert!(cmd.contains("--kver"));
     }
 }
