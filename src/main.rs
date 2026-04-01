@@ -2,6 +2,7 @@ mod app;
 mod config;
 mod disk;
 mod installer;
+mod iso;
 mod kernel;
 mod profile;
 mod swap;
@@ -12,7 +13,7 @@ mod zrepl;
 
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use color_eyre::eyre::Result;
 
 #[derive(Parser, Debug)]
@@ -21,23 +22,56 @@ use color_eyre::eyre::Result;
     about = "Arch Linux installer with ZFS support"
 )]
 pub struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
     /// Path to a JSON configuration file
-    #[arg(long)]
+    #[arg(long, global = true)]
     config: Option<PathBuf>,
 
     /// Run installation without interactive prompts (requires --config)
-    #[arg(long)]
+    #[arg(long, global = true)]
     silent: bool,
 
     /// Preview commands without executing them
-    #[arg(long)]
+    #[arg(long, global = true)]
     dry_run: bool,
 }
 
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    /// Render archiso profile templates for ISO building
+    RenderProfile {
+        /// Source profile directory containing .j2 templates
+        #[arg(long)]
+        profile_dir: PathBuf,
+
+        /// Output directory for rendered profile
+        #[arg(long)]
+        out_dir: PathBuf,
+
+        /// Kernel package (linux, linux-lts, linux-zen)
+        #[arg(long, default_value = "linux-lts")]
+        kernel: String,
+
+        /// ZFS module mode (precompiled or dkms)
+        #[arg(long, default_value = "precompiled")]
+        zfs: String,
+
+        /// Include kernel headers (auto, true, false)
+        #[arg(long, default_value = "auto")]
+        headers: String,
+
+        /// Fast build mode (minimal packages, erofs)
+        #[arg(long)]
+        fast: bool,
+    },
+}
+
 fn setup_logging() -> Result<()> {
+    use tracing_subscriber::EnvFilter;
     use tracing_subscriber::fmt;
     use tracing_subscriber::prelude::*;
-    use tracing_subscriber::EnvFilter;
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
@@ -62,5 +96,15 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     tracing::info!(?cli, "starting archinstall-zfs");
 
-    app::run(cli)
+    match &cli.command {
+        Some(Commands::RenderProfile {
+            profile_dir,
+            out_dir,
+            kernel,
+            zfs,
+            headers,
+            fast,
+        }) => iso::render_profile(profile_dir, out_dir, kernel, zfs, headers, *fast),
+        None => app::run(cli),
+    }
 }

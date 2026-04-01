@@ -9,6 +9,7 @@ blockdev = "0.3.1"
 clap = { version = "4.6.0", features = ["derive"] }
 color-eyre = "0.6.5"
 crossterm = "0.29.0"
+minijinja = { version = "2.19.0", features = ["builtins"] }
 nix = { version = "0.31.2", features = ["fs", "process", "signal"] }
 pacmanconf = "3.1.0"
 ratatui = "0.30.0"
