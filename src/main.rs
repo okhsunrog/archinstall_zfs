@@ -1,9 +1,14 @@
 mod app;
 mod config;
 mod disk;
+mod installer;
+mod kernel;
+mod profile;
+mod swap;
 mod system;
 mod tui;
 mod zfs;
+mod zrepl;
 
 use std::path::PathBuf;
 
