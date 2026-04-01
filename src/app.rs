@@ -218,45 +218,26 @@ fn run_headless_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Re
     tracing::info!("Phase 13: Setting up ZFSBootMenu");
     let efi_mount = mountpoint.join("boot/efi");
     crate::zfs::bootmenu::download_zbm_efi(runner, &efi_mount)?;
-    crate::zfs::bootmenu::create_efi_entry(
-        runner,
-        &efi_partition,
-        pool_name,
-        prefix,
-        "00bab10c",
-        &config.init_system.to_string(),
-        matches!(
-            config.swap_mode,
-            SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-        ),
-    )?;
+    crate::zfs::bootmenu::create_efi_entries(runner, &efi_partition)?;
 
-    // Set ZBM commandline on root dataset
-    crate::zfs::bootmenu::set_zbm_commandline(
+    // Set ZBM properties: commandline (no root=), rootprefix, bootfs
+    let zswap_on = matches!(
+        config.swap_mode,
+        SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
+    );
+    crate::zfs::bootmenu::set_zbm_properties(
         runner,
         pool_name,
         prefix,
         &config.init_system.to_string(),
-        "00bab10c",
-        matches!(
-            config.swap_mode,
-            SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-        ),
+        zswap_on,
     )?;
-
-    // Set rootprefix for dracut
-    let root_ds = format!("{pool_name}/{prefix}/root");
-    let rootprefix = match config.init_system {
-        crate::config::types::InitSystem::Dracut => "root=ZFS=",
-        crate::config::types::InitSystem::Mkinitcpio => "zfs=",
-    };
-    let prop = format!("org.zfsbootmenu:rootprefix={rootprefix}");
-    let output = runner.run("zfs", &["set", &prop, &root_ds])?;
-    check_exit(&output, "set ZBM rootprefix")?;
 
     // ── Phase 14: Cleanup ──────────────────────────────────────
     tracing::info!("Phase 14: Cleanup");
     nix::unistd::sync();
+
+    let root_ds = format!("{pool_name}/{prefix}/root");
 
     // Unmount EFI
     crate::disk::partition::umount_efi(runner, &mountpoint)?;

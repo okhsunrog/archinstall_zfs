@@ -5,10 +5,10 @@ use color_eyre::eyre::{Context, Result};
 
 use crate::system::cmd::{check_exit, CommandRunner};
 
-const HOSTID_VALUE: &str = "00bab10c";
+use super::bootmenu::HOSTID_VALUE;
 
 pub fn create_hostid(runner: &dyn CommandRunner) -> Result<()> {
-    let output = runner.run("zgenhostid", &["-f", &format!("0x{HOSTID_VALUE}")])?;
+    let output = runner.run("zgenhostid", &["-f", HOSTID_VALUE])?;
     check_exit(&output, "zgenhostid")?;
     Ok(())
 }
@@ -68,7 +68,7 @@ mod tests {
 
         let calls = runner.calls();
         assert_eq!(calls[0].program, "zgenhostid");
-        assert!(calls[0].args.contains(&format!("0x{HOSTID_VALUE}")));
+        assert!(calls[0].args.contains(&HOSTID_VALUE.to_string()));
     }
 
     #[test]
