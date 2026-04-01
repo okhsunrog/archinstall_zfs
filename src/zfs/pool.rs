@@ -38,7 +38,7 @@ pub fn create_pool(
     let device_str = device.to_str().unwrap();
     let mount_str = mountpoint.to_str().unwrap();
 
-    let mut args: Vec<&str> = vec!["create"];
+    let mut args: Vec<&str> = vec!["create", "-f"];
     args.extend_from_slice(DEFAULT_POOL_OPTIONS);
     args.extend_from_slice(&["-R", mount_str]);
     let compression_opt = format!("compression={compression}");

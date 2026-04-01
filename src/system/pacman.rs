@@ -45,13 +45,19 @@ pub fn wait_for_db_lock(runner: &dyn CommandRunner) -> Result<()> {
     bail!("pacman db.lck not released after 10 minutes");
 }
 
-const ARCHZFS_REPO_BLOCK: &str = r#"
-[archzfs]
-Server = https://archzfs.com/$repo/$arch
-Server = https://zxcvfdsa.com/archzfs/$repo/$arch
-"#;
+const ARCHZFS_REPO_BLOCK: &str = "\n[archzfs]\nSigLevel = Never\nServer = https://github.com/archzfs/archzfs/releases/download/experimental\n";
 
-const ARCHZFS_KEY_IDS: &[&str] = &["DDF7DB817396A49B2A2723F7403BD972F75D9D76"];
+const ARCHZFS_KEY_IDS: &[&str] = &[
+    "3A9917BF0DED5C13F69AC68FABEC0A1208037BE9",
+    "DDF7DB817396A49B2A2723F7403BD972F75D9D76",
+];
+
+const KEYSERVERS: &[&str] = &[
+    "hkps://keyserver.ubuntu.com",
+    "hkps://pgp.mit.edu",
+    "hkps://pool.sks-keyservers.net",
+    "hkps://keys.openpgp.org",
+];
 
 pub fn add_archzfs_repo(runner: &dyn CommandRunner, target: Option<&Path>) -> Result<()> {
     let pacman_conf = match target {
@@ -59,9 +65,13 @@ pub fn add_archzfs_repo(runner: &dyn CommandRunner, target: Option<&Path>) -> Re
         None => std::path::PathBuf::from("/etc/pacman.conf"),
     };
 
+    // Rewrite or append [archzfs] block
     let content = std::fs::read_to_string(&pacman_conf)?;
     if content.contains("[archzfs]") {
-        tracing::info!("archzfs repo already present in pacman.conf");
+        // Replace existing block
+        let new_content = rewrite_archzfs_block(&content);
+        std::fs::write(&pacman_conf, new_content)?;
+        tracing::info!("updated existing archzfs repo block");
     } else {
         let mut new_content = content;
         new_content.push_str(ARCHZFS_REPO_BLOCK);
@@ -69,40 +79,96 @@ pub fn add_archzfs_repo(runner: &dyn CommandRunner, target: Option<&Path>) -> Re
         tracing::info!(path = %pacman_conf.display(), "added archzfs repo to pacman.conf");
     }
 
-    // Import archzfs signing key
+    // Initialize keyring
+    let init_result = if let Some(t) = target {
+        crate::system::cmd::chroot(
+            runner,
+            t,
+            "pacman-key --init && pacman-key --populate archlinux",
+        )
+    } else {
+        runner.run(
+            "bash",
+            &["-c", "pacman-key --init && pacman-key --populate archlinux"],
+        )
+    };
+    if let Ok(ref output) = init_result {
+        if !output.success() {
+            tracing::warn!(
+                "pacman-key init/populate had issues: {}",
+                output.stderr.trim()
+            );
+        }
+    }
+
+    // Import archzfs signing keys
     for key_id in ARCHZFS_KEY_IDS {
-        let gpgdir = target.map(|t| format!("{}/etc/pacman.d/gnupg", t.display()));
-
-        // Try multiple keyservers
-        for server in ["keyserver.ubuntu.com", "keys.openpgp.org", "pgp.mit.edu"] {
-            let mut args: Vec<&str> = Vec::new();
-            if let Some(ref dir) = gpgdir {
-                args.extend_from_slice(&["--gpgdir", dir]);
-            }
-            args.extend_from_slice(&["--recv-keys", key_id, "--keyserver", server]);
-
-            let output = runner.run("pacman-key", &args);
+        let mut received = false;
+        for server in KEYSERVERS {
+            let cmd = format!("pacman-key --keyserver {server} -r {key_id}");
+            let output = if let Some(t) = target {
+                crate::system::cmd::chroot(runner, t, &cmd)
+            } else {
+                runner.run("bash", &["-c", &cmd])
+            };
             if output.is_ok() && output.as_ref().unwrap().success() {
                 tracing::info!(key = key_id, server, "received archzfs key");
+                received = true;
                 break;
             }
         }
-
-        let mut lsign_args: Vec<&str> = Vec::new();
-        if let Some(ref dir) = gpgdir {
-            lsign_args.extend_from_slice(&["--gpgdir", dir]);
+        if !received {
+            tracing::warn!(key = key_id, "failed to receive key from any keyserver");
         }
-        lsign_args.extend_from_slice(&["--lsign-key", key_id]);
-        let _ = runner.run("pacman-key", &lsign_args);
+
+        // Locally sign the key
+        let lsign_cmd = format!("pacman-key --lsign-key {key_id}");
+        let _ = if let Some(t) = target {
+            crate::system::cmd::chroot(runner, t, &lsign_cmd)
+        } else {
+            runner.run("bash", &["-c", &lsign_cmd])
+        };
     }
 
     // Sync databases
-    if target.is_none() {
-        let output = runner.run("pacman", &["-Sy", "--noconfirm"])?;
-        check_exit(&output, "pacman -Sy after adding archzfs")?;
+    let sync_cmd = "pacman -Sy --noconfirm";
+    let output = if let Some(t) = target {
+        crate::system::cmd::chroot(runner, t, sync_cmd)?
+    } else {
+        runner.run("pacman", &["-Sy", "--noconfirm"])?
+    };
+    if !output.success() {
+        tracing::warn!("pacman -Sy failed: {}", output.stderr.trim());
     }
 
     Ok(())
+}
+
+fn rewrite_archzfs_block(content: &str) -> String {
+    let mut result = String::new();
+    let mut in_archzfs_block = false;
+
+    for line in content.lines() {
+        if line.trim() == "[archzfs]" {
+            in_archzfs_block = true;
+            continue;
+        }
+        if in_archzfs_block {
+            // Skip lines until next section or end
+            if line.starts_with('[') {
+                in_archzfs_block = false;
+                result.push_str(line);
+                result.push('\n');
+            }
+            // else: skip the line (part of old archzfs block)
+            continue;
+        }
+        result.push_str(line);
+        result.push('\n');
+    }
+
+    result.push_str(ARCHZFS_REPO_BLOCK);
+    result
 }
 
 pub fn set_parallel_downloads(target: Option<&Path>, count: u32) -> Result<()> {

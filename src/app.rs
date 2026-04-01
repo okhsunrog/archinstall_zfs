@@ -41,6 +41,30 @@ fn run_headless_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Re
     let prefix = &config.dataset_prefix;
     let compression = config.compression.to_string();
     let encryption = config.zfs_encryption_mode;
+    let kernel = config
+        .effective_kernels()
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "linux-lts".to_string());
+
+    // ── Phase 0: Pre-installation checks ───────────────────────
+    tracing::info!("Phase 0: Pre-installation checks");
+
+    // Check internet
+    let has_internet = crate::system::net::check_internet(runner)?;
+    if !has_internet {
+        bail!("No internet connectivity. Connect to the network and retry.");
+    }
+    tracing::info!("internet connectivity OK");
+
+    // Check UEFI
+    if !crate::system::sysinfo::has_uefi() {
+        bail!("UEFI boot required. This installer only supports UEFI systems.");
+    }
+    tracing::info!("UEFI boot detected");
+
+    // Initialize ZFS on host (handles reflector, archzfs repo, ZFS packages, module loading)
+    crate::zfs::kmod::initialize_zfs(runner, &kernel, config.zfs_module_mode)?;
 
     // ── Phase 1: Disk preparation ──────────────────────────────
     tracing::info!("Phase 1: Disk preparation");

@@ -3,7 +3,8 @@ use color_eyre::eyre::Result;
 use super::cmd::{check_exit, CommandRunner};
 
 pub fn check_internet(runner: &dyn CommandRunner) -> Result<bool> {
-    let output = runner.run("ping", &["-c", "1", "-W", "3", "archlinux.org"])?;
+    // Use IP address to avoid DNS delays; 1.1.1.1 is Cloudflare DNS
+    let output = runner.run("ping", &["-c", "1", "-W", "5", "1.1.1.1"])?;
     Ok(output.success())
 }
 
