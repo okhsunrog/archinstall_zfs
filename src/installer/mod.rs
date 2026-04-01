@@ -130,7 +130,8 @@ impl<'a> Installer<'a> {
         // Add archzfs repo to target
         crate::system::pacman::add_archzfs_repo(self.runner, Some(&self.target))?;
 
-        // Install ZFS packages with fallback
+        // Install ZFS packages inside chroot (not pacstrap, since archzfs
+        // repo is in the target's pacman.conf, not the host's)
         let kernel = self
             .config
             .effective_kernels()
@@ -139,9 +140,10 @@ impl<'a> Installer<'a> {
             .unwrap_or_else(|| "linux-lts".to_string());
 
         let zfs_packages = crate::kernel::get_zfs_packages(&kernel, self.config.zfs_module_mode);
-        let pkg_refs: Vec<&str> = zfs_packages.iter().map(|s| s.as_str()).collect();
-
-        crate::system::pacman::pacstrap(self.runner, &self.target, &pkg_refs, self.tx)?;
+        let pkg_list = zfs_packages.join(" ");
+        let cmd = format!("pacman --noconfirm --needed -S {pkg_list}");
+        let output = crate::system::cmd::chroot(self.runner, &self.target, &cmd)?;
+        crate::system::cmd::check_exit(&output, "install ZFS packages in chroot")?;
 
         Ok(())
     }
@@ -166,6 +168,13 @@ impl<'a> Installer<'a> {
     fn configure_users(&self) -> Result<()> {
         if let Some(ref pw) = self.config.root_password {
             users::set_root_password(self.runner, &self.target, pw)?;
+
+            // If sshd is in extra_services, allow root login
+            if self.config.extra_services.iter().any(|s| s == "sshd") {
+                let sshd_dir = self.target.join("etc/ssh/sshd_config.d");
+                std::fs::create_dir_all(&sshd_dir)?;
+                std::fs::write(sshd_dir.join("10-root-login.conf"), "PermitRootLogin yes\n")?;
+            }
         }
 
         if let Some(ref user_list) = self.config.users {
@@ -242,6 +251,11 @@ impl<'a> Installer<'a> {
         let aur_pkgs = self.config.all_aur_packages();
         if !aur_pkgs.is_empty() {
             aur::install_aur_packages(self.runner, &self.target, &aur_pkgs)?;
+        }
+
+        // Enable extra services
+        for service in &self.config.extra_services {
+            services::enable_service(self.runner, &self.target, service)?;
         }
 
         Ok(())

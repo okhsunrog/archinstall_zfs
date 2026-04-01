@@ -15,10 +15,11 @@
     "ntp": true,
     "root_password": "test",
     "kernels": ["linux-lts"],
-    "additional_packages": [],
+    "additional_packages": ["openssh"],
     "aur_packages": [],
     "network_copy_iso": true,
     "parallel_downloads": 5,
     "zrepl_enabled": false,
-    "bluetooth": false
+    "bluetooth": false,
+    "extra_services": ["sshd"]
 }

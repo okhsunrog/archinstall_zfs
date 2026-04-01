@@ -180,6 +180,8 @@ pub struct GlobalConfig {
     pub bluetooth: bool,
     #[serde(default = "default_parallel_downloads")]
     pub parallel_downloads: u32,
+    #[serde(default)]
+    pub extra_services: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -262,6 +264,7 @@ impl Default for GlobalConfig {
             audio: None,
             bluetooth: false,
             parallel_downloads: default_parallel_downloads(),
+            extra_services: Vec::new(),
         }
     }
 }

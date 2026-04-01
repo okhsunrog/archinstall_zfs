@@ -20,6 +20,12 @@ pub fn download_zbm_efi(runner: &dyn CommandRunner, efi_dir: &Path) -> Result<()
     )?;
     check_exit(&output, "download ZFSBootMenu EFI")?;
 
+    // Also install as the UEFI fallback bootloader so it boots
+    // even without a specific efibootmgr entry
+    let fallback_dir = efi_dir.join("EFI/BOOT");
+    std::fs::create_dir_all(&fallback_dir)?;
+    std::fs::copy(&target_file, fallback_dir.join("BOOTX64.EFI"))?;
+
     tracing::info!(path = %target_file.display(), "downloaded ZFSBootMenu EFI");
     Ok(())
 }
@@ -110,14 +116,21 @@ mod tests {
     fn test_download_zbm_efi() {
         let dir = tempfile::tempdir().unwrap();
         let runner = RecordingRunner::new(vec![CannedResponse::default()]);
+        // Create dummy EFI file since the mock runner doesn't write files
+        // but fs::copy needs the source to exist
+        let zbm_dir = dir.path().join("EFI/ZBM");
+        std::fs::create_dir_all(&zbm_dir).unwrap();
+        std::fs::write(zbm_dir.join("vmlinuz.EFI"), b"fake-efi").unwrap();
+
         download_zbm_efi(&runner, dir.path()).unwrap();
 
         let calls = runner.calls();
         assert_eq!(calls[0].program, "curl");
         assert!(calls[0].args.contains(&"-L".to_string()));
 
-        // Verify directory was created
+        // Verify directories and fallback were created
         assert!(dir.path().join("EFI/ZBM").exists());
+        assert!(dir.path().join("EFI/BOOT/BOOTX64.EFI").exists());
     }
 
     #[test]
