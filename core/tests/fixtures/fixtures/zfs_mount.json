@@ -1,1 +1,0 @@
-{"output_version":{"command":"zfs mount","vers_major":0,"vers_minor":1},"datasets":{"testpool":{"filesystem":"testpool","mountpoint":"/testpool"},"testpool/data":{"filesystem":"testpool/data","mountpoint":"/mnt/test"},"testpool/data/home":{"filesystem":"testpool/data/home","mountpoint":"/mnt/test/home"}}}

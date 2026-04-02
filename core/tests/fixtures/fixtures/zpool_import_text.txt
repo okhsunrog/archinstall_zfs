@@ -1,8 +1,0 @@
-  pool: testpool
-    id: 3784656309273197691
- state: ONLINE
-action: The pool can be imported using its name or numeric identifier.
-config:
-
-	testpool         ONLINE
-	  /tmp/test.img  ONLINE
