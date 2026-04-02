@@ -216,11 +216,8 @@ fn run_headless_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Re
 
     // ── Phase 13: ZFSBootMenu ──────────────────────────────────
     tracing::info!("Phase 13: Setting up ZFSBootMenu");
-    let efi_mount = mountpoint.join("boot/efi");
-    crate::zfs::bootmenu::download_zbm_efi(runner, &efi_mount)?;
-    crate::zfs::bootmenu::create_efi_entries(runner, &efi_partition)?;
 
-    // Set ZBM properties: commandline (no root=), rootprefix, bootfs
+    // Set ZBM dataset properties before generate-zbm (it reads them)
     let zswap_on = matches!(
         config.swap_mode,
         SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
@@ -231,7 +228,15 @@ fn run_headless_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Re
         prefix,
         &config.init_system.to_string(),
         zswap_on,
+        config.set_bootfs,
     )?;
+
+    // Install zfsbootmenu from AUR, write config, run generate-zbm
+    let init_system_str = config.init_system.to_string();
+    crate::zfs::bootmenu::install_and_generate_zbm(runner, &mountpoint, &init_system_str)?;
+
+    // Create efibootmgr entries
+    crate::zfs::bootmenu::create_efi_entries(runner, &efi_partition)?;
 
     // ── Phase 14: Cleanup ──────────────────────────────────────
     tracing::info!("Phase 14: Cleanup");

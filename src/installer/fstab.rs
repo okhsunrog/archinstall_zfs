@@ -17,7 +17,7 @@ pub fn generate_fstab(
     let output = runner.run("genfstab", &["-U", target_str])?;
     check_exit(&output, "genfstab")?;
 
-    // Filter out ZFS lines and keep only non-ZFS entries
+    // Filter out ZFS lines and fix EFI mount options
     let fstab_content: String = output
         .stdout
         .lines()
@@ -29,6 +29,29 @@ pub fn generate_fstab(
             }
             // Filter out ZFS-managed mounts
             !trimmed.contains("zfs") && !trimmed.contains(pool_name)
+        })
+        .map(|line| {
+            // For the EFI mount (/boot/efi vfat), set passno to 0 (no fsck
+            // for vfat) and ensure nofail so a failed mount doesn't block boot
+            if line.contains("/boot/efi") && line.contains("vfat") && !line.trim().starts_with('#')
+            {
+                let mut fixed = line.to_string();
+                // Inject nofail into mount options
+                if !fixed.contains("nofail") {
+                    fixed = fixed.replacen("\trw,", "\trw,nofail,", 1);
+                }
+                // Replace passno 2 or 1 with 0 at end of line
+                if fixed.ends_with("\t0\t2") {
+                    let len = fixed.len();
+                    fixed.replace_range(len - 3.., "0\t0");
+                } else if fixed.ends_with("\t0\t1") {
+                    let len = fixed.len();
+                    fixed.replace_range(len - 3.., "0\t0");
+                }
+                fixed
+            } else {
+                line.to_string()
+            }
         })
         .collect::<Vec<_>>()
         .join("\n");

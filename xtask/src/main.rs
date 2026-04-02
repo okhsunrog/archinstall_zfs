@@ -1,6 +1,6 @@
 mod qemu;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -46,13 +46,17 @@ struct TestOpts {
     #[arg(long, default_value = "target/release/archinstall-zfs-rs")]
     binary: PathBuf,
 
-    /// Path to qcow2 disk image
+    /// Path to qcow2 disk image (overridden by --tmpfs)
     #[arg(long, default_value = "gen_iso/arch.qcow2")]
     disk: PathBuf,
 
-    /// Path to UEFI vars file
+    /// Path to UEFI vars file (overridden by --tmpfs)
     #[arg(long, default_value = "gen_iso/my_vars.fd")]
     vars: PathBuf,
+
+    /// Place disk image and UEFI vars in /tmp (tmpfs) for faster I/O
+    #[arg(long)]
+    tmpfs: bool,
 
     /// SSH port for ISO VM
     #[arg(long, default_value_t = 2222)]
@@ -71,12 +75,21 @@ struct TestOpts {
     timeout: u64,
 }
 
+fn apply_tmpfs(mut opts: TestOpts) -> TestOpts {
+    if opts.tmpfs {
+        opts.disk = PathBuf::from("/tmp/archzfs-test.qcow2");
+        opts.vars = PathBuf::from("/tmp/archzfs-test-vars.fd");
+        eprintln!("Using tmpfs: disk={}, vars={}", opts.disk.display(), opts.vars.display());
+    }
+    opts
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
-        Commands::TestVm { opts } => cmd_test_vm(opts),
-        Commands::TestInstall { opts } => cmd_test_install(opts),
-        Commands::TestBoot { opts } => cmd_test_boot(opts),
+        Commands::TestVm { opts } => cmd_test_vm(apply_tmpfs(opts)),
+        Commands::TestInstall { opts } => cmd_test_install(apply_tmpfs(opts)),
+        Commands::TestBoot { opts } => cmd_test_boot(apply_tmpfs(opts)),
     };
     match result {
         Ok(()) => {
@@ -96,6 +109,16 @@ fn cmd_test_vm(opts: TestOpts) -> Result<(), String> {
     cmd_test_install(opts.clone())?;
     cmd_test_boot(opts)?;
     Ok(())
+}
+
+/// Detect the init system from the JSON config file.
+fn detect_init_system(config: &Path) -> String {
+    let content = std::fs::read_to_string(config).unwrap_or_default();
+    if content.contains("\"mkinitcpio\"") {
+        "mkinitcpio".to_string()
+    } else {
+        "dracut".to_string()
+    }
 }
 
 fn cmd_test_install(opts: TestOpts) -> Result<(), String> {
@@ -175,7 +198,8 @@ fn cmd_test_boot(opts: TestOpts) -> Result<(), String> {
 
     // Verify
     eprintln!("[3/3] Verifying system health");
-    verify_system(&vm)?;
+    let init_system = detect_init_system(&opts.config);
+    verify_system(&vm, &init_system)?;
 
     eprintln!("=== test-boot: PASSED ===\n");
     Ok(())
@@ -183,7 +207,7 @@ fn cmd_test_boot(opts: TestOpts) -> Result<(), String> {
 
 // ── Verification ───────────────────────────────────────
 
-fn verify_system(vm: &QemuVm) -> Result<(), String> {
+fn verify_system(vm: &QemuVm, init_system: &str) -> Result<(), String> {
     let mut passed = 0;
     let mut checks = Vec::new();
 
@@ -223,13 +247,25 @@ fn verify_system(vm: &QemuVm) -> Result<(), String> {
         checks.push(format!("  fstab: FAIL\n{fstab}"));
     }
 
-    // dracut config
-    let dracut = vm.ssh_stdout("cat /etc/dracut.conf.d/zfs.conf 2>/dev/null || echo missing");
-    if dracut.contains("hostonly") {
-        checks.push("  dracut: configured".to_string());
-        passed += 1;
+    // initramfs config
+    if init_system == "mkinitcpio" {
+        let mkinitcpio =
+            vm.ssh_stdout("cat /etc/mkinitcpio.conf 2>/dev/null || echo missing");
+        if mkinitcpio.contains("zfs") {
+            checks.push("  mkinitcpio: configured (has zfs)".to_string());
+            passed += 1;
+        } else {
+            checks.push(format!("  mkinitcpio: FAIL\n{mkinitcpio}"));
+        }
     } else {
-        checks.push(format!("  dracut: FAIL ({dracut})"));
+        let dracut =
+            vm.ssh_stdout("cat /etc/dracut.conf.d/zfs.conf 2>/dev/null || echo missing");
+        if dracut.contains("hostonly") {
+            checks.push("  dracut: configured".to_string());
+            passed += 1;
+        } else {
+            checks.push(format!("  dracut: FAIL ({dracut})"));
+        }
     }
 
     // zram
@@ -259,7 +295,69 @@ fn verify_system(vm: &QemuVm) -> Result<(), String> {
         checks.push(format!("  hostid: FAIL (got '{hostid}')"));
     }
 
-    let total = 8;
+    // ZED cache hook (boot-environment aware)
+    let zed_hook = vm.ssh_stdout(
+        "cat /etc/zfs/zed.d/history_event-zfs-list-cacher.sh 2>/dev/null || echo missing",
+    );
+    if zed_hook.contains("boot environment aware") {
+        checks.push("  ZED hook: installed".to_string());
+        passed += 1;
+    } else {
+        checks.push("  ZED hook: FAIL (custom hook not found)".to_string());
+    }
+
+    // bootfs (needed for zbm.timeout auto-boot; users can still select other BEs)
+    let bootfs = vm.ssh_stdout("zpool get -H -o value bootfs testpool 2>/dev/null");
+    if bootfs == "testpool/arch0/root" {
+        checks.push("  bootfs: testpool/arch0/root".to_string());
+        passed += 1;
+    } else {
+        checks.push(format!("  bootfs: FAIL (expected testpool/arch0/root, got '{bootfs}')"));
+    }
+
+    // ZBM rootprefix property
+    let rootprefix = vm.ssh_stdout(
+        "zfs get -H -o value org.zfsbootmenu:rootprefix testpool/arch0/root 2>/dev/null",
+    );
+    let expected_prefix = if init_system == "dracut" {
+        "root=ZFS="
+    } else {
+        "zfs="
+    };
+    if rootprefix == expected_prefix {
+        checks.push(format!("  rootprefix: {rootprefix}").to_string());
+        passed += 1;
+    } else {
+        checks.push(format!(
+            "  rootprefix: FAIL (expected '{expected_prefix}', got '{rootprefix}')"
+        ));
+    }
+
+    // ZBM locally built (generate-zbm available + config present)
+    let zbm_config = vm.ssh_stdout("cat /etc/zfsbootmenu/config.yaml 2>/dev/null || echo missing");
+    let zbm_bin = vm.ssh_stdout("which generate-zbm 2>/dev/null || echo missing");
+    if zbm_config.contains("ManageImages: true") && !zbm_bin.contains("missing") {
+        checks.push("  ZBM local build: OK".to_string());
+        passed += 1;
+    } else {
+        checks.push(format!("  ZBM local build: FAIL (config={}, bin={})",
+            if zbm_config.contains("ManageImages") { "ok" } else { "missing" },
+            if zbm_bin.contains("missing") { "missing" } else { "ok" }
+        ));
+    }
+
+    // ZBM pacman hook
+    let zbm_hook = vm.ssh_stdout(
+        "cat /etc/pacman.d/hooks/95-zfsbootmenu.hook 2>/dev/null || echo missing",
+    );
+    if zbm_hook.contains("generate-zbm") {
+        checks.push("  ZBM pacman hook: installed".to_string());
+        passed += 1;
+    } else {
+        checks.push("  ZBM pacman hook: FAIL".to_string());
+    }
+
+    let total = 13;
     for line in &checks {
         eprintln!("{line}");
     }

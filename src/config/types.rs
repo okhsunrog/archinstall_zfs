@@ -151,6 +151,10 @@ pub struct GlobalConfig {
     #[serde(default = "default_zram_size_expr")]
     pub zram_size_expr: Option<String>,
 
+    // Boot
+    #[serde(default = "default_set_bootfs")]
+    pub set_bootfs: bool,
+
     // Optional features
     #[serde(default)]
     pub zrepl_enabled: bool,
@@ -225,6 +229,10 @@ fn default_ntp() -> bool {
     true
 }
 
+fn default_set_bootfs() -> bool {
+    true
+}
+
 fn default_parallel_downloads() -> u32 {
     5
 }
@@ -247,6 +255,7 @@ impl Default for GlobalConfig {
             swap_partition_size: None,
             swap_partition_by_id: None,
             zram_size_expr: default_zram_size_expr(),
+            set_bootfs: true,
             zrepl_enabled: false,
             aur_packages: Vec::new(),
             hostname: None,

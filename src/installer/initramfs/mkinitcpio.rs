@@ -22,20 +22,26 @@ pub fn configure(target: &Path, encryption: bool) -> Result<()> {
         }
     });
 
-    // Set HOOKS to include zfs before filesystems
+    // The archzfs `zfs` hook is a legacy (udev-based) hook, not compatible
+    // with systemd-based initramfs. Replace systemd/sd-vconsole with udev/keymap
+    // if present, then insert zfs before filesystems.
     new_content = patch_conf_array(&new_content, "HOOKS", |hooks| {
-        // Remove systemd/sd-vconsole, replace with udev/keymap
-        hooks.retain(|h| h != "systemd" && h != "sd-vconsole");
-        if !hooks.contains(&"udev".to_string()) {
-            if let Some(pos) = hooks.iter().position(|h| h == "base") {
-                hooks.insert(pos + 1, "udev".to_string());
-            } else {
-                hooks.insert(0, "udev".to_string());
+        // Replace systemd hooks with udev equivalents
+        if hooks.contains(&"systemd".to_string()) {
+            hooks.retain(|h| h != "systemd" && h != "sd-vconsole");
+            if !hooks.contains(&"udev".to_string()) {
+                if let Some(pos) = hooks.iter().position(|h| h == "base") {
+                    hooks.insert(pos + 1, "udev".to_string());
+                } else {
+                    hooks.insert(0, "udev".to_string());
+                }
             }
-        }
-        if !hooks.contains(&"keymap".to_string()) {
-            if let Some(pos) = hooks.iter().position(|h| h == "udev") {
-                hooks.insert(pos + 1, "keymap".to_string());
+            if !hooks.contains(&"keymap".to_string()) {
+                if let Some(pos) = hooks.iter().position(|h| h == "keyboard") {
+                    hooks.insert(pos + 1, "keymap".to_string());
+                } else if let Some(pos) = hooks.iter().position(|h| h == "udev") {
+                    hooks.insert(pos + 1, "keymap".to_string());
+                }
             }
         }
         // Insert zfs before filesystems

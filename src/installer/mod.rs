@@ -298,7 +298,12 @@ impl<'a> Installer<'a> {
         fstab::generate_fstab(self.runner, &self.target, pool_name, prefix)?;
 
         // Copy misc files (hostid, zfs cache)
-        crate::zfs::cache::copy_misc_files(&self.target, pool_name)?;
+        crate::zfs::cache::copy_misc_files(
+            self.runner,
+            &self.target,
+            pool_name,
+            Path::new("/mnt"),
+        )?;
 
         // Copy encryption key if needed
         if self.config.encryption_enabled() {
