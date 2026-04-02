@@ -34,7 +34,9 @@ enum MenuKind {
     Password,
     /// Boolean toggle
     Toggle,
-    /// Action button (install, quit)
+    /// Custom handler (disk, timezone, locale, profile — shows value)
+    Custom,
+    /// Action button (install, quit — no value shown)
     Action,
 }
 
@@ -102,7 +104,7 @@ impl MainMenu {
                     .as_ref()
                     .map(|p| p.display().to_string())
                     .unwrap_or("Not set".into()),
-                kind: MenuKind::Action,
+                kind: MenuKind::Custom,
             },
             MenuItem {
                 key: "pool_name",
@@ -208,13 +210,13 @@ impl MainMenu {
                 key: "locale",
                 label: "Locale",
                 value: c.locale.clone().unwrap_or("Not set".into()),
-                kind: MenuKind::Action, // handled specially in activate_item
+                kind: MenuKind::Custom,
             },
             MenuItem {
                 key: "timezone",
                 label: "Timezone",
                 value: c.timezone.clone().unwrap_or("Not set".into()),
-                kind: MenuKind::Action, // handled specially in activate_item
+                kind: MenuKind::Custom,
             },
             MenuItem {
                 key: "keyboard",
@@ -249,7 +251,7 @@ impl MainMenu {
                 key: "profile",
                 label: "Profile",
                 value: c.profile.clone().unwrap_or("Not set".into()),
-                kind: MenuKind::Action,
+                kind: MenuKind::Custom,
             },
             MenuItem {
                 key: "audio",
@@ -393,6 +395,9 @@ impl MainMenu {
             MenuKind::Action => match key {
                 "install" => return Ok(Action::Install),
                 "quit" => return Ok(Action::Quit),
+                _ => {}
+            },
+            MenuKind::Custom => match key {
                 "timezone" => {
                     if let Some(tz) = self.pick_timezone(terminal)? {
                         self.config.timezone = Some(tz);
