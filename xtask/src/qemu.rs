@@ -13,7 +13,7 @@ pub struct QemuVm {
 impl QemuVm {
     pub fn boot_iso(disk: &Path, uefi_vars: &Path, iso: &Path, port: u16) -> Self {
         let ovmf = find_ovmf_code();
-        let child = Command::new("qemu-system-x86_64")
+        let mut child = Command::new("qemu-system-x86_64")
             .args([
                 "-enable-kvm",
                 "-cpu",
@@ -54,8 +54,14 @@ impl QemuVm {
             .spawn()
             .expect("Failed to start QEMU. Is KVM available?");
 
+        let pid = child.id();
+        // Detach: we manage the process via kill(pid), not wait()
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+
         Self {
-            pid: Some(child.id()),
+            pid: Some(pid),
             port,
             password: None,
         }
@@ -63,7 +69,7 @@ impl QemuVm {
 
     pub fn boot_disk(disk: &Path, uefi_vars: &Path, port: u16) -> Self {
         let ovmf = find_ovmf_code();
-        let child = Command::new("qemu-system-x86_64")
+        let mut child = Command::new("qemu-system-x86_64")
             .args([
                 "-enable-kvm",
                 "-cpu",
@@ -101,8 +107,13 @@ impl QemuVm {
             .spawn()
             .expect("Failed to start QEMU. Is KVM available?");
 
+        let pid = child.id();
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+
         Self {
-            pid: Some(child.id()),
+            pid: Some(pid),
             port,
             password: None,
         }
@@ -175,10 +186,6 @@ impl QemuVm {
         String::from_utf8_lossy(&output.stdout).trim().to_string()
     }
 
-    pub fn ssh_ok(&self, cmd: &str) -> bool {
-        self.ssh_run(cmd).is_ok_and(|o| o.status.success())
-    }
-
     pub fn scp_to(&self, local: &Path, remote: &str) {
         let port_str = self.port.to_string();
         let mut args = vec![
@@ -232,14 +239,14 @@ impl QemuVm {
         let status = if let Some(pw) = &self.password {
             Command::new("sshpass")
                 .args(["-p", pw, "scp"])
-                .args(&base_args)
+                .args(base_args)
                 .args([remote_src.as_str(), local_str])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status()
         } else {
             Command::new("scp")
-                .args(&base_args)
+                .args(base_args)
                 .args([remote_src.as_str(), local_str])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())

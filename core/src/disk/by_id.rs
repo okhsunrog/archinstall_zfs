@@ -56,10 +56,10 @@ pub fn get_disk_by_id_for_device(dev_path: &Path) -> Result<Option<PathBuf>> {
     let canonical = fs::canonicalize(dev_path)?;
     for entry in fs::read_dir(by_id)? {
         let entry = entry?;
-        if let Ok(target) = fs::canonicalize(entry.path()) {
-            if target == canonical {
-                return Ok(Some(entry.path()));
-            }
+        if let Ok(target) = fs::canonicalize(entry.path())
+            && target == canonical
+        {
+            return Ok(Some(entry.path()));
         }
     }
     Ok(None)

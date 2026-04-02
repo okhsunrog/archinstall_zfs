@@ -10,7 +10,7 @@ pub mod users;
 use std::path::{Path, PathBuf};
 
 use alpm::SigLevel;
-use color_eyre::eyre::{bail, Result};
+use color_eyre::eyre::{Result, bail};
 
 use crate::config::types::{GlobalConfig, InitSystem, SwapMode, ZfsEncryptionMode};
 use crate::system::alpm_pacman::{AlpmContext, TargetMounts};
@@ -219,7 +219,7 @@ impl<'a> Installer<'a> {
             let profile = crate::profile::get_profile(profile_name);
             if let Some(p) = profile {
                 if !p.packages.is_empty() {
-                    let pkg_refs: Vec<&str> = p.packages.iter().copied().collect();
+                    let pkg_refs: Vec<&str> = p.packages.to_vec();
                     self.install_target_packages(&pkg_refs)?;
                 }
                 for service in &p.services {
@@ -283,13 +283,13 @@ impl<'a> Installer<'a> {
             }
             SwapMode::ZswapPartition => {
                 let part = self.effective_swap_partition();
-                if let Some(ref part) = part {
+                if let Some(part) = part {
                     crate::swap::setup_swap_partition(self.runner, &self.target, part, false)?;
                 }
             }
             SwapMode::ZswapPartitionEncrypted => {
                 let part = self.effective_swap_partition();
-                if let Some(ref part) = part {
+                if let Some(part) = part {
                     crate::swap::setup_swap_partition(self.runner, &self.target, part, true)?;
                 }
             }
@@ -359,9 +359,11 @@ mod tests {
         let mut installer = Installer::new(&runner, &config, Path::new("/mnt"));
         let result = installer.perform_installation();
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("validation failed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("validation failed")
+        );
     }
 }

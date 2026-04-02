@@ -91,13 +91,7 @@ impl AlpmContext {
 
         // Ensure hook directories are set (relative to root, libalpm prepends root)
         handle
-            .set_hookdirs(
-                [
-                    "/usr/share/libalpm/hooks/",
-                    "/etc/pacman.d/hooks/",
-                ]
-                .iter(),
-            )
+            .set_hookdirs(["/usr/share/libalpm/hooks/", "/etc/pacman.d/hooks/"].iter())
             .map_err(|e| eyre!("failed to set hook dirs: {e}"))?;
 
         let ctx = Self {
@@ -451,14 +445,8 @@ fn mount_api_filesystems(target: &Path) -> Result<Vec<PathBuf>> {
     for (source, dest, fstype, flags, data) in &mount_points {
         let mount_path = target.join(dest);
         fs::create_dir_all(&mount_path)?;
-        mount(
-            Some(*source),
-            &mount_path,
-            Some(*fstype),
-            *flags,
-            *data,
-        )
-        .wrap_err_with(|| format!("failed to mount {fstype} on {dest}"))?;
+        mount(Some(*source), &mount_path, Some(*fstype), *flags, *data)
+            .wrap_err_with(|| format!("failed to mount {fstype} on {dest}"))?;
         mounts.push(mount_path);
     }
 

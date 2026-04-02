@@ -62,13 +62,13 @@ pub fn add_archzfs_repo(runner: &dyn CommandRunner, target: Option<&Path>) -> Re
             &["-c", "pacman-key --init && pacman-key --populate archlinux"],
         )
     };
-    if let Ok(ref output) = init_result {
-        if !output.success() {
-            tracing::warn!(
-                "pacman-key init/populate had issues: {}",
-                output.stderr.trim()
-            );
-        }
+    if let Ok(ref output) = init_result
+        && !output.success()
+    {
+        tracing::warn!(
+            "pacman-key init/populate had issues: {}",
+            output.stderr.trim()
+        );
     }
 
     // Import archzfs signing keys

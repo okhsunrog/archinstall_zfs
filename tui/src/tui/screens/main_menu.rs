@@ -1,18 +1,18 @@
 use crossterm::event::{Event, KeyCode, KeyModifiers};
+use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
-use ratatui::Frame;
 
 use archinstall_zfs_core::config::types::{
     AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, SwapMode, UserConfig,
     ZfsEncryptionMode, ZfsModuleMode,
 };
 
-use crate::tui::theme;
 use crate::tui::Action;
+use crate::tui::theme;
 
 use super::edit::run_edit;
 use super::select::run_select;
@@ -21,9 +21,7 @@ use super::select::run_select;
 
 #[derive(Clone)]
 enum MenuKind {
-    /// Separator line (not selectable)
-    Separator,
-    /// Section header with label (not selectable)
+    /// Section header with label, or empty separator (not selectable)
     SectionHeader,
     /// Select from a list of options
     Select {
@@ -52,7 +50,7 @@ struct MenuItem {
 
 impl MenuItem {
     fn is_selectable(&self) -> bool {
-        !matches!(self.kind, MenuKind::Separator | MenuKind::SectionHeader)
+        !matches!(self.kind, MenuKind::SectionHeader)
     }
 }
 
@@ -560,21 +558,17 @@ impl MainMenu {
                 }
                 "save" => {
                     let result = run_edit(terminal, "Save config to file", "config.json", false)?;
-                    if let Some(path) = result.value {
-                        if !path.is_empty() {
-                            match self.config.save_to_file(std::path::Path::new(&path)) {
-                                Ok(()) => {
-                                    let _ = run_select(
-                                        terminal,
-                                        &format!("Saved to {path}"),
-                                        &["OK"],
-                                        0,
-                                    );
-                                }
-                                Err(e) => {
-                                    let msg = format!("Save failed: {e}");
-                                    let _ = run_select(terminal, &msg, &["OK"], 0);
-                                }
+                    if let Some(path) = result.value
+                        && !path.is_empty()
+                    {
+                        match self.config.save_to_file(std::path::Path::new(&path)) {
+                            Ok(()) => {
+                                let _ =
+                                    run_select(terminal, &format!("Saved to {path}"), &["OK"], 0);
+                            }
+                            Err(e) => {
+                                let msg = format!("Save failed: {e}");
+                                let _ = run_select(terminal, &msg, &["OK"], 0);
                             }
                         }
                     }
@@ -672,13 +666,13 @@ impl MainMenu {
             }
             MenuKind::Password => {
                 let result = run_edit(terminal, item.label, "", true)?;
-                if let Some(val) = result.value {
-                    if !val.is_empty() {
-                        self.apply_text(key, &val);
-                    }
+                if let Some(val) = result.value
+                    && !val.is_empty()
+                {
+                    self.apply_text(key, &val);
                 }
             }
-            MenuKind::Separator | MenuKind::SectionHeader => {}
+            MenuKind::SectionHeader => {}
         }
         Ok(Action::Continue)
     }
@@ -692,7 +686,7 @@ impl MainMenu {
         use archinstall_zfs_core::installer::locale;
 
         let regions = locale::list_timezone_regions();
-        let region_strs: Vec<&str> = regions.iter().copied().collect();
+        let region_strs: Vec<&str> = regions.to_vec();
         let result = run_select(terminal, "Timezone region", &region_strs, 0)?;
         let Some(region_idx) = result.selected else {
             return Ok(None);
@@ -758,7 +752,7 @@ impl MainMenu {
         // Discover importable pools, offer Refresh and manual entry
         let pool_name = loop {
             let mut pools = pool::discover_importable_pools(&runner);
-            let mut options: Vec<String> = pools.iter().map(|p| p.clone()).collect();
+            let mut options: Vec<String> = pools.to_vec();
             options.push("Refresh".into());
             options.push("Enter manually".into());
             let opt_refs: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
@@ -873,8 +867,8 @@ impl MainMenu {
         &self,
         terminal: &mut ratatui::DefaultTerminal,
     ) -> color_eyre::eyre::Result<Option<Vec<String>>> {
-        use archinstall_zfs_core::kernel::scanner::scan_all_kernels;
         use archinstall_zfs_core::kernel::AVAILABLE_KERNELS;
+        use archinstall_zfs_core::kernel::scanner::scan_all_kernels;
 
         let results = scan_all_kernels();
 
@@ -945,43 +939,42 @@ impl MainMenu {
 
             if idx < users.len() {
                 // Edit existing user — toggle sudo
-                if let Some(ref mut user_list) = self.config.users {
-                    if let Some(user) = user_list.get_mut(idx) {
-                        user.sudo = !user.sudo;
-                    }
+                if let Some(ref mut user_list) = self.config.users
+                    && let Some(user) = user_list.get_mut(idx)
+                {
+                    user.sudo = !user.sudo;
                 }
             } else if options[idx] == "+ Add user" {
                 let result = run_edit(terminal, "Username", "", false)?;
-                if let Some(username) = result.value {
-                    if !username.is_empty() {
-                        let pw_result =
-                            run_edit(terminal, "Password (empty=no password)", "", true)?;
-                        let password = pw_result.value.filter(|p| !p.is_empty());
+                if let Some(username) = result.value
+                    && !username.is_empty()
+                {
+                    let pw_result = run_edit(terminal, "Password (empty=no password)", "", true)?;
+                    let password = pw_result.value.filter(|p| !p.is_empty());
 
-                        let sudo_opts = ["No", "Yes"];
-                        let sudo_result = run_select(terminal, "Enable sudo?", &sudo_opts, 1)?;
-                        let sudo = sudo_result.selected == Some(1);
+                    let sudo_opts = ["No", "Yes"];
+                    let sudo_result = run_select(terminal, "Enable sudo?", &sudo_opts, 1)?;
+                    let sudo = sudo_result.selected == Some(1);
 
-                        let user = UserConfig {
-                            username,
-                            password,
-                            sudo,
-                            shell: None,
-                            groups: None,
-                        };
-                        self.config.users.get_or_insert_with(Vec::new).push(user);
-                    }
+                    let user = UserConfig {
+                        username,
+                        password,
+                        sudo,
+                        shell: None,
+                        groups: None,
+                    };
+                    self.config.users.get_or_insert_with(Vec::new).push(user);
                 }
             } else if options[idx].starts_with("- Remove") {
                 // Pick which user to remove
                 let user_names: Vec<&str> = users.iter().map(|u| u.username.as_str()).collect();
                 let result = run_select(terminal, "Remove user", &user_names, 0)?;
-                if let Some(rm_idx) = result.selected {
-                    if let Some(ref mut user_list) = self.config.users {
-                        user_list.remove(rm_idx);
-                        if user_list.is_empty() {
-                            self.config.users = None;
-                        }
+                if let Some(rm_idx) = result.selected
+                    && let Some(ref mut user_list) = self.config.users
+                {
+                    user_list.remove(rm_idx);
+                    if user_list.is_empty() {
+                        self.config.users = None;
                     }
                 }
             } else {
@@ -1039,10 +1032,10 @@ impl MainMenu {
                     && self.config.zfs_encryption_password.is_none()
                 {
                     let result = run_edit(terminal, "Encryption password (min 8 chars)", "", true)?;
-                    if let Some(pw) = result.value {
-                        if !pw.is_empty() {
-                            self.config.zfs_encryption_password = Some(pw);
-                        }
+                    if let Some(pw) = result.value
+                        && !pw.is_empty()
+                    {
+                        self.config.zfs_encryption_password = Some(pw);
                     }
                 }
                 if new_mode == ZfsEncryptionMode::None {
@@ -1217,46 +1210,30 @@ impl MainMenu {
             let y = inner.y + (vi - scroll) as u16;
             let line_area = Rect::new(inner.x, y, inner.width, 1);
 
-            match &item.kind {
-                MenuKind::Separator => {
+            if matches!(item.kind, MenuKind::SectionHeader) {
+                if item.label.is_empty() {
+                    // Empty section header = visual separator
                     let sep = Paragraph::new(Line::from(Span::styled(
                         "─".repeat(inner.width as usize),
                         theme::BORDER_STYLE,
                     )));
                     frame.render_widget(sep, line_area);
-                    continue;
+                } else {
+                    // Styled section header: ── Label ──
+                    let label = format!(" {} ", item.label);
+                    let pad_total = (inner.width as usize)
+                        .saturating_sub(label.len())
+                        .saturating_sub(4);
+                    let pad_left = pad_total / 2;
+                    let pad_right = pad_total - pad_left;
+                    let line = Line::from(vec![
+                        Span::styled(format!("  {}─", "─".repeat(pad_left)), theme::BORDER_STYLE),
+                        Span::styled(label, theme::SECTION_STYLE),
+                        Span::styled(format!("─{}", "─".repeat(pad_right)), theme::BORDER_STYLE),
+                    ]);
+                    frame.render_widget(Paragraph::new(line), line_area);
                 }
-                MenuKind::SectionHeader => {
-                    if item.label.is_empty() {
-                        // Empty section header = visual separator
-                        let sep = Paragraph::new(Line::from(Span::styled(
-                            "─".repeat(inner.width as usize),
-                            theme::BORDER_STYLE,
-                        )));
-                        frame.render_widget(sep, line_area);
-                    } else {
-                        // Styled section header: ── Label ──
-                        let label = format!(" {} ", item.label);
-                        let pad_total =
-                            (inner.width as usize).saturating_sub(label.len()).saturating_sub(4);
-                        let pad_left = pad_total / 2;
-                        let pad_right = pad_total - pad_left;
-                        let line = Line::from(vec![
-                            Span::styled(
-                                format!("  {}─", "─".repeat(pad_left)),
-                                theme::BORDER_STYLE,
-                            ),
-                            Span::styled(label, theme::SECTION_STYLE),
-                            Span::styled(
-                                format!("─{}", "─".repeat(pad_right)),
-                                theme::BORDER_STYLE,
-                            ),
-                        ]);
-                        frame.render_widget(Paragraph::new(line), line_area);
-                    }
-                    continue;
-                }
-                _ => {}
+                continue;
             }
 
             let is_selected = vi == self.selected;
@@ -1312,8 +1289,8 @@ impl MainMenu {
                 // Build dots between label and value for visual connection
                 let label_text = format!("{:<20}", item.label);
                 let value_text = &item.value;
-                let dots_len = (inner.width as usize)
-                    .saturating_sub(3 + 1 + 20 + 2 + value_text.len() + 1);
+                let dots_len =
+                    (inner.width as usize).saturating_sub(3 + 1 + 20 + 2 + value_text.len() + 1);
                 let dots = ".".repeat(dots_len);
 
                 Line::from(vec![

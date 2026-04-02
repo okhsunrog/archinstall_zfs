@@ -8,9 +8,7 @@ fn is_valid_hostname(name: &str) -> bool {
         && name.len() <= 63
         && !name.starts_with('-')
         && !name.ends_with('-')
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 /// Valid Linux username: 1-32 chars, starts with letter or underscore,
@@ -18,8 +16,7 @@ fn is_valid_hostname(name: &str) -> bool {
 fn is_valid_username(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 32
-        && name
-            .starts_with(|c: char| c.is_ascii_lowercase() || c == '_')
+        && name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_')
         && name
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
@@ -124,12 +121,12 @@ impl GlobalConfig {
         }
 
         // Hostname validation
-        if let Some(ref hostname) = self.hostname {
-            if !is_valid_hostname(hostname) {
-                errors.push(format!(
+        if let Some(ref hostname) = self.hostname
+            && !is_valid_hostname(hostname)
+        {
+            errors.push(format!(
                     "Hostname '{hostname}' is invalid: must be 1-63 chars, alphanumeric and hyphens, no leading/trailing hyphen"
                 ));
-            }
         }
 
         // Kernel validation

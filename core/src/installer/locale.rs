@@ -3,7 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{check_exit, chroot, CommandRunner};
+use crate::system::cmd::{CommandRunner, check_exit, chroot};
 
 pub fn set_hostname(target: &Path, hostname: &str) -> Result<()> {
     let path = target.join("etc/hostname");
@@ -75,16 +75,15 @@ pub fn list_timezone_cities(region: &str) -> Vec<String> {
             // Skip non-files (symlinks to directories like posix/)
             if !path.is_file() {
                 // Could be a subdirectory (e.g. America/Argentina/Buenos_Aires)
-                if path.is_dir() {
-                    if let Some(subdir) = path.file_name().and_then(|n| n.to_str()) {
-                        if let Ok(sub_entries) = fs::read_dir(&path) {
-                            for sub_entry in sub_entries.flatten() {
-                                if sub_entry.path().is_file() {
-                                    if let Some(name) = sub_entry.file_name().to_str() {
-                                        cities.push(format!("{subdir}/{name}"));
-                                    }
-                                }
-                            }
+                if path.is_dir()
+                    && let Some(subdir) = path.file_name().and_then(|n| n.to_str())
+                    && let Ok(sub_entries) = fs::read_dir(&path)
+                {
+                    for sub_entry in sub_entries.flatten() {
+                        if sub_entry.path().is_file()
+                            && let Some(name) = sub_entry.file_name().to_str()
+                        {
+                            cities.push(format!("{subdir}/{name}"));
                         }
                     }
                 }

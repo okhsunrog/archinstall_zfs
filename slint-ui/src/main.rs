@@ -165,11 +165,11 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
 
             // Disk select
             if key == "disk_select" {
-                if let Ok(disks) = archinstall_zfs_core::disk::by_id::list_disks_by_id() {
-                    if let Some(disk) = disks.get(idx as usize) {
-                        cfg.borrow_mut().disk_by_id = Some(disk.clone());
-                        refresh_config_items(&app, &cfg.borrow());
-                    }
+                if let Ok(disks) = archinstall_zfs_core::disk::by_id::list_disks_by_id()
+                    && let Some(disk) = disks.get(idx as usize)
+                {
+                    cfg.borrow_mut().disk_by_id = Some(disk.clone());
+                    refresh_config_items(&app, &cfg.borrow());
                 }
                 return;
             }
@@ -276,8 +276,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 let filter = tracing_subscriber::EnvFilter::try_from_default_env()
                     .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("trace"));
 
-                let file_appender =
-                    tracing_appender::rolling::never("/tmp", "archinstall-zfs.log");
+                let file_appender = tracing_appender::rolling::never("/tmp", "archinstall-zfs.log");
                 let file_layer = tracing_subscriber::fmt::layer()
                     .with_writer(file_appender)
                     .with_ansi(false)
@@ -567,8 +566,9 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig) {
         "kernel" => {
             let results = archinstall_zfs_core::kernel::scanner::scan_all_kernels();
             let mut options = Vec::new();
-            for (info, result) in
-                archinstall_zfs_core::kernel::AVAILABLE_KERNELS.iter().zip(&results)
+            for (info, result) in archinstall_zfs_core::kernel::AVAILABLE_KERNELS
+                .iter()
+                .zip(&results)
             {
                 let compat = if result.precompiled_compatible || result.dkms_compatible {
                     "OK"
@@ -584,7 +584,13 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig) {
                 .iter()
                 .position(|k| k.name == current_kernel)
                 .unwrap_or(0);
-            show_select(app, "kernel_select", "Kernel", &opt_refs, current_idx as i32);
+            show_select(
+                app,
+                "kernel_select",
+                "Kernel",
+                &opt_refs,
+                current_idx as i32,
+            );
         }
         "profile" => {
             let profiles = archinstall_zfs_core::profile::all_profiles();

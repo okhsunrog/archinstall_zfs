@@ -5,7 +5,7 @@ use color_eyre::eyre::{Context, Result};
 use serde::Serialize;
 
 use crate::config::types::InitSystem;
-use crate::system::cmd::{check_exit, chroot, CommandRunner};
+use crate::system::cmd::{CommandRunner, check_exit, chroot};
 
 pub const HOSTID_VALUE: &str = "0x00bab10c";
 

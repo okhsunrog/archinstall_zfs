@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use color_eyre::eyre::{bail, Result};
+use color_eyre::eyre::{Result, bail};
 
 use archinstall_zfs_core::config::types::{
     GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode,
@@ -121,10 +121,10 @@ pub fn run_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Result<
     archinstall_zfs_core::zfs::cache::prepare_zfs_cache(Path::new("/"), pool_name)?;
     let _ = runner.run("systemctl", &["enable", "--now", "zfs-zed.service"]);
 
-    if encryption != ZfsEncryptionMode::None {
-        if let Some(ref pw) = config.zfs_encryption_password {
-            archinstall_zfs_core::zfs::encryption::write_key_file(Path::new("/"), pw)?;
-        }
+    if encryption != ZfsEncryptionMode::None
+        && let Some(ref pw) = config.zfs_encryption_password
+    {
+        archinstall_zfs_core::zfs::encryption::write_key_file(Path::new("/"), pw)?;
     }
 
     let key_path = archinstall_zfs_core::zfs::encryption::key_file_path(Path::new("/"));

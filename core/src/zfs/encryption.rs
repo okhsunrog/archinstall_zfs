@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use color_eyre::eyre::{Context, Result};
 
 use super::cli::run_zfs;
-use crate::system::cmd::{check_exit, CommandRunner};
+use crate::system::cmd::{CommandRunner, check_exit};
 
 const KEY_FILE_PATH: &str = "etc/zfs/zroot.key";
 

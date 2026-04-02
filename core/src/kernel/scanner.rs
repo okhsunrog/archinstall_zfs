@@ -330,10 +330,10 @@ fn validate_precompiled_version(
 
     // Try stripping trailing build suffix from ZFS version
     // e.g., "6.18.20.1" -> "6.18.20"
-    if let Some(stripped) = strip_build_suffix(zfs_kernel_base) {
-        if stripped == kernel_base {
-            return Ok(());
-        }
+    if let Some(stripped) = strip_build_suffix(zfs_kernel_base)
+        && stripped == kernel_base
+    {
+        return Ok(());
     }
 
     Err(format!(

@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use color_eyre::eyre::{bail, Result};
+use color_eyre::eyre::{Result, bail};
 
-use crate::system::cmd::{check_exit, chroot, shell_quote, CommandRunner};
+use crate::system::cmd::{CommandRunner, check_exit, chroot, shell_quote};
 
 const TEMP_USER: &str = "aurinstall";
 

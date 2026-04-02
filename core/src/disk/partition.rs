@@ -2,7 +2,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{check_exit, CommandRunner};
+use crate::system::cmd::{CommandRunner, check_exit};
 
 pub fn zap_disk(runner: &dyn CommandRunner, disk: &Path) -> Result<()> {
     let disk_str = disk.to_string_lossy();

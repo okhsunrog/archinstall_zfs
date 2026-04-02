@@ -1,6 +1,6 @@
 use crossterm::event::{Event, KeyCode, KeyModifiers};
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Flex, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
@@ -107,17 +107,17 @@ fn render_select(frame: &mut Frame, title: &str, items: &[&str], state: &mut Lis
 }
 
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
-    let [_, vCenter, _] = Layout::vertical([
+    let [_, v_center, _] = Layout::vertical([
         Constraint::Fill(1),
         Constraint::Length(height),
         Constraint::Fill(1),
     ])
     .areas(area);
-    let [_, hCenter, _] = Layout::horizontal([
+    let [_, h_center, _] = Layout::horizontal([
         Constraint::Fill(1),
         Constraint::Length(width),
         Constraint::Fill(1),
     ])
-    .areas(vCenter);
-    hCenter
+    .areas(v_center);
+    h_center
 }

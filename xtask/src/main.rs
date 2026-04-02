@@ -16,6 +16,7 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::enum_variant_names)]
 enum Commands {
     /// Run full cycle: fresh disk, install, boot, verify
     TestVm {

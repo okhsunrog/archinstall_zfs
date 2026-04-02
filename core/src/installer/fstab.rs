@@ -3,7 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{check_exit, CommandRunner};
+use crate::system::cmd::{CommandRunner, check_exit};
 
 pub fn generate_fstab(
     runner: &dyn CommandRunner,
@@ -41,10 +41,7 @@ pub fn generate_fstab(
                     fixed = fixed.replacen("\trw,", "\trw,nofail,", 1);
                 }
                 // Replace passno 2 or 1 with 0 at end of line
-                if fixed.ends_with("\t0\t2") {
-                    let len = fixed.len();
-                    fixed.replace_range(len - 3.., "0\t0");
-                } else if fixed.ends_with("\t0\t1") {
+                if fixed.ends_with("\t0\t2") || fixed.ends_with("\t0\t1") {
                     let len = fixed.len();
                     fixed.replace_range(len - 3.., "0\t0");
                 }

@@ -19,7 +19,7 @@ use crate::tui::tracing_layer::ChannelLayer;
 enum InstallState {
     Running,
     Succeeded,
-    Failed(String),
+    Failed(#[allow(dead_code)] String),
 }
 
 struct LogEntry {
@@ -150,10 +150,7 @@ impl InstallProgress {
         use ratatui::widgets::BorderType;
 
         // Fill background
-        frame.render_widget(
-            Block::default().style(theme::BG_STYLE),
-            frame.area(),
-        );
+        frame.render_widget(Block::default().style(theme::BG_STYLE), frame.area());
 
         let area = frame.area();
 
@@ -169,12 +166,8 @@ impl InstallProgress {
         // Title with status
         let (title_text, title_style) = match &self.state {
             InstallState::Running => (" Installing... ", theme::TITLE_STYLE),
-            InstallState::Succeeded => {
-                (" \u{2713} Installation Complete ", theme::SUCCESS_STYLE)
-            }
-            InstallState::Failed(_) => {
-                (" \u{26a0} Installation Failed ", theme::ERROR_STYLE)
-            }
+            InstallState::Succeeded => (" \u{2713} Installation Complete ", theme::SUCCESS_STYLE),
+            InstallState::Failed(_) => (" \u{26a0} Installation Failed ", theme::ERROR_STYLE),
         };
         let title = Paragraph::new(Line::from(vec![Span::styled(title_text, title_style)]))
             .alignment(Alignment::Center)

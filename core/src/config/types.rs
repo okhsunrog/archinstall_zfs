@@ -331,12 +331,12 @@ fn is_by_id_path(path: &std::path::Path) -> bool {
 impl GlobalConfig {
     pub fn validate_pool_name(&self) -> Vec<String> {
         let mut errors = Vec::new();
-        if let Some(ref name) = self.pool_name {
-            if !is_valid_pool_name(name) {
-                errors.push(format!(
-                    "Pool name '{name}' is invalid: must be alphanumeric, underscores, or hyphens"
-                ));
-            }
+        if let Some(ref name) = self.pool_name
+            && !is_valid_pool_name(name)
+        {
+            errors.push(format!(
+                "Pool name '{name}' is invalid: must be alphanumeric, underscores, or hyphens"
+            ));
         }
         errors
     }
@@ -354,37 +354,37 @@ impl GlobalConfig {
 
     pub fn validate_by_id_paths(&self) -> Vec<String> {
         let mut errors = Vec::new();
-        if let Some(ref p) = self.disk_by_id {
-            if !is_by_id_path(p) {
-                errors.push(format!(
-                    "disk_by_id must be a /dev/disk/by-id/ path, got: {}",
-                    p.display()
-                ));
-            }
+        if let Some(ref p) = self.disk_by_id
+            && !is_by_id_path(p)
+        {
+            errors.push(format!(
+                "disk_by_id must be a /dev/disk/by-id/ path, got: {}",
+                p.display()
+            ));
         }
-        if let Some(ref p) = self.efi_partition_by_id {
-            if !is_by_id_path(p) {
-                errors.push(format!(
-                    "efi_partition_by_id must be a /dev/disk/by-id/ path, got: {}",
-                    p.display()
-                ));
-            }
+        if let Some(ref p) = self.efi_partition_by_id
+            && !is_by_id_path(p)
+        {
+            errors.push(format!(
+                "efi_partition_by_id must be a /dev/disk/by-id/ path, got: {}",
+                p.display()
+            ));
         }
-        if let Some(ref p) = self.zfs_partition_by_id {
-            if !is_by_id_path(p) {
-                errors.push(format!(
-                    "zfs_partition_by_id must be a /dev/disk/by-id/ path, got: {}",
-                    p.display()
-                ));
-            }
+        if let Some(ref p) = self.zfs_partition_by_id
+            && !is_by_id_path(p)
+        {
+            errors.push(format!(
+                "zfs_partition_by_id must be a /dev/disk/by-id/ path, got: {}",
+                p.display()
+            ));
         }
-        if let Some(ref p) = self.swap_partition_by_id {
-            if !is_by_id_path(p) {
-                errors.push(format!(
-                    "swap_partition_by_id must be a /dev/disk/by-id/ path, got: {}",
-                    p.display()
-                ));
-            }
+        if let Some(ref p) = self.swap_partition_by_id
+            && !is_by_id_path(p)
+        {
+            errors.push(format!(
+                "swap_partition_by_id must be a /dev/disk/by-id/ path, got: {}",
+                p.display()
+            ));
         }
         errors
     }

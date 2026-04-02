@@ -4,7 +4,7 @@ use color_eyre::eyre::Result;
 
 use super::cli::{run_zpool, run_zpool_json};
 use super::models::{ZpoolListOutput, ZpoolStatusOutput};
-use crate::system::cmd::{check_exit, CommandRunner};
+use crate::system::cmd::{CommandRunner, check_exit};
 
 pub const DEFAULT_POOL_OPTIONS: &[&str] = &[
     "-o",

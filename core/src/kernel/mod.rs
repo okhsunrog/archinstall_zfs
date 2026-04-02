@@ -127,17 +127,17 @@ pub fn query_packages(packages: &[&str]) -> Result<std::collections::HashMap<Str
     }
 
     // Fallback: download archzfs.db for ZFS packages not in local repos
-    if !missing_zfs.is_empty() {
-        if let Some(archzfs_versions) = fetch_archzfs_db_versions() {
-            for &pkg_name in &missing_zfs {
-                if let Some(ver) = archzfs_versions.get(pkg_name) {
-                    tracing::debug!(
-                        package = pkg_name,
-                        version = ver,
-                        "found ZFS package version from archzfs.db fallback"
-                    );
-                    result.insert(pkg_name.to_string(), ver.clone());
-                }
+    if !missing_zfs.is_empty()
+        && let Some(archzfs_versions) = fetch_archzfs_db_versions()
+    {
+        for &pkg_name in &missing_zfs {
+            if let Some(ver) = archzfs_versions.get(pkg_name) {
+                tracing::debug!(
+                    package = pkg_name,
+                    version = ver,
+                    "found ZFS package version from archzfs.db fallback"
+                );
+                result.insert(pkg_name.to_string(), ver.clone());
             }
         }
     }
