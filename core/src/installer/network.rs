@@ -44,7 +44,7 @@ pub fn copy_iso_network(runner: &dyn CommandRunner, target: &Path) -> Result<()>
 }
 
 pub fn install_network_manager(runner: &dyn CommandRunner, target: &Path) -> Result<()> {
-    crate::system::pacman::pacstrap(runner, target, &["networkmanager"], None)?;
+    crate::system::pacman::pacstrap(runner, target, &["networkmanager"])?;
 
     let target_str = target.to_str().unwrap();
     let output = runner.run(

@@ -32,7 +32,7 @@ pub fn install_aur_packages(
 
 fn setup_aur_environment(runner: &dyn CommandRunner, target: &Path) -> Result<()> {
     // Install dependencies
-    crate::system::pacman::pacstrap(runner, target, &["git", "base-devel", "sudo"], None)?;
+    crate::system::pacman::pacstrap(runner, target, &["git", "base-devel", "sudo"])?;
 
     // Create temp user
     let output = chroot(runner, target, &format!("useradd -m {TEMP_USER}"))?;

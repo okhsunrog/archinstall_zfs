@@ -1,6 +1,7 @@
 pub mod event;
 pub mod screens;
 pub mod theme;
+pub mod tracing_layer;
 pub mod widgets;
 
 use color_eyre::eyre::Result;
@@ -14,6 +15,7 @@ use ratatui::prelude::CrosstermBackend;
 
 use archinstall_zfs_core::config::types::GlobalConfig;
 
+use self::screens::install_progress::InstallProgress;
 use self::screens::main_menu::MainMenu;
 
 pub fn run_tui(config: GlobalConfig, _dry_run: bool) -> Result<()> {
@@ -41,11 +43,8 @@ fn restore_terminal() -> Result<()> {
 
 /// What the main menu wants the app to do next.
 pub enum Action {
-    /// Keep running the main loop.
     Continue,
-    /// User chose to install — return the config.
     Install,
-    /// User quit.
     Quit,
 }
 
@@ -60,10 +59,28 @@ fn run_app(terminal: &mut DefaultTerminal, config: GlobalConfig) -> Result<()> {
             match menu.handle_event(ev, terminal)? {
                 Action::Continue => {}
                 Action::Install => {
-                    // TODO: run installation with progress screen
+                    let config = menu.into_config();
+                    run_install_screen(terminal, config)?;
                     return Ok(());
                 }
                 Action::Quit => return Ok(()),
+            }
+        }
+    }
+}
+
+fn run_install_screen(terminal: &mut DefaultTerminal, config: GlobalConfig) -> Result<()> {
+    let mut progress = InstallProgress::start(config);
+
+    loop {
+        progress.tick();
+
+        terminal.draw(|frame| progress.render(frame))?;
+
+        if crossterm::event::poll(std::time::Duration::from_millis(50))? {
+            let ev = crossterm::event::read()?;
+            if progress.handle_event(ev) {
+                return Ok(());
             }
         }
     }

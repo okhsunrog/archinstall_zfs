@@ -1,28 +1,17 @@
 use std::path::Path;
-use std::sync::mpsc::Sender;
 
 use color_eyre::eyre::{Result, bail};
 
 use super::cmd::{CmdOutput, CommandRunner, check_exit};
 
-pub fn pacstrap(
-    runner: &dyn CommandRunner,
-    target: &Path,
-    packages: &[&str],
-    tx: Option<&Sender<String>>,
-) -> Result<CmdOutput> {
+pub fn pacstrap(runner: &dyn CommandRunner, target: &Path, packages: &[&str]) -> Result<CmdOutput> {
     let target_str = target.to_str().unwrap_or("/mnt");
     let mut args = vec!["-C", "/etc/pacman.conf", "-K", target_str];
     args.extend(packages);
     args.push("--noconfirm");
     args.push("--needed");
 
-    let output = if let Some(tx) = tx {
-        runner.run_streaming("pacstrap", &args, tx)?
-    } else {
-        runner.run("pacstrap", &args)?
-    };
-
+    let output = runner.run("pacstrap", &args)?;
     check_exit(&output, "pacstrap")?;
     Ok(output)
 }
@@ -210,7 +199,7 @@ mod tests {
     #[test]
     fn test_pacstrap_builds_correct_args() {
         let runner = RecordingRunner::new(vec![CannedResponse::default()]);
-        let _ = pacstrap(&runner, Path::new("/mnt"), &["base", "linux-lts"], None);
+        let _ = pacstrap(&runner, Path::new("/mnt"), &["base", "linux-lts"]);
 
         let calls = runner.calls();
         assert_eq!(calls.len(), 1);

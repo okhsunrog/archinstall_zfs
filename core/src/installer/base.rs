@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::sync::mpsc::Sender;
 
 use color_eyre::eyre::Result;
 
@@ -11,7 +10,6 @@ pub fn install_base(
     runner: &dyn CommandRunner,
     target: &Path,
     config: &GlobalConfig,
-    tx: Option<&Sender<String>>,
 ) -> Result<()> {
     let mut packages: Vec<&str> = vec![
         "base",
@@ -44,7 +42,7 @@ pub fn install_base(
     // Set parallel downloads before pacstrap
     crate::system::pacman::set_parallel_downloads(None, config.parallel_downloads)?;
 
-    crate::system::pacman::pacstrap(runner, target, &packages, tx)?;
+    crate::system::pacman::pacstrap(runner, target, &packages)?;
 
     // Set parallel downloads on target too
     crate::system::pacman::set_parallel_downloads(Some(target), config.parallel_downloads)?;
@@ -80,7 +78,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = install_base(&runner, dir.path(), &config, None);
+        let result = install_base(&runner, dir.path(), &config);
         // May fail due to host pacman.conf being read-only; just check the commands
         let calls = runner.calls();
         let pacstrap_call = calls.iter().find(|c| c.program == "pacstrap");

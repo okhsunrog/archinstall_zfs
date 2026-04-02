@@ -8,7 +8,6 @@ pub mod services;
 pub mod users;
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::Sender;
 
 use color_eyre::eyre::{Result, bail};
 
@@ -19,28 +18,14 @@ pub struct Installer<'a> {
     pub runner: &'a dyn CommandRunner,
     pub config: &'a GlobalConfig,
     pub target: PathBuf,
-    pub tx: Option<&'a Sender<String>>,
 }
 
 impl<'a> Installer<'a> {
-    pub fn new(
-        runner: &'a dyn CommandRunner,
-        config: &'a GlobalConfig,
-        target: &Path,
-        tx: Option<&'a Sender<String>>,
-    ) -> Self {
+    pub fn new(runner: &'a dyn CommandRunner, config: &'a GlobalConfig, target: &Path) -> Self {
         Self {
             runner,
             config,
             target: target.to_path_buf(),
-            tx,
-        }
-    }
-
-    fn log(&self, msg: &str) {
-        tracing::info!("{msg}");
-        if let Some(tx) = self.tx {
-            let _ = tx.send(msg.to_string());
         }
     }
 
@@ -53,42 +38,42 @@ impl<'a> Installer<'a> {
         }
 
         // Phase 4: pacstrap base system
-        self.log("Phase 4: Installing base system...");
-        base::install_base(self.runner, &self.target, self.config, self.tx)?;
+        tracing::info!("Phase 4: Installing base system...");
+        base::install_base(self.runner, &self.target, self.config)?;
 
         // Phase 5: System config
-        self.log("Phase 5: Configuring system...");
+        tracing::info!("Phase 5: Configuring system...");
         self.configure_system()?;
 
         // Phase 6: archzfs repo on target + ZFS packages
-        self.log("Phase 6: Installing ZFS packages on target...");
+        tracing::info!("Phase 6: Installing ZFS packages on target...");
         self.install_zfs_on_target()?;
 
         // Phase 7: Initramfs
-        self.log("Phase 7: Generating initramfs...");
+        tracing::info!("Phase 7: Generating initramfs...");
         self.generate_initramfs()?;
 
         // Phase 8: Users + authentication
-        self.log("Phase 8: Configuring users...");
+        tracing::info!("Phase 8: Configuring users...");
         self.configure_users()?;
 
         // Phase 9: Profile packages + services
-        self.log("Phase 9: Installing profile packages...");
+        tracing::info!("Phase 9: Installing profile packages...");
         self.install_profile()?;
 
         // Phase 10: Additional packages + AUR
-        self.log("Phase 10: Installing additional packages...");
+        tracing::info!("Phase 10: Installing additional packages...");
         self.install_additional_packages()?;
 
         // Phase 11: Swap configuration
-        self.log("Phase 11: Configuring swap...");
+        tracing::info!("Phase 11: Configuring swap...");
         self.configure_swap()?;
 
         // Phase 12: ZFS services + genfstab + misc files
-        self.log("Phase 12: Finalizing ZFS configuration...");
+        tracing::info!("Phase 12: Finalizing ZFS configuration...");
         self.finalize_zfs()?;
 
-        self.log("Installation complete.");
+        tracing::info!("Installation complete.");
         Ok(())
     }
 
@@ -192,7 +177,7 @@ impl<'a> Installer<'a> {
             if let Some(p) = profile {
                 if !p.packages.is_empty() {
                     let pkg_refs: Vec<&str> = p.packages.iter().copied().collect();
-                    crate::system::pacman::pacstrap(self.runner, &self.target, &pkg_refs, self.tx)?;
+                    crate::system::pacman::pacstrap(self.runner, &self.target, &pkg_refs)?;
                 }
                 for service in &p.services {
                     services::enable_service(self.runner, &self.target, service)?;
@@ -212,17 +197,12 @@ impl<'a> Installer<'a> {
                     vec!["pulseaudio", "pulseaudio-alsa"]
                 }
             };
-            crate::system::pacman::pacstrap(self.runner, &self.target, &pkgs, self.tx)?;
+            crate::system::pacman::pacstrap(self.runner, &self.target, &pkgs)?;
         }
 
         // Bluetooth
         if self.config.bluetooth {
-            crate::system::pacman::pacstrap(
-                self.runner,
-                &self.target,
-                &["bluez", "bluez-utils"],
-                self.tx,
-            )?;
+            crate::system::pacman::pacstrap(self.runner, &self.target, &["bluez", "bluez-utils"])?;
             services::enable_service(self.runner, &self.target, "bluetooth")?;
         }
 
@@ -237,7 +217,7 @@ impl<'a> Installer<'a> {
                 .iter()
                 .map(|s| s.as_str())
                 .collect();
-            crate::system::pacman::pacstrap(self.runner, &self.target, &pkg_refs, self.tx)?;
+            crate::system::pacman::pacstrap(self.runner, &self.target, &pkg_refs)?;
         }
 
         let aur_pkgs = self.config.all_aur_packages();
@@ -324,7 +304,7 @@ mod tests {
     fn test_installer_validates_config() {
         let runner = RecordingRunner::new(vec![]);
         let config = GlobalConfig::default(); // missing installation_mode
-        let installer = Installer::new(&runner, &config, Path::new("/mnt"), None);
+        let installer = Installer::new(&runner, &config, Path::new("/mnt"));
         let result = installer.perform_installation();
         assert!(result.is_err());
         assert!(

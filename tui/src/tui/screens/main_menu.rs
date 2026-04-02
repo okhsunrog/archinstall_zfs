@@ -69,6 +69,10 @@ impl MainMenu {
         }
     }
 
+    pub fn into_config(self) -> GlobalConfig {
+        self.config
+    }
+
     fn items(&self) -> Vec<MenuItem> {
         let c = &self.config;
         vec![
