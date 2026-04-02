@@ -37,8 +37,9 @@ jobs:
     - name: Check formatting
       run: cargo fmt --all -- --check
 
+    # Exclude slint-ui: depends on custom Slint fork and KMS system libraries
     - name: Run clippy
-      run: cargo clippy --workspace -- -D warnings
+      run: cargo clippy --workspace --exclude archinstall-zfs-slint -- -D warnings
 
     - name: Run tests
-      run: cargo test --workspace
+      run: cargo test --workspace --exclude archinstall-zfs-slint
