@@ -1,15 +1,23 @@
 mod install;
 mod tracing_layer;
 
+use std::cell::RefCell;
 use std::path::PathBuf;
+use std::rc::Rc;
+use std::thread;
 
 use clap::{Parser, Subcommand};
 use color_eyre::eyre::{bail, Result};
-use slint::{ModelRc, SharedString, VecModel};
+use slint::{Model, ModelRc, SharedString, VecModel};
 
-use archinstall_zfs_core::config::types::GlobalConfig;
+use archinstall_zfs_core::config::types::{
+    AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, SwapMode,
+    ZfsEncryptionMode, ZfsModuleMode,
+};
 
 slint::include_modules!();
+
+const MAX_LOG_LINES: usize = 2000;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -47,7 +55,6 @@ enum Commands {
 
 fn main() -> Result<()> {
     color_eyre::install()?;
-
     let cli = Cli::parse();
 
     match &cli.command {
@@ -58,77 +65,160 @@ fn main() -> Result<()> {
             zfs,
             headers,
             fast,
-        }) => {
-            return archinstall_zfs_core::iso::render_profile(
-                profile_dir,
-                out_dir,
-                kernel,
-                zfs,
-                headers,
-                *fast,
-            );
+        }) => archinstall_zfs_core::iso::render_profile(
+            profile_dir, out_dir, kernel, zfs, headers, *fast,
+        ),
+        None => {
+            let config = if let Some(ref path) = cli.config {
+                GlobalConfig::load_from_file(path)?
+            } else {
+                GlobalConfig::default()
+            };
+
+            if cli.silent {
+                if cli.config.is_none() {
+                    bail!("--silent requires --config");
+                }
+                let errors = config.validate_for_install();
+                if !errors.is_empty() {
+                    bail!("Config validation failed:\n  {}", errors.join("\n  "));
+                }
+                let runner = archinstall_zfs_core::system::cmd::RealRunner;
+                install::run_install(&runner, &config)
+            } else {
+                run_gui(config)
+            }
         }
-        None => {}
     }
-
-    let config = if let Some(ref path) = cli.config {
-        GlobalConfig::load_from_file(path)?
-    } else {
-        GlobalConfig::default()
-    };
-
-    if cli.silent {
-        if cli.config.is_none() {
-            bail!("--silent requires --config");
-        }
-        let errors = config.validate_for_install();
-        if !errors.is_empty() {
-            bail!("Config validation failed:\n  {}", errors.join("\n  "));
-        }
-        let runner = archinstall_zfs_core::system::cmd::RealRunner;
-        return install::run_install(&runner, &config);
-    }
-
-    run_gui(config)
 }
 
 fn run_gui(config: GlobalConfig) -> Result<()> {
     let app = App::new().unwrap();
+    let config = Rc::new(RefCell::new(config));
 
-    refresh_config_items(&app, &config);
-    app.set_status_text(SharedString::from("Click an item to edit"));
+    refresh_config_items(&app, &config.borrow());
+    app.set_status_text("Click an item to edit".into());
 
-    // ── Item activated (user clicks a config field) ───
+    // ── Item activated ───────────────────────────────
     {
         let weak = app.as_weak();
         let cfg = config.clone();
         app.on_item_activated(move |key| {
             let Some(app) = weak.upgrade() else { return };
-            let key = key.to_string();
-            handle_item_activated(&app, &key, &cfg);
+            handle_item_activated(&app, &key, &cfg.borrow());
         });
     }
 
-    // ── Select confirmed ──────────────────────────────
+    // ── Toggle activated ─────────────────────────────
     {
         let weak = app.as_weak();
-        app.on_select_confirmed(move |_key, _idx| {
-            let Some(_app) = weak.upgrade() else { return };
-            // TODO: update config based on key+idx, refresh items
+        let cfg = config.clone();
+        app.on_toggle_activated(move |key| {
+            let Some(app) = weak.upgrade() else { return };
+            let mut c = cfg.borrow_mut();
+            match key.as_str() {
+                "ntp" => c.ntp = !c.ntp,
+                "bluetooth" => c.bluetooth = !c.bluetooth,
+                "zrepl" => c.zrepl_enabled = !c.zrepl_enabled,
+                _ => return,
+            }
+            refresh_config_items(&app, &c);
         });
     }
 
-    // ── Install requested ─────────────────────────────
+    // ── Select confirmed ─────────────────────────────
     {
         let weak = app.as_weak();
+        let cfg = config.clone();
+        app.on_select_confirmed(move |key, idx| {
+            let Some(app) = weak.upgrade() else { return };
+            let mut c = cfg.borrow_mut();
+            apply_select(&mut c, &key, idx);
+            refresh_config_items(&app, &c);
+        });
+    }
+
+    // ── Text confirmed ───────────────────────────────
+    {
+        let weak = app.as_weak();
+        let cfg = config.clone();
+        app.on_text_confirmed(move |key, val| {
+            let Some(app) = weak.upgrade() else { return };
+            let mut c = cfg.borrow_mut();
+            apply_text(&mut c, &key, &val);
+            refresh_config_items(&app, &c);
+        });
+    }
+
+    // ── Install requested ────────────────────────────
+    {
+        let weak = app.as_weak();
+        let cfg = config.clone();
         app.on_install_requested(move || {
             let Some(app) = weak.upgrade() else { return };
-            // TODO: validate config, start install
+            let c = cfg.borrow().clone();
+
+            let errors = c.validate_for_install();
+            if !errors.is_empty() {
+                app.set_status_text(SharedString::from(format!(
+                    "Validation: {}",
+                    errors[0]
+                )));
+                return;
+            }
+
             app.set_install_state(1);
+            app.set_log_messages(ModelRc::new(VecModel::<LogMessage>::default()));
+
+            // Set up tracing channel
+            let (log_tx, log_rx) = crossbeam_channel::bounded::<(String, i32)>(512);
+
+            // Spawn log consumer thread
+            let weak_log = app.as_weak();
+            thread::spawn(move || {
+                while let Ok((text, level)) = log_rx.recv() {
+                    let text = SharedString::from(&text);
+                    let _ = weak_log.upgrade_in_event_loop(move |app| {
+                        let model = app.get_log_messages();
+                        let vec_model = model
+                            .as_any()
+                            .downcast_ref::<VecModel<LogMessage>>()
+                            .unwrap();
+                        vec_model.push(LogMessage { text, level });
+                        if vec_model.row_count() > MAX_LOG_LINES {
+                            let to_remove =
+                                vec_model.row_count() - MAX_LOG_LINES + MAX_LOG_LINES / 4;
+                            for _ in 0..to_remove {
+                                vec_model.remove(0);
+                            }
+                        }
+                    });
+                }
+            });
+
+            // Spawn install thread with tracing layer
+            let weak_install = app.as_weak();
+            thread::spawn(move || {
+                use tracing_subscriber::layer::SubscriberExt;
+
+                let layer = tracing_layer::UiLogLayer::new(log_tx);
+                let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+                let subscriber = tracing_subscriber::registry().with(filter).with(layer);
+                let _guard = tracing::subscriber::set_default(subscriber);
+
+                let runner = archinstall_zfs_core::system::cmd::RealRunner;
+                let result = install::run_install(&runner, &c);
+
+                let state = if result.is_ok() { 2 } else { 3 };
+                let _ = weak_install.upgrade_in_event_loop(move |app| {
+                    app.set_install_state(state);
+                });
+            });
         });
     }
 
-    // ── Quit ──────────────────────────────────────────
+    // ── Quit ─────────────────────────────────────────
     {
         let weak = app.as_weak();
         app.on_quit_requested(move || {
@@ -142,152 +232,255 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     Ok(())
 }
 
+// ── Config item building ─────────────────────────────
+
 fn refresh_config_items(app: &App, config: &GlobalConfig) {
-    let items: Vec<ConfigItem> = build_config_items(config);
-    let model = ModelRc::new(VecModel::from(items));
-    app.set_config_items(model);
+    app.set_config_items(ModelRc::new(VecModel::from(build_config_items(config))));
 }
 
 fn build_config_items(c: &GlobalConfig) -> Vec<ConfigItem> {
+    let pkg_str = if c.additional_packages.is_empty() {
+        "None".to_string()
+    } else {
+        c.additional_packages.join(", ")
+    };
+    let aur_str = if c.aur_packages.is_empty() {
+        "None".to_string()
+    } else {
+        c.aur_packages.join(", ")
+    };
+
     vec![
-        config_item("installation_mode", "Installation mode",
+        ci("installation_mode", "Installation mode",
             &c.installation_mode.map(|m| m.to_string()).unwrap_or("Not set".into()), 1),
-        config_item("disk_by_id", "Disk",
+        ci("disk_by_id", "Disk",
             &c.disk_by_id.as_ref().map(|p| p.display().to_string()).unwrap_or("Not set".into()), 0),
-        config_item("pool_name", "Pool name",
-            &c.pool_name.clone().unwrap_or("Not set".into()), 0),
-        config_item("dataset_prefix", "Dataset prefix", &c.dataset_prefix, 0),
-        config_item("encryption", "Encryption", &c.zfs_encryption_mode.to_string(), 1),
-        config_item("compression", "Compression", &c.compression.to_string(), 1),
-        config_item("swap_mode", "Swap", &c.swap_mode.to_string(), 1),
-        separator(),
-        config_item("init_system", "Init system", &c.init_system.to_string(), 1),
-        config_item("zfs_module_mode", "ZFS module", &c.zfs_module_mode.to_string(), 1),
-        config_item("hostname", "Hostname",
-            &c.hostname.clone().unwrap_or("Not set".into()), 0),
-        config_item("locale", "Locale",
-            &c.locale.clone().unwrap_or("Not set".into()), 0),
-        config_item("timezone", "Timezone",
-            &c.timezone.clone().unwrap_or("Not set".into()), 0),
-        config_item("keyboard", "Keyboard layout", &c.keyboard_layout, 0),
-        config_item("ntp", "NTP (time sync)",
-            if c.ntp { "Enabled" } else { "Disabled" }, 3),
-        separator(),
-        config_item("root_password", "Root password",
+        ci("pool_name", "Pool name", &c.pool_name.clone().unwrap_or("Not set".into()), 0),
+        ci("dataset_prefix", "Dataset prefix", &c.dataset_prefix, 0),
+        ci("encryption", "Encryption", &c.zfs_encryption_mode.to_string(), 1),
+        ci("compression", "Compression", &c.compression.to_string(), 1),
+        ci("swap_mode", "Swap", &c.swap_mode.to_string(), 1),
+        sep(),
+        ci("init_system", "Init system", &c.init_system.to_string(), 1),
+        ci("zfs_module_mode", "ZFS module", &c.zfs_module_mode.to_string(), 1),
+        ci("hostname", "Hostname", &c.hostname.clone().unwrap_or("Not set".into()), 0),
+        ci("locale", "Locale", &c.locale.clone().unwrap_or("Not set".into()), 0),
+        ci("timezone", "Timezone", &c.timezone.clone().unwrap_or("Not set".into()), 0),
+        ci("keyboard", "Keyboard layout", &c.keyboard_layout, 0),
+        ci("ntp", "NTP (time sync)", if c.ntp { "Enabled" } else { "Disabled" }, 3),
+        sep(),
+        ci("root_password", "Root password",
             if c.root_password.is_some() { "Set" } else { "Not set" }, 2),
-        config_item("profile", "Profile",
-            &c.profile.clone().unwrap_or("Not set".into()), 1),
-        config_item("audio", "Audio",
-            &c.audio.map(|a| a.to_string()).unwrap_or("None".into()), 1),
-        config_item("bluetooth", "Bluetooth",
-            if c.bluetooth { "Enabled" } else { "Disabled" }, 3),
-        {
-            let pkgs = if c.additional_packages.is_empty() { "None".to_string() } else { c.additional_packages.join(", ") };
-            config_item("additional_packages", "Additional packages", &pkgs, 0)
+        ci("profile", "Profile", &c.profile.clone().unwrap_or("Not set".into()), 1),
+        ci("audio", "Audio", &c.audio.map(|a| a.to_string()).unwrap_or("None".into()), 1),
+        ci("bluetooth", "Bluetooth", if c.bluetooth { "Enabled" } else { "Disabled" }, 3),
+        ci("additional_packages", "Additional packages", &pkg_str, 0),
+        ci("aur_packages", "AUR packages", &aur_str, 0),
+        ci("zrepl", "zrepl (snapshots)", if c.zrepl_enabled { "Enabled" } else { "Disabled" }, 3),
+        sep(),
+        ConfigItem {
+            key: "install".into(), label: "Install".into(),
+            value: SharedString::default(), item_type: 5,
         },
-        config_item("zrepl", "zrepl (snapshots)",
-            if c.zrepl_enabled { "Enabled" } else { "Disabled" }, 3),
-        separator(),
-        action_item("install", "Install"),
-        action_item("quit", "Quit"),
+        ConfigItem {
+            key: "quit".into(), label: "Quit".into(),
+            value: SharedString::default(), item_type: 5,
+        },
     ]
 }
 
-fn config_item(key: &str, label: &str, value: &str, item_type: i32) -> ConfigItem {
+fn ci(key: &str, label: &str, value: &str, item_type: i32) -> ConfigItem {
     ConfigItem {
-        key: SharedString::from(key),
-        label: SharedString::from(label),
-        value: SharedString::from(value),
-        item_type,
+        key: key.into(), label: label.into(),
+        value: value.into(), item_type,
     }
 }
 
-fn separator() -> ConfigItem {
+fn sep() -> ConfigItem {
     ConfigItem {
-        key: SharedString::default(),
-        label: SharedString::default(),
-        value: SharedString::default(),
-        item_type: 4,
+        key: SharedString::default(), label: SharedString::default(),
+        value: SharedString::default(), item_type: 4,
     }
 }
 
-fn action_item(key: &str, label: &str) -> ConfigItem {
-    ConfigItem {
-        key: SharedString::from(key),
-        label: SharedString::from(label),
-        value: SharedString::default(),
-        item_type: 5,
-    }
-}
+// ── Item activation (open popup) ─────────────────────
 
-fn handle_item_activated(app: &App, key: &str, _config: &GlobalConfig) {
-    let (title, options, current) = match key {
-        "installation_mode" => (
-            "Installation Mode",
-            vec!["Full Disk", "New Pool", "Existing Pool"],
-            0,
-        ),
-        "encryption" => (
-            "Encryption",
-            vec!["No encryption", "Encrypt entire pool", "Encrypt base dataset only"],
-            0,
-        ),
-        "compression" => (
-            "Compression",
-            vec!["lz4", "zstd", "zstd-5", "zstd-10", "off"],
-            0,
-        ),
-        "swap_mode" => (
-            "Swap Mode",
-            vec!["None", "ZRAM", "Swap partition", "Swap partition (encrypted)"],
-            0,
-        ),
-        "init_system" => (
-            "Init System",
-            vec!["dracut", "mkinitcpio"],
-            0,
-        ),
-        "zfs_module_mode" => (
-            "ZFS Module",
-            vec!["precompiled", "dkms"],
-            0,
-        ),
-        "profile" => (
-            "Profile",
-            vec![
-                "None", "gnome", "plasma", "xfce", "sway", "hyprland", "i3",
-                "budgie", "cinnamon", "mate", "lxqt", "deepin", "minimal",
-            ],
-            0,
-        ),
-        "audio" => (
-            "Audio",
-            vec!["None", "pipewire", "pulseaudio"],
-            0,
-        ),
-        // Toggle items
-        "ntp" | "bluetooth" | "zrepl" => {
-            // Handled differently — toggle inline
-            // TODO: implement toggle + refresh
-            return;
+fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig) {
+    match key {
+        // Select items
+        "installation_mode" => show_select(app, key, "Installation Mode",
+            &["Full Disk", "New Pool", "Existing Pool"],
+            match config.installation_mode {
+                Some(InstallationMode::FullDisk) => 0,
+                Some(InstallationMode::NewPool) => 1,
+                Some(InstallationMode::ExistingPool) => 2,
+                None => 0,
+            }),
+        "encryption" => show_select(app, key, "Encryption",
+            &["No encryption", "Encrypt entire pool", "Encrypt base dataset only"],
+            match config.zfs_encryption_mode {
+                ZfsEncryptionMode::None => 0,
+                ZfsEncryptionMode::Pool => 1,
+                ZfsEncryptionMode::Dataset => 2,
+            }),
+        "compression" => show_select(app, key, "Compression",
+            &["lz4", "zstd", "zstd-5", "zstd-10", "off"],
+            match config.compression {
+                CompressionAlgo::Lz4 => 0, CompressionAlgo::Zstd => 1,
+                CompressionAlgo::Zstd5 => 2, CompressionAlgo::Zstd10 => 3,
+                CompressionAlgo::Off => 4,
+            }),
+        "swap_mode" => show_select(app, key, "Swap Mode",
+            &["None", "ZRAM", "Swap partition", "Swap partition (encrypted)"],
+            match config.swap_mode {
+                SwapMode::None => 0, SwapMode::Zram => 1,
+                SwapMode::ZswapPartition => 2, SwapMode::ZswapPartitionEncrypted => 3,
+            }),
+        "init_system" => show_select(app, key, "Init System",
+            &["dracut", "mkinitcpio"],
+            match config.init_system {
+                InitSystem::Dracut => 0, InitSystem::Mkinitcpio => 1,
+            }),
+        "zfs_module_mode" => show_select(app, key, "ZFS Module",
+            &["precompiled", "dkms"],
+            match config.zfs_module_mode {
+                ZfsModuleMode::Precompiled => 0, ZfsModuleMode::Dkms => 1,
+            }),
+        "profile" => show_select(app, key, "Profile",
+            &["None", "gnome", "plasma", "xfce", "sway", "hyprland", "i3",
+              "budgie", "cinnamon", "mate", "lxqt", "deepin", "minimal"],
+            0),
+        "audio" => show_select(app, key, "Audio",
+            &["None", "pipewire", "pulseaudio"],
+            match config.audio {
+                None => 0, Some(AudioServer::Pipewire) => 1,
+                Some(AudioServer::Pulseaudio) => 2,
+            }),
+
+        // Text items
+        "disk_by_id" | "pool_name" | "dataset_prefix" | "hostname" | "locale"
+        | "timezone" | "keyboard" | "additional_packages" | "aur_packages" => {
+            let current = match key {
+                "disk_by_id" => config.disk_by_id.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+                "pool_name" => config.pool_name.clone().unwrap_or_default(),
+                "dataset_prefix" => config.dataset_prefix.clone(),
+                "hostname" => config.hostname.clone().unwrap_or_default(),
+                "locale" => config.locale.clone().unwrap_or_default(),
+                "timezone" => config.timezone.clone().unwrap_or_default(),
+                "keyboard" => config.keyboard_layout.clone(),
+                "additional_packages" => config.additional_packages.join(" "),
+                "aur_packages" => config.aur_packages.join(" "),
+                _ => String::new(),
+            };
+            show_text_input(app, key, key, &current, false);
         }
-        // Text/password items
-        _ => {
-            // TODO: implement text input popup
-            return;
-        }
-    };
 
-    let select_options: Vec<SelectOption> = options
+        // Password
+        "root_password" => {
+            show_text_input(app, key, "Root password", "", true);
+        }
+
+        _ => {}
+    }
+}
+
+fn show_select(app: &App, key: &str, title: &str, options: &[&str], current: i32) {
+    let opts: Vec<SelectOption> = options
         .iter()
-        .map(|s| SelectOption {
-            text: SharedString::from(*s),
-        })
+        .map(|s| SelectOption { text: SharedString::from(*s) })
         .collect();
-
-    app.set_select_title(SharedString::from(title));
-    app.set_select_options(ModelRc::new(VecModel::from(select_options)));
+    app.set_select_key(key.into());
+    app.set_select_title(title.into());
+    app.set_select_options(ModelRc::new(VecModel::from(opts)));
     app.set_select_index(current);
-    app.set_select_key(SharedString::from(key));
     app.set_select_visible(true);
+}
+
+fn show_text_input(app: &App, key: &str, title: &str, current: &str, password: bool) {
+    app.set_text_input_key(key.into());
+    app.set_text_input_title(title.into());
+    app.set_text_input_value(current.into());
+    app.set_text_input_password(password);
+    app.set_text_input_visible(true);
+}
+
+// ── Apply mutations ──────────────────────────────────
+
+fn apply_select(config: &mut GlobalConfig, key: &str, idx: i32) {
+    match key {
+        "installation_mode" => config.installation_mode = Some(match idx {
+            0 => InstallationMode::FullDisk,
+            1 => InstallationMode::NewPool,
+            _ => InstallationMode::ExistingPool,
+        }),
+        "encryption" => config.zfs_encryption_mode = match idx {
+            0 => ZfsEncryptionMode::None,
+            1 => ZfsEncryptionMode::Pool,
+            _ => ZfsEncryptionMode::Dataset,
+        },
+        "compression" => config.compression = match idx {
+            0 => CompressionAlgo::Lz4,
+            1 => CompressionAlgo::Zstd,
+            2 => CompressionAlgo::Zstd5,
+            3 => CompressionAlgo::Zstd10,
+            _ => CompressionAlgo::Off,
+        },
+        "swap_mode" => config.swap_mode = match idx {
+            0 => SwapMode::None,
+            1 => SwapMode::Zram,
+            2 => SwapMode::ZswapPartition,
+            _ => SwapMode::ZswapPartitionEncrypted,
+        },
+        "init_system" => config.init_system = match idx {
+            0 => InitSystem::Dracut,
+            _ => InitSystem::Mkinitcpio,
+        },
+        "zfs_module_mode" => config.zfs_module_mode = match idx {
+            0 => ZfsModuleMode::Precompiled,
+            _ => ZfsModuleMode::Dkms,
+        },
+        "profile" => config.profile = match idx {
+            0 => None,
+            i => {
+                let profiles = [
+                    "gnome", "plasma", "xfce", "sway", "hyprland", "i3",
+                    "budgie", "cinnamon", "mate", "lxqt", "deepin", "minimal",
+                ];
+                profiles.get((i - 1) as usize).map(|s| s.to_string())
+            }
+        },
+        "audio" => config.audio = match idx {
+            0 => None,
+            1 => Some(AudioServer::Pipewire),
+            _ => Some(AudioServer::Pulseaudio),
+        },
+        _ => {}
+    }
+}
+
+fn apply_text(config: &mut GlobalConfig, key: &str, val: &str) {
+    let opt = if val.is_empty() { None } else { Some(val.to_string()) };
+    match key {
+        "pool_name" => config.pool_name = opt,
+        "dataset_prefix" => { if !val.is_empty() { config.dataset_prefix = val.to_string(); } }
+        "hostname" => config.hostname = opt,
+        "locale" => config.locale = opt,
+        "timezone" => config.timezone = opt,
+        "keyboard" => { if !val.is_empty() { config.keyboard_layout = val.to_string(); } }
+        "root_password" => config.root_password = opt,
+        "disk_by_id" => config.disk_by_id = opt.map(PathBuf::from),
+        "additional_packages" => {
+            config.additional_packages = val.split_whitespace()
+                .map(|s| s.trim_matches(',').to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+        }
+        "aur_packages" => {
+            config.aur_packages = val.split_whitespace()
+                .map(|s| s.trim_matches(',').to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+        }
+        _ => {}
+    }
 }

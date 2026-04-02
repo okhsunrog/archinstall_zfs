@@ -52,10 +52,120 @@ export struct SelectOption {
 
 export struct LogMessage {
     text: string,
-    level: int, // 0=trace, 1=debug, 2=info, 3=warn, 4=error
+    level: int,
 }
 
-// ── Select popup ──────────────────────────────────────
+// ── Text input popup ─────────────────────────────────
+
+component TextInputPopup inherits Rectangle {
+    in property <string> title;
+    in-out property <string> input-text;
+    in property <bool> is-password: false;
+    in property <bool> popup-visible;
+
+    callback confirmed(string);
+    callback cancelled();
+
+    if popup-visible: Rectangle {
+        background: #00000080;
+        width: 100%; height: 100%;
+
+        TouchArea { clicked => { cancelled(); } }
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(500px, parent.width - 40px);
+            height: 140px;
+            background: Theme.c.mantle;
+            border-radius: 8px;
+            border-color: Theme.c.surface1;
+            border-width: 1px;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 12px;
+
+                Text {
+                    text: title;
+                    color: Theme.c.blue;
+                    font-size: 16px;
+                    font-weight: 600;
+                }
+
+                Rectangle {
+                    height: 36px;
+                    background: Theme.c.surface0;
+                    border-radius: 4px;
+                    border-color: Theme.c.blue;
+                    border-width: 1px;
+
+                    input := TextInput {
+                        x: 8px;
+                        width: parent.width - 16px;
+                        vertical-alignment: center;
+                        color: Theme.c.text;
+                        font-size: 14px;
+                        text: input-text;
+                        input-type: is-password ? InputType.password : InputType.text;
+
+                        accepted => {
+                            confirmed(self.text);
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: end;
+
+                    // Cancel button
+                    Rectangle {
+                        width: 80px;
+                        height: 30px;
+                        background: cancel-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
+                        border-radius: 4px;
+
+                        cancel-ta := TouchArea {
+                            clicked => { cancelled(); }
+                        }
+
+                        Text {
+                            text: "Cancel";
+                            color: Theme.c.subtext0;
+                            font-size: 13px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    // Confirm button
+                    Rectangle {
+                        width: 80px;
+                        height: 30px;
+                        background: ok-ta.has-hover ? Theme.c.sky : Theme.c.blue;
+                        border-radius: 4px;
+
+                        ok-ta := TouchArea {
+                            clicked => { confirmed(input.text); }
+                        }
+
+                        Text {
+                            text: "OK";
+                            color: Theme.c.base;
+                            font-size: 13px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Select popup ─────────────────────────────────────
 
 component SelectPopup inherits Rectangle {
     in property <string> title;
@@ -71,14 +181,12 @@ component SelectPopup inherits Rectangle {
         background: #00000080;
         width: 100%; height: 100%;
 
-        TouchArea {
-            clicked => { cancelled(); }
-        }
+        TouchArea { clicked => { cancelled(); } }
 
-        popup-box := Rectangle {
+        Rectangle {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            width: 400px;
+            width: min(400px, parent.width - 40px);
             height: min(options.length * 36px + 60px, parent.height - 80px);
             background: Theme.c.mantle;
             border-radius: 8px;
@@ -98,10 +206,12 @@ component SelectPopup inherits Rectangle {
 
                 for option[index] in options: Rectangle {
                     height: 32px;
-                    background: index == result-index ? Theme.c.surface1 : transparent;
+                    background: ta.has-hover ? Theme.c.surface1
+                              : index == result-index ? Theme.c.surface0
+                              : transparent;
                     border-radius: 4px;
 
-                    TouchArea {
+                    ta := TouchArea {
                         clicked => {
                             result-index = index;
                             accepted(index);
@@ -125,7 +235,7 @@ component SelectPopup inherits Rectangle {
     }
 }
 
-// ── Main application ──────────────────────────────────
+// ── Main application ─────────────────────────────────
 
 export component App inherits Window {
     background: Theme.c.base;
@@ -143,6 +253,13 @@ export component App inherits Window {
     in-out property <int> select-index;
     in-out property <string> select-key;
 
+    // Text input popup state
+    in-out property <bool> text-input-visible: false;
+    in-out property <string> text-input-title;
+    in-out property <string> text-input-value;
+    in-out property <bool> text-input-password: false;
+    in-out property <string> text-input-key;
+
     // Install state: 0=config, 1=installing, 2=done, 3=failed
     in-out property <int> install-state: 0;
 
@@ -153,12 +270,14 @@ export component App inherits Window {
     in property <string> status-text;
 
     // Callbacks to Rust
-    callback item-activated(string);      // key of config item
-    callback select-confirmed(string, int); // key, selected index
+    callback item-activated(string);
+    callback select-confirmed(string, int);
+    callback text-confirmed(string, string); // key, value
+    callback toggle-activated(string);
     callback install-requested();
     callback quit-requested();
 
-    // ── Config screen ─────────────────────────────────
+    // ── Config screen ────────────────────────────────
     if install-state == 0: VerticalLayout {
         padding: 16px;
         spacing: 0px;
@@ -192,6 +311,8 @@ export component App inherits Window {
                 for item[index] in config-items: Rectangle {
                     height: item.item-type == 4 ? 16px : 34px;
                     border-radius: 4px;
+                    background: row-ta.has-hover && item.item-type != 4
+                        ? Theme.c.surface0 : transparent;
 
                     if item.item-type == 4: Rectangle {
                         height: 1px;
@@ -199,13 +320,15 @@ export component App inherits Window {
                         background: Theme.c.surface0;
                     }
 
-                    if item.item-type != 4: TouchArea {
-                        mouse-cursor: pointer;
+                    row-ta := TouchArea {
+                        mouse-cursor: item.item-type == 4 ? default : pointer;
                         clicked => {
                             if item.item-type == 5 {
                                 if item.key == "install" { install-requested(); }
                                 if item.key == "quit" { quit-requested(); }
-                            } else {
+                            } else if item.item-type == 3 {
+                                toggle-activated(item.key);
+                            } else if item.item-type != 4 {
                                 item-activated(item.key);
                             }
                         }
@@ -238,7 +361,7 @@ export component App inherits Window {
 
                         Text {
                             text: item.value;
-                            color: item.value == "Not set" || item.value == "None"
+                            color: item.value == "Not set" || item.value == "None" || item.value == "Disabled"
                                 ? Theme.c.overlay0
                                 : Theme.c.green;
                             font-size: 14px;
@@ -262,12 +385,11 @@ export component App inherits Window {
         }
     }
 
-    // ── Install progress screen ───────────────────────
+    // ── Install progress screen ──────────────────────
     if install-state >= 1: VerticalLayout {
         padding: 16px;
         spacing: 8px;
 
-        // Title
         Rectangle {
             height: 48px;
             background: Theme.c.mantle;
@@ -287,7 +409,6 @@ export component App inherits Window {
             }
         }
 
-        // Log view
         log-view := ListView {
             for msg[index] in log-messages: Rectangle {
                 height: msg-text.preferred-height + 4px;
@@ -309,36 +430,35 @@ export component App inherits Window {
             }
         }
 
-        // Auto-scroll to bottom on new messages
         property <int> scroll-trigger: log-messages.length;
         changed scroll-trigger => {
             log-view.viewport-y = -100000px;
         }
 
-        // Footer (only when done)
         if install-state >= 2: Rectangle {
             height: 36px;
 
-            TouchArea {
-                clicked => { quit-requested(); }
+            Rectangle {
+                background: exit-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
+                border-radius: 4px;
 
-                Rectangle {
-                    background: Theme.c.surface0;
-                    border-radius: 4px;
+                exit-ta := TouchArea {
+                    clicked => { quit-requested(); }
+                }
 
-                    Text {
-                        text: "Press to exit";
-                        color: Theme.c.subtext0;
-                        font-size: 14px;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
+                Text {
+                    text: "Click to exit";
+                    color: Theme.c.subtext0;
+                    font-size: 14px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
                 }
             }
         }
     }
 
-    // ── Select popup overlay ──────────────────────────
+    // ── Popup overlays (order matters — last renders on top) ──
+
     SelectPopup {
         title: select-title;
         options: select-options;
@@ -349,9 +469,23 @@ export component App inherits Window {
             select-visible = false;
             select-confirmed(select-key, idx);
         }
-
         cancelled() => {
             select-visible = false;
+        }
+    }
+
+    TextInputPopup {
+        title: text-input-title;
+        input-text: text-input-value;
+        is-password: text-input-password;
+        popup-visible: text-input-visible;
+
+        confirmed(val) => {
+            text-input-visible = false;
+            text-confirmed(text-input-key, val);
+        }
+        cancelled() => {
+            text-input-visible = false;
         }
     }
 }
