@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Context, Result};
 
 use crate::system::cmd::{CommandRunner, check_exit};
 
@@ -10,14 +10,15 @@ pub fn copy_iso_network(runner: &dyn CommandRunner, target: &Path) -> Result<()>
     let src_networkd = Path::new("/etc/systemd/network");
     let dst_networkd = target.join("etc/systemd/network");
     if src_networkd.exists() {
-        copy_dir_contents(src_networkd, &dst_networkd)?;
+        copy_dir_contents(src_networkd, &dst_networkd)
+            .wrap_err("failed to copy systemd-networkd configs")?;
     }
 
     // Copy iwd configs (wifi)
     let src_iwd = Path::new("/var/lib/iwd");
     let dst_iwd = target.join("var/lib/iwd");
     if src_iwd.exists() {
-        copy_dir_contents(src_iwd, &dst_iwd)?;
+        copy_dir_contents(src_iwd, &dst_iwd).wrap_err("failed to copy iwd configs")?;
     }
 
     // Create resolv.conf symlink
@@ -57,18 +58,11 @@ pub fn install_network_manager(runner: &dyn CommandRunner, target: &Path) -> Res
 
 fn copy_dir_contents(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst)?;
-    if src.is_dir() {
-        for entry in fs::read_dir(src)? {
-            let entry = entry?;
-            let src_path = entry.path();
-            let dst_path = dst.join(entry.file_name());
-            if src_path.is_dir() {
-                copy_dir_contents(&src_path, &dst_path)?;
-            } else {
-                fs::copy(&src_path, &dst_path)?;
-            }
-        }
-    }
+    let options = fs_extra::dir::CopyOptions::new()
+        .content_only(true)
+        .copy_inside(true);
+    fs_extra::dir::copy(src, dst, &options)
+        .map_err(|e| color_eyre::eyre::eyre!("copy_dir failed: {e}"))?;
     Ok(())
 }
 
@@ -81,9 +75,19 @@ mod tests {
         let src = tempfile::tempdir().unwrap();
         let dst = tempfile::tempdir().unwrap();
 
+        // Create file and subdirectory
         fs::write(src.path().join("test.conf"), "content").unwrap();
-        copy_dir_contents(src.path(), &dst.path().join("out")).unwrap();
+        fs::create_dir_all(src.path().join("subdir")).unwrap();
+        fs::write(src.path().join("subdir/nested.conf"), "nested").unwrap();
 
-        assert!(dst.path().join("out/test.conf").exists());
+        let out = dst.path().join("out");
+        copy_dir_contents(src.path(), &out).unwrap();
+
+        assert!(out.join("test.conf").exists());
+        assert!(out.join("subdir/nested.conf").exists());
+        assert_eq!(
+            fs::read_to_string(out.join("subdir/nested.conf")).unwrap(),
+            "nested"
+        );
     }
 }

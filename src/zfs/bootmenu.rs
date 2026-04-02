@@ -2,45 +2,81 @@ use std::fs;
 use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
+use serde::Serialize;
 
 use crate::config::types::InitSystem;
 use crate::system::cmd::{CommandRunner, check_exit, chroot};
 
 pub const HOSTID_VALUE: &str = "0x00bab10c";
 
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct ZbmConfig {
+    global: ZbmGlobal,
+    components: ZbmComponents,
+    #[serde(rename = "EFI")]
+    efi: ZbmEfi,
+    kernel: ZbmKernel,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct ZbmGlobal {
+    manage_images: bool,
+    boot_mount_point: String,
+    dracut_conf_dir: String,
+    #[serde(rename = "InitCPIOConfig")]
+    init_cpio_config: String,
+    #[serde(rename = "InitCPIO")]
+    init_cpio: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct ZbmComponents {
+    enabled: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct ZbmEfi {
+    image_dir: String,
+    versions: bool,
+    enabled: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct ZbmKernel {
+    command_line: String,
+}
+
 /// Write /etc/zfsbootmenu/config.yaml inside the target chroot.
-/// This configures generate-zbm to build a unified EFI bundle using the same
-/// init system (dracut or mkinitcpio) and kernel as the installed system.
 fn write_zbm_config(target: &Path, init_system: InitSystem) -> Result<()> {
     let conf_dir = target.join("etc/zfsbootmenu");
     fs::create_dir_all(&conf_dir)?;
 
-    let initcpio_line = match init_system {
-        InitSystem::Mkinitcpio => "  InitCPIO: true",
-        InitSystem::Dracut => "  InitCPIO: false",
+    let config = ZbmConfig {
+        global: ZbmGlobal {
+            manage_images: true,
+            boot_mount_point: "/boot/efi".into(),
+            dracut_conf_dir: "/etc/zfsbootmenu/dracut.conf.d".into(),
+            init_cpio_config: "/etc/zfsbootmenu/mkinitcpio.conf".into(),
+            init_cpio: matches!(init_system, InitSystem::Mkinitcpio),
+        },
+        components: ZbmComponents { enabled: false },
+        efi: ZbmEfi {
+            image_dir: "/boot/efi/EFI/zbm".into(),
+            versions: false,
+            enabled: true,
+        },
+        kernel: ZbmKernel {
+            command_line: "zbm.import_policy=hostid zbm.timeout=10 ro quiet loglevel=0".into(),
+        },
     };
 
-    // zbm.timeout=10: auto-boot after 10s countdown
-    // zbm.import_policy=hostid: adopt hostid from pool if needed
-    let config = format!(
-        r#"Global:
-  ManageImages: true
-  BootMountPoint: /boot/efi
-  DracutConfDir: /etc/zfsbootmenu/dracut.conf.d
-  InitCPIOConfig: /etc/zfsbootmenu/mkinitcpio.conf
-{initcpio_line}
-Components:
-  Enabled: false
-EFI:
-  ImageDir: /boot/efi/EFI/zbm
-  Versions: false
-  Enabled: true
-Kernel:
-  CommandLine: zbm.import_policy=hostid zbm.timeout=10 ro quiet loglevel=0
-"#
-    );
-
-    fs::write(conf_dir.join("config.yaml"), config).wrap_err("failed to write ZBM config.yaml")?;
+    let yaml = serde_yaml_ng::to_string(&config).wrap_err("failed to serialize ZBM config")?;
+    fs::write(conf_dir.join("config.yaml"), yaml).wrap_err("failed to write ZBM config.yaml")?;
     tracing::info!("wrote /etc/zfsbootmenu/config.yaml (init_system={init_system})");
     Ok(())
 }
