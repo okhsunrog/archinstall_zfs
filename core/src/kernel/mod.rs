@@ -103,20 +103,112 @@ fn init_alpm() -> Result<alpm::Alpm> {
 }
 
 /// Query multiple packages at once, returning a map of name -> version.
+/// For ZFS packages (zfs-*), falls back to downloading archzfs.db directly
+/// if the package isn't found in locally configured repos.
 pub fn query_packages(packages: &[&str]) -> Result<std::collections::HashMap<String, String>> {
     let handle = init_alpm()?;
 
     let mut result = std::collections::HashMap::new();
+    let mut missing_zfs = Vec::new();
+
     for &pkg_name in packages {
+        let mut found = false;
         for db in handle.syncdbs() {
             if let Ok(pkg) = db.pkg(pkg_name.as_bytes()) {
                 result.insert(pkg_name.to_string(), pkg.version().to_string());
+                found = true;
                 break;
+            }
+        }
+        // Track ZFS packages not found locally — we'll try archzfs.db fallback
+        if !found && pkg_name.starts_with("zfs-") {
+            missing_zfs.push(pkg_name);
+        }
+    }
+
+    // Fallback: download archzfs.db for ZFS packages not in local repos
+    if !missing_zfs.is_empty() {
+        if let Some(archzfs_versions) = fetch_archzfs_db_versions() {
+            for &pkg_name in &missing_zfs {
+                if let Some(ver) = archzfs_versions.get(pkg_name) {
+                    tracing::debug!(
+                        package = pkg_name,
+                        version = ver,
+                        "found ZFS package version from archzfs.db fallback"
+                    );
+                    result.insert(pkg_name.to_string(), ver.clone());
+                }
             }
         }
     }
 
     Ok(result)
+}
+
+/// Download and parse the archzfs package database to get ZFS package versions.
+/// This works even when archzfs repo isn't configured locally (e.g., before
+/// add_archzfs_repo is called, or in CI environments).
+fn fetch_archzfs_db_versions() -> Option<std::collections::HashMap<String, String>> {
+    let url = "https://github.com/archzfs/archzfs/releases/download/experimental/archzfs.db";
+    tracing::debug!("downloading archzfs.db from {url}");
+
+    let client = reqwest::blocking::Client::new();
+    let resp = client
+        .get(url)
+        .header("User-Agent", "archinstall-zfs-rs")
+        .send()
+        .ok()?;
+    let data = resp.bytes().ok()?;
+
+    // archzfs.db is an XZ-compressed tar archive
+    let mut decompressed = Vec::new();
+    lzma_rs::xz_decompress(&mut std::io::Cursor::new(&data), &mut decompressed).ok()?;
+    let mut archive = tar::Archive::new(std::io::Cursor::new(decompressed));
+
+    let mut versions = std::collections::HashMap::new();
+    for entry in archive.entries().ok()? {
+        let mut entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let path = match entry.path() {
+            Ok(p) => p.to_string_lossy().to_string(),
+            Err(_) => continue,
+        };
+        // Look for desc files: "zfs-linux-lts-2.3.3_6.12.41.1-1/desc"
+        if !path.ends_with("/desc") {
+            continue;
+        }
+        let mut content = String::new();
+        if std::io::Read::read_to_string(&mut entry, &mut content).is_err() {
+            continue;
+        }
+        // Parse %NAME% and %VERSION% from desc format
+        let mut name = None;
+        let mut version = None;
+        let mut section = "";
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with('%') && trimmed.ends_with('%') {
+                section = trimmed;
+                continue;
+            }
+            if trimmed.is_empty() {
+                continue;
+            }
+            match section {
+                "%NAME%" => name = Some(trimmed.to_string()),
+                "%VERSION%" => version = Some(trimmed.to_string()),
+                _ => {}
+            }
+        }
+        if let (Some(n), Some(v)) = (name, version) {
+            versions.insert(n, v);
+        }
+    }
+
+    tracing::debug!(count = versions.len(), "parsed archzfs.db");
+    Some(versions)
 }
 
 #[cfg(test)]
