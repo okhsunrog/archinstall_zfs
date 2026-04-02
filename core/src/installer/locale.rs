@@ -99,6 +99,29 @@ pub fn list_timezone_cities(region: &str) -> Vec<String> {
     cities
 }
 
+/// List available locales by parsing /etc/locale.gen.
+/// Returns only UTF-8 locales (most common), sorted.
+pub fn list_locales() -> Vec<String> {
+    let path = Path::new("/etc/locale.gen");
+    let mut locales = Vec::new();
+    if let Ok(content) = fs::read_to_string(path) {
+        for line in content.lines() {
+            let line = line.trim();
+            // Lines look like: #en_US.UTF-8 UTF-8
+            let entry = line.strip_prefix('#').unwrap_or(line).trim();
+            if entry.is_empty() || entry.starts_with('#') {
+                continue;
+            }
+            if entry.contains("UTF-8") {
+                locales.push(entry.to_string());
+            }
+        }
+    }
+    locales.sort();
+    locales.dedup();
+    locales
+}
+
 pub fn set_timezone(target: &Path, timezone: &str) -> Result<()> {
     let localtime = target.join("etc/localtime");
     let zoneinfo = format!("/usr/share/zoneinfo/{timezone}");

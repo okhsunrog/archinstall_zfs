@@ -163,6 +163,16 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 return;
             }
 
+            // Locale select
+            if key == "locale_select" {
+                let locales = archinstall_zfs_core::installer::locale::list_locales();
+                if let Some(loc) = locales.get(idx as usize) {
+                    cfg.borrow_mut().locale = Some(loc.clone());
+                    refresh_config_items(&app, &cfg.borrow());
+                }
+                return;
+            }
+
             let mut c = cfg.borrow_mut();
             apply_select(&mut c, &key, idx);
             refresh_config_items(&app, &c);
@@ -329,7 +339,7 @@ fn build_config_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             "locale",
             "Locale",
             &c.locale.clone().unwrap_or("Not set".into()),
-            0,
+            1,
         ),
         ci(
             "timezone",
@@ -529,12 +539,18 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig) {
             show_select(app, "timezone_region", "Timezone region", &regions, 0);
         }
 
+        // Locale: select from available UTF-8 locales
+        "locale" => {
+            let locales = archinstall_zfs_core::installer::locale::list_locales();
+            let locale_strs: Vec<&str> = locales.iter().map(|s| s.as_str()).collect();
+            show_select(app, "locale_select", "Locale", &locale_strs, 0);
+        }
+
         // Text items
         "disk_by_id"
         | "pool_name"
         | "dataset_prefix"
         | "hostname"
-        | "locale"
         | "keyboard"
         | "additional_packages"
         | "aur_packages" => {
@@ -547,7 +563,6 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig) {
                 "pool_name" => config.pool_name.clone().unwrap_or_default(),
                 "dataset_prefix" => config.dataset_prefix.clone(),
                 "hostname" => config.hostname.clone().unwrap_or_default(),
-                "locale" => config.locale.clone().unwrap_or_default(),
                 "keyboard" => config.keyboard_layout.clone(),
                 "additional_packages" => config.additional_packages.join(" "),
                 "aur_packages" => config.aur_packages.join(" "),

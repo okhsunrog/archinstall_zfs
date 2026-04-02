@@ -208,7 +208,7 @@ impl MainMenu {
                 key: "locale",
                 label: "Locale",
                 value: c.locale.clone().unwrap_or("Not set".into()),
-                kind: MenuKind::Text,
+                kind: MenuKind::Action, // handled specially in activate_item
             },
             MenuItem {
                 key: "timezone",
@@ -404,6 +404,11 @@ impl MainMenu {
                         self.config.timezone = Some(tz);
                     }
                 }
+                "locale" => {
+                    if let Some(loc) = self.pick_locale(terminal)? {
+                        self.config.locale = Some(loc);
+                    }
+                }
                 _ => {}
             },
             MenuKind::Toggle => {
@@ -464,6 +469,21 @@ impl MainMenu {
         };
 
         Ok(Some(format!("{region}/{}", cities[city_idx])))
+    }
+
+    fn pick_locale(
+        &self,
+        terminal: &mut ratatui::DefaultTerminal,
+    ) -> color_eyre::eyre::Result<Option<String>> {
+        use archinstall_zfs_core::installer::locale;
+
+        let locales = locale::list_locales();
+        let locale_strs: Vec<&str> = locales.iter().map(|s| s.as_str()).collect();
+        let result = run_select(terminal, "Locale", &locale_strs, 0)?;
+        match result.selected {
+            Some(idx) => Ok(Some(locales[idx].clone())),
+            None => Ok(None),
+        }
     }
 
     fn apply_toggle(&mut self, key: &str) {

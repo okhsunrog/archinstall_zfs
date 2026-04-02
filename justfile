@@ -145,6 +145,16 @@ qemu-run-serial:
 ssh:
     ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 root@localhost
 
+# Upload latest binaries to running QEMU VM
+upload:
+    scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P 2222 \
+        {{BINARY}} root@localhost:/root/archinstall-zfs
+    @if [ -f {{BINARY_SLINT}} ]; then \
+        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P 2222 \
+            {{BINARY_SLINT}} root@localhost:/root/archinstall-zfs-slint; \
+    fi
+    @echo "Uploaded to QEMU VM"
+
 # ─── Integration Tests ─────────────────────────────────
 
 # Full cycle: fresh disk, install, boot, verify
