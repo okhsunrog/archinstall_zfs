@@ -49,8 +49,7 @@ pub fn run_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Result<
     // ── Phase 0: Pre-installation checks ───────────────────────
     tracing::info!("Phase 0: Pre-installation checks");
 
-    let has_internet = archinstall_zfs_core::system::net::check_internet(runner)?;
-    if !has_internet {
+    if !archinstall_zfs_core::system::net::check_internet() {
         bail!("No internet connectivity. Connect to the network and retry.");
     }
     tracing::info!("Internet connectivity OK");
