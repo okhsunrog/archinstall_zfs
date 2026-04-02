@@ -249,13 +249,7 @@ impl MainMenu {
                 key: "profile",
                 label: "Profile",
                 value: c.profile.clone().unwrap_or("Not set".into()),
-                kind: MenuKind::Select {
-                    options: vec![
-                        "None", "gnome", "plasma", "xfce", "sway", "hyprland", "i3", "budgie",
-                        "cinnamon", "mate", "lxqt", "deepin", "cutefish", "minimal",
-                    ],
-                    current: 0,
-                },
+                kind: MenuKind::Action,
             },
             MenuItem {
                 key: "audio",
@@ -412,6 +406,19 @@ impl MainMenu {
                 "disk_by_id" => {
                     if let Some(disk) = self.pick_disk(terminal)? {
                         self.config.disk_by_id = Some(disk);
+                    }
+                }
+                "profile" => {
+                    let profiles = archinstall_zfs_core::profile::all_profiles();
+                    let mut names: Vec<&str> = vec!["None"];
+                    names.extend(profiles.iter().map(|p| p.name));
+                    let result = run_select(terminal, "Profile", &names, 0)?;
+                    if let Some(idx) = result.selected {
+                        self.config.profile = if idx == 0 {
+                            None
+                        } else {
+                            Some(names[idx].to_string())
+                        };
                     }
                 }
                 _ => {}
@@ -576,15 +583,13 @@ impl MainMenu {
                     _ => return,
                 };
             }
+            // profile handled via pick from registry in activate_item
             "profile" => {
                 self.config.profile = match idx {
                     0 => None,
-                    i => {
-                        let profiles = [
-                            "gnome", "plasma", "xfce", "sway", "hyprland", "i3", "budgie",
-                            "cinnamon", "mate", "lxqt", "deepin", "cutefish", "minimal",
-                        ];
-                        profiles.get(i - 1).map(|s| s.to_string())
+                    _ => {
+                        let profiles = archinstall_zfs_core::profile::all_profiles();
+                        profiles.get(idx - 1).map(|p| p.name.to_string())
                     }
                 };
             }

@@ -3,6 +3,12 @@ use super::Profile;
 pub fn server_profiles() -> Vec<Profile> {
     vec![
         Profile {
+            name: "minimal",
+            display_name: "Minimal",
+            packages: vec![],
+            services: vec![],
+        },
+        Profile {
             name: "sshd",
             display_name: "SSH Server",
             packages: vec!["openssh"],

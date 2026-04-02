@@ -174,6 +174,18 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 return;
             }
 
+            // Profile select
+            if key == "profile_select" {
+                let profiles = archinstall_zfs_core::profile::all_profiles();
+                cfg.borrow_mut().profile = if idx == 0 {
+                    None
+                } else {
+                    profiles.get((idx - 1) as usize).map(|p| p.name.to_string())
+                };
+                refresh_config_items(&app, &cfg.borrow());
+                return;
+            }
+
             // Locale select
             if key == "locale_select" {
                 let locales = archinstall_zfs_core::installer::locale::list_locales();
@@ -522,16 +534,13 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig) {
                 ZfsModuleMode::Dkms => 1,
             },
         ),
-        "profile" => show_select(
-            app,
-            key,
-            "Profile",
-            &[
-                "None", "gnome", "plasma", "xfce", "sway", "hyprland", "i3", "budgie", "cinnamon",
-                "mate", "lxqt", "deepin", "minimal",
-            ],
-            0,
-        ),
+        "profile" => {
+            let profiles = archinstall_zfs_core::profile::all_profiles();
+            let mut names: Vec<String> = vec!["None".to_string()];
+            names.extend(profiles.iter().map(|p| p.name.to_string()));
+            let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+            show_select(app, "profile_select", "Profile", &name_refs, 0);
+        }
         "audio" => show_select(
             app,
             key,
@@ -665,16 +674,7 @@ fn apply_select(config: &mut GlobalConfig, key: &str, idx: i32) {
             }
         }
         "profile" => {
-            config.profile = match idx {
-                0 => None,
-                i => {
-                    let profiles = [
-                        "gnome", "plasma", "xfce", "sway", "hyprland", "i3", "budgie", "cinnamon",
-                        "mate", "lxqt", "deepin", "minimal",
-                    ];
-                    profiles.get((i - 1) as usize).map(|s| s.to_string())
-                }
-            }
+            // profile handled via profile_select
         }
         "audio" => {
             config.audio = match idx {
