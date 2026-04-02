@@ -265,7 +265,18 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 let layer = tracing_layer::UiLogLayer::new(log_tx);
                 let filter = tracing_subscriber::EnvFilter::try_from_default_env()
                     .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("trace"));
-                let subscriber = tracing_subscriber::registry().with(filter).with(layer);
+
+                let file_appender =
+                    tracing_appender::rolling::never("/tmp", "archinstall-zfs.log");
+                let file_layer = tracing_subscriber::fmt::layer()
+                    .with_writer(file_appender)
+                    .with_ansi(false)
+                    .with_target(true);
+
+                let subscriber = tracing_subscriber::registry()
+                    .with(filter)
+                    .with(file_layer)
+                    .with(layer);
                 let _guard = tracing::subscriber::set_default(subscriber);
 
                 let runner = archinstall_zfs_core::system::cmd::RealRunner;

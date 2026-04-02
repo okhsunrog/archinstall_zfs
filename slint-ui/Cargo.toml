@@ -17,6 +17,7 @@ slint = { git = "https://github.com/okhsunrog/slint.git", branch = "feat/rendere
     "renderer-skia-software",
 ] }
 tracing = "0.1.44"
+tracing-appender = "0.2.4"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 [build-dependencies]

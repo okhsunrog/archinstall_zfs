@@ -63,16 +63,25 @@ fn setup_logging() -> Result<()> {
     use tracing_subscriber::fmt;
     use tracing_subscriber::prelude::*;
 
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    // Console: info+ by default (overridable via RUST_LOG)
+    let console_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let console_layer = fmt::layer()
+        .with_writer(std::io::stderr)
+        .with_target(false)
+        .with_filter(console_filter);
 
+    // File: always trace level for full diagnostics
     let file_appender = tracing_appender::rolling::never("/tmp", "archinstall-zfs.log");
+    let file_filter = EnvFilter::new("trace");
     let file_layer = fmt::layer()
         .with_writer(file_appender)
         .with_ansi(false)
-        .with_target(true);
+        .with_target(true)
+        .with_filter(file_filter);
 
     tracing_subscriber::registry()
-        .with(filter)
+        .with(console_layer)
         .with(file_layer)
         .init();
 

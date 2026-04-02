@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use alpm::{Alpm, AnyDownloadEvent, AnyEvent, DownloadEvent, LogLevel, SigLevel, TransFlag};
+use alpm::{Alpm, DownloadEvent, LogLevel, SigLevel, TransFlag};
 use color_eyre::eyre::{Context, Result, bail, eyre};
 
 /// Wraps an alpm handle with lifecycle management for host or target installs.
@@ -26,7 +26,7 @@ impl AlpmContext {
         alpm_utils::configure_alpm(&mut handle, &conf)
             .map_err(|e| eyre!("failed to configure alpm: {e}"))?;
 
-        let mut ctx = Self {
+        let ctx = Self {
             handle,
             root: PathBuf::from(&conf.root_dir),
             is_target: false,
@@ -66,7 +66,7 @@ impl AlpmContext {
             .set_cachedirs([cache_dir.as_str()].iter())
             .map_err(|e| eyre!("failed to set cache dir: {e}"))?;
 
-        let mut ctx = Self {
+        let ctx = Self {
             handle,
             root: target.to_path_buf(),
             is_target: true,

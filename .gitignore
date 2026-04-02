@@ -4,3 +4,4 @@ gen_iso/workdir/
 gen_iso/arch.qcow2
 gen_iso/my_vars.fd
 gen_iso/profile_rendered/
+test-install.log

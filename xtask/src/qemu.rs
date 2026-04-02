@@ -181,22 +181,72 @@ impl QemuVm {
 
     pub fn scp_to(&self, local: &Path, remote: &str) {
         let port_str = self.port.to_string();
-        let status = Command::new("scp")
-            .args([
-                "-o",
-                "StrictHostKeyChecking=no",
-                "-o",
-                "UserKnownHostsFile=/dev/null",
-                "-P",
-                &port_str,
-                local.to_str().unwrap(),
-                &format!("root@localhost:{remote}"),
-            ])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .expect("scp failed to execute");
-        assert!(status.success(), "scp to {remote} failed");
+        let mut args = vec![
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+            "-P",
+            &port_str,
+        ];
+        let local_str = local.to_str().unwrap();
+        let remote_dest = format!("root@localhost:{remote}");
+
+        if let Some(ref pw) = self.password {
+            let status = Command::new("sshpass")
+                .args(["-p", pw, "scp"])
+                .args(&args)
+                .args([local_str, remote_dest.as_str()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .expect("scp failed to execute");
+            assert!(status.success(), "scp to {remote} failed");
+        } else {
+            args.push(local_str);
+            args.push(remote_dest.as_str());
+            let status = Command::new("scp")
+                .args(&args)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .expect("scp failed to execute");
+            assert!(status.success(), "scp to {remote} failed");
+        }
+    }
+
+    /// Copy a file from the VM to a local path. Returns true on success.
+    pub fn scp_from(&self, remote: &str, local: &Path) -> bool {
+        let port_str = self.port.to_string();
+        let remote_src = format!("root@localhost:{remote}");
+        let local_str = local.to_str().unwrap();
+        let base_args = [
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+            "-P",
+            &port_str,
+        ];
+
+        let status = if let Some(pw) = &self.password {
+            Command::new("sshpass")
+                .args(["-p", pw, "scp"])
+                .args(&base_args)
+                .args([remote_src.as_str(), local_str])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+        } else {
+            Command::new("scp")
+                .args(&base_args)
+                .args([remote_src.as_str(), local_str])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+        };
+
+        status.is_ok_and(|s| s.success())
     }
 
     pub fn shutdown(&mut self) {

@@ -155,12 +155,22 @@ fn cmd_test_install(opts: TestOpts) -> Result<(), String> {
         .ssh_run("/root/archinstall-zfs-rs --config /root/config.json --silent")
         .map_err(|e| format!("installer failed to execute: {e}"))?;
 
+    // Pull installer logs from VM before shutdown (regardless of success/failure)
+    let log_dest = PathBuf::from("test-install.log");
+    if vm.scp_from("/tmp/archinstall-zfs.log", &log_dest) {
+        eprintln!("  Logs saved to {}", log_dest.display());
+    } else {
+        eprintln!("  Warning: could not retrieve installer logs");
+    }
+
     if !output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
+        vm.shutdown();
         return Err(format!(
-            "Installer exited with {}:\nstdout: {stdout}\nstderr: {stderr}",
-            output.status
+            "Installer exited with {}:\nstdout: {stdout}\nstderr: {stderr}\nLogs: {}",
+            output.status,
+            log_dest.display()
         ));
     }
 
