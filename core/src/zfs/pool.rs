@@ -210,4 +210,26 @@ mod tests {
         assert!(calls[1].args.contains(&"export".to_string()));
         assert!(calls[1].args.contains(&"mypool".to_string()));
     }
+
+    #[test]
+    fn test_discover_importable_pools() {
+        let output = "   pool: mypool\n     id: 12345\n  state: ONLINE\n\n   pool: backup\n     id: 67890\n  state: ONLINE\n";
+        let runner = RecordingRunner::new(vec![CannedResponse {
+            stdout: output.into(),
+            ..Default::default()
+        }]);
+        let pools = discover_importable_pools(&runner);
+        assert_eq!(pools, vec!["mypool", "backup"]);
+    }
+
+    #[test]
+    fn test_discover_importable_pools_empty() {
+        let runner = RecordingRunner::new(vec![CannedResponse {
+            stdout: "no pools available to import\n".into(),
+            exit_code: 1,
+            ..Default::default()
+        }]);
+        let pools = discover_importable_pools(&runner);
+        assert!(pools.is_empty());
+    }
 }

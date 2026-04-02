@@ -104,16 +104,7 @@ pub fn verify_pool_passphrase(runner: &dyn CommandRunner, pool: &str, password: 
     }
 
     // Write password to a temporary file
-    let tmp_result = tempfile::NamedTempFile::new();
-    let tmp = match tmp_result {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to create temp key file");
-            let _ = runner.run("zpool", &["export", pool]);
-            return false;
-        }
-    };
-    let key_path = tmp.path().to_path_buf();
+    let key_path = std::env::temp_dir().join(format!(".zfs_verify_{}", std::process::id()));
 
     let write_ok = fs::write(&key_path, password).is_ok()
         && fs::set_permissions(&key_path, fs::Permissions::from_mode(0o000)).is_ok();
@@ -182,5 +173,97 @@ mod tests {
             ..Default::default()
         }]);
         assert!(!detect_encryption(&runner, "testpool").unwrap());
+    }
+
+    #[test]
+    fn test_detect_pool_encryption_encrypted() {
+        let runner = RecordingRunner::new(vec![
+            CannedResponse::default(), // zpool import -fN
+            CannedResponse {
+                stdout: "aes-256-gcm\n".into(),
+                ..Default::default()
+            }, // zfs get encryption
+            CannedResponse::default(), // zfs unload-key
+            CannedResponse::default(), // zpool export
+        ]);
+        assert!(detect_pool_encryption(&runner, "testpool"));
+
+        let calls = runner.calls();
+        assert_eq!(calls[0].program, "zpool");
+        assert!(calls[0].args.contains(&"import".to_string()));
+        assert!(calls[0].args.contains(&"-fN".to_string()));
+        // Cleanup: unload-key + export
+        assert_eq!(calls[2].program, "zfs");
+        assert!(calls[2].args.contains(&"unload-key".to_string()));
+        assert_eq!(calls[3].program, "zpool");
+        assert!(calls[3].args.contains(&"export".to_string()));
+    }
+
+    #[test]
+    fn test_detect_pool_encryption_not_encrypted() {
+        let runner = RecordingRunner::new(vec![
+            CannedResponse::default(), // zpool import -fN
+            CannedResponse {
+                stdout: "off\n".into(),
+                ..Default::default()
+            }, // zfs get encryption
+            CannedResponse::default(), // zfs unload-key
+            CannedResponse::default(), // zpool export
+        ]);
+        assert!(!detect_pool_encryption(&runner, "testpool"));
+    }
+
+    #[test]
+    fn test_detect_pool_encryption_import_fails() {
+        let runner = RecordingRunner::new(vec![
+            CannedResponse {
+                exit_code: 1,
+                ..Default::default()
+            }, // zpool import fails
+        ]);
+        assert!(!detect_pool_encryption(&runner, "badpool"));
+    }
+
+    #[test]
+    fn test_verify_pool_passphrase_success() {
+        let runner = RecordingRunner::new(vec![
+            CannedResponse::default(), // zpool import -fN
+            CannedResponse::default(), // zfs load-key (success)
+            CannedResponse::default(), // zfs unload-key
+            CannedResponse::default(), // zpool export
+        ]);
+        assert!(verify_pool_passphrase(&runner, "testpool", "correct"));
+
+        let calls = runner.calls();
+        // First call: import
+        assert!(calls[0].args.contains(&"import".to_string()));
+        // Second call: load-key with -L file://...
+        assert_eq!(calls[1].program, "zfs");
+        assert!(calls[1].args.contains(&"load-key".to_string()));
+    }
+
+    #[test]
+    fn test_verify_pool_passphrase_wrong() {
+        let runner = RecordingRunner::new(vec![
+            CannedResponse::default(), // zpool import -fN
+            CannedResponse {
+                exit_code: 1,
+                ..Default::default()
+            }, // zfs load-key fails
+            CannedResponse::default(), // zfs unload-key
+            CannedResponse::default(), // zpool export
+        ]);
+        assert!(!verify_pool_passphrase(&runner, "testpool", "wrong"));
+    }
+
+    #[test]
+    fn test_verify_pool_passphrase_import_fails() {
+        let runner = RecordingRunner::new(vec![
+            CannedResponse {
+                exit_code: 1,
+                ..Default::default()
+            }, // zpool import fails
+        ]);
+        assert!(!verify_pool_passphrase(&runner, "badpool", "pass"));
     }
 }

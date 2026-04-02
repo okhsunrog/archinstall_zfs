@@ -1,18 +1,18 @@
 use crossterm::event::{Event, KeyCode, KeyModifiers};
-use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
+use ratatui::Frame;
 
 use archinstall_zfs_core::config::types::{
     AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, SwapMode, UserConfig,
     ZfsEncryptionMode, ZfsModuleMode,
 };
 
-use crate::tui::Action;
 use crate::tui::theme;
+use crate::tui::Action;
 
 use super::edit::run_edit;
 use super::select::run_select;
@@ -151,7 +151,11 @@ impl MainMenu {
             key: "pool_name",
             label: "Pool name",
             value: c.pool_name.clone().unwrap_or("Not set".into()),
-            kind: MenuKind::Text,
+            kind: if matches!(mode, Some(InstallationMode::ExistingPool)) {
+                MenuKind::Custom
+            } else {
+                MenuKind::Text
+            },
         });
         items.push(MenuItem {
             key: "dataset_prefix",
@@ -229,10 +233,7 @@ impl MainMenu {
             items.push(MenuItem {
                 key: "swap_partition_size",
                 label: "Swap size",
-                value: c
-                    .swap_partition_size
-                    .clone()
-                    .unwrap_or("Not set".into()),
+                value: c.swap_partition_size.clone().unwrap_or("Not set".into()),
                 kind: MenuKind::Text,
             });
         }
@@ -635,6 +636,10 @@ impl MainMenu {
                         self.config.parallel_downloads = (idx + 1) as u32;
                     }
                 }
+                "pool_name" => {
+                    // ExistingPool mode: discover pools, detect encryption, verify passphrase
+                    self.pick_existing_pool(terminal)?;
+                }
                 _ => {}
             },
             MenuKind::Toggle => {
@@ -732,6 +737,116 @@ impl MainMenu {
         }
     }
 
+    /// Existing-pool picker: discover importable pools, let the user select one,
+    /// then detect encryption and verify passphrase (matching the Python flow).
+    fn pick_existing_pool(
+        &mut self,
+        terminal: &mut ratatui::DefaultTerminal,
+    ) -> color_eyre::eyre::Result<()> {
+        use archinstall_zfs_core::system::cmd::RealRunner;
+        use archinstall_zfs_core::zfs::{encryption, pool};
+
+        let runner = RealRunner;
+
+        // Discover importable pools, offer Refresh and manual entry
+        let pool_name = loop {
+            let mut pools = pool::discover_importable_pools(&runner);
+            let mut options: Vec<String> = pools.iter().map(|p| p.clone()).collect();
+            options.push("Refresh".into());
+            options.push("Enter manually".into());
+            let opt_refs: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
+
+            let current = if let Some(ref name) = self.config.pool_name {
+                pools.iter().position(|p| p == name).unwrap_or(0)
+            } else {
+                0
+            };
+
+            let result = run_select(terminal, "Select importable ZFS pool", &opt_refs, current)?;
+            let Some(idx) = result.selected else {
+                return Ok(()); // cancelled
+            };
+
+            if idx == options.len() - 2 {
+                // Refresh
+                continue;
+            } else if idx == options.len() - 1 {
+                // Enter manually
+                let result = run_edit(terminal, "Pool name", "", false)?;
+                match result.value {
+                    Some(name) if !name.is_empty() => break name,
+                    _ => return Ok(()),
+                }
+            } else {
+                break pools.swap_remove(idx);
+            }
+        };
+
+        self.config.pool_name = Some(pool_name.clone());
+
+        // Detect encryption via ephemeral import/export
+        if encryption::detect_pool_encryption(&runner, &pool_name) {
+            // Pool is encrypted — verify passphrase
+            loop {
+                let result = run_edit(terminal, "Enter pool passphrase", "", true)?;
+                let Some(pw) = result.value else {
+                    // User cancelled — leave encryption unconfigured
+                    break;
+                };
+                if pw.is_empty() {
+                    break;
+                }
+
+                if encryption::verify_pool_passphrase(&runner, &pool_name, &pw) {
+                    self.config.zfs_encryption_mode = ZfsEncryptionMode::Pool;
+                    self.config.zfs_encryption_password = Some(pw);
+                    break;
+                } else {
+                    let _ = run_select(
+                        terminal,
+                        "Passphrase verification failed. Try again.",
+                        &["OK"],
+                        0,
+                    );
+                }
+            }
+        } else {
+            // Pool is not encrypted — offer to encrypt the new base dataset
+            let result = run_select(
+                terminal,
+                "Encrypt the new base dataset?",
+                &["No - Skip encryption", "Yes - Encrypt new base dataset"],
+                0,
+            )?;
+            if result.selected == Some(1) {
+                // Prompt for new encryption password with confirmation
+                loop {
+                    let pw1 = run_edit(terminal, "Encryption password (min 8 chars)", "", true)?;
+                    let Some(pw1) = pw1.value.filter(|p| !p.is_empty()) else {
+                        break;
+                    };
+                    let pw2 = run_edit(terminal, "Verify password", "", true)?;
+                    let Some(pw2) = pw2.value else {
+                        break;
+                    };
+                    if pw1 == pw2 {
+                        self.config.zfs_encryption_mode = ZfsEncryptionMode::Dataset;
+                        self.config.zfs_encryption_password = Some(pw1);
+                        break;
+                    } else {
+                        let _ =
+                            run_select(terminal, "Passwords do not match. Try again.", &["OK"], 0);
+                    }
+                }
+            } else {
+                self.config.zfs_encryption_mode = ZfsEncryptionMode::None;
+                self.config.zfs_encryption_password = None;
+            }
+        }
+
+        Ok(())
+    }
+
     fn pick_locale(
         &self,
         terminal: &mut ratatui::DefaultTerminal,
@@ -751,8 +866,8 @@ impl MainMenu {
         &self,
         terminal: &mut ratatui::DefaultTerminal,
     ) -> color_eyre::eyre::Result<Option<Vec<String>>> {
-        use archinstall_zfs_core::kernel::AVAILABLE_KERNELS;
         use archinstall_zfs_core::kernel::scanner::scan_all_kernels;
+        use archinstall_zfs_core::kernel::AVAILABLE_KERNELS;
 
         let results = scan_all_kernels();
 
@@ -832,7 +947,8 @@ impl MainMenu {
                 let result = run_edit(terminal, "Username", "", false)?;
                 if let Some(username) = result.value {
                     if !username.is_empty() {
-                        let pw_result = run_edit(terminal, "Password (empty=no password)", "", true)?;
+                        let pw_result =
+                            run_edit(terminal, "Password (empty=no password)", "", true)?;
                         let password = pw_result.value.filter(|p| !p.is_empty());
 
                         let sudo_opts = ["No", "Yes"];
@@ -846,10 +962,7 @@ impl MainMenu {
                             shell: None,
                             groups: None,
                         };
-                        self.config
-                            .users
-                            .get_or_insert_with(Vec::new)
-                            .push(user);
+                        self.config.users.get_or_insert_with(Vec::new).push(user);
                     }
                 }
             } else if options[idx].starts_with("- Remove") {
