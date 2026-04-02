@@ -2,26 +2,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Result, bail};
 
-use super::cmd::{CmdOutput, CommandRunner, check_exit};
-
-pub fn pacstrap(runner: &dyn CommandRunner, target: &Path, packages: &[&str]) -> Result<CmdOutput> {
-    let target_str = target.to_str().unwrap_or("/mnt");
-    let mut args = vec!["-C", "/etc/pacman.conf", "-K", target_str];
-    args.extend(packages);
-    args.push("--noconfirm");
-    args.push("--needed");
-    args.push("--noprogressbar");
-
-    let output = runner.run("pacstrap", &args)?;
-    check_exit(&output, "pacstrap")?;
-    Ok(output)
-}
-
-pub fn sync_db(runner: &dyn CommandRunner) -> Result<()> {
-    let output = runner.run("pacman", &["-Syy", "--noconfirm"])?;
-    check_exit(&output, "pacman -Syy")?;
-    Ok(())
-}
+use super::cmd::CommandRunner;
 
 pub fn wait_for_db_lock(_runner: &dyn CommandRunner) -> Result<()> {
     let lock_path = Path::new("/var/lib/pacman/db.lck");
@@ -58,7 +39,6 @@ pub fn add_archzfs_repo(runner: &dyn CommandRunner, target: Option<&Path>) -> Re
     // Rewrite or append [archzfs] block
     let content = std::fs::read_to_string(&pacman_conf)?;
     if content.contains("[archzfs]") {
-        // Replace existing block
         let new_content = rewrite_archzfs_block(&content);
         std::fs::write(&pacman_conf, new_content)?;
         tracing::info!("updated existing archzfs repo block");
@@ -142,13 +122,11 @@ fn rewrite_archzfs_block(content: &str) -> String {
             continue;
         }
         if in_archzfs_block {
-            // Skip lines until next section or end
             if line.starts_with('[') {
                 in_archzfs_block = false;
                 result.push_str(line);
                 result.push('\n');
             }
-            // else: skip the line (part of old archzfs block)
             continue;
         }
         result.push_str(line);
@@ -193,33 +171,6 @@ pub fn set_parallel_downloads(target: Option<&Path>, count: u32) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::system::cmd::tests::{CannedResponse, RecordingRunner};
-
-    #[test]
-    fn test_pacstrap_builds_correct_args() {
-        let runner = RecordingRunner::new(vec![CannedResponse::default()]);
-        let _ = pacstrap(&runner, Path::new("/mnt"), &["base", "linux-lts"]);
-
-        let calls = runner.calls();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].program, "pacstrap");
-        assert!(calls[0].args.contains(&"-K".to_string()));
-        assert!(calls[0].args.contains(&"/mnt".to_string()));
-        assert!(calls[0].args.contains(&"base".to_string()));
-        assert!(calls[0].args.contains(&"linux-lts".to_string()));
-        assert!(calls[0].args.contains(&"--noconfirm".to_string()));
-        assert!(calls[0].args.contains(&"--needed".to_string()));
-    }
-
-    #[test]
-    fn test_sync_db_runs_pacman() {
-        let runner = RecordingRunner::new(vec![CannedResponse::default()]);
-        sync_db(&runner).unwrap();
-
-        let calls = runner.calls();
-        assert_eq!(calls[0].program, "pacman");
-        assert!(calls[0].args.contains(&"-Syy".to_string()));
-    }
 
     #[test]
     fn test_set_parallel_downloads() {
