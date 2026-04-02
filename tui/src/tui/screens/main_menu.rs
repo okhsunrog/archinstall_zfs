@@ -7,7 +7,7 @@ use ratatui::widgets::{
 };
 
 use archinstall_zfs_core::config::types::{
-    AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, SwapMode,
+    AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, SwapMode, UserConfig,
     ZfsEncryptionMode, ZfsModuleMode,
 };
 
@@ -77,7 +77,13 @@ impl MainMenu {
 
     fn items(&self) -> Vec<MenuItem> {
         let c = &self.config;
-        vec![
+        let mode = c.installation_mode;
+        let has_swap_partition = matches!(
+            c.swap_mode,
+            SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
+        );
+
+        let mut items = vec![
             // ── Storage & ZFS ──
             MenuItem {
                 key: "installation_mode",
@@ -96,7 +102,11 @@ impl MainMenu {
                     },
                 },
             },
-            MenuItem {
+        ];
+
+        // Show disk picker for FullDisk mode
+        if matches!(mode, Some(InstallationMode::FullDisk) | None) {
+            items.push(MenuItem {
                 key: "disk_by_id",
                 label: "Disk",
                 value: c
@@ -105,77 +115,150 @@ impl MainMenu {
                     .map(|p| p.display().to_string())
                     .unwrap_or("Not set".into()),
                 kind: MenuKind::Custom,
+            });
+        }
+
+        // Show partition pickers for NewPool/ExistingPool
+        if matches!(
+            mode,
+            Some(InstallationMode::NewPool) | Some(InstallationMode::ExistingPool)
+        ) {
+            items.push(MenuItem {
+                key: "efi_partition",
+                label: "EFI partition",
+                value: c
+                    .efi_partition_by_id
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or("Not set".into()),
+                kind: MenuKind::Custom,
+            });
+        }
+        if matches!(mode, Some(InstallationMode::NewPool)) {
+            items.push(MenuItem {
+                key: "zfs_partition",
+                label: "ZFS partition",
+                value: c
+                    .zfs_partition_by_id
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or("Not set".into()),
+                kind: MenuKind::Custom,
+            });
+        }
+
+        items.push(MenuItem {
+            key: "pool_name",
+            label: "Pool name",
+            value: c.pool_name.clone().unwrap_or("Not set".into()),
+            kind: MenuKind::Text,
+        });
+        items.push(MenuItem {
+            key: "dataset_prefix",
+            label: "Dataset prefix",
+            value: c.dataset_prefix.clone(),
+            kind: MenuKind::Text,
+        });
+        items.push(MenuItem {
+            key: "encryption",
+            label: "Encryption",
+            value: c.zfs_encryption_mode.to_string(),
+            kind: MenuKind::Select {
+                options: vec![
+                    "No encryption",
+                    "Encrypt entire pool",
+                    "Encrypt base dataset only",
+                ],
+                current: match c.zfs_encryption_mode {
+                    ZfsEncryptionMode::None => 0,
+                    ZfsEncryptionMode::Pool => 1,
+                    ZfsEncryptionMode::Dataset => 2,
+                },
             },
-            MenuItem {
-                key: "pool_name",
-                label: "Pool name",
-                value: c.pool_name.clone().unwrap_or("Not set".into()),
+        });
+        // Show encryption password status when encryption is enabled
+        if c.zfs_encryption_mode != ZfsEncryptionMode::None {
+            items.push(MenuItem {
+                key: "encryption_password",
+                label: "Encryption password",
+                value: if c.zfs_encryption_password.is_some() {
+                    "Set".into()
+                } else {
+                    "Not set".into()
+                },
+                kind: MenuKind::Password,
+            });
+        }
+        items.push(MenuItem {
+            key: "compression",
+            label: "Compression",
+            value: c.compression.to_string(),
+            kind: MenuKind::Select {
+                options: vec!["lz4", "zstd", "zstd-5", "zstd-10", "off"],
+                current: match c.compression {
+                    CompressionAlgo::Lz4 => 0,
+                    CompressionAlgo::Zstd => 1,
+                    CompressionAlgo::Zstd5 => 2,
+                    CompressionAlgo::Zstd10 => 3,
+                    CompressionAlgo::Off => 4,
+                },
+            },
+        });
+        items.push(MenuItem {
+            key: "swap_mode",
+            label: "Swap",
+            value: c.swap_mode.to_string(),
+            kind: MenuKind::Select {
+                options: vec![
+                    "None",
+                    "ZRAM",
+                    "Swap partition",
+                    "Swap partition (encrypted)",
+                ],
+                current: match c.swap_mode {
+                    SwapMode::None => 0,
+                    SwapMode::Zram => 1,
+                    SwapMode::ZswapPartition => 2,
+                    SwapMode::ZswapPartitionEncrypted => 3,
+                },
+            },
+        });
+
+        // Swap partition size for FullDisk + ZSWAP modes
+        if matches!(mode, Some(InstallationMode::FullDisk)) && has_swap_partition {
+            items.push(MenuItem {
+                key: "swap_partition_size",
+                label: "Swap size",
+                value: c
+                    .swap_partition_size
+                    .clone()
+                    .unwrap_or("Not set".into()),
                 kind: MenuKind::Text,
-            },
-            MenuItem {
-                key: "dataset_prefix",
-                label: "Dataset prefix",
-                value: c.dataset_prefix.clone(),
-                kind: MenuKind::Text,
-            },
-            MenuItem {
-                key: "encryption",
-                label: "Encryption",
-                value: c.zfs_encryption_mode.to_string(),
-                kind: MenuKind::Select {
-                    options: vec![
-                        "No encryption",
-                        "Encrypt entire pool",
-                        "Encrypt base dataset only",
-                    ],
-                    current: match c.zfs_encryption_mode {
-                        ZfsEncryptionMode::None => 0,
-                        ZfsEncryptionMode::Pool => 1,
-                        ZfsEncryptionMode::Dataset => 2,
-                    },
-                },
-            },
-            MenuItem {
-                key: "compression",
-                label: "Compression",
-                value: c.compression.to_string(),
-                kind: MenuKind::Select {
-                    options: vec!["lz4", "zstd", "zstd-5", "zstd-10", "off"],
-                    current: match c.compression {
-                        CompressionAlgo::Lz4 => 0,
-                        CompressionAlgo::Zstd => 1,
-                        CompressionAlgo::Zstd5 => 2,
-                        CompressionAlgo::Zstd10 => 3,
-                        CompressionAlgo::Off => 4,
-                    },
-                },
-            },
-            MenuItem {
-                key: "swap_mode",
-                label: "Swap",
-                value: c.swap_mode.to_string(),
-                kind: MenuKind::Select {
-                    options: vec![
-                        "None",
-                        "ZRAM",
-                        "Swap partition",
-                        "Swap partition (encrypted)",
-                    ],
-                    current: match c.swap_mode {
-                        SwapMode::None => 0,
-                        SwapMode::Zram => 1,
-                        SwapMode::ZswapPartition => 2,
-                        SwapMode::ZswapPartitionEncrypted => 3,
-                    },
-                },
-            },
-            MenuItem {
-                key: "sep1",
-                label: "",
-                value: String::new(),
-                kind: MenuKind::Separator,
-            },
-            // ── System ──
+            });
+        }
+        // Swap partition picker for NewPool/ExistingPool + ZSWAP modes
+        if !matches!(mode, Some(InstallationMode::FullDisk) | None) && has_swap_partition {
+            items.push(MenuItem {
+                key: "swap_partition",
+                label: "Swap partition",
+                value: c
+                    .swap_partition_by_id
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or("Not set".into()),
+                kind: MenuKind::Custom,
+            });
+        }
+
+        items.push(MenuItem {
+            key: "sep1",
+            label: "",
+            value: String::new(),
+            kind: MenuKind::Separator,
+        });
+
+        // ── System ──
+        items.extend([
             MenuItem {
                 key: "init_system",
                 label: "Init system",
@@ -241,22 +324,57 @@ impl MainMenu {
                 kind: MenuKind::Toggle,
             },
             MenuItem {
+                key: "network",
+                label: "Network",
+                value: if c.network_copy_iso {
+                    "Copy from ISO"
+                } else {
+                    "Manual"
+                }
+                .into(),
+                kind: MenuKind::Select {
+                    options: vec!["Copy from ISO", "Manual"],
+                    current: if c.network_copy_iso { 0 } else { 1 },
+                },
+            },
+            MenuItem {
+                key: "parallel_downloads",
+                label: "Parallel downloads",
+                value: c.parallel_downloads.to_string(),
+                kind: MenuKind::Custom,
+            },
+            MenuItem {
                 key: "sep2",
                 label: "",
                 value: String::new(),
                 kind: MenuKind::Separator,
             },
-            // ── Auth & packages ──
-            MenuItem {
-                key: "root_password",
-                label: "Root password",
-                value: if c.root_password.is_some() {
-                    "Set".into()
-                } else {
-                    "Not set".into()
-                },
-                kind: MenuKind::Password,
+        ]);
+
+        // ── Auth & packages ──
+        items.push(MenuItem {
+            key: "root_password",
+            label: "Root password",
+            value: if c.root_password.is_some() {
+                "Set".into()
+            } else {
+                "Not set".into()
             },
+            kind: MenuKind::Password,
+        });
+        items.push(MenuItem {
+            key: "users",
+            label: "User accounts",
+            value: match &c.users {
+                Some(users) if !users.is_empty() => {
+                    let names: Vec<&str> = users.iter().map(|u| u.username.as_str()).collect();
+                    names.join(", ")
+                }
+                _ => "None".into(),
+            },
+            kind: MenuKind::Custom,
+        });
+        items.extend([
             MenuItem {
                 key: "profile",
                 label: "Profile",
@@ -303,6 +421,16 @@ impl MainMenu {
                 kind: MenuKind::Text,
             },
             MenuItem {
+                key: "extra_services",
+                label: "Extra services",
+                value: if c.extra_services.is_empty() {
+                    "None".into()
+                } else {
+                    c.extra_services.join(", ")
+                },
+                kind: MenuKind::Text,
+            },
+            MenuItem {
                 key: "zrepl",
                 label: "zrepl (snapshots)",
                 value: if c.zrepl_enabled {
@@ -321,6 +449,12 @@ impl MainMenu {
             },
             // ── Actions ──
             MenuItem {
+                key: "save",
+                label: "Save configuration",
+                value: String::new(),
+                kind: MenuKind::Action,
+            },
+            MenuItem {
                 key: "install",
                 label: "Install",
                 value: String::new(),
@@ -332,7 +466,9 @@ impl MainMenu {
                 value: String::new(),
                 kind: MenuKind::Action,
             },
-        ]
+        ]);
+
+        items
     }
 
     fn selectable_indices(&self) -> Vec<usize> {
@@ -403,7 +539,38 @@ impl MainMenu {
 
         match &item.kind {
             MenuKind::Action => match key {
-                "install" => return Ok(Action::Install),
+                "install" => {
+                    // Pre-install validation
+                    let errors = self.config.validate_for_install();
+                    if !errors.is_empty() {
+                        let msg = errors.join("\n");
+                        let lines: Vec<&str> = msg.lines().collect();
+                        let _ = run_select(terminal, "Validation errors", &lines, 0);
+                        return Ok(Action::Continue);
+                    }
+                    return Ok(Action::Install);
+                }
+                "save" => {
+                    let result = run_edit(terminal, "Save config to file", "config.json", false)?;
+                    if let Some(path) = result.value {
+                        if !path.is_empty() {
+                            match self.config.save_to_file(std::path::Path::new(&path)) {
+                                Ok(()) => {
+                                    let _ = run_select(
+                                        terminal,
+                                        &format!("Saved to {path}"),
+                                        &["OK"],
+                                        0,
+                                    );
+                                }
+                                Err(e) => {
+                                    let msg = format!("Save failed: {e}");
+                                    let _ = run_select(terminal, &msg, &["OK"], 0);
+                                }
+                            }
+                        }
+                    }
+                }
                 "quit" => return Ok(Action::Quit),
                 _ => {}
             },
@@ -421,6 +588,21 @@ impl MainMenu {
                 "disk_by_id" => {
                     if let Some(disk) = self.pick_disk(terminal)? {
                         self.config.disk_by_id = Some(disk);
+                    }
+                }
+                "efi_partition" => {
+                    if let Some(part) = self.pick_partition(terminal, "EFI partition")? {
+                        self.config.efi_partition_by_id = Some(part);
+                    }
+                }
+                "zfs_partition" => {
+                    if let Some(part) = self.pick_partition(terminal, "ZFS partition")? {
+                        self.config.zfs_partition_by_id = Some(part);
+                    }
+                }
+                "swap_partition" => {
+                    if let Some(part) = self.pick_partition(terminal, "Swap partition")? {
+                        self.config.swap_partition_by_id = Some(part);
                     }
                 }
                 "kernel" => {
@@ -441,6 +623,18 @@ impl MainMenu {
                         };
                     }
                 }
+                "users" => {
+                    self.manage_users(terminal)?;
+                }
+                "parallel_downloads" => {
+                    let options: Vec<String> = (1..=10).map(|n| n.to_string()).collect();
+                    let opt_refs: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
+                    let current = (self.config.parallel_downloads as usize).saturating_sub(1);
+                    let result = run_select(terminal, "Parallel downloads", &opt_refs, current)?;
+                    if let Some(idx) = result.selected {
+                        self.config.parallel_downloads = (idx + 1) as u32;
+                    }
+                }
                 _ => {}
             },
             MenuKind::Toggle => {
@@ -449,7 +643,7 @@ impl MainMenu {
             MenuKind::Select { options, current } => {
                 let result = run_select(terminal, item.label, options, *current)?;
                 if let Some(idx) = result.selected {
-                    self.apply_select(key, idx);
+                    self.apply_select(key, idx, terminal)?;
                 }
             }
             MenuKind::Text => {
@@ -477,13 +671,14 @@ impl MainMenu {
         Ok(Action::Continue)
     }
 
+    // ── Pickers ─────────────────────────────────────────
+
     fn pick_timezone(
         &self,
         terminal: &mut ratatui::DefaultTerminal,
     ) -> color_eyre::eyre::Result<Option<String>> {
         use archinstall_zfs_core::installer::locale;
 
-        // Step 1: pick region
         let regions = locale::list_timezone_regions();
         let region_strs: Vec<&str> = regions.iter().copied().collect();
         let result = run_select(terminal, "Timezone region", &region_strs, 0)?;
@@ -492,7 +687,6 @@ impl MainMenu {
         };
         let region = regions[region_idx];
 
-        // Step 2: pick city
         let cities = locale::list_timezone_cities(region);
         let city_strs: Vec<&str> = cities.iter().map(|s| s.as_str()).collect();
         let result = run_select(terminal, &format!("{region} /"), &city_strs, 0)?;
@@ -516,6 +710,24 @@ impl MainMenu {
         let result = run_select(terminal, "Select disk", &disk_refs, 0)?;
         match result.selected {
             Some(idx) => Ok(Some(disks[idx].clone())),
+            None => Ok(None),
+        }
+    }
+
+    fn pick_partition(
+        &self,
+        terminal: &mut ratatui::DefaultTerminal,
+        title: &str,
+    ) -> color_eyre::eyre::Result<Option<std::path::PathBuf>> {
+        let parts = archinstall_zfs_core::disk::by_id::list_partitions_by_id()?;
+        if parts.is_empty() {
+            return Ok(None);
+        }
+        let part_strs: Vec<String> = parts.iter().map(|p| p.display().to_string()).collect();
+        let part_refs: Vec<&str> = part_strs.iter().map(|s| s.as_str()).collect();
+        let result = run_select(terminal, title, &part_refs, 0)?;
+        match result.selected {
+            Some(idx) => Ok(Some(parts[idx].clone())),
             None => Ok(None),
         }
     }
@@ -544,29 +756,31 @@ impl MainMenu {
 
         let results = scan_all_kernels();
 
-        // Build options showing compatibility status
         let mut options = Vec::new();
         let mut kernel_names = Vec::new();
         for (info, result) in AVAILABLE_KERNELS.iter().zip(&results) {
             let compat = match self.config.zfs_module_mode {
                 ZfsModuleMode::Precompiled => {
-                    if result.precompiled_compatible { "OK" } else { "INCOMPATIBLE" }
+                    if result.precompiled_compatible {
+                        "OK"
+                    } else {
+                        "INCOMPATIBLE"
+                    }
                 }
                 ZfsModuleMode::Dkms => {
-                    if result.dkms_compatible { "OK" } else { "INCOMPATIBLE" }
+                    if result.dkms_compatible {
+                        "OK"
+                    } else {
+                        "INCOMPATIBLE"
+                    }
                 }
             };
-            let ver = result
-                .kernel_version
-                .as_deref()
-                .unwrap_or("?");
+            let ver = result.kernel_version.as_deref().unwrap_or("?");
             options.push(format!("{} ({ver}) [{compat}]", info.display_name));
             kernel_names.push(info.name);
         }
 
         let option_refs: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
-
-        // Find current selection index
         let current_kernel = self.config.primary_kernel();
         let current_idx = kernel_names
             .iter()
@@ -580,6 +794,86 @@ impl MainMenu {
         }
     }
 
+    // ── User management ─────────────────────────────────
+
+    fn manage_users(
+        &mut self,
+        terminal: &mut ratatui::DefaultTerminal,
+    ) -> color_eyre::eyre::Result<()> {
+        loop {
+            let users = self.config.users.clone().unwrap_or_default();
+            let mut options: Vec<String> = users
+                .iter()
+                .map(|u| {
+                    let sudo = if u.sudo { " [sudo]" } else { "" };
+                    format!("{}{sudo}", u.username)
+                })
+                .collect();
+            options.push("+ Add user".to_string());
+            if !users.is_empty() {
+                options.push("- Remove user".to_string());
+            }
+            options.push("Done".to_string());
+
+            let opt_refs: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
+            let result = run_select(terminal, "User accounts", &opt_refs, 0)?;
+            let Some(idx) = result.selected else {
+                break;
+            };
+
+            if idx < users.len() {
+                // Edit existing user — toggle sudo
+                if let Some(ref mut user_list) = self.config.users {
+                    if let Some(user) = user_list.get_mut(idx) {
+                        user.sudo = !user.sudo;
+                    }
+                }
+            } else if options[idx] == "+ Add user" {
+                let result = run_edit(terminal, "Username", "", false)?;
+                if let Some(username) = result.value {
+                    if !username.is_empty() {
+                        let pw_result = run_edit(terminal, "Password (empty=no password)", "", true)?;
+                        let password = pw_result.value.filter(|p| !p.is_empty());
+
+                        let sudo_opts = ["No", "Yes"];
+                        let sudo_result = run_select(terminal, "Enable sudo?", &sudo_opts, 1)?;
+                        let sudo = sudo_result.selected == Some(1);
+
+                        let user = UserConfig {
+                            username,
+                            password,
+                            sudo,
+                            shell: None,
+                            groups: None,
+                        };
+                        self.config
+                            .users
+                            .get_or_insert_with(Vec::new)
+                            .push(user);
+                    }
+                }
+            } else if options[idx].starts_with("- Remove") {
+                // Pick which user to remove
+                let user_names: Vec<&str> = users.iter().map(|u| u.username.as_str()).collect();
+                let result = run_select(terminal, "Remove user", &user_names, 0)?;
+                if let Some(rm_idx) = result.selected {
+                    if let Some(ref mut user_list) = self.config.users {
+                        user_list.remove(rm_idx);
+                        if user_list.is_empty() {
+                            self.config.users = None;
+                        }
+                    }
+                }
+            } else {
+                // Done
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    // ── Apply handlers ──────────────────────────────────
+
     fn apply_toggle(&mut self, key: &str) {
         match key {
             "ntp" => self.config.ntp = !self.config.ntp,
@@ -589,23 +883,51 @@ impl MainMenu {
         }
     }
 
-    fn apply_select(&mut self, key: &str, idx: usize) {
+    fn apply_select(
+        &mut self,
+        key: &str,
+        idx: usize,
+        terminal: &mut ratatui::DefaultTerminal,
+    ) -> color_eyre::eyre::Result<()> {
         match key {
             "installation_mode" => {
-                self.config.installation_mode = Some(match idx {
+                let new_mode = match idx {
                     0 => InstallationMode::FullDisk,
                     1 => InstallationMode::NewPool,
                     2 => InstallationMode::ExistingPool,
-                    _ => return,
-                });
+                    _ => return Ok(()),
+                };
+                // Reset mode-dependent fields when switching modes
+                if self.config.installation_mode != Some(new_mode) {
+                    self.config.disk_by_id = None;
+                    self.config.efi_partition_by_id = None;
+                    self.config.zfs_partition_by_id = None;
+                    self.config.swap_partition_by_id = None;
+                }
+                self.config.installation_mode = Some(new_mode);
             }
             "encryption" => {
-                self.config.zfs_encryption_mode = match idx {
+                let new_mode = match idx {
                     0 => ZfsEncryptionMode::None,
                     1 => ZfsEncryptionMode::Pool,
                     2 => ZfsEncryptionMode::Dataset,
-                    _ => return,
+                    _ => return Ok(()),
                 };
+                self.config.zfs_encryption_mode = new_mode;
+                // Prompt for password when enabling encryption
+                if new_mode != ZfsEncryptionMode::None
+                    && self.config.zfs_encryption_password.is_none()
+                {
+                    let result = run_edit(terminal, "Encryption password (min 8 chars)", "", true)?;
+                    if let Some(pw) = result.value {
+                        if !pw.is_empty() {
+                            self.config.zfs_encryption_password = Some(pw);
+                        }
+                    }
+                }
+                if new_mode == ZfsEncryptionMode::None {
+                    self.config.zfs_encryption_password = None;
+                }
             }
             "compression" => {
                 self.config.compression = match idx {
@@ -614,7 +936,7 @@ impl MainMenu {
                     2 => CompressionAlgo::Zstd5,
                     3 => CompressionAlgo::Zstd10,
                     4 => CompressionAlgo::Off,
-                    _ => return,
+                    _ => return Ok(()),
                 };
             }
             "swap_mode" => {
@@ -623,21 +945,21 @@ impl MainMenu {
                     1 => SwapMode::Zram,
                     2 => SwapMode::ZswapPartition,
                     3 => SwapMode::ZswapPartitionEncrypted,
-                    _ => return,
+                    _ => return Ok(()),
                 };
             }
             "init_system" => {
                 self.config.init_system = match idx {
                     0 => InitSystem::Dracut,
                     1 => InitSystem::Mkinitcpio,
-                    _ => return,
+                    _ => return Ok(()),
                 };
             }
             "zfs_module_mode" => {
                 self.config.zfs_module_mode = match idx {
                     0 => ZfsModuleMode::Precompiled,
                     1 => ZfsModuleMode::Dkms,
-                    _ => return,
+                    _ => return Ok(()),
                 };
             }
             "audio" => {
@@ -645,10 +967,12 @@ impl MainMenu {
                     0 => None,
                     1 => Some(AudioServer::Pipewire),
                     2 => Some(AudioServer::Pulseaudio),
-                    _ => return,
+                    _ => return Ok(()),
                 };
             }
-            // profile handled via pick from registry in activate_item
+            "network" => {
+                self.config.network_copy_iso = idx == 0;
+            }
             "profile" => {
                 self.config.profile = match idx {
                     0 => None,
@@ -660,6 +984,7 @@ impl MainMenu {
             }
             _ => {}
         }
+        Ok(())
     }
 
     fn apply_text(&mut self, key: &str, val: &str) {
@@ -684,7 +1009,8 @@ impl MainMenu {
                 }
             }
             "root_password" => self.config.root_password = val_opt,
-            // disk_by_id handled via pick_disk()
+            "encryption_password" => self.config.zfs_encryption_password = val_opt,
+            "swap_partition_size" => self.config.swap_partition_size = val_opt,
             "additional_packages" => {
                 self.config.additional_packages = val
                     .split_whitespace()
@@ -699,9 +1025,18 @@ impl MainMenu {
                     .filter(|s| !s.is_empty())
                     .collect();
             }
+            "extra_services" => {
+                self.config.extra_services = val
+                    .split_whitespace()
+                    .map(|s| s.trim_matches(',').to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }
             _ => {}
         }
     }
+
+    // ── Render ───────────────────────────────────────────
 
     pub fn render(&self, frame: &mut Frame) {
         let area = frame.area();
