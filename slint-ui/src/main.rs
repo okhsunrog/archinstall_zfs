@@ -264,7 +264,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
 
                 let layer = tracing_layer::UiLogLayer::new(log_tx);
                 let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("trace"));
                 let subscriber = tracing_subscriber::registry().with(filter).with(layer);
                 let _guard = tracing::subscriber::set_default(subscriber);
 

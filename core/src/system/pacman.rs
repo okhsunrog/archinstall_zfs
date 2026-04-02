@@ -10,6 +10,7 @@ pub fn pacstrap(runner: &dyn CommandRunner, target: &Path, packages: &[&str]) ->
     args.extend(packages);
     args.push("--noconfirm");
     args.push("--needed");
+    args.push("--noprogressbar");
 
     let output = runner.run("pacstrap", &args)?;
     check_exit(&output, "pacstrap")?;

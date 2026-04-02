@@ -3,18 +3,17 @@ use std::sync::mpsc::Sender;
 
 use tracing::Subscriber;
 use tracing::field::{Field, Visit};
-use tracing::span;
 use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 
-/// A tracing layer that sends formatted log messages to an mpsc channel.
-/// The install progress screen reads from the receiver end.
+/// A tracing layer that sends (message, level) pairs to an mpsc channel.
+/// Level: 0=trace, 1=debug, 2=info, 3=warn, 4=error
 pub struct ChannelLayer {
-    tx: Sender<String>,
+    tx: Sender<(String, i32)>,
 }
 
 impl ChannelLayer {
-    pub fn new(tx: Sender<String>) -> Self {
+    pub fn new(tx: Sender<(String, i32)>) -> Self {
         Self { tx }
     }
 }
@@ -22,7 +21,13 @@ impl ChannelLayer {
 impl<S: Subscriber> Layer<S> for ChannelLayer {
     fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
         let metadata = event.metadata();
-        let level = metadata.level();
+        let level = match *metadata.level() {
+            tracing::Level::TRACE => 0,
+            tracing::Level::DEBUG => 1,
+            tracing::Level::INFO => 2,
+            tracing::Level::WARN => 3,
+            tracing::Level::ERROR => 4,
+        };
 
         let mut visitor = MessageVisitor::default();
         event.record(&mut visitor);
@@ -33,13 +38,16 @@ impl<S: Subscriber> Layer<S> for ChannelLayer {
             format!("{}: {}", metadata.target(), visitor.fields.join(", "))
         };
 
-        let formatted = match *level {
-            tracing::Level::ERROR => format!("[ERROR] {msg}"),
-            tracing::Level::WARN => format!("[WARN] {msg}"),
-            _ => msg,
+        let prefix = match level {
+            4 => "ERROR",
+            3 => "WARN ",
+            1 => "DEBUG",
+            0 => "TRACE",
+            _ => "INFO ",
         };
 
-        let _ = self.tx.send(formatted);
+        let formatted = format!("[{prefix}] {msg}");
+        let _ = self.tx.send((formatted, level));
     }
 }
 

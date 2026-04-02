@@ -45,6 +45,16 @@ impl CommandRunner for RealRunner {
             exit_code: output.status.code().unwrap_or(-1),
         };
         tracing::debug!(exit_code = result.exit_code, "command finished");
+        for line in result.stdout.lines() {
+            if !line.trim().is_empty() {
+                tracing::trace!("[{program}] {line}");
+            }
+        }
+        for line in result.stderr.lines() {
+            if !line.trim().is_empty() {
+                tracing::trace!("[{program} stderr] {line}");
+            }
+        }
         Ok(result)
     }
 
@@ -69,11 +79,22 @@ impl CommandRunner for RealRunner {
             .wait_with_output()
             .wrap_err("failed to wait on child")?;
 
-        Ok(CmdOutput {
+        let result = CmdOutput {
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             exit_code: output.status.code().unwrap_or(-1),
-        })
+        };
+        for line in result.stdout.lines() {
+            if !line.trim().is_empty() {
+                tracing::trace!("[{program}] {line}");
+            }
+        }
+        for line in result.stderr.lines() {
+            if !line.trim().is_empty() {
+                tracing::trace!("[{program} stderr] {line}");
+            }
+        }
+        Ok(result)
     }
 
     fn run_streaming(

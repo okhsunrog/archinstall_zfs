@@ -10,7 +10,6 @@ use ratatui::widgets::{
 };
 
 use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
 
 use archinstall_zfs_core::config::types::GlobalConfig;
 
@@ -23,55 +22,31 @@ enum InstallState {
     Failed(String),
 }
 
+struct LogEntry {
+    text: String,
+    level: i32, // 0=trace, 1=debug, 2=info, 3=warn, 4=error
+}
+
+const LEVEL_NAMES: &[&str] = &["TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
+
 pub struct InstallProgress {
-    log_lines: Vec<String>,
+    log_entries: Vec<LogEntry>,
     scroll: usize,
     state: InstallState,
-    rx: mpsc::Receiver<String>,
+    rx: mpsc::Receiver<(String, i32)>,
+    min_level: i32, // minimum level to display (default 2=info)
 }
 
 impl InstallProgress {
-    /// Start installation in a background thread, return the progress screen.
-    /// Installs a tracing layer that captures all log events from core.
     pub fn start(config: GlobalConfig) -> Self {
         let (tx, rx) = mpsc::channel();
 
-        // Add a channel-based tracing layer so all tracing::info!() etc.
-        // from the core crate flow into our log display.
-        let channel_layer = ChannelLayer::new(tx.clone());
-
-        // We need to set a new global subscriber that includes our layer.
-        // Since the file logger was set up in main(), we rebuild the stack
-        // with both the file layer and our channel layer.
-        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-
-        let file_appender = tracing_appender::rolling::never("/tmp", "archinstall-zfs.log");
-        let file_layer = tracing_subscriber::fmt::layer()
-            .with_writer(file_appender)
-            .with_ansi(false)
-            .with_target(true);
-
-        // Replace the global subscriber with one that has both layers
-        let subscriber = tracing_subscriber::registry()
-            .with(filter)
-            .with(file_layer)
-            .with(channel_layer);
-
-        // Use try_init because a subscriber was already set in main().
-        // If it fails (already set), the channel layer won't work — fall back
-        // to a thread-local approach.
-        let _guard = tracing::subscriber::set_default(subscriber);
-
-        // Spawn the install thread. It uses the thread-local subscriber
-        // we just set, but since set_default is scoped to this thread,
-        // we need to pass the subscriber to the install thread instead.
         let tx_clone = tx.clone();
         thread::spawn(move || {
-            // Set up a subscriber for this thread that includes the channel layer
             let channel_layer = ChannelLayer::new(tx_clone.clone());
+            // Capture all levels including trace (command output)
             let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("trace"));
             let file_appender = tracing_appender::rolling::never("/tmp", "archinstall-zfs.log");
             let file_layer = tracing_subscriber::fmt::layer()
                 .with_writer(file_appender)
@@ -81,40 +56,51 @@ impl InstallProgress {
                 .with(filter)
                 .with(file_layer)
                 .with(channel_layer);
-
             let _guard = tracing::subscriber::set_default(subscriber);
 
             let runner = archinstall_zfs_core::system::cmd::RealRunner;
             let result = crate::app::run_install(&runner, &config);
             match result {
                 Ok(()) => {
-                    let _ = tx_clone.send("[OK] Installation complete!".to_string());
+                    let _ = tx_clone.send(("[INFO ] Installation complete!".to_string(), 2));
                 }
                 Err(e) => {
-                    let _ = tx_clone.send(format!("[ERROR] {e}"));
+                    let _ = tx_clone.send((format!("[ERROR] {e}"), 4));
                 }
             }
         });
 
         Self {
-            log_lines: vec!["Starting installation...".to_string()],
+            log_entries: vec![LogEntry {
+                text: "[INFO ] Starting installation...".to_string(),
+                level: 2,
+            }],
             scroll: 0,
             state: InstallState::Running,
             rx,
+            min_level: 2, // show info+ by default
         }
     }
 
+    fn filtered_lines(&self) -> Vec<&LogEntry> {
+        self.log_entries
+            .iter()
+            .filter(|e| e.level >= self.min_level)
+            .collect()
+    }
+
     pub fn tick(&mut self) {
-        while let Ok(msg) = self.rx.try_recv() {
-            if msg.starts_with("[OK]") {
+        while let Ok((text, level)) = self.rx.try_recv() {
+            if text.contains("[INFO ] Installation complete!") {
                 self.state = InstallState::Succeeded;
-            } else if msg.starts_with("[ERROR]") {
-                let err = msg.strip_prefix("[ERROR] ").unwrap_or(&msg).to_string();
+            } else if text.starts_with("[ERROR]") {
+                let err = text.strip_prefix("[ERROR] ").unwrap_or(&text).to_string();
                 self.state = InstallState::Failed(err);
             }
-            self.log_lines.push(msg);
-            // Auto-scroll to bottom
-            self.scroll = self.log_lines.len().saturating_sub(1);
+            self.log_entries.push(LogEntry { text, level });
+            // Auto-scroll to bottom if viewing filtered list
+            let filtered_count = self.filtered_lines().len();
+            self.scroll = filtered_count.saturating_sub(1);
         }
     }
 
@@ -135,11 +121,24 @@ impl InstallProgress {
                     self.scroll = self.scroll.saturating_sub(1);
                 }
                 (KeyCode::Down | KeyCode::Char('j'), _) => {
-                    self.scroll = (self.scroll + 1).min(self.log_lines.len().saturating_sub(1));
+                    let max = self.filtered_lines().len().saturating_sub(1);
+                    self.scroll = (self.scroll + 1).min(max);
                 }
                 (KeyCode::Home, _) => self.scroll = 0,
                 (KeyCode::End, _) => {
-                    self.scroll = self.log_lines.len().saturating_sub(1);
+                    self.scroll = self.filtered_lines().len().saturating_sub(1);
+                }
+                // Toggle log level with 'l'
+                (KeyCode::Char('l'), _) => {
+                    self.min_level = match self.min_level {
+                        0 => 2, // trace -> info
+                        2 => 1, // info -> debug
+                        1 => 0, // debug -> trace
+                        _ => 2,
+                    };
+                    // Re-clamp scroll
+                    let max = self.filtered_lines().len().saturating_sub(1);
+                    self.scroll = self.scroll.min(max);
                 }
                 _ => {}
             }
@@ -175,16 +174,18 @@ impl InstallProgress {
         frame.render_widget(title, chunks[0]);
 
         // Log area
+        let level_name = LEVEL_NAMES.get(self.min_level as usize).unwrap_or(&"?");
         let log_block = Block::default()
-            .title(" Log ")
+            .title(format!(" Log [{level_name}+] "))
             .title_style(theme::HEADER_STYLE)
             .borders(Borders::ALL)
             .style(theme::BORDER_STYLE);
         let inner = log_block.inner(chunks[1]);
         frame.render_widget(log_block, chunks[1]);
 
+        let filtered = self.filtered_lines();
         let visible_height = inner.height as usize;
-        let total = self.log_lines.len();
+        let total = filtered.len();
 
         let start = if self.scroll + visible_height > total {
             total.saturating_sub(visible_height)
@@ -192,26 +193,26 @@ impl InstallProgress {
             self.scroll
         };
 
-        for (i, line) in self
-            .log_lines
-            .iter()
-            .skip(start)
-            .take(visible_height)
-            .enumerate()
-        {
+        for (i, entry) in filtered.iter().skip(start).take(visible_height).enumerate() {
             let y = inner.y + i as u16;
-            let style = if line.starts_with("[OK]") {
-                theme::SUCCESS_STYLE
-            } else if line.starts_with("[ERROR]") || line.starts_with("[WARN]") {
-                theme::ERROR_STYLE
-            } else if line.starts_with("Phase ") {
-                theme::HEADER_STYLE
-            } else {
-                theme::NORMAL_STYLE
+            let style = match entry.level {
+                4 => theme::ERROR_STYLE,
+                3 => theme::ERROR_STYLE,
+                2 => {
+                    if entry.text.contains("Phase ") {
+                        theme::HEADER_STYLE
+                    } else if entry.text.contains("complete") {
+                        theme::SUCCESS_STYLE
+                    } else {
+                        theme::NORMAL_STYLE
+                    }
+                }
+                1 => theme::DIMMED_STYLE,
+                _ => theme::DIMMED_STYLE, // trace
             };
             let line_area = ratatui::layout::Rect::new(inner.x, y, inner.width, 1);
             frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(line.as_str(), style))),
+                Paragraph::new(Line::from(Span::styled(entry.text.as_str(), style))),
                 line_area,
             );
         }
@@ -228,9 +229,9 @@ impl InstallProgress {
 
         // Footer
         let footer_text = if self.is_done() {
-            " Press Enter or q to exit "
+            format!(" Enter/q: exit | l: log level ({level_name}+) ")
         } else {
-            " j/k: scroll | Installation in progress... "
+            format!(" j/k: scroll | l: log level ({level_name}+) ")
         };
         let footer = Paragraph::new(Line::from(vec![Span::styled(
             footer_text,

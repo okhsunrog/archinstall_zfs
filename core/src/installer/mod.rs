@@ -118,7 +118,7 @@ impl<'a> Installer<'a> {
         let kernel = self.config.primary_kernel();
         let zfs_packages = crate::kernel::get_zfs_packages(kernel, self.config.zfs_module_mode);
         let pkg_list = zfs_packages.join(" ");
-        let cmd = format!("pacman --noconfirm --needed -S {pkg_list}");
+        let cmd = format!("pacman --noconfirm --needed --noprogressbar -S {pkg_list}");
         let output = crate::system::cmd::chroot(self.runner, &self.target, &cmd)?;
         crate::system::cmd::check_exit(&output, "install ZFS packages in chroot")?;
 
