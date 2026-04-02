@@ -201,6 +201,16 @@ impl MainMenu {
                 },
             },
             MenuItem {
+                key: "kernel",
+                label: "Kernel",
+                value: c
+                    .kernels
+                    .as_ref()
+                    .map(|k| k.join(", "))
+                    .unwrap_or_else(|| c.primary_kernel().to_string()),
+                kind: MenuKind::Custom,
+            },
+            MenuItem {
                 key: "hostname",
                 label: "Hostname",
                 value: c.hostname.clone().unwrap_or("Not set".into()),
@@ -413,6 +423,11 @@ impl MainMenu {
                         self.config.disk_by_id = Some(disk);
                     }
                 }
+                "kernel" => {
+                    if let Some(kernels) = self.pick_kernel(terminal)? {
+                        self.config.kernels = Some(kernels);
+                    }
+                }
                 "profile" => {
                     let profiles = archinstall_zfs_core::profile::all_profiles();
                     let mut names: Vec<&str> = vec!["None"];
@@ -516,6 +531,51 @@ impl MainMenu {
         let result = run_select(terminal, "Locale", &locale_strs, 0)?;
         match result.selected {
             Some(idx) => Ok(Some(locales[idx].clone())),
+            None => Ok(None),
+        }
+    }
+
+    fn pick_kernel(
+        &self,
+        terminal: &mut ratatui::DefaultTerminal,
+    ) -> color_eyre::eyre::Result<Option<Vec<String>>> {
+        use archinstall_zfs_core::kernel::AVAILABLE_KERNELS;
+        use archinstall_zfs_core::kernel::scanner::scan_all_kernels;
+
+        let results = scan_all_kernels();
+
+        // Build options showing compatibility status
+        let mut options = Vec::new();
+        let mut kernel_names = Vec::new();
+        for (info, result) in AVAILABLE_KERNELS.iter().zip(&results) {
+            let compat = match self.config.zfs_module_mode {
+                ZfsModuleMode::Precompiled => {
+                    if result.precompiled_compatible { "OK" } else { "INCOMPATIBLE" }
+                }
+                ZfsModuleMode::Dkms => {
+                    if result.dkms_compatible { "OK" } else { "INCOMPATIBLE" }
+                }
+            };
+            let ver = result
+                .kernel_version
+                .as_deref()
+                .unwrap_or("?");
+            options.push(format!("{} ({ver}) [{compat}]", info.display_name));
+            kernel_names.push(info.name);
+        }
+
+        let option_refs: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
+
+        // Find current selection index
+        let current_kernel = self.config.primary_kernel();
+        let current_idx = kernel_names
+            .iter()
+            .position(|&n| n == current_kernel)
+            .unwrap_or(0);
+
+        let result = run_select(terminal, "Kernel", &option_refs, current_idx)?;
+        match result.selected {
+            Some(idx) => Ok(Some(vec![kernel_names[idx].to_string()])),
             None => Ok(None),
         }
     }

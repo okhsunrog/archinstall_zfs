@@ -60,6 +60,15 @@ pub fn run_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Result<
     }
     tracing::info!("UEFI boot detected");
 
+    // Validate kernel/ZFS compatibility before proceeding
+    let warnings = archinstall_zfs_core::kernel::scanner::validate_kernel_zfs_plan(
+        kernel,
+        config.zfs_module_mode,
+    );
+    for w in &warnings {
+        tracing::warn!("kernel compatibility: {w}");
+    }
+
     archinstall_zfs_core::zfs::kmod::initialize_zfs(runner, kernel, config.zfs_module_mode)?;
     tracing::info!("ZFS initialized on host");
 

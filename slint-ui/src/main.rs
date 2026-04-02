@@ -174,6 +174,16 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 return;
             }
 
+            // Kernel select
+            if key == "kernel_select" {
+                let kernels = archinstall_zfs_core::kernel::AVAILABLE_KERNELS;
+                if let Some(info) = kernels.get(idx as usize) {
+                    cfg.borrow_mut().kernels = Some(vec![info.name.to_string()]);
+                    refresh_config_items(&app, &cfg.borrow());
+                }
+                return;
+            }
+
             // Profile select
             if key == "profile_select" {
                 let profiles = archinstall_zfs_core::profile::all_profiles();
@@ -364,6 +374,15 @@ fn build_config_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             1,
         ),
         ci(
+            "kernel",
+            "Kernel",
+            &c.kernels
+                .as_ref()
+                .map(|k| k.join(", "))
+                .unwrap_or_else(|| c.primary_kernel().to_string()),
+            1,
+        ),
+        ci(
             "hostname",
             "Hostname",
             &c.hostname.clone().unwrap_or("Not set".into()),
@@ -545,6 +564,28 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig) {
                 ZfsModuleMode::Dkms => 1,
             },
         ),
+        "kernel" => {
+            let results = archinstall_zfs_core::kernel::scanner::scan_all_kernels();
+            let mut options = Vec::new();
+            for (info, result) in
+                archinstall_zfs_core::kernel::AVAILABLE_KERNELS.iter().zip(&results)
+            {
+                let compat = if result.precompiled_compatible || result.dkms_compatible {
+                    "OK"
+                } else {
+                    "INCOMPATIBLE"
+                };
+                let ver = result.kernel_version.as_deref().unwrap_or("?");
+                options.push(format!("{} ({ver}) [{compat}]", info.display_name));
+            }
+            let opt_refs: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
+            let current_kernel = config.primary_kernel();
+            let current_idx = archinstall_zfs_core::kernel::AVAILABLE_KERNELS
+                .iter()
+                .position(|k| k.name == current_kernel)
+                .unwrap_or(0);
+            show_select(app, "kernel_select", "Kernel", &opt_refs, current_idx as i32);
+        }
         "profile" => {
             let profiles = archinstall_zfs_core::profile::all_profiles();
             let mut names: Vec<String> = vec!["None".to_string()];
