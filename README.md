@@ -12,11 +12,12 @@ Setting up ZFS on Arch involves kernel selection, ZFS module installation, bootl
 
 This is a Rust rewrite of [archinstall_zfs](https://github.com/okhsunrog/archinstall_zfs). Key improvements over the Python version:
 
+- **No archinstall dependency** — fully standalone, no dependency on the official Arch installer framework or its Python ecosystem
+- **Single binary** with no Python/pip/venv dependencies
 - **Direct libalpm** for all package management with per-package progress callbacks
 - **No external package manager binaries** needed at runtime (no `pacman`, `pacstrap`, `yay`)
 - **Proper AUR dependency resolution** via `raur` + `aur-depends` crates
 - **Trace-level file logging** (`/tmp/archinstall-zfs.log`) for post-mortem analysis
-- **Single static binary** with no Python/pip/venv dependencies
 
 ---
 
