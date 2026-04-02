@@ -360,41 +360,53 @@ fn mount_api_filesystems(target: &Path) -> Result<Vec<PathBuf>> {
 
     let mut mounts = Vec::new();
 
-    let mount_points: Vec<(&str, &str, &str, MsFlags)> = vec![
+    // (source, dest, fstype, flags, data) — matches pacstrap's chroot_setup()
+    let mount_points: Vec<(&str, &str, &str, MsFlags, Option<&str>)> = vec![
         (
             "proc",
             "proc",
             "proc",
             MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
+            None,
         ),
         (
             "sysfs",
             "sys",
             "sysfs",
             MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV | MsFlags::MS_RDONLY,
+            None,
         ),
-        ("devtmpfs", "dev", "devtmpfs", MsFlags::MS_NOSUID),
+        (
+            "devtmpfs",
+            "dev",
+            "devtmpfs",
+            MsFlags::MS_NOSUID,
+            Some("mode=0755"),
+        ),
         (
             "devpts",
             "dev/pts",
             "devpts",
             MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC,
+            Some("mode=0620,gid=5"),
         ),
         (
             "tmpfs",
             "dev/shm",
             "tmpfs",
             MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
+            Some("mode=1777"),
         ),
         (
             "tmpfs",
             "tmp",
             "tmpfs",
             MsFlags::MS_STRICTATIME | MsFlags::MS_NODEV | MsFlags::MS_NOSUID,
+            Some("mode=1777"),
         ),
     ];
 
-    for (source, dest, fstype, flags) in &mount_points {
+    for (source, dest, fstype, flags, data) in &mount_points {
         let mount_path = target.join(dest);
         fs::create_dir_all(&mount_path)?;
         mount(
@@ -402,10 +414,24 @@ fn mount_api_filesystems(target: &Path) -> Result<Vec<PathBuf>> {
             &mount_path,
             Some(*fstype),
             *flags,
-            None::<&str>,
+            *data,
         )
         .wrap_err_with(|| format!("failed to mount {fstype} on {dest}"))?;
         mounts.push(mount_path);
+    }
+
+    // Conditionally mount efivarfs (matches pacstrap behavior)
+    let efivars_path = target.join("sys/firmware/efi/efivars");
+    if efivars_path.is_dir() {
+        mount(
+            Some("efivarfs"),
+            &efivars_path,
+            Some("efivarfs"),
+            MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
+            None::<&str>,
+        )
+        .wrap_err("failed to mount efivarfs")?;
+        mounts.push(efivars_path);
     }
 
     // Bind mount /run
