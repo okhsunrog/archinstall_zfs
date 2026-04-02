@@ -113,13 +113,10 @@ pub fn install_and_generate_zbm(
     target: &Path,
     init_system: InitSystem,
 ) -> Result<()> {
-    // 1. Install zfsbootmenu from AUR (perl-boolean is an AUR dep)
+    // 1. Install zfsbootmenu from AUR (aur-depends resolves AUR dep chains
+    //    like perl-boolean automatically)
     tracing::info!("installing zfsbootmenu from AUR");
-    crate::installer::aur::install_aur_packages(
-        runner,
-        target,
-        &["perl-boolean", "zfsbootmenu"],
-    )?;
+    crate::installer::aur::install_aur_packages(runner, target, &["zfsbootmenu"])?;
 
     // 2. Write config.yaml
     write_zbm_config(target, init_system)?;

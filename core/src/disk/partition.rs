@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Context, Result};
 
 use crate::system::cmd::{CommandRunner, check_exit};
 
@@ -23,7 +23,11 @@ pub fn zap_disk(runner: &dyn CommandRunner, disk: &Path) -> Result<()> {
     // Get disk size for zeroing the end
     let output = runner.run("blockdev", &["--getsz", disk_str])?;
     check_exit(&output, "blockdev --getsz")?;
-    let sectors: u64 = output.stdout.trim().parse().unwrap_or(0);
+    let sectors: u64 = output
+        .stdout
+        .trim()
+        .parse()
+        .wrap_err("failed to parse disk sector count from blockdev --getsz")?;
     if sectors > 34 {
         let seek = sectors - 34;
         let _ = runner.run(

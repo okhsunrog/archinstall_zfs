@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 /// Result of compatibility check for a single kernel.
 #[derive(Debug, Clone)]
 pub struct CompatibilityResult {
@@ -64,8 +66,8 @@ pub fn scan_kernel(kernel: &str) -> CompatibilityResult {
 
     let kernel_version = versions.get(kernel).cloned();
 
-    // DKMS check: zfs-dkms must be available
-    let (dkms_ok, dkms_warn) = check_dkms_compat(&versions);
+    // DKMS check: zfs-dkms must be available AND kernel must be in supported range
+    let (dkms_ok, dkms_warn) = check_dkms_compat(&versions, kernel);
 
     // Precompiled check: kernel version must match the version embedded in the ZFS package
     let (pre_ok, pre_ver, pre_warn) = check_precompiled_compat(info, &versions);
@@ -81,19 +83,184 @@ pub fn scan_kernel(kernel: &str) -> CompatibilityResult {
     }
 }
 
-fn check_dkms_compat(versions: &std::collections::HashMap<String, String>) -> (bool, Vec<String>) {
-    match versions.get("zfs-dkms") {
-        Some(ver) => {
-            tracing::debug!(version = ver, "zfs-dkms found");
-            (true, vec![])
+/// Validate a kernel/ZFS plan before installation.
+/// Returns a list of warnings (empty = no issues).
+pub fn validate_kernel_zfs_plan(
+    kernel: &str,
+    mode: crate::config::types::ZfsModuleMode,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+
+    let info = match super::get_kernel_info(kernel) {
+        Some(i) => i,
+        None => {
+            warnings.push(format!(
+                "Unsupported kernel: {kernel}. Supported: {}",
+                super::AVAILABLE_KERNELS
+                    .iter()
+                    .map(|k| k.name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+            return warnings;
         }
-        None => (false, vec!["zfs-dkms not found in repos".to_string()]),
+    };
+
+    if mode == crate::config::types::ZfsModuleMode::Precompiled
+        && info.precompiled_package.is_none()
+    {
+        warnings.push(format!(
+            "Precompiled ZFS not available for {kernel}, will use DKMS"
+        ));
+    }
+
+    // Run the full compatibility scan
+    let result = scan_kernel(kernel);
+    match mode {
+        crate::config::types::ZfsModuleMode::Precompiled => {
+            if !result.precompiled_compatible {
+                warnings.extend(result.precompiled_warnings);
+            }
+        }
+        crate::config::types::ZfsModuleMode::Dkms => {
+            if !result.dkms_compatible {
+                warnings.extend(result.dkms_warnings);
+            }
+        }
+    }
+
+    warnings
+}
+
+// ── DKMS compatibility ──────────────────────────────
+
+fn check_dkms_compat(versions: &HashMap<String, String>, kernel: &str) -> (bool, Vec<String>) {
+    let dkms_ver = match versions.get("zfs-dkms") {
+        Some(ver) => ver,
+        None => return (false, vec!["zfs-dkms not found in repos".to_string()]),
+    };
+
+    let kernel_ver = match versions.get(kernel) {
+        Some(ver) => ver,
+        None => {
+            return (
+                false,
+                vec![format!("Kernel {kernel} not found in repos")],
+            );
+        }
+    };
+
+    // Fetch kernel compatibility range from OpenZFS GitHub releases
+    let base_zfs_ver = dkms_ver.split('-').next().unwrap_or(dkms_ver);
+    match fetch_zfs_kernel_range(base_zfs_ver) {
+        Some((min_ver, max_ver)) => {
+            let kernel_base = kernel_ver.split('-').next().unwrap_or(kernel_ver);
+            let kernel_parsed = parse_major_minor(kernel_base);
+            let min_parsed = parse_major_minor(&min_ver);
+            let max_parsed = parse_major_minor(&max_ver);
+
+            if kernel_parsed >= min_parsed && kernel_parsed <= max_parsed {
+                tracing::debug!(
+                    kernel,
+                    kernel_ver = kernel_base,
+                    range = format!("{min_ver} - {max_ver}"),
+                    "kernel is within ZFS DKMS supported range"
+                );
+                (true, vec![])
+            } else {
+                (
+                    false,
+                    vec![format!(
+                        "Kernel {kernel} ({kernel_base}) is outside ZFS DKMS supported range ({min_ver} - {max_ver})"
+                    )],
+                )
+            }
+        }
+        None => {
+            // Can't fetch range — fall back to existence check (assume compatible)
+            tracing::warn!(
+                "Could not fetch ZFS kernel compatibility range from GitHub, assuming DKMS compatible"
+            );
+            (
+                true,
+                vec!["Could not verify DKMS kernel range (GitHub API unavailable)".to_string()],
+            )
+        }
     }
 }
 
+/// Fetch the supported kernel version range for a ZFS version from the
+/// OpenZFS GitHub release notes.
+/// Returns (min_kernel, max_kernel) or None if unavailable.
+fn fetch_zfs_kernel_range(zfs_version: &str) -> Option<(String, String)> {
+    let tag = format!("zfs-{zfs_version}");
+    let url = format!("https://api.github.com/repos/openzfs/zfs/releases/tags/{tag}");
+
+    tracing::debug!(url, "fetching ZFS kernel compatibility from GitHub");
+
+    let client = reqwest::blocking::Client::new();
+    let resp = client
+        .get(&url)
+        .header("Accept", "application/vnd.github.v3+json")
+        .header("User-Agent", "archinstall-zfs-rs")
+        .send()
+        .ok()?;
+
+    let data: serde_json::Value = resp.json().ok()?;
+    let body = data.get("body")?.as_str()?;
+    parse_kernel_range_from_release_notes(body)
+}
+
+/// Parse kernel compatibility range from OpenZFS release notes body.
+/// Tries multiple patterns for robustness (same as Python version).
+fn parse_kernel_range_from_release_notes(body: &str) -> Option<(String, String)> {
+    let patterns = [
+        // **Linux**: compatible with 6.1 - 6.15 kernels
+        r"\*\*Linux\*\*:\s*compatible with\s+([\d.]+)\s*-\s*([\d.]+)\s*kernels",
+        // Linux ... compatible with 6.1 - 6.15 kernels
+        r"Linux.*?compatible with.*?([\d.]+)\s*-\s*([\d.]+)\s*kernels",
+        // Kernel compatibility ... 6.1 - 6.15
+        r"Kernel.*?compatibility.*?([\d.]+)\s*-\s*([\d.]+)",
+        // Linux kernel 6.1 - 6.15
+        r"Linux kernel.*?([\d.]+)\s*-\s*([\d.]+)",
+    ];
+
+    for pattern in &patterns {
+        if let Some(caps) = regex::Regex::new(pattern).ok()?.captures(body) {
+            let min = caps.get(1)?.as_str().to_string();
+            let max = caps.get(2)?.as_str().to_string();
+            tracing::debug!(min, max, "parsed ZFS kernel compatibility range");
+            return Some((min, max));
+        }
+    }
+
+    tracing::debug!("no kernel compatibility range found in release notes");
+    None
+}
+
+/// Parse a version string into (major, minor) for range comparison.
+/// Normalizes to major.minor only — patch versions don't matter for
+/// DKMS range checking (6.15.9 is compatible with 6.15).
+fn parse_major_minor(version: &str) -> (u32, u32) {
+    // Strip non-numeric suffixes (e.g., "6.18.arch1" -> "6.18")
+    let clean: String = version
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    let parts: Vec<u32> = clean
+        .split('.')
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    let major = parts.first().copied().unwrap_or(0);
+    let minor = parts.get(1).copied().unwrap_or(0);
+    (major, minor)
+}
+
+// ── Precompiled compatibility ───────────────────────
+
 fn check_precompiled_compat(
     info: &super::KernelInfo,
-    versions: &std::collections::HashMap<String, String>,
+    versions: &HashMap<String, String>,
 ) -> (bool, Option<String>, Vec<String>) {
     let pre_pkg = match info.precompiled_package {
         Some(p) => p,
@@ -124,8 +291,6 @@ fn check_precompiled_compat(
         }
     };
 
-    // Precompiled ZFS package version format: {zfs_ver}_{supported_kernel_ver}-{pkgrel}
-    // e.g. "2.4.1_6.18.20.1-1" means it supports kernel version "6.18.20" with arch suffix
     let warnings = match validate_precompiled_version(&pre_version, kernel_version) {
         Ok(()) => vec![],
         Err(w) => vec![w],
@@ -142,7 +307,6 @@ fn validate_precompiled_version(
     zfs_version: &str,
     kernel_version: &str,
 ) -> std::result::Result<(), String> {
-    // Extract the kernel part from the ZFS version: everything after '_' and before the last '-'
     let after_underscore = match zfs_version.split('_').nth(1) {
         Some(s) => s,
         None => {
@@ -151,10 +315,6 @@ fn validate_precompiled_version(
             ));
         }
     };
-
-    // The ZFS supported kernel part: "6.18.20.1-1"
-    // The actual kernel version: "6.18.20-1"
-    // We need to compare the base versions (ignoring the build suffix in ZFS version)
 
     let zfs_kernel_base = strip_pkgrel(after_underscore);
     let kernel_base = strip_pkgrel(kernel_version);
@@ -166,7 +326,7 @@ fn validate_precompiled_version(
 
     // Try stripping trailing build suffix from ZFS version
     // e.g., "6.18.20.1" -> "6.18.20"
-    if let Some(stripped) = strip_build_suffix(&zfs_kernel_base) {
+    if let Some(stripped) = strip_build_suffix(zfs_kernel_base) {
         if stripped == kernel_base {
             return Ok(());
         }
@@ -189,7 +349,9 @@ fn strip_pkgrel(version: &str) -> &str {
 /// "6.18.20.1" -> Some("6.18.20"), "6.18.20" -> None
 fn strip_build_suffix(version: &str) -> Option<&str> {
     match version.rsplit_once('.') {
-        Some((base, suffix)) if suffix.len() == 1 && suffix.chars().all(|c| c.is_ascii_digit()) => {
+        Some((base, suffix))
+            if suffix.len() == 1 && suffix.chars().all(|c| c.is_ascii_digit()) =>
+        {
             Some(base)
         }
         _ => None,
@@ -207,13 +369,14 @@ mod tests {
 
     #[test]
     fn test_validate_precompiled_build_suffix() {
-        // ZFS has build suffix .1, kernel doesn't
         assert!(validate_precompiled_version("2.4.1_6.18.20.1-1", "6.18.20-1").is_ok());
     }
 
     #[test]
     fn test_validate_precompiled_arch_suffix() {
-        assert!(validate_precompiled_version("2.4.1_6.18.20.arch1.1-1", "6.18.20.arch1-1").is_ok());
+        assert!(
+            validate_precompiled_version("2.4.1_6.18.20.arch1.1-1", "6.18.20.arch1-1").is_ok()
+        );
     }
 
     #[test]
@@ -233,8 +396,39 @@ mod tests {
     #[test]
     fn test_strip_build_suffix() {
         assert_eq!(strip_build_suffix("6.18.20.1"), Some("6.18.20"));
-        assert_eq!(strip_build_suffix("6.18.20.arch1.1"), Some("6.18.20.arch1"));
-        assert_eq!(strip_build_suffix("6.18.20"), None); // "20" is too long for a build suffix
+        assert_eq!(
+            strip_build_suffix("6.18.20.arch1.1"),
+            Some("6.18.20.arch1")
+        );
+        assert_eq!(strip_build_suffix("6.18.20"), None);
+    }
+
+    #[test]
+    fn test_parse_major_minor() {
+        assert_eq!(parse_major_minor("6.18.20"), (6, 18));
+        assert_eq!(parse_major_minor("6.1"), (6, 1));
+        assert_eq!(parse_major_minor("6.18.arch1"), (6, 18));
+        assert_eq!(parse_major_minor("6"), (6, 0));
+    }
+
+    #[test]
+    fn test_parse_kernel_range_from_release_notes() {
+        let body = "## Changes\n**Linux**: compatible with 6.1 - 6.15 kernels\nSome other text";
+        let result = parse_kernel_range_from_release_notes(body);
+        assert_eq!(result, Some(("6.1".to_string(), "6.15".to_string())));
+    }
+
+    #[test]
+    fn test_parse_kernel_range_alt_format() {
+        let body = "Linux kernel 6.6 - 6.12 supported\nother stuff";
+        let result = parse_kernel_range_from_release_notes(body);
+        assert_eq!(result, Some(("6.6".to_string(), "6.12".to_string())));
+    }
+
+    #[test]
+    fn test_parse_kernel_range_not_found() {
+        let body = "No compatibility info here";
+        assert!(parse_kernel_range_from_release_notes(body).is_none());
     }
 
     // Integration test: only on Arch with synced DB
@@ -244,7 +438,6 @@ mod tests {
             return;
         }
         let result = scan_kernel("linux-lts");
-        // Should at least not crash
         tracing::info!(?result, "scan result for linux-lts");
     }
 }

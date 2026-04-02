@@ -3,7 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{CommandRunner, check_exit, chroot};
+use crate::system::cmd::{CommandRunner, check_exit, chroot_cmd};
 
 pub fn set_root_password(runner: &dyn CommandRunner, target: &Path, password: &str) -> Result<()> {
     let target_str = target.to_string_lossy();
@@ -24,12 +24,12 @@ pub fn create_user(
     shell: Option<&str>,
     groups: Option<&[String]>,
 ) -> Result<()> {
-    // Create user
-    let mut useradd_cmd = format!("useradd -m {username}");
-    if let Some(sh) = shell {
-        useradd_cmd = format!("useradd -m -s {sh} {username}");
-    }
-    let output = chroot(runner, target, &useradd_cmd)?;
+    // Create user — args passed directly, no shell interpretation
+    let output = if let Some(sh) = shell {
+        chroot_cmd(runner, target, "useradd", &["-m", "-s", sh, username])?
+    } else {
+        chroot_cmd(runner, target, "useradd", &["-m", username])?
+    };
     check_exit(&output, &format!("useradd {username}"))?;
 
     // Set password via stdin (not visible in process args)
@@ -41,11 +41,10 @@ pub fn create_user(
         check_exit(&output, &format!("set password for {username}"))?;
     }
 
-    // Add to groups
+    // Add to groups — args passed directly, no shell interpretation
     if let Some(grps) = groups {
         for group in grps {
-            let cmd = format!("usermod -aG {group} {username}");
-            let output = chroot(runner, target, &cmd)?;
+            let output = chroot_cmd(runner, target, "usermod", &["-aG", group, username])?;
             check_exit(&output, &format!("add {username} to {group}"))?;
         }
     }

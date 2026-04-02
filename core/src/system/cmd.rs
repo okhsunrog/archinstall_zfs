@@ -140,8 +140,38 @@ impl CommandRunner for RealRunner {
 }
 
 pub fn chroot(runner: &dyn CommandRunner, target: &Path, cmd: &str) -> Result<CmdOutput> {
-    let target_str = target.to_str().unwrap_or("/mnt");
-    runner.run("arch-chroot", &[target_str, "bash", "-c", cmd])
+    let target_str = target.to_string_lossy();
+    runner.run("arch-chroot", &[&*target_str, "bash", "-c", cmd])
+}
+
+/// Run a command inside an arch-chroot without bash interpretation.
+/// Arguments are passed directly to the program, avoiding shell injection.
+pub fn chroot_cmd(
+    runner: &dyn CommandRunner,
+    target: &Path,
+    program: &str,
+    args: &[&str],
+) -> Result<CmdOutput> {
+    let target_str = target.to_string_lossy();
+    let mut full_args = vec![&*target_str, program];
+    full_args.extend_from_slice(args);
+    runner.run("arch-chroot", &full_args)
+}
+
+/// Shell-quote a string for safe interpolation into bash commands.
+/// Returns the string wrapped in single quotes with internal single quotes escaped.
+pub fn shell_quote(s: &str) -> String {
+    if s.is_empty() {
+        return "''".to_string();
+    }
+    // If string only contains safe characters, return as-is
+    if s.chars().all(|c| {
+        c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '@' | '+' | ',')
+    }) {
+        return s.to_string();
+    }
+    // Wrap in single quotes, escaping any embedded single quotes
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 pub fn chroot_streaming(
@@ -150,8 +180,8 @@ pub fn chroot_streaming(
     cmd: &str,
     tx: &Sender<String>,
 ) -> Result<CmdOutput> {
-    let target_str = target.to_str().unwrap_or("/mnt");
-    runner.run_streaming("arch-chroot", &[target_str, "bash", "-c", cmd], tx)
+    let target_str = target.to_string_lossy();
+    runner.run_streaming("arch-chroot", &[&*target_str, "bash", "-c", cmd], tx)
 }
 
 pub fn check_exit(output: &CmdOutput, context: &str) -> Result<()> {
