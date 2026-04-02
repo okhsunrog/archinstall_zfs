@@ -181,52 +181,63 @@ component SelectPopup inherits Rectangle {
         background: #00000080;
         width: 100%; height: 100%;
 
-        TouchArea { clicked => { cancelled(); } }
+        // Block clicks/scroll from reaching the background
+        TouchArea {
+            clicked => { cancelled(); }
+            scroll-event(e) => {
+                // Consume scroll so it doesn't reach the main window
+                return accept;
+            }
+        }
 
         Rectangle {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            width: min(400px, parent.width - 40px);
-            height: min(options.length * 36px + 60px, parent.height - 80px);
+            width: min(500px, parent.width - 40px);
+            height: min(parent.height - 80px, 500px);
             background: Theme.c.mantle;
             border-radius: 8px;
             border-color: Theme.c.surface1;
             border-width: 1px;
+            clip: true;
 
             VerticalLayout {
                 padding: 16px;
-                spacing: 4px;
+                spacing: 8px;
 
                 Text {
                     text: title;
                     color: Theme.c.blue;
                     font-size: 16px;
                     font-weight: 600;
+                    height: 24px;
                 }
 
-                for option[index] in options: Rectangle {
-                    height: 32px;
-                    background: ta.has-hover ? Theme.c.surface1
-                              : index == result-index ? Theme.c.surface0
-                              : transparent;
-                    border-radius: 4px;
+                ListView {
+                    for option[index] in options: Rectangle {
+                        height: 32px;
+                        background: item-ta.has-hover ? Theme.c.surface1
+                                  : index == result-index ? Theme.c.surface0
+                                  : transparent;
+                        border-radius: 4px;
 
-                    ta := TouchArea {
-                        clicked => {
-                            result-index = index;
-                            accepted(index);
+                        item-ta := TouchArea {
+                            clicked => {
+                                result-index = index;
+                                accepted(index);
+                            }
                         }
-                    }
 
-                    HorizontalLayout {
-                        padding-left: 12px;
-                        alignment: start;
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            alignment: start;
 
-                        Text {
-                            text: index == result-index ? "> " + option.text : "  " + option.text;
-                            color: index == result-index ? Theme.c.green : Theme.c.text;
-                            font-size: 14px;
-                            vertical-alignment: center;
+                            Text {
+                                text: index == result-index ? "> " + option.text : "  " + option.text;
+                                color: index == result-index ? Theme.c.green : Theme.c.text;
+                                font-size: 14px;
+                                vertical-alignment: center;
+                            }
                         }
                     }
                 }
