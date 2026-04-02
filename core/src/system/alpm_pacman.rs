@@ -146,13 +146,17 @@ impl AlpmContext {
             eyre!(msg)
         })?;
 
-        let to_install: Vec<String> = self
-            .handle
-            .trans_add()
-            .iter()
-            .map(|p| format!("{} {}", p.name(), p.version()))
-            .collect();
-        tracing::info!(count = to_install.len(), "transaction prepared, installing");
+        let count = self.handle.trans_add().len();
+        if count == 0 {
+            // All packages already installed (NEEDED flag skipped them)
+            tracing::info!("all packages already up to date");
+            self.handle
+                .trans_release()
+                .map_err(|e| eyre!("failed to release transaction: {e}"))?;
+            return Ok(());
+        }
+
+        tracing::info!(count, "transaction prepared, installing");
 
         // Commit (download + install)
         self.handle.trans_commit().map_err(|e| {

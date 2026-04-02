@@ -61,7 +61,7 @@ fn install_single_aur_package(
         "su - {TEMP_USER} -c 'cd /tmp && \
          git clone https://aur.archlinux.org/{package}.git && \
          cd {package} && \
-         makepkg -si --noconfirm --needed'"
+         makepkg -si --noconfirm --needed --skippgpcheck'"
     );
     let output = chroot(runner, target, &cmd)?;
     check_exit(&output, &format!("AUR install {package}"))?;
