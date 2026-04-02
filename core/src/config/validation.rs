@@ -2,6 +2,29 @@ use super::types::{
     GlobalConfig, InstallationMode, SwapMode, ZFS_PASSPHRASE_MIN_LENGTH, ZfsEncryptionMode,
 };
 
+/// Valid Linux hostname: 1-63 chars, alphanumeric + hyphens, no leading/trailing hyphen.
+fn is_valid_hostname(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 63
+        && !name.starts_with('-')
+        && !name.ends_with('-')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// Valid Linux username: 1-32 chars, starts with letter or underscore,
+/// rest is alphanumeric + underscore + hyphen.
+fn is_valid_username(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 32
+        && name
+            .starts_with(|c: char| c.is_ascii_lowercase() || c == '_')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+}
+
 impl GlobalConfig {
     /// Validate configuration for installation.
     /// Returns a list of error messages. Empty means valid.
@@ -100,6 +123,43 @@ impl GlobalConfig {
             }
         }
 
+        // Hostname validation
+        if let Some(ref hostname) = self.hostname {
+            if !is_valid_hostname(hostname) {
+                errors.push(format!(
+                    "Hostname '{hostname}' is invalid: must be 1-63 chars, alphanumeric and hyphens, no leading/trailing hyphen"
+                ));
+            }
+        }
+
+        // Kernel validation
+        if let Some(ref kernels) = self.kernels {
+            for kernel in kernels {
+                if crate::kernel::get_kernel_info(kernel).is_none() {
+                    let known: Vec<&str> = crate::kernel::AVAILABLE_KERNELS
+                        .iter()
+                        .map(|k| k.name)
+                        .collect();
+                    errors.push(format!(
+                        "Unknown kernel '{kernel}'. Available: {}",
+                        known.join(", ")
+                    ));
+                }
+            }
+        }
+
+        // User validation
+        if let Some(ref users) = self.users {
+            for user in users {
+                if !is_valid_username(&user.username) {
+                    errors.push(format!(
+                        "Username '{}' is invalid: must be 1-32 chars, start with lowercase letter or underscore, contain only lowercase, digits, underscore, hyphen",
+                        user.username
+                    ));
+                }
+            }
+        }
+
         errors
     }
 }
@@ -109,7 +169,9 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::config::types::{CompressionAlgo, GlobalConfig, InstallationMode, SwapMode};
+    use crate::config::types::{
+        CompressionAlgo, GlobalConfig, InstallationMode, SwapMode, UserConfig,
+    };
 
     fn valid_full_disk_config() -> GlobalConfig {
         GlobalConfig {
@@ -275,6 +337,110 @@ mod tests {
         cfg.disk_by_id = Some(PathBuf::from("/dev/sda"));
         let errors = cfg.validate_for_install();
         assert!(errors.iter().any(|e| e.contains("/dev/disk/by-id/")));
+    }
+
+    #[test]
+    fn test_valid_hostname() {
+        let mut cfg = valid_full_disk_config();
+        cfg.hostname = Some("my-host".to_string());
+        let errors = cfg.validate_for_install();
+        assert!(errors.is_empty(), "Expected no errors, got: {errors:?}");
+    }
+
+    #[test]
+    fn test_invalid_hostname_leading_hyphen() {
+        let mut cfg = valid_full_disk_config();
+        cfg.hostname = Some("-badhost".to_string());
+        let errors = cfg.validate_for_install();
+        assert!(errors.iter().any(|e| e.contains("Hostname")));
+    }
+
+    #[test]
+    fn test_invalid_hostname_special_chars() {
+        let mut cfg = valid_full_disk_config();
+        cfg.hostname = Some("host.name".to_string());
+        let errors = cfg.validate_for_install();
+        assert!(errors.iter().any(|e| e.contains("Hostname")));
+    }
+
+    #[test]
+    fn test_invalid_hostname_too_long() {
+        let mut cfg = valid_full_disk_config();
+        cfg.hostname = Some("a".repeat(64));
+        let errors = cfg.validate_for_install();
+        assert!(errors.iter().any(|e| e.contains("Hostname")));
+    }
+
+    #[test]
+    fn test_unknown_kernel() {
+        let mut cfg = valid_full_disk_config();
+        cfg.kernels = Some(vec!["linux-custom".to_string()]);
+        let errors = cfg.validate_for_install();
+        assert!(errors.iter().any(|e| e.contains("Unknown kernel")));
+    }
+
+    #[test]
+    fn test_valid_kernel() {
+        let mut cfg = valid_full_disk_config();
+        cfg.kernels = Some(vec!["linux-lts".to_string()]);
+        let errors = cfg.validate_for_install();
+        assert!(errors.is_empty(), "Expected no errors, got: {errors:?}");
+    }
+
+    #[test]
+    fn test_valid_username() {
+        let mut cfg = valid_full_disk_config();
+        cfg.users = Some(vec![UserConfig {
+            username: "john".to_string(),
+            password: None,
+            sudo: false,
+            shell: None,
+            groups: None,
+        }]);
+        let errors = cfg.validate_for_install();
+        assert!(errors.is_empty(), "Expected no errors, got: {errors:?}");
+    }
+
+    #[test]
+    fn test_invalid_username_uppercase() {
+        let mut cfg = valid_full_disk_config();
+        cfg.users = Some(vec![UserConfig {
+            username: "John".to_string(),
+            password: None,
+            sudo: false,
+            shell: None,
+            groups: None,
+        }]);
+        let errors = cfg.validate_for_install();
+        assert!(errors.iter().any(|e| e.contains("Username")));
+    }
+
+    #[test]
+    fn test_invalid_username_starts_with_digit() {
+        let mut cfg = valid_full_disk_config();
+        cfg.users = Some(vec![UserConfig {
+            username: "1user".to_string(),
+            password: None,
+            sudo: false,
+            shell: None,
+            groups: None,
+        }]);
+        let errors = cfg.validate_for_install();
+        assert!(errors.iter().any(|e| e.contains("Username")));
+    }
+
+    #[test]
+    fn test_invalid_username_spaces() {
+        let mut cfg = valid_full_disk_config();
+        cfg.users = Some(vec![UserConfig {
+            username: "my user".to_string(),
+            password: None,
+            sudo: false,
+            shell: None,
+            groups: None,
+        }]);
+        let errors = cfg.validate_for_install();
+        assert!(errors.iter().any(|e| e.contains("Username")));
     }
 
     #[test]
