@@ -1,0 +1,17 @@
+[package]
+name = "archinstall-zfs-slint"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+
+[dependencies]
+archinstall-zfs-core = { path = "../core" }
+slint = { version = "1.15", default-features = false, features = [
+    "std",
+    "compat-1-2",
+    "backend-linuxkms-noseat",
+    "renderer-software",
+] }
+
+[build-dependencies]
+slint-build = "1.15"

@@ -11,9 +11,10 @@ crossterm = "0.29.0"
 nix = { version = "0.31.2", features = ["fs"] }
 ratatui = "0.30.0"
 ratatui-macros = "0.7.0"
+ratatui-widgets = "0.3.0"
 tracing = "0.1.44"
 tracing-appender = "0.2.4"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 tui-scrollview = "0.6.3"
-tui-textarea = "0.7.0"
+tui-textarea-2 = "0.10.2"
 tui-widget-list = "0.15.2"
