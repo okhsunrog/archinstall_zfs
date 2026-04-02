@@ -14,9 +14,11 @@ use ratatui::prelude::CrosstermBackend;
 
 use archinstall_zfs_core::config::types::GlobalConfig;
 
-pub fn run_tui(config: GlobalConfig, dry_run: bool) -> Result<()> {
+use self::screens::main_menu::MainMenu;
+
+pub fn run_tui(config: GlobalConfig, _dry_run: bool) -> Result<()> {
     let mut terminal = setup_terminal()?;
-    let result = run_app(&mut terminal, config, dry_run);
+    let result = run_app(&mut terminal, config);
     restore_terminal()?;
     result
 }
@@ -37,26 +39,31 @@ fn restore_terminal() -> Result<()> {
     Ok(())
 }
 
-fn run_app(terminal: &mut DefaultTerminal, config: GlobalConfig, _dry_run: bool) -> Result<()> {
-    use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+/// What the main menu wants the app to do next.
+pub enum Action {
+    /// Keep running the main loop.
+    Continue,
+    /// User chose to install — return the config.
+    Install,
+    /// User quit.
+    Quit,
+}
 
-    let config = config;
+fn run_app(terminal: &mut DefaultTerminal, config: GlobalConfig) -> Result<()> {
+    let mut menu = MainMenu::new(config);
 
     loop {
-        terminal.draw(|frame| {
-            screens::main_menu::render(frame, &config);
-        })?;
+        terminal.draw(|frame| menu.render(frame))?;
 
-        if event::poll(std::time::Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                match (key.code, key.modifiers) {
-                    (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-                        return Ok(());
-                    }
-                    _ => {
-                        // TODO: dispatch to screens
-                    }
+        if crossterm::event::poll(std::time::Duration::from_millis(50))? {
+            let ev = crossterm::event::read()?;
+            match menu.handle_event(ev, terminal)? {
+                Action::Continue => {}
+                Action::Install => {
+                    // TODO: run installation with progress screen
+                    return Ok(());
                 }
+                Action::Quit => return Ok(()),
             }
         }
     }
