@@ -3,8 +3,10 @@ use std::path::{Path, PathBuf};
 use color_eyre::eyre::{Result, bail};
 
 use crate::Cli;
-use crate::config::types::{GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode};
-use crate::system::cmd::{CommandRunner, RealRunner};
+use archinstall_zfs_core::config::types::{
+    GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode,
+};
+use archinstall_zfs_core::system::cmd::{CommandRunner, RealRunner};
 
 pub fn run(cli: Cli) -> Result<()> {
     let config = if let Some(ref path) = cli.config {
@@ -45,20 +47,20 @@ fn run_headless_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Re
     tracing::info!("Phase 0: Pre-installation checks");
 
     // Check internet
-    let has_internet = crate::system::net::check_internet(runner)?;
+    let has_internet = archinstall_zfs_core::system::net::check_internet(runner)?;
     if !has_internet {
         bail!("No internet connectivity. Connect to the network and retry.");
     }
     tracing::info!("internet connectivity OK");
 
     // Check UEFI
-    if !crate::system::sysinfo::has_uefi() {
+    if !archinstall_zfs_core::system::sysinfo::has_uefi() {
         bail!("UEFI boot required. This installer only supports UEFI systems.");
     }
     tracing::info!("UEFI boot detected");
 
     // Initialize ZFS on host (handles reflector, archzfs repo, ZFS packages, module loading)
-    crate::zfs::kmod::initialize_zfs(runner, kernel, config.zfs_module_mode)?;
+    archinstall_zfs_core::zfs::kmod::initialize_zfs(runner, kernel, config.zfs_module_mode)?;
 
     // ── Phase 1: Disk preparation ──────────────────────────────
     tracing::info!("Phase 1: Disk preparation");
@@ -67,7 +69,7 @@ fn run_headless_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Re
             let disk = config.disk_by_id.as_ref().unwrap();
             tracing::info!(disk = %disk.display(), "full disk mode");
 
-            crate::disk::partition::zap_disk(runner, disk)?;
+            archinstall_zfs_core::disk::partition::zap_disk(runner, disk)?;
 
             let swap_size = match config.swap_mode {
                 SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted => {
@@ -75,8 +77,10 @@ fn run_headless_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Re
                 }
                 _ => None,
             };
-            let layout = crate::disk::partition::create_partitions(runner, disk, swap_size)?;
-            let parts = crate::disk::partition::wait_for_by_id_partitions(disk, &layout);
+            let layout =
+                archinstall_zfs_core::disk::partition::create_partitions(runner, disk, swap_size)?;
+            let parts =
+                archinstall_zfs_core::disk::partition::wait_for_by_id_partitions(disk, &layout);
 
             let efi = parts[0].clone();
             let zfs = parts[1].clone();
@@ -106,10 +110,10 @@ fn run_headless_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Re
     tracing::info!("Phase 2: ZFS pool and datasets");
 
     // Create hostid
-    crate::zfs::cache::create_hostid(runner)?;
+    archinstall_zfs_core::zfs::cache::create_hostid(runner)?;
 
     // Prepare ZFS cache on host
-    crate::zfs::cache::prepare_zfs_cache(Path::new("/"), pool_name)?;
+    archinstall_zfs_core::zfs::cache::prepare_zfs_cache(Path::new("/"), pool_name)?;
 
     // Enable ZED on host
     let _ = runner.run("systemctl", &["enable", "--now", "zfs-zed.service"]);
@@ -117,18 +121,18 @@ fn run_headless_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Re
     // Encryption key setup
     if encryption != ZfsEncryptionMode::None {
         if let Some(ref pw) = config.zfs_encryption_password {
-            crate::zfs::encryption::write_key_file(Path::new("/"), pw)?;
+            archinstall_zfs_core::zfs::encryption::write_key_file(Path::new("/"), pw)?;
         }
     }
 
-    let key_path = crate::zfs::encryption::key_file_path(Path::new("/"));
+    let key_path = archinstall_zfs_core::zfs::encryption::key_file_path(Path::new("/"));
 
     match mode {
         InstallationMode::FullDisk | InstallationMode::NewPool => {
             // Build encryption properties
             let enc_props: Vec<(&str, String)> = match encryption {
                 ZfsEncryptionMode::Pool => {
-                    crate::zfs::encryption::pool_encryption_properties(&key_path)
+                    archinstall_zfs_core::zfs::encryption::pool_encryption_properties(&key_path)
                 }
                 _ => Vec::new(),
             };
@@ -136,7 +140,7 @@ fn run_headless_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Re
                 enc_props.iter().map(|(k, v)| (*k, v.as_str())).collect();
 
             // Create pool
-            crate::zfs::pool::create_pool(
+            archinstall_zfs_core::zfs::pool::create_pool(
                 runner,
                 pool_name,
                 &zfs_partition,
@@ -146,12 +150,20 @@ fn run_headless_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Re
             )?;
 
             // Set cachefile=none (use scan-based import)
-            crate::zfs::pool::set_pool_property(runner, pool_name, "cachefile", "none")?;
+            archinstall_zfs_core::zfs::pool::set_pool_property(
+                runner,
+                pool_name,
+                "cachefile",
+                "none",
+            )?;
 
             // Create base dataset
             let base_props: Vec<(&str, String)> = match encryption {
                 ZfsEncryptionMode::Dataset => {
-                    let mut p = crate::zfs::encryption::dataset_encryption_properties(&key_path);
+                    let mut p =
+                        archinstall_zfs_core::zfs::encryption::dataset_encryption_properties(
+                            &key_path,
+                        );
                     p.push(("mountpoint", "none".to_string()));
                     p.push(("compression", compression.clone()));
                     p
@@ -165,38 +177,45 @@ fn run_headless_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Re
             };
             let base_refs: Vec<(&str, &str)> =
                 base_props.iter().map(|(k, v)| (*k, v.as_str())).collect();
-            crate::zfs::dataset::create_base_dataset(runner, pool_name, prefix, &base_refs)?;
+            archinstall_zfs_core::zfs::dataset::create_base_dataset(
+                runner, pool_name, prefix, &base_refs,
+            )?;
 
             // Create child datasets
-            let datasets = crate::zfs::dataset::default_datasets();
-            crate::zfs::dataset::create_child_datasets(runner, pool_name, prefix, &datasets)?;
+            let datasets = archinstall_zfs_core::zfs::dataset::default_datasets();
+            archinstall_zfs_core::zfs::dataset::create_child_datasets(
+                runner, pool_name, prefix, &datasets,
+            )?;
 
             // Export and reimport (needed for ZFS to properly set up mount hierarchy)
-            crate::zfs::pool::export_pool(runner, pool_name)?;
-            crate::zfs::pool::import_pool_no_mount(runner, pool_name, &mountpoint)?;
+            archinstall_zfs_core::zfs::pool::export_pool(runner, pool_name)?;
+            archinstall_zfs_core::zfs::pool::import_pool_no_mount(runner, pool_name, &mountpoint)?;
         }
         InstallationMode::ExistingPool => {
             // Import existing pool
-            crate::zfs::pool::import_pool_no_mount(runner, pool_name, &mountpoint)?;
+            archinstall_zfs_core::zfs::pool::import_pool_no_mount(runner, pool_name, &mountpoint)?;
 
             // Load encryption key if pool is encrypted
             if encryption != ZfsEncryptionMode::None {
-                crate::zfs::encryption::load_key(runner, pool_name, &key_path)?;
+                archinstall_zfs_core::zfs::encryption::load_key(runner, pool_name, &key_path)?;
             }
         }
     }
 
     // Mount datasets
-    let datasets = crate::zfs::dataset::default_datasets();
-    crate::zfs::dataset::mount_datasets_ordered(runner, pool_name, prefix, &datasets)?;
+    let datasets = archinstall_zfs_core::zfs::dataset::default_datasets();
+    archinstall_zfs_core::zfs::dataset::mount_datasets_ordered(
+        runner, pool_name, prefix, &datasets,
+    )?;
 
     // ── Phase 3: Mount EFI ─────────────────────────────────────
     tracing::info!("Phase 3: Mounting EFI partition");
-    crate::disk::partition::mount_efi(runner, &efi_partition, &mountpoint)?;
+    archinstall_zfs_core::disk::partition::mount_efi(runner, &efi_partition, &mountpoint)?;
 
     // ── Phases 4-12: Installer pipeline ────────────────────────
     tracing::info!("Phases 4-12: Running installer pipeline");
-    let installer = crate::installer::Installer::new(runner, config, &mountpoint, None);
+    let installer =
+        archinstall_zfs_core::installer::Installer::new(runner, config, &mountpoint, None);
     installer.perform_installation()?;
 
     // ── Phase 13: ZFSBootMenu ──────────────────────────────────
@@ -207,7 +226,7 @@ fn run_headless_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Re
         config.swap_mode,
         SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
     );
-    crate::zfs::bootmenu::set_zbm_properties(
+    archinstall_zfs_core::zfs::bootmenu::set_zbm_properties(
         runner,
         pool_name,
         prefix,
@@ -217,10 +236,14 @@ fn run_headless_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Re
     )?;
 
     // Install zfsbootmenu from AUR, write config, run generate-zbm
-    crate::zfs::bootmenu::install_and_generate_zbm(runner, &mountpoint, config.init_system)?;
+    archinstall_zfs_core::zfs::bootmenu::install_and_generate_zbm(
+        runner,
+        &mountpoint,
+        config.init_system,
+    )?;
 
     // Create efibootmgr entries
-    crate::zfs::bootmenu::create_efi_entries(runner, &efi_partition)?;
+    archinstall_zfs_core::zfs::bootmenu::create_efi_entries(runner, &efi_partition)?;
 
     // ── Phase 14: Cleanup ──────────────────────────────────────
     tracing::info!("Phase 14: Cleanup");
@@ -229,7 +252,7 @@ fn run_headless_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Re
     let root_ds = format!("{pool_name}/{prefix}/root");
 
     // Unmount EFI
-    crate::disk::partition::umount_efi(runner, &mountpoint)?;
+    archinstall_zfs_core::disk::partition::umount_efi(runner, &mountpoint)?;
 
     // Unmount ZFS (multiple strategies, matching Python)
     for attempt in 1..=4 {

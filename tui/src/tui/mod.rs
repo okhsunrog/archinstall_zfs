@@ -12,7 +12,7 @@ use crossterm::terminal::{
 use ratatui::DefaultTerminal;
 use ratatui::prelude::CrosstermBackend;
 
-use crate::config::types::GlobalConfig;
+use archinstall_zfs_core::config::types::GlobalConfig;
 
 pub fn run_tui(config: GlobalConfig, dry_run: bool) -> Result<()> {
     let mut terminal = setup_terminal()?;

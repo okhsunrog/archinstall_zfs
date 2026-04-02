@@ -3,8 +3,8 @@ use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-use crate::config::types::GlobalConfig;
 use crate::tui::theme;
+use archinstall_zfs_core::config::types::GlobalConfig;
 
 struct MenuItem {
     label: &'static str,

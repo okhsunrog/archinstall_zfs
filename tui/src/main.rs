@@ -1,15 +1,5 @@
 mod app;
-mod config;
-mod disk;
-mod installer;
-mod iso;
-mod kernel;
-mod profile;
-mod swap;
-mod system;
 mod tui;
-mod zfs;
-mod zrepl;
 
 use std::path::PathBuf;
 
@@ -104,7 +94,14 @@ fn main() -> Result<()> {
             zfs,
             headers,
             fast,
-        }) => iso::render_profile(profile_dir, out_dir, kernel, zfs, headers, *fast),
+        }) => archinstall_zfs_core::iso::render_profile(
+            profile_dir,
+            out_dir,
+            kernel,
+            zfs,
+            headers,
+            *fast,
+        ),
         None => app::run(cli),
     }
 }

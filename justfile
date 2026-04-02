@@ -7,7 +7,7 @@ ISO_OUT := "gen_iso/out"
 DISK_IMAGE := "gen_iso/arch.qcow2"
 UEFI_VARS := "gen_iso/my_vars.fd"
 QEMU_SCRIPT := "gen_iso/run-qemu.sh"
-BINARY := "target/release/archinstall-zfs-rs"
+BINARY := "target/release/archinstall-zfs-tui"
 
 # ─── Build ──────────────────────────────────────────────
 
@@ -17,19 +17,19 @@ build:
 
 # Run cargo tests
 test:
-    cargo test
+    cargo test --workspace
 
 # Run clippy
 lint:
-    cargo clippy -- -D warnings
+    cargo clippy --workspace -- -D warnings
 
 # Format check
 fmt-check:
-    cargo fmt -- --check
+    cargo fmt --all -- --check
 
 # Format
 fmt:
-    cargo fmt
+    cargo fmt --all
 
 # All checks
 check: fmt-check lint test
@@ -38,7 +38,7 @@ check: fmt-check lint test
 
 # Internal: render profile templates
 _render-profile MODE="precompiled" KERNEL="linux-lts" FAST="":
-    cargo run --release -- render-profile \
+    cargo run --release -p archinstall-zfs-tui -- render-profile \
         --profile-dir {{PROFILE_DIR}} \
         --out-dir {{PROFILE_OUT}} \
         --kernel {{KERNEL}} \
