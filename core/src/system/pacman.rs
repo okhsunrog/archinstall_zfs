@@ -100,15 +100,7 @@ pub fn add_archzfs_repo(runner: &dyn CommandRunner, target: Option<&Path>) -> Re
         };
     }
 
-    // Sync databases on host only. For target installs, the caller
-    // syncs via AlpmContext::sync_databases() after register_repo().
-    if target.is_none() {
-        let output = runner.run("pacman", &["-Sy", "--noconfirm"])?;
-        if !output.success() {
-            tracing::warn!("pacman -Sy failed: {}", output.stderr.trim());
-        }
-    }
-
+    // Database sync is handled by the caller via AlpmContext::sync_databases()
     Ok(())
 }
 
