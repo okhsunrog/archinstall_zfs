@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use color_eyre::eyre::{Result, bail};
+use color_eyre::eyre::{bail, Result};
 
 use archinstall_zfs_core::config::types::{
     GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode,
@@ -73,7 +73,7 @@ pub fn run_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Result<
 
     // ── Phase 1: Disk preparation ──────────────────────────────
     tracing::info!("Phase 1: Disk preparation");
-    let (efi_partition, zfs_partition, _swap_partition) = match mode {
+    let (efi_partition, zfs_partition, swap_partition) = match mode {
         InstallationMode::FullDisk => {
             let disk = config.disk_by_id.as_ref().unwrap();
             tracing::info!(disk = %disk.display(), "full disk mode");
@@ -209,7 +209,11 @@ pub fn run_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Result<
 
     // ── Phases 4-12: Installer pipeline ────────────────────────
     tracing::info!("Phase 4-12: Running installer pipeline");
-    let mut installer = archinstall_zfs_core::installer::Installer::new(runner, config, &mountpoint);
+    let mut installer =
+        archinstall_zfs_core::installer::Installer::new(runner, config, &mountpoint);
+    if let Some(swap) = swap_partition {
+        installer.set_swap_partition(swap);
+    }
     installer.perform_installation()?;
 
     // ── Phase 13: ZFSBootMenu ──────────────────────────────────

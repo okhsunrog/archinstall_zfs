@@ -10,7 +10,7 @@ pub mod users;
 use std::path::{Path, PathBuf};
 
 use alpm::SigLevel;
-use color_eyre::eyre::{Result, bail};
+use color_eyre::eyre::{bail, Result};
 
 use crate::config::types::{GlobalConfig, InitSystem, SwapMode, ZfsEncryptionMode};
 use crate::system::alpm_pacman::{AlpmContext, TargetMounts};
@@ -20,6 +20,9 @@ pub struct Installer<'a> {
     pub runner: &'a dyn CommandRunner,
     pub config: &'a GlobalConfig,
     pub target: PathBuf,
+    /// Swap partition computed at runtime (e.g. from full-disk partitioning).
+    /// Overrides `config.swap_partition_by_id` when set.
+    swap_partition: Option<PathBuf>,
     _target_mounts: Option<TargetMounts>,
     alpm_ctx: Option<AlpmContext>,
 }
@@ -30,9 +33,16 @@ impl<'a> Installer<'a> {
             runner,
             config,
             target: target.to_path_buf(),
+            swap_partition: None,
             _target_mounts: None,
             alpm_ctx: None,
         }
+    }
+
+    /// Set the swap partition path (used when full-disk partitioning computed
+    /// the path at runtime, since it's not in the static config).
+    pub fn set_swap_partition(&mut self, partition: PathBuf) {
+        self.swap_partition = Some(partition);
     }
 
     /// Run the full installation pipeline.
@@ -272,18 +282,27 @@ impl<'a> Installer<'a> {
                 crate::swap::configure_zram(&self.target, self.config.zram_size_expr.as_deref())?;
             }
             SwapMode::ZswapPartition => {
-                if let Some(ref part) = self.config.swap_partition_by_id {
+                let part = self.effective_swap_partition();
+                if let Some(ref part) = part {
                     crate::swap::setup_swap_partition(self.runner, &self.target, part, false)?;
                 }
             }
             SwapMode::ZswapPartitionEncrypted => {
-                if let Some(ref part) = self.config.swap_partition_by_id {
+                let part = self.effective_swap_partition();
+                if let Some(ref part) = part {
                     crate::swap::setup_swap_partition(self.runner, &self.target, part, true)?;
                 }
             }
             SwapMode::None => {}
         }
         Ok(())
+    }
+
+    /// Return the swap partition path: runtime override first, then config.
+    fn effective_swap_partition(&self) -> Option<&Path> {
+        self.swap_partition
+            .as_deref()
+            .or(self.config.swap_partition_by_id.as_deref())
     }
 
     fn finalize_zfs(&self) -> Result<()> {
@@ -340,11 +359,9 @@ mod tests {
         let mut installer = Installer::new(&runner, &config, Path::new("/mnt"));
         let result = installer.perform_installation();
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("validation failed")
-        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("validation failed"));
     }
 }
