@@ -6,12 +6,18 @@ build = "build.rs"
 
 [dependencies]
 archinstall-zfs-core = { path = "../core" }
+clap = { version = "4.6.0", features = ["derive"] }
+color-eyre = "0.6.5"
+crossbeam-channel = "0.5"
+nix = { version = "0.31.2", features = ["fs"] }
 slint = { version = "1.15", default-features = false, features = [
     "std",
     "compat-1-2",
     "backend-linuxkms-noseat",
     "renderer-software",
 ] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 [build-dependencies]
 slint-build = "1.15"

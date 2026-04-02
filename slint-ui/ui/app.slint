@@ -1,25 +1,357 @@
-export component App inherits Window {
-    background: #1e1e2e;
-    preferred-width: 800px;
-    preferred-height: 600px;
+import { ListView } from "std-widgets.slint";
 
-    VerticalLayout {
-        alignment: center;
-        padding: 20px;
-        spacing: 16px;
+// Catppuccin Mocha color palette
+struct Catppuccin {
+    base: color,
+    mantle: color,
+    surface0: color,
+    surface1: color,
+    overlay0: color,
+    text: color,
+    subtext0: color,
+    subtext1: color,
+    blue: color,
+    green: color,
+    red: color,
+    yellow: color,
+    mauve: color,
+    teal: color,
+    sky: color,
+}
 
-        Text {
-            text: "archinstall-zfs";
-            color: #cdd6f4;
-            font-size: 36px;
-            horizontal-alignment: center;
+global Theme {
+    out property <Catppuccin> c: {
+        base: #1e1e2e,
+        mantle: #181825,
+        surface0: #313244,
+        surface1: #45475a,
+        overlay0: #6c7086,
+        text: #cdd6f4,
+        subtext0: #a6adc8,
+        subtext1: #bac2de,
+        blue: #89b4fa,
+        green: #a6e3a1,
+        red: #f38ba8,
+        yellow: #f9e2af,
+        mauve: #cba6f7,
+        teal: #94e2d5,
+        sky: #89dceb,
+    };
+}
+
+export struct ConfigItem {
+    key: string,
+    label: string,
+    value: string,
+    item-type: int, // 0=text, 1=select, 2=password, 3=toggle, 4=separator, 5=action
+}
+
+export struct SelectOption {
+    text: string,
+}
+
+export struct LogMessage {
+    text: string,
+    level: int, // 0=trace, 1=debug, 2=info, 3=warn, 4=error
+}
+
+// ── Select popup ──────────────────────────────────────
+
+component SelectPopup inherits Rectangle {
+    in property <string> title;
+    in property <[SelectOption]> options;
+    in property <int> selected-index;
+    out property <int> result-index: selected-index;
+    in property <bool> popup-visible;
+
+    callback accepted(int);
+    callback cancelled();
+
+    if popup-visible: Rectangle {
+        background: #00000080;
+        width: 100%; height: 100%;
+
+        TouchArea {
+            clicked => { cancelled(); }
         }
 
-        Text {
-            text: "Slint KMS UI — experimental";
-            color: #a6adc8;
-            font-size: 18px;
-            horizontal-alignment: center;
+        popup-box := Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 400px;
+            height: min(options.length * 36px + 60px, parent.height - 80px);
+            background: Theme.c.mantle;
+            border-radius: 8px;
+            border-color: Theme.c.surface1;
+            border-width: 1px;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 4px;
+
+                Text {
+                    text: title;
+                    color: Theme.c.blue;
+                    font-size: 16px;
+                    font-weight: 600;
+                }
+
+                for option[index] in options: Rectangle {
+                    height: 32px;
+                    background: index == result-index ? Theme.c.surface1 : transparent;
+                    border-radius: 4px;
+
+                    TouchArea {
+                        clicked => {
+                            result-index = index;
+                            accepted(index);
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        alignment: start;
+
+                        Text {
+                            text: index == result-index ? "> " + option.text : "  " + option.text;
+                            color: index == result-index ? Theme.c.green : Theme.c.text;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Main application ──────────────────────────────────
+
+export component App inherits Window {
+    background: Theme.c.base;
+    preferred-width: 800px;
+    preferred-height: 600px;
+    title: "archinstall-zfs";
+
+    // Config items model
+    in property <[ConfigItem]> config-items;
+
+    // Select popup state
+    in-out property <bool> select-visible: false;
+    in-out property <string> select-title;
+    in-out property <[SelectOption]> select-options;
+    in-out property <int> select-index;
+    in-out property <string> select-key;
+
+    // Install state: 0=config, 1=installing, 2=done, 3=failed
+    in-out property <int> install-state: 0;
+
+    // Log messages
+    in property <[LogMessage]> log-messages;
+
+    // Status text
+    in property <string> status-text;
+
+    // Callbacks to Rust
+    callback item-activated(string);      // key of config item
+    callback select-confirmed(string, int); // key, selected index
+    callback install-requested();
+    callback quit-requested();
+
+    // ── Config screen ─────────────────────────────────
+    if install-state == 0: VerticalLayout {
+        padding: 16px;
+        spacing: 0px;
+
+        // Title bar
+        Rectangle {
+            height: 48px;
+            background: Theme.c.mantle;
+            border-radius: 4px;
+
+            Text {
+                text: "archinstall-zfs";
+                color: Theme.c.blue;
+                font-size: 24px;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        Rectangle { height: 8px; }
+
+        // Config list
+        Flickable {
+            viewport-height: config-items.length * 36px;
+
+            VerticalLayout {
+                spacing: 2px;
+                padding: 4px;
+
+                for item[index] in config-items: Rectangle {
+                    height: item.item-type == 4 ? 16px : 34px;
+                    border-radius: 4px;
+
+                    if item.item-type == 4: Rectangle {
+                        height: 1px;
+                        y: 8px;
+                        background: Theme.c.surface0;
+                    }
+
+                    if item.item-type != 4: TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            if item.item-type == 5 {
+                                if item.key == "install" { install-requested(); }
+                                if item.key == "quit" { quit-requested(); }
+                            } else {
+                                item-activated(item.key);
+                            }
+                        }
+                    }
+
+                    if item.item-type == 5: HorizontalLayout {
+                        padding-left: 16px;
+                        alignment: start;
+
+                        Text {
+                            text: item.label;
+                            color: Theme.c.mauve;
+                            font-size: 14px;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    if item.item-type != 4 && item.item-type != 5: HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+
+                        Text {
+                            text: item.label;
+                            color: Theme.c.subtext1;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+
+                        Text {
+                            text: item.value;
+                            color: item.value == "Not set" || item.value == "None"
+                                ? Theme.c.overlay0
+                                : Theme.c.green;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Footer
+        Rectangle {
+            height: 28px;
+            Text {
+                text: status-text;
+                color: Theme.c.overlay0;
+                font-size: 12px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    // ── Install progress screen ───────────────────────
+    if install-state >= 1: VerticalLayout {
+        padding: 16px;
+        spacing: 8px;
+
+        // Title
+        Rectangle {
+            height: 48px;
+            background: Theme.c.mantle;
+            border-radius: 4px;
+
+            Text {
+                text: install-state == 1 ? "Installing..."
+                    : install-state == 2 ? "Installation Complete"
+                    : "Installation Failed";
+                color: install-state == 1 ? Theme.c.blue
+                    : install-state == 2 ? Theme.c.green
+                    : Theme.c.red;
+                font-size: 20px;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        // Log view
+        log-view := ListView {
+            for msg[index] in log-messages: Rectangle {
+                height: msg-text.preferred-height + 4px;
+
+                msg-text := Text {
+                    text: msg.text;
+                    color: msg.level == 4 ? Theme.c.red
+                         : msg.level == 3 ? Theme.c.yellow
+                         : msg.level == 2 ? Theme.c.green
+                         : msg.level == 1 ? Theme.c.blue
+                         : Theme.c.overlay0;
+                    font-family: "monospace";
+                    font-size: 12px;
+                    x: 8px;
+                    width: parent.width - 16px;
+                    wrap: word-wrap;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // Auto-scroll to bottom on new messages
+        property <int> scroll-trigger: log-messages.length;
+        changed scroll-trigger => {
+            log-view.viewport-y = -100000px;
+        }
+
+        // Footer (only when done)
+        if install-state >= 2: Rectangle {
+            height: 36px;
+
+            TouchArea {
+                clicked => { quit-requested(); }
+
+                Rectangle {
+                    background: Theme.c.surface0;
+                    border-radius: 4px;
+
+                    Text {
+                        text: "Press to exit";
+                        color: Theme.c.subtext0;
+                        font-size: 14px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Select popup overlay ──────────────────────────
+    SelectPopup {
+        title: select-title;
+        options: select-options;
+        selected-index: select-index;
+        popup-visible: select-visible;
+
+        accepted(idx) => {
+            select-visible = false;
+            select-confirmed(select-key, idx);
+        }
+
+        cancelled() => {
+            select-visible = false;
         }
     }
 }
