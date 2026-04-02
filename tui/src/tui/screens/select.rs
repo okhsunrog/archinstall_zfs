@@ -57,13 +57,15 @@ pub fn run_select(
 }
 
 fn render_select(frame: &mut Frame, title: &str, items: &[&str], state: &mut ListState) {
+    use ratatui::widgets::BorderType;
+
     // Dim background
     let area = frame.area();
     let bg = Paragraph::new("").style(Style::default().add_modifier(Modifier::DIM));
     frame.render_widget(bg, area);
 
     // Center popup
-    let popup_width = (items.iter().map(|s| s.len()).max().unwrap_or(20) + 6).min(60) as u16;
+    let popup_width = (items.iter().map(|s| s.len()).max().unwrap_or(20) + 8).min(70) as u16;
     let popup_height = (items.len() as u16 + 4).min(area.height - 4);
     let popup = centered_rect(popup_width, popup_height, area);
 
@@ -73,7 +75,9 @@ fn render_select(frame: &mut Frame, title: &str, items: &[&str], state: &mut Lis
         .title(format!(" {title} "))
         .title_style(theme::HEADER_STYLE)
         .borders(Borders::ALL)
-        .border_style(theme::BORDER_STYLE);
+        .border_type(BorderType::Rounded)
+        .border_style(theme::BORDER_STYLE)
+        .style(theme::BG_STYLE);
 
     let list_items: Vec<ListItem> = items
         .iter()
@@ -83,6 +87,7 @@ fn render_select(frame: &mut Frame, title: &str, items: &[&str], state: &mut Lis
     let list = List::new(list_items)
         .block(block)
         .highlight_style(theme::SELECTED_STYLE)
+        .highlight_symbol(" \u{25b8} ")
         .highlight_spacing(HighlightSpacing::Always);
 
     frame.render_stateful_widget(list, popup, state);
@@ -90,10 +95,12 @@ fn render_select(frame: &mut Frame, title: &str, items: &[&str], state: &mut Lis
     // Footer
     let footer_area = Rect::new(popup.x, popup.y + popup.height, popup.width, 1);
     if footer_area.y < area.height {
-        let footer = Paragraph::new(Line::from(vec![Span::styled(
-            " Enter: select | Esc: cancel ",
-            theme::DIMMED_STYLE,
-        )]))
+        let footer = Paragraph::new(Line::from(vec![
+            Span::styled(" Enter", theme::ACCENT_STYLE),
+            Span::styled(" select  ", theme::DIMMED_STYLE),
+            Span::styled("Esc", theme::ACCENT_STYLE),
+            Span::styled(" cancel ", theme::DIMMED_STYLE),
+        ]))
         .alignment(Alignment::Center);
         frame.render_widget(footer, footer_area);
     }

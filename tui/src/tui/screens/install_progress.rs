@@ -147,6 +147,14 @@ impl InstallProgress {
     }
 
     pub fn render(&self, frame: &mut Frame) {
+        use ratatui::widgets::BorderType;
+
+        // Fill background
+        frame.render_widget(
+            Block::default().style(theme::BG_STYLE),
+            frame.area(),
+        );
+
         let area = frame.area();
 
         let chunks = Layout::default()
@@ -154,32 +162,38 @@ impl InstallProgress {
             .constraints([
                 Constraint::Length(3),
                 Constraint::Min(0),
-                Constraint::Length(3),
+                Constraint::Length(1),
             ])
             .split(area);
 
-        // Title
+        // Title with status
         let (title_text, title_style) = match &self.state {
             InstallState::Running => (" Installing... ", theme::TITLE_STYLE),
-            InstallState::Succeeded => (" Installation Complete ", theme::SUCCESS_STYLE),
-            InstallState::Failed(_) => (" Installation Failed ", theme::ERROR_STYLE),
+            InstallState::Succeeded => {
+                (" \u{2713} Installation Complete ", theme::SUCCESS_STYLE)
+            }
+            InstallState::Failed(_) => {
+                (" \u{26a0} Installation Failed ", theme::ERROR_STYLE)
+            }
         };
         let title = Paragraph::new(Line::from(vec![Span::styled(title_text, title_style)]))
             .alignment(Alignment::Center)
             .block(
                 Block::default()
                     .borders(Borders::BOTTOM)
-                    .style(theme::BORDER_STYLE),
+                    .border_type(BorderType::Rounded)
+                    .border_style(theme::BORDER_STYLE),
             );
         frame.render_widget(title, chunks[0]);
 
-        // Log area
+        // Log area with rounded borders
         let level_name = LEVEL_NAMES.get(self.min_level as usize).unwrap_or(&"?");
         let log_block = Block::default()
             .title(format!(" Log [{level_name}+] "))
             .title_style(theme::HEADER_STYLE)
             .borders(Borders::ALL)
-            .style(theme::BORDER_STYLE);
+            .border_type(BorderType::Rounded)
+            .border_style(theme::BORDER_STYLE);
         let inner = log_block.inner(chunks[1]);
         frame.render_widget(log_block, chunks[1]);
 
@@ -197,11 +211,11 @@ impl InstallProgress {
             let y = inner.y + i as u16;
             let style = match entry.level {
                 4 => theme::ERROR_STYLE,
-                3 => theme::ERROR_STYLE,
+                3 => theme::WARN_STYLE,
                 2 => {
                     if entry.text.contains("Phase ") {
-                        theme::HEADER_STYLE
-                    } else if entry.text.contains("complete") {
+                        theme::SECTION_STYLE
+                    } else if entry.text.contains("complete") || entry.text.contains("Complete") {
                         theme::SUCCESS_STYLE
                     } else {
                         theme::NORMAL_STYLE
@@ -227,22 +241,25 @@ impl InstallProgress {
             );
         }
 
-        // Footer
-        let footer_text = if self.is_done() {
-            format!(" Enter/q: exit | l: log level ({level_name}+) ")
+        // Footer with styled key hints
+        let footer = if self.is_done() {
+            Line::from(vec![
+                Span::styled(" Enter/q", theme::ACCENT_STYLE),
+                Span::styled(" exit  ", theme::DIMMED_STYLE),
+                Span::styled("l", theme::ACCENT_STYLE),
+                Span::styled(format!(" log level ({level_name}+) "), theme::DIMMED_STYLE),
+            ])
         } else {
-            format!(" j/k: scroll | l: log level ({level_name}+) ")
+            Line::from(vec![
+                Span::styled(" j/k", theme::ACCENT_STYLE),
+                Span::styled(" scroll  ", theme::DIMMED_STYLE),
+                Span::styled("l", theme::ACCENT_STYLE),
+                Span::styled(format!(" log level ({level_name}+) "), theme::DIMMED_STYLE),
+            ])
         };
-        let footer = Paragraph::new(Line::from(vec![Span::styled(
-            footer_text,
-            theme::DIMMED_STYLE,
-        )]))
-        .alignment(Alignment::Center)
-        .block(
-            Block::default()
-                .borders(Borders::TOP)
-                .style(theme::BORDER_STYLE),
+        frame.render_widget(
+            Paragraph::new(footer).alignment(Alignment::Center),
+            chunks[2],
         );
-        frame.render_widget(footer, chunks[2]);
     }
 }

@@ -2,7 +2,7 @@ use crossterm::event::{Event, KeyCode, KeyModifiers};
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+    Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
 use ratatui::Frame;
 
@@ -23,6 +23,8 @@ use super::select::run_select;
 enum MenuKind {
     /// Separator line (not selectable)
     Separator,
+    /// Section header with label (not selectable)
+    SectionHeader,
     /// Select from a list of options
     Select {
         options: Vec<&'static str>,
@@ -50,7 +52,7 @@ struct MenuItem {
 
 impl MenuItem {
     fn is_selectable(&self) -> bool {
-        !matches!(self.kind, MenuKind::Separator)
+        !matches!(self.kind, MenuKind::Separator | MenuKind::SectionHeader)
     }
 }
 
@@ -84,7 +86,12 @@ impl MainMenu {
         );
 
         let mut items = vec![
-            // ── Storage & ZFS ──
+            MenuItem {
+                key: "sec_storage",
+                label: "Storage & ZFS",
+                value: String::new(),
+                kind: MenuKind::SectionHeader,
+            },
             MenuItem {
                 key: "installation_mode",
                 label: "Installation mode",
@@ -253,9 +260,9 @@ impl MainMenu {
 
         items.push(MenuItem {
             key: "sep1",
-            label: "",
+            label: "System",
             value: String::new(),
-            kind: MenuKind::Separator,
+            kind: MenuKind::SectionHeader,
         });
 
         // ── System ──
@@ -346,9 +353,9 @@ impl MainMenu {
             },
             MenuItem {
                 key: "sep2",
-                label: "",
+                label: "Auth & Packages",
                 value: String::new(),
-                kind: MenuKind::Separator,
+                kind: MenuKind::SectionHeader,
             },
         ]);
 
@@ -446,7 +453,7 @@ impl MainMenu {
                 key: "sep3",
                 label: "",
                 value: String::new(),
-                kind: MenuKind::Separator,
+                kind: MenuKind::SectionHeader,
             },
             // ── Actions ──
             MenuItem {
@@ -671,7 +678,7 @@ impl MainMenu {
                     }
                 }
             }
-            MenuKind::Separator => {}
+            MenuKind::Separator | MenuKind::SectionHeader => {}
         }
         Ok(Action::Continue)
     }
@@ -1152,37 +1159,43 @@ impl MainMenu {
     // ── Render ───────────────────────────────────────────
 
     pub fn render(&self, frame: &mut Frame) {
+        // Fill background
+        frame.render_widget(Block::default().style(theme::BG_STYLE), frame.area());
+
         let area = frame.area();
         let items = self.items();
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),
+                Constraint::Length(4),
                 Constraint::Min(0),
                 Constraint::Length(1),
             ])
             .split(area);
 
-        // Title
-        let title = Paragraph::new(Line::from(vec![Span::styled(
-            " archinstall-zfs ",
-            theme::TITLE_STYLE,
-        )]))
+        // Title with ASCII art branding
+        let title = Paragraph::new(vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled(" archinstall", theme::TITLE_STYLE),
+                Span::styled("-zfs ", theme::ACCENT_STYLE),
+            ]),
+        ])
         .alignment(Alignment::Center)
         .block(
             Block::default()
                 .borders(Borders::BOTTOM)
-                .style(theme::BORDER_STYLE),
+                .border_type(BorderType::Rounded)
+                .border_style(theme::BORDER_STYLE),
         );
         frame.render_widget(title, chunks[0]);
 
-        // Menu block
+        // Menu block with rounded borders
         let menu_block = Block::default()
-            .title(" Configuration ")
-            .title_style(theme::HEADER_STYLE)
             .borders(Borders::ALL)
-            .style(theme::BORDER_STYLE);
+            .border_type(BorderType::Rounded)
+            .border_style(theme::BORDER_STYLE);
 
         let inner = menu_block.inner(chunks[1]);
         frame.render_widget(menu_block, chunks[1]);
@@ -1204,17 +1217,69 @@ impl MainMenu {
             let y = inner.y + (vi - scroll) as u16;
             let line_area = Rect::new(inner.x, y, inner.width, 1);
 
-            if matches!(item.kind, MenuKind::Separator) {
-                let sep = Paragraph::new(Line::from(Span::styled(
-                    "─".repeat(inner.width as usize),
-                    theme::BORDER_STYLE,
-                )));
-                frame.render_widget(sep, line_area);
-                continue;
+            match &item.kind {
+                MenuKind::Separator => {
+                    let sep = Paragraph::new(Line::from(Span::styled(
+                        "─".repeat(inner.width as usize),
+                        theme::BORDER_STYLE,
+                    )));
+                    frame.render_widget(sep, line_area);
+                    continue;
+                }
+                MenuKind::SectionHeader => {
+                    if item.label.is_empty() {
+                        // Empty section header = visual separator
+                        let sep = Paragraph::new(Line::from(Span::styled(
+                            "─".repeat(inner.width as usize),
+                            theme::BORDER_STYLE,
+                        )));
+                        frame.render_widget(sep, line_area);
+                    } else {
+                        // Styled section header: ── Label ──
+                        let label = format!(" {} ", item.label);
+                        let pad_total =
+                            (inner.width as usize).saturating_sub(label.len()).saturating_sub(4);
+                        let pad_left = pad_total / 2;
+                        let pad_right = pad_total - pad_left;
+                        let line = Line::from(vec![
+                            Span::styled(
+                                format!("  {}─", "─".repeat(pad_left)),
+                                theme::BORDER_STYLE,
+                            ),
+                            Span::styled(label, theme::SECTION_STYLE),
+                            Span::styled(
+                                format!("─{}", "─".repeat(pad_right)),
+                                theme::BORDER_STYLE,
+                            ),
+                        ]);
+                        frame.render_widget(Paragraph::new(line), line_area);
+                    }
+                    continue;
+                }
+                _ => {}
             }
 
             let is_selected = vi == self.selected;
             let is_action = matches!(item.kind, MenuKind::Action);
+            let is_unset =
+                item.value.contains("Not set") || item.value == "None" || item.value.is_empty();
+
+            // Status icon
+            let icon = if is_action {
+                ""
+            } else if is_unset {
+                theme::ICON_UNSET
+            } else {
+                theme::ICON_SET
+            };
+
+            let icon_style = if is_selected {
+                theme::SELECTED_STYLE
+            } else if is_unset {
+                theme::UNSET_STYLE
+            } else {
+                theme::VALUE_STYLE
+            };
 
             let label_style = if is_selected {
                 theme::SELECTED_STYLE
@@ -1225,25 +1290,38 @@ impl MainMenu {
             let value_style = if is_selected {
                 theme::SELECTED_STYLE
             } else if is_action {
-                theme::TITLE_STYLE
-            } else if item.value.contains("Not") || item.value == "None" {
+                theme::ACTION_STYLE
+            } else if is_unset {
                 theme::UNSET_STYLE
             } else {
                 theme::VALUE_STYLE
             };
 
-            let cursor = if is_selected { "> " } else { "  " };
+            let cursor = if is_selected {
+                format!(" {} ", theme::ICON_ARROW)
+            } else {
+                "   ".to_string()
+            };
 
             let line = if is_action {
                 Line::from(vec![
-                    Span::styled(cursor, label_style),
+                    Span::styled(&cursor, label_style),
                     Span::styled(item.label, value_style),
                 ])
             } else {
+                // Build dots between label and value for visual connection
+                let label_text = format!("{:<20}", item.label);
+                let value_text = &item.value;
+                let dots_len = (inner.width as usize)
+                    .saturating_sub(3 + 1 + 20 + 2 + value_text.len() + 1);
+                let dots = ".".repeat(dots_len);
+
                 Line::from(vec![
-                    Span::styled(cursor, label_style),
-                    Span::styled(format!("{:<22}", item.label), label_style),
-                    Span::styled(&item.value, value_style),
+                    Span::styled(&cursor, label_style),
+                    Span::styled(format!("{icon} "), icon_style),
+                    Span::styled(label_text, label_style),
+                    Span::styled(dots, theme::DIMMED_STYLE),
+                    Span::styled(format!(" {value_text} "), value_style),
                 ])
             };
 
@@ -1260,11 +1338,15 @@ impl MainMenu {
             );
         }
 
-        // Footer
-        let footer = Paragraph::new(Line::from(vec![Span::styled(
-            " j/k: navigate | Enter: edit | q: quit ",
-            theme::DIMMED_STYLE,
-        )]))
+        // Footer with key hints
+        let footer = Paragraph::new(Line::from(vec![
+            Span::styled(" j/k", theme::ACCENT_STYLE),
+            Span::styled(" navigate  ", theme::DIMMED_STYLE),
+            Span::styled("Enter", theme::ACCENT_STYLE),
+            Span::styled(" edit  ", theme::DIMMED_STYLE),
+            Span::styled("q", theme::ACCENT_STYLE),
+            Span::styled(" quit ", theme::DIMMED_STYLE),
+        ]))
         .alignment(Alignment::Center);
         frame.render_widget(footer, chunks[2]);
     }
