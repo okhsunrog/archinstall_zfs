@@ -8,12 +8,13 @@ DISK_IMAGE := "gen_iso/arch.qcow2"
 UEFI_VARS := "gen_iso/my_vars.fd"
 QEMU_SCRIPT := "gen_iso/run-qemu.sh"
 BINARY := "target/release/archinstall-zfs-tui"
+BINARY_SLINT := "target/release/archinstall-zfs-slint"
 
 # ─── Build ──────────────────────────────────────────────
 
-# Build the installer binary (release)
+# Build installer binaries (release)
 build:
-    cargo build --release
+    cargo build --release -p archinstall-zfs-tui -p archinstall-zfs-slint
 
 # Run cargo tests
 test:
@@ -45,10 +46,13 @@ _render-profile MODE="precompiled" KERNEL="linux-lts" FAST="":
         --zfs {{MODE}} \
         {{FAST}}
 
-# Internal: copy installer binary into rendered profile
+# Internal: copy installer binaries into rendered profile
 _prepare-binary:
     @mkdir -p {{PROFILE_OUT}}/airootfs/root/
-    cp {{BINARY}} {{PROFILE_OUT}}/airootfs/root/archinstall-zfs
+    install -m 0755 {{BINARY}} {{PROFILE_OUT}}/airootfs/root/archinstall-zfs
+    @if [ -f {{BINARY_SLINT}} ]; then \
+        install -m 0755 {{BINARY_SLINT}} {{PROFILE_OUT}}/airootfs/root/archinstall-zfs-slint; \
+    fi
 
 # Build production ISO
 # Usage: just build-main [pre|dkms] [linux|linux-lts|linux-zen]

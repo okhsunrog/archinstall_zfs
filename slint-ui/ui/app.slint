@@ -1,4 +1,4 @@
-import { ListView } from "std-widgets.slint";
+import { ListView, ScrollView } from "std-widgets.slint";
 
 // Catppuccin Mocha color palette
 struct Catppuccin {
@@ -301,8 +301,7 @@ export component App inherits Window {
         Rectangle { height: 8px; }
 
         // Config list
-        Flickable {
-            viewport-height: config-items.length * 36px;
+        ScrollView {
 
             VerticalLayout {
                 spacing: 2px;
