@@ -163,6 +163,17 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 return;
             }
 
+            // Disk select
+            if key == "disk_select" {
+                if let Ok(disks) = archinstall_zfs_core::disk::by_id::list_disks_by_id() {
+                    if let Some(disk) = disks.get(idx as usize) {
+                        cfg.borrow_mut().disk_by_id = Some(disk.clone());
+                        refresh_config_items(&app, &cfg.borrow());
+                    }
+                }
+                return;
+            }
+
             // Locale select
             if key == "locale_select" {
                 let locales = archinstall_zfs_core::installer::locale::list_locales();
@@ -304,7 +315,7 @@ fn build_config_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                 .as_ref()
                 .map(|p| p.display().to_string())
                 .unwrap_or("Not set".into()),
-            0,
+            1,
         ),
         ci(
             "pool_name",
@@ -546,20 +557,24 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig) {
             show_select(app, "locale_select", "Locale", &locale_strs, 0);
         }
 
+        // Disk: select from /dev/disk/by-id/
+        "disk_by_id" => {
+            if let Ok(disks) = archinstall_zfs_core::disk::by_id::list_disks_by_id() {
+                let disk_strs: Vec<String> =
+                    disks.iter().map(|p| p.display().to_string()).collect();
+                let disk_refs: Vec<&str> = disk_strs.iter().map(|s| s.as_str()).collect();
+                show_select(app, "disk_select", "Select disk", &disk_refs, 0);
+            }
+        }
+
         // Text items
-        "disk_by_id"
-        | "pool_name"
+        "pool_name"
         | "dataset_prefix"
         | "hostname"
         | "keyboard"
         | "additional_packages"
         | "aur_packages" => {
             let current = match key {
-                "disk_by_id" => config
-                    .disk_by_id
-                    .as_ref()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_default(),
                 "pool_name" => config.pool_name.clone().unwrap_or_default(),
                 "dataset_prefix" => config.dataset_prefix.clone(),
                 "hostname" => config.hostname.clone().unwrap_or_default(),
@@ -694,7 +709,7 @@ fn apply_text(config: &mut GlobalConfig, key: &str, val: &str) {
             }
         }
         "root_password" => config.root_password = opt,
-        "disk_by_id" => config.disk_by_id = opt.map(PathBuf::from),
+        // disk_by_id handled via disk_select
         "additional_packages" => {
             config.additional_packages = val
                 .split_whitespace()

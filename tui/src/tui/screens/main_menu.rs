@@ -102,7 +102,7 @@ impl MainMenu {
                     .as_ref()
                     .map(|p| p.display().to_string())
                     .unwrap_or("Not set".into()),
-                kind: MenuKind::Text,
+                kind: MenuKind::Action,
             },
             MenuItem {
                 key: "pool_name",
@@ -409,6 +409,11 @@ impl MainMenu {
                         self.config.locale = Some(loc);
                     }
                 }
+                "disk_by_id" => {
+                    if let Some(disk) = self.pick_disk(terminal)? {
+                        self.config.disk_by_id = Some(disk);
+                    }
+                }
                 _ => {}
             },
             MenuKind::Toggle => {
@@ -469,6 +474,23 @@ impl MainMenu {
         };
 
         Ok(Some(format!("{region}/{}", cities[city_idx])))
+    }
+
+    fn pick_disk(
+        &self,
+        terminal: &mut ratatui::DefaultTerminal,
+    ) -> color_eyre::eyre::Result<Option<std::path::PathBuf>> {
+        let disks = archinstall_zfs_core::disk::by_id::list_disks_by_id()?;
+        if disks.is_empty() {
+            return Ok(None);
+        }
+        let disk_strs: Vec<String> = disks.iter().map(|p| p.display().to_string()).collect();
+        let disk_refs: Vec<&str> = disk_strs.iter().map(|s| s.as_str()).collect();
+        let result = run_select(terminal, "Select disk", &disk_refs, 0)?;
+        match result.selected {
+            Some(idx) => Ok(Some(disks[idx].clone())),
+            None => Ok(None),
+        }
     }
 
     fn pick_locale(
@@ -592,9 +614,7 @@ impl MainMenu {
                 }
             }
             "root_password" => self.config.root_password = val_opt,
-            "disk_by_id" => {
-                self.config.disk_by_id = val_opt.map(std::path::PathBuf::from);
-            }
+            // disk_by_id handled via pick_disk()
             "additional_packages" => {
                 self.config.additional_packages = val
                     .split_whitespace()
