@@ -7,10 +7,10 @@ use color_eyre::eyre::Result;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::execute;
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use ratatui::prelude::CrosstermBackend;
 use ratatui::DefaultTerminal;
+use ratatui::prelude::CrosstermBackend;
 
 use crate::config::types::GlobalConfig;
 

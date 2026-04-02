@@ -1,6 +1,6 @@
 use color_eyre::eyre::Result;
 
-use super::cmd::{check_exit, CommandRunner};
+use super::cmd::CommandRunner;
 
 pub fn check_internet(runner: &dyn CommandRunner) -> Result<bool> {
     // Use IP address to avoid DNS delays; 1.1.1.1 is Cloudflare DNS

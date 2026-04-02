@@ -3,11 +3,13 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{check_exit, chroot, CommandRunner};
+use crate::system::cmd::{CommandRunner, check_exit, chroot};
 
 pub fn set_root_password(runner: &dyn CommandRunner, target: &Path, password: &str) -> Result<()> {
-    let cmd = format!("echo 'root:{password}' | chpasswd");
-    let output = chroot(runner, target, &cmd)?;
+    let target_str = target.to_string_lossy();
+    let input = format!("root:{password}\n");
+    let output =
+        runner.run_with_stdin("arch-chroot", &[&target_str, "chpasswd"], input.as_bytes())?;
     check_exit(&output, "set root password")?;
     tracing::info!("set root password");
     Ok(())
@@ -30,10 +32,12 @@ pub fn create_user(
     let output = chroot(runner, target, &useradd_cmd)?;
     check_exit(&output, &format!("useradd {username}"))?;
 
-    // Set password
+    // Set password via stdin (not visible in process args)
     if let Some(pw) = password {
-        let cmd = format!("echo '{username}:{pw}' | chpasswd");
-        let output = chroot(runner, target, &cmd)?;
+        let target_str = target.to_string_lossy();
+        let input = format!("{username}:{pw}\n");
+        let output =
+            runner.run_with_stdin("arch-chroot", &[&target_str, "chpasswd"], input.as_bytes())?;
         check_exit(&output, &format!("set password for {username}"))?;
     }
 

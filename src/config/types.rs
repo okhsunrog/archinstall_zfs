@@ -283,18 +283,31 @@ impl GlobalConfig {
         self.zfs_encryption_mode != ZfsEncryptionMode::None
     }
 
-    pub fn all_aur_packages(&self) -> Vec<String> {
-        let mut pkgs = self.aur_packages.clone();
-        if self.zrepl_enabled && !pkgs.iter().any(|p| p == "zrepl-bin") {
-            pkgs.push("zrepl-bin".to_string());
+    pub fn all_aur_packages(&self) -> Vec<&str> {
+        let mut pkgs: Vec<&str> = self.aur_packages.iter().map(|s| s.as_str()).collect();
+        if self.zrepl_enabled && !pkgs.contains(&"zrepl-bin") {
+            pkgs.push("zrepl-bin");
         }
         pkgs
     }
 
-    pub fn effective_kernels(&self) -> Vec<String> {
-        self.kernels
-            .clone()
-            .unwrap_or_else(|| vec!["linux-lts".to_string()])
+    pub fn effective_kernels(&self) -> &[String] {
+        match &self.kernels {
+            Some(k) if !k.is_empty() => k,
+            _ => {
+                // Can't return a reference to a temporary, so callers that
+                // need the default should use primary_kernel() instead.
+                // This returns empty — base.rs handles it by also using primary_kernel.
+                &[]
+            }
+        }
+    }
+
+    pub fn primary_kernel(&self) -> &str {
+        self.effective_kernels()
+            .first()
+            .map(|s| s.as_str())
+            .unwrap_or("linux-lts")
     }
 }
 
@@ -394,7 +407,7 @@ mod tests {
         assert_eq!(cfg.compression, CompressionAlgo::Lz4);
         assert_eq!(cfg.swap_mode, SwapMode::None);
         assert!(!cfg.encryption_enabled());
-        assert_eq!(cfg.effective_kernels(), vec!["linux-lts"]);
+        assert_eq!(cfg.primary_kernel(), "linux-lts");
     }
 
     #[test]
@@ -446,8 +459,8 @@ mod tests {
         cfg.zrepl_enabled = true;
 
         let pkgs = cfg.all_aur_packages();
-        assert!(pkgs.contains(&"custom-pkg".to_string()));
-        assert!(pkgs.contains(&"zrepl-bin".to_string()));
+        assert!(pkgs.contains(&"custom-pkg"));
+        assert!(pkgs.contains(&"zrepl-bin"));
     }
 
     #[test]

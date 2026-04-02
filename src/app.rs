@@ -1,12 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use color_eyre::eyre::{bail, Context, Result};
+use color_eyre::eyre::{Result, bail};
 
-use crate::config::types::{
-    GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode, ZfsModuleMode,
-};
-use crate::system::cmd::{check_exit, CommandRunner, RealRunner};
 use crate::Cli;
+use crate::config::types::{GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode};
+use crate::system::cmd::{CommandRunner, RealRunner};
 
 pub fn run(cli: Cli) -> Result<()> {
     let config = if let Some(ref path) = cli.config {
@@ -41,11 +39,7 @@ fn run_headless_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Re
     let prefix = &config.dataset_prefix;
     let compression = config.compression.to_string();
     let encryption = config.zfs_encryption_mode;
-    let kernel = config
-        .effective_kernels()
-        .first()
-        .cloned()
-        .unwrap_or_else(|| "linux-lts".to_string());
+    let kernel = config.primary_kernel();
 
     // ── Phase 0: Pre-installation checks ───────────────────────
     tracing::info!("Phase 0: Pre-installation checks");
@@ -64,11 +58,11 @@ fn run_headless_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Re
     tracing::info!("UEFI boot detected");
 
     // Initialize ZFS on host (handles reflector, archzfs repo, ZFS packages, module loading)
-    crate::zfs::kmod::initialize_zfs(runner, &kernel, config.zfs_module_mode)?;
+    crate::zfs::kmod::initialize_zfs(runner, kernel, config.zfs_module_mode)?;
 
     // ── Phase 1: Disk preparation ──────────────────────────────
     tracing::info!("Phase 1: Disk preparation");
-    let (efi_partition, zfs_partition, swap_partition) = match mode {
+    let (efi_partition, zfs_partition, _swap_partition) = match mode {
         InstallationMode::FullDisk => {
             let disk = config.disk_by_id.as_ref().unwrap();
             tracing::info!(disk = %disk.display(), "full disk mode");
@@ -155,15 +149,6 @@ fn run_headless_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Re
             crate::zfs::pool::set_pool_property(runner, pool_name, "cachefile", "none")?;
 
             // Create base dataset
-            let base_enc_props: Vec<(&str, &str)> = match encryption {
-                ZfsEncryptionMode::Dataset => {
-                    let props = crate::zfs::encryption::dataset_encryption_properties(&key_path);
-                    // Need to leak these into the right lifetime — build owned vec
-                    // and return refs from it. We'll handle this inline.
-                    vec![] // handled below
-                }
-                _ => vec![],
-            };
             let base_props: Vec<(&str, String)> = match encryption {
                 ZfsEncryptionMode::Dataset => {
                     let mut p = crate::zfs::encryption::dataset_encryption_properties(&key_path);
@@ -226,14 +211,13 @@ fn run_headless_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Re
         runner,
         pool_name,
         prefix,
-        &config.init_system.to_string(),
+        config.init_system,
         zswap_on,
         config.set_bootfs,
     )?;
 
     // Install zfsbootmenu from AUR, write config, run generate-zbm
-    let init_system_str = config.init_system.to_string();
-    crate::zfs::bootmenu::install_and_generate_zbm(runner, &mountpoint, &init_system_str)?;
+    crate::zfs::bootmenu::install_and_generate_zbm(runner, &mountpoint, config.init_system)?;
 
     // Create efibootmgr entries
     crate::zfs::bootmenu::create_efi_entries(runner, &efi_partition)?;
@@ -249,7 +233,7 @@ fn run_headless_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Re
 
     // Unmount ZFS (multiple strategies, matching Python)
     for attempt in 1..=4 {
-        let result = match attempt {
+        let _result = match attempt {
             1 => runner.run("zfs", &["umount", "-a"]),
             2 => runner.run("zfs", &["unmount", &root_ds]),
             3 => runner.run("zfs", &["umount", "-af"]),

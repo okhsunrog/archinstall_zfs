@@ -1,6 +1,6 @@
 use color_eyre::eyre::Result;
 
-use crate::system::cmd::{check_exit, CmdOutput, CommandRunner};
+use crate::system::cmd::{CmdOutput, CommandRunner, check_exit};
 
 pub fn run_zfs(runner: &dyn CommandRunner, args: &[&str]) -> Result<CmdOutput> {
     tracing::debug!(?args, "zfs");

@@ -3,21 +3,21 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{check_exit, chroot, CommandRunner};
+use crate::config::types::InitSystem;
+use crate::system::cmd::{CommandRunner, check_exit, chroot};
 
 pub const HOSTID_VALUE: &str = "0x00bab10c";
 
 /// Write /etc/zfsbootmenu/config.yaml inside the target chroot.
 /// This configures generate-zbm to build a unified EFI bundle using the same
 /// init system (dracut or mkinitcpio) and kernel as the installed system.
-fn write_zbm_config(target: &Path, init_system: &str) -> Result<()> {
+fn write_zbm_config(target: &Path, init_system: InitSystem) -> Result<()> {
     let conf_dir = target.join("etc/zfsbootmenu");
     fs::create_dir_all(&conf_dir)?;
 
-    let initcpio_line = if init_system == "mkinitcpio" {
-        "  InitCPIO: true"
-    } else {
-        "  InitCPIO: false"
+    let initcpio_line = match init_system {
+        InitSystem::Mkinitcpio => "  InitCPIO: true",
+        InitSystem::Dracut => "  InitCPIO: false",
     };
 
     // zbm.timeout=10: auto-boot after 10s countdown
@@ -40,8 +40,7 @@ Kernel:
 "#
     );
 
-    fs::write(conf_dir.join("config.yaml"), config)
-        .wrap_err("failed to write ZBM config.yaml")?;
+    fs::write(conf_dir.join("config.yaml"), config).wrap_err("failed to write ZBM config.yaml")?;
     tracing::info!("wrote /etc/zfsbootmenu/config.yaml (init_system={init_system})");
     Ok(())
 }
@@ -76,15 +75,11 @@ fn install_zbm_pacman_hook(target: &Path) -> Result<()> {
 pub fn install_and_generate_zbm(
     runner: &dyn CommandRunner,
     target: &Path,
-    init_system: &str,
+    init_system: InitSystem,
 ) -> Result<()> {
     // 1. Install zfsbootmenu from AUR
     tracing::info!("installing zfsbootmenu from AUR");
-    crate::installer::aur::install_aur_packages(
-        runner,
-        target,
-        &["zfsbootmenu".to_string()],
-    )?;
+    crate::installer::aur::install_aur_packages(runner, target, &["zfsbootmenu"])?;
 
     // 2. Write config.yaml
     write_zbm_config(target, init_system)?;
@@ -114,7 +109,9 @@ pub fn install_and_generate_zbm(
             for entry in fs::read_dir(&zbm_dir)? {
                 let entry = entry?;
                 let path = entry.path();
-                if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("efi"))
+                if path
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("efi"))
                     && !path.to_string_lossy().contains("backup")
                 {
                     fs::copy(&path, fallback_dir.join("BOOTX64.EFI"))
@@ -191,7 +188,7 @@ pub fn set_zbm_properties(
     runner: &dyn CommandRunner,
     pool_name: &str,
     prefix: &str,
-    init_system: &str,
+    init_system: InitSystem,
     zswap_enabled: bool,
     set_bootfs: bool,
 ) -> Result<()> {
@@ -214,8 +211,8 @@ pub fn set_zbm_properties(
 
     // Set rootprefix based on init system
     let rootprefix = match init_system {
-        "dracut" => "root=ZFS=",
-        _ => "zfs=",
+        InitSystem::Dracut => "root=ZFS=",
+        InitSystem::Mkinitcpio => "zfs=",
     };
     let prop = format!("org.zfsbootmenu:rootprefix={rootprefix}");
     let output = runner.run("zfs", &["set", &prop, &root_ds])?;
@@ -227,12 +224,20 @@ pub fn set_zbm_properties(
         // 10-second countdown then boots the bootfs dataset. Users can press
         // any key during the countdown to browse/select other BEs.
         // Without bootfs, ZBM ignores zbm.timeout and always waits for input.
-        let output =
-            runner.run("zpool", &["set", &format!("bootfs={root_ds}"), pool_name])?;
+        let output = runner.run("zpool", &["set", &format!("bootfs={root_ds}"), pool_name])?;
         check_exit(&output, "set pool bootfs")?;
-        tracing::info!(cmdline, rootprefix, bootfs = root_ds.as_str(), "set ZFSBootMenu properties");
+        tracing::info!(
+            cmdline,
+            rootprefix,
+            bootfs = root_ds.as_str(),
+            "set ZFSBootMenu properties"
+        );
     } else {
-        tracing::info!(cmdline, rootprefix, "set ZFSBootMenu properties (bootfs disabled)");
+        tracing::info!(
+            cmdline,
+            rootprefix,
+            "set ZFSBootMenu properties (bootfs disabled)"
+        );
     }
     Ok(())
 }
@@ -245,7 +250,7 @@ mod tests {
     #[test]
     fn test_write_zbm_config_dracut() {
         let dir = tempfile::tempdir().unwrap();
-        write_zbm_config(dir.path(), "dracut").unwrap();
+        write_zbm_config(dir.path(), InitSystem::Dracut).unwrap();
 
         let config = fs::read_to_string(dir.path().join("etc/zfsbootmenu/config.yaml")).unwrap();
         assert!(config.contains("ManageImages: true"));
@@ -258,7 +263,7 @@ mod tests {
     #[test]
     fn test_write_zbm_config_mkinitcpio() {
         let dir = tempfile::tempdir().unwrap();
-        write_zbm_config(dir.path(), "mkinitcpio").unwrap();
+        write_zbm_config(dir.path(), InitSystem::Mkinitcpio).unwrap();
 
         let config = fs::read_to_string(dir.path().join("etc/zfsbootmenu/config.yaml")).unwrap();
         assert!(config.contains("InitCPIO: true"));
@@ -285,7 +290,7 @@ mod tests {
             CannedResponse::default(), // set rootprefix
             CannedResponse::default(), // set bootfs
         ]);
-        set_zbm_properties(&runner, "mypool", "arch0", "dracut", false, true).unwrap();
+        set_zbm_properties(&runner, "mypool", "arch0", InitSystem::Dracut, false, true).unwrap();
 
         let calls = runner.calls();
         assert_eq!(calls.len(), 3);
@@ -309,9 +314,9 @@ mod tests {
         let runner = RecordingRunner::new(vec![
             CannedResponse::default(), // set commandline
             CannedResponse::default(), // set rootprefix
-            // no bootfs call
+                                       // no bootfs call
         ]);
-        set_zbm_properties(&runner, "mypool", "arch0", "dracut", false, false).unwrap();
+        set_zbm_properties(&runner, "mypool", "arch0", InitSystem::Dracut, false, false).unwrap();
 
         let calls = runner.calls();
         assert_eq!(calls.len(), 2, "should not set bootfs when disabled");
@@ -324,7 +329,7 @@ mod tests {
             CannedResponse::default(), // set rootprefix
             CannedResponse::default(), // set bootfs
         ]);
-        set_zbm_properties(&runner, "pool", "arch1", "mkinitcpio", true, true).unwrap();
+        set_zbm_properties(&runner, "pool", "arch1", InitSystem::Mkinitcpio, true, true).unwrap();
 
         let calls = runner.calls();
         assert_eq!(calls.len(), 3);

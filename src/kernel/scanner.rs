@@ -1,5 +1,3 @@
-use color_eyre::eyre::{Context, Result};
-
 /// Result of compatibility check for a single kernel.
 #[derive(Debug, Clone)]
 pub struct CompatibilityResult {

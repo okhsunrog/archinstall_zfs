@@ -3,7 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{check_exit, CommandRunner};
+use crate::system::cmd::{CommandRunner, check_exit};
 
 pub fn configure_zram(target: &Path, size_expr: Option<&str>) -> Result<()> {
     let conf_dir = target.join("etc/systemd/zram-generator.conf.d");

@@ -2,7 +2,7 @@ use color_eyre::eyre::Result;
 
 use super::cli::{run_zfs, run_zfs_json};
 use super::models::{ZfsGetOutput, ZfsListOutput, ZfsMountOutput};
-use crate::system::cmd::{check_exit, CommandRunner};
+use crate::system::cmd::{CommandRunner, check_exit};
 
 pub struct DatasetConfig {
     pub name: String,

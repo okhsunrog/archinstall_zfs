@@ -1,9 +1,9 @@
 use std::path::Path;
 use std::sync::mpsc::Sender;
 
-use color_eyre::eyre::{bail, Result};
+use color_eyre::eyre::{Result, bail};
 
-use super::cmd::{check_exit, CmdOutput, CommandRunner};
+use super::cmd::{CmdOutput, CommandRunner, check_exit};
 
 pub fn pacstrap(
     runner: &dyn CommandRunner,
@@ -33,7 +33,7 @@ pub fn sync_db(runner: &dyn CommandRunner) -> Result<()> {
     Ok(())
 }
 
-pub fn wait_for_db_lock(runner: &dyn CommandRunner) -> Result<()> {
+pub fn wait_for_db_lock(_runner: &dyn CommandRunner) -> Result<()> {
     let lock_path = Path::new("/var/lib/pacman/db.lck");
     for _ in 0..60 {
         if !lock_path.exists() {

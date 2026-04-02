@@ -3,7 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{check_exit, chroot, CommandRunner};
+use crate::system::cmd::{CommandRunner, check_exit, chroot};
 
 use super::bootmenu::HOSTID_VALUE;
 
@@ -226,11 +226,9 @@ pub fn copy_zfs_cache(target: &Path, pool_name: &str, mountpoint: &Path) -> Resu
         }
         // Read cache content and rewrite mountpoints: strip the temporary
         // mountpoint prefix (e.g. /mnt) so paths are correct on the target.
-        let content = fs::read_to_string(&src_cache)
-            .wrap_err("failed to read ZFS cache file")?;
+        let content = fs::read_to_string(&src_cache).wrap_err("failed to read ZFS cache file")?;
         let modified = rewrite_cache_mountpoints(&content, mountpoint);
-        fs::write(&dst_cache, modified)
-            .wrap_err("failed to write ZFS cache to target")?;
+        fs::write(&dst_cache, modified).wrap_err("failed to write ZFS cache to target")?;
     }
     Ok(())
 }
@@ -256,7 +254,13 @@ fn rewrite_cache_mountpoints(content: &str, mountpoint: &Path) -> String {
             let owned_fields: Vec<String> = fields
                 .iter()
                 .enumerate()
-                .map(|(i, f)| if i == 1 { rewritten.clone() } else { f.to_string() })
+                .map(|(i, f)| {
+                    if i == 1 {
+                        rewritten.clone()
+                    } else {
+                        f.to_string()
+                    }
+                })
                 .collect();
             result.push(owned_fields.join("\t"));
         } else {
@@ -285,13 +289,11 @@ pub fn install_zed_cache_hook(runner: &dyn CommandRunner, target: &Path) -> Resu
 
     // Remove existing file
     if hook_path.exists() {
-        fs::remove_file(&hook_path)
-            .wrap_err("failed to remove existing ZED hook")?;
+        fs::remove_file(&hook_path).wrap_err("failed to remove existing ZED hook")?;
     }
 
     // Write our custom hook
-    fs::write(&hook_path, ZED_HISTORY_CACHER)
-        .wrap_err("failed to write ZED cache hook")?;
+    fs::write(&hook_path, ZED_HISTORY_CACHER).wrap_err("failed to write ZED cache hook")?;
 
     // Make executable
     #[cfg(unix)]

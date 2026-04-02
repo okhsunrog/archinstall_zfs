@@ -1,3 +1,4 @@
+#[allow(dead_code)] // JSON models for ZFS -j output; used by tests and future TUI queries
 use std::collections::HashMap;
 
 use serde::Deserialize;

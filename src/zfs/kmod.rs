@@ -264,8 +264,10 @@ mod tests {
 
         let calls = runner.calls();
         // Should not have called pacman -S since ZFS was already available
-        assert!(!calls
-            .iter()
-            .any(|c| { c.program == "pacman" && c.args.iter().any(|a| a == "-S") }));
+        assert!(
+            !calls
+                .iter()
+                .any(|c| { c.program == "pacman" && c.args.iter().any(|a| a == "-S") })
+        );
     }
 }

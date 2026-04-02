@@ -10,11 +10,9 @@ pub mod users;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 
-use color_eyre::eyre::{bail, Context, Result};
+use color_eyre::eyre::{Result, bail};
 
-use crate::config::types::{
-    GlobalConfig, InitSystem, InstallationMode, SwapMode, ZfsEncryptionMode, ZfsModuleMode,
-};
+use crate::config::types::{GlobalConfig, InitSystem, SwapMode, ZfsEncryptionMode};
 use crate::system::cmd::CommandRunner;
 
 pub struct Installer<'a> {
@@ -132,14 +130,8 @@ impl<'a> Installer<'a> {
 
         // Install ZFS packages inside chroot (not pacstrap, since archzfs
         // repo is in the target's pacman.conf, not the host's)
-        let kernel = self
-            .config
-            .effective_kernels()
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "linux-lts".to_string());
-
-        let zfs_packages = crate::kernel::get_zfs_packages(&kernel, self.config.zfs_module_mode);
+        let kernel = self.config.primary_kernel();
+        let zfs_packages = crate::kernel::get_zfs_packages(kernel, self.config.zfs_module_mode);
         let pkg_list = zfs_packages.join(" ");
         let cmd = format!("pacman --noconfirm --needed -S {pkg_list}");
         let output = crate::system::cmd::chroot(self.runner, &self.target, &cmd)?;
@@ -291,10 +283,6 @@ impl<'a> Installer<'a> {
         }
 
         // genfstab
-        let zswap_on = matches!(
-            self.config.swap_mode,
-            SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-        );
         fstab::generate_fstab(self.runner, &self.target, pool_name, prefix)?;
 
         // Copy misc files (hostid, zfs cache)
@@ -339,9 +327,11 @@ mod tests {
         let installer = Installer::new(&runner, &config, Path::new("/mnt"), None);
         let result = installer.perform_installation();
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("validation failed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("validation failed")
+        );
     }
 }

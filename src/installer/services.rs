@@ -2,7 +2,7 @@ use std::path::Path;
 
 use color_eyre::eyre::Result;
 
-use crate::system::cmd::{check_exit, CommandRunner};
+use crate::system::cmd::{CommandRunner, check_exit};
 
 pub fn enable_service(runner: &dyn CommandRunner, target: &Path, service: &str) -> Result<()> {
     let target_str = target.to_str().unwrap();

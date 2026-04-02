@@ -2,7 +2,7 @@ use std::path::Path;
 
 use color_eyre::eyre::Result;
 
-use crate::system::cmd::{check_exit, chroot, CommandRunner};
+use crate::system::cmd::{CommandRunner, check_exit, chroot};
 
 const TEMP_USER: &str = "aurinstall";
 const AUR_HELPER_REPO: &str = "https://aur.archlinux.org/yay-bin.git";
@@ -10,7 +10,7 @@ const AUR_HELPER_REPO: &str = "https://aur.archlinux.org/yay-bin.git";
 pub fn install_aur_packages(
     runner: &dyn CommandRunner,
     target: &Path,
-    packages: &[String],
+    packages: &[&str],
 ) -> Result<()> {
     if packages.is_empty() {
         return Ok(());
@@ -21,7 +21,7 @@ pub fn install_aur_packages(
     setup_aur_environment(runner, target)?;
     install_aur_helper(runner, target)?;
 
-    for pkg in packages {
+    for &pkg in packages {
         install_single_aur_package(runner, target, pkg)?;
     }
 
@@ -101,7 +101,7 @@ mod tests {
     #[test]
     fn test_install_aur_packages_empty() {
         let runner = RecordingRunner::new(vec![]);
-        install_aur_packages(&runner, Path::new("/mnt"), &[]).unwrap();
+        install_aur_packages(&runner, Path::new("/mnt"), &[] as &[&str]).unwrap();
         assert!(runner.calls().is_empty());
     }
 
@@ -120,9 +120,11 @@ mod tests {
 
         let calls = runner.calls();
         assert!(calls.iter().any(|c| c.program == "pacstrap"));
-        assert!(calls
-            .iter()
-            .any(|c| c.args.iter().any(|a| a.contains("useradd"))));
+        assert!(
+            calls
+                .iter()
+                .any(|c| c.args.iter().any(|a| a.contains("useradd")))
+        );
 
         let sudoers = dir.path().join(format!("etc/sudoers.d/99_{TEMP_USER}"));
         assert!(sudoers.exists());

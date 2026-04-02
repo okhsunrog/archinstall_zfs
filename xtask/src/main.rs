@@ -79,7 +79,11 @@ fn apply_tmpfs(mut opts: TestOpts) -> TestOpts {
     if opts.tmpfs {
         opts.disk = PathBuf::from("/tmp/archzfs-test.qcow2");
         opts.vars = PathBuf::from("/tmp/archzfs-test-vars.fd");
-        eprintln!("Using tmpfs: disk={}, vars={}", opts.disk.display(), opts.vars.display());
+        eprintln!(
+            "Using tmpfs: disk={}, vars={}",
+            opts.disk.display(),
+            opts.vars.display()
+        );
     }
     opts
 }
@@ -249,8 +253,7 @@ fn verify_system(vm: &QemuVm, init_system: &str) -> Result<(), String> {
 
     // initramfs config
     if init_system == "mkinitcpio" {
-        let mkinitcpio =
-            vm.ssh_stdout("cat /etc/mkinitcpio.conf 2>/dev/null || echo missing");
+        let mkinitcpio = vm.ssh_stdout("cat /etc/mkinitcpio.conf 2>/dev/null || echo missing");
         if mkinitcpio.contains("zfs") {
             checks.push("  mkinitcpio: configured (has zfs)".to_string());
             passed += 1;
@@ -258,8 +261,7 @@ fn verify_system(vm: &QemuVm, init_system: &str) -> Result<(), String> {
             checks.push(format!("  mkinitcpio: FAIL\n{mkinitcpio}"));
         }
     } else {
-        let dracut =
-            vm.ssh_stdout("cat /etc/dracut.conf.d/zfs.conf 2>/dev/null || echo missing");
+        let dracut = vm.ssh_stdout("cat /etc/dracut.conf.d/zfs.conf 2>/dev/null || echo missing");
         if dracut.contains("hostonly") {
             checks.push("  dracut: configured".to_string());
             passed += 1;
@@ -312,7 +314,9 @@ fn verify_system(vm: &QemuVm, init_system: &str) -> Result<(), String> {
         checks.push("  bootfs: testpool/arch0/root".to_string());
         passed += 1;
     } else {
-        checks.push(format!("  bootfs: FAIL (expected testpool/arch0/root, got '{bootfs}')"));
+        checks.push(format!(
+            "  bootfs: FAIL (expected testpool/arch0/root, got '{bootfs}')"
+        ));
     }
 
     // ZBM rootprefix property
@@ -340,16 +344,24 @@ fn verify_system(vm: &QemuVm, init_system: &str) -> Result<(), String> {
         checks.push("  ZBM local build: OK".to_string());
         passed += 1;
     } else {
-        checks.push(format!("  ZBM local build: FAIL (config={}, bin={})",
-            if zbm_config.contains("ManageImages") { "ok" } else { "missing" },
-            if zbm_bin.contains("missing") { "missing" } else { "ok" }
+        checks.push(format!(
+            "  ZBM local build: FAIL (config={}, bin={})",
+            if zbm_config.contains("ManageImages") {
+                "ok"
+            } else {
+                "missing"
+            },
+            if zbm_bin.contains("missing") {
+                "missing"
+            } else {
+                "ok"
+            }
         ));
     }
 
     // ZBM pacman hook
-    let zbm_hook = vm.ssh_stdout(
-        "cat /etc/pacman.d/hooks/95-zfsbootmenu.hook 2>/dev/null || echo missing",
-    );
+    let zbm_hook =
+        vm.ssh_stdout("cat /etc/pacman.d/hooks/95-zfsbootmenu.hook 2>/dev/null || echo missing");
     if zbm_hook.contains("generate-zbm") {
         checks.push("  ZBM pacman hook: installed".to_string());
         passed += 1;

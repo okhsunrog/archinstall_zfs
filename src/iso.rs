@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use color_eyre::eyre::{bail, Context, Result};
+use color_eyre::eyre::{Context, Result, bail};
 use minijinja::Environment;
 
 pub fn render_profile(

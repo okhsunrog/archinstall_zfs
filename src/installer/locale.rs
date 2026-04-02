@@ -3,7 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{check_exit, chroot, CommandRunner};
+use crate::system::cmd::{CommandRunner, check_exit, chroot};
 
 pub fn set_hostname(target: &Path, hostname: &str) -> Result<()> {
     let path = target.join("etc/hostname");
@@ -37,7 +37,7 @@ pub fn set_locale(runner: &dyn CommandRunner, target: &Path, locale: &str) -> Re
     Ok(())
 }
 
-pub fn set_keyboard(runner: &dyn CommandRunner, target: &Path, layout: &str) -> Result<()> {
+pub fn set_keyboard(_runner: &dyn CommandRunner, target: &Path, layout: &str) -> Result<()> {
     let vconsole = target.join("etc/vconsole.conf");
     if let Some(parent) = vconsole.parent() {
         fs::create_dir_all(parent)?;
@@ -51,6 +51,12 @@ pub fn set_timezone(target: &Path, timezone: &str) -> Result<()> {
     let localtime = target.join("etc/localtime");
     let zoneinfo = format!("/usr/share/zoneinfo/{timezone}");
     let target_zoneinfo = target.join(format!("usr/share/zoneinfo/{timezone}"));
+    if !target_zoneinfo.exists() {
+        tracing::warn!(
+            timezone,
+            "zoneinfo file not found on target, symlink may be broken"
+        );
+    }
 
     // Remove existing symlink
     let _ = fs::remove_file(&localtime);

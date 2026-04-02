@@ -1,5 +1,5 @@
 use super::types::{
-    GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode, ZFS_PASSPHRASE_MIN_LENGTH,
+    GlobalConfig, InstallationMode, SwapMode, ZFS_PASSPHRASE_MIN_LENGTH, ZfsEncryptionMode,
 };
 
 impl GlobalConfig {

@@ -3,7 +3,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
 
-use color_eyre::eyre::{bail, Context, Result};
+use color_eyre::eyre::{Context, Result, bail};
 
 #[derive(Debug, Clone)]
 pub struct CmdOutput {
@@ -24,7 +24,7 @@ pub trait CommandRunner: Send + Sync {
     fn run_with_stdin(&self, program: &str, args: &[&str], stdin: &[u8]) -> Result<CmdOutput>;
 
     fn run_streaming(&self, program: &str, args: &[&str], tx: &Sender<String>)
-        -> Result<CmdOutput>;
+    -> Result<CmdOutput>;
 }
 
 pub struct RealRunner;
