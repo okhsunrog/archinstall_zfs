@@ -39,7 +39,7 @@ enum Commands {
 #[derive(Parser, Clone)]
 struct TestOpts {
     /// Path to JSON config file
-    #[arg(long, default_value = "tests/qemu_full_disk.json")]
+    #[arg(long, default_value = "xtask/configs/qemu_full_disk.json")]
     config: PathBuf,
 
     /// Path to installer binary
