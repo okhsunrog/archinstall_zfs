@@ -4,7 +4,7 @@ use color_eyre::eyre::Result;
 
 use super::cli::{run_zpool, run_zpool_json};
 use super::models::{ZpoolListOutput, ZpoolStatusOutput};
-use crate::system::cmd::{CommandRunner, check_exit};
+use crate::system::cmd::{check_exit, CommandRunner};
 
 pub const DEFAULT_POOL_OPTIONS: &[&str] = &[
     "-o",
@@ -35,12 +35,12 @@ pub fn create_pool(
     compression: &str,
     extra_props: &[(&str, &str)],
 ) -> Result<()> {
-    let device_str = device.to_str().unwrap();
-    let mount_str = mountpoint.to_str().unwrap();
+    let device_str = device.to_string_lossy();
+    let mount_str = mountpoint.to_string_lossy();
 
     let mut args: Vec<&str> = vec!["create", "-f"];
     args.extend_from_slice(DEFAULT_POOL_OPTIONS);
-    args.extend_from_slice(&["-R", mount_str]);
+    args.extend_from_slice(&["-R", &mount_str]);
     let compression_opt = format!("compression={compression}");
     args.extend_from_slice(&["-O", &compression_opt]);
 
@@ -53,7 +53,7 @@ pub fn create_pool(
     args.extend_from_slice(&prop_refs);
 
     args.push(name);
-    args.push(device_str);
+    args.push(&device_str);
 
     let output = run_zpool(runner, &args)?;
     check_exit(&output, "zpool create")?;
@@ -61,8 +61,8 @@ pub fn create_pool(
 }
 
 pub fn import_pool(runner: &dyn CommandRunner, name: &str, mountpoint: &Path) -> Result<()> {
-    let mount_str = mountpoint.to_str().unwrap();
-    let output = run_zpool(runner, &["import", "-f", "-R", mount_str, name])?;
+    let mount_str = mountpoint.to_string_lossy();
+    let output = run_zpool(runner, &["import", "-f", "-R", &mount_str, name])?;
     check_exit(&output, "zpool import")?;
     Ok(())
 }
@@ -72,8 +72,8 @@ pub fn import_pool_no_mount(
     name: &str,
     mountpoint: &Path,
 ) -> Result<()> {
-    let mount_str = mountpoint.to_str().unwrap();
-    let output = run_zpool(runner, &["import", "-N", "-R", mount_str, name])?;
+    let mount_str = mountpoint.to_string_lossy();
+    let output = run_zpool(runner, &["import", "-N", "-R", &mount_str, name])?;
     check_exit(&output, "zpool import -N")?;
     Ok(())
 }

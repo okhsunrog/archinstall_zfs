@@ -2,10 +2,10 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{CommandRunner, check_exit};
+use crate::system::cmd::{check_exit, CommandRunner};
 
 pub fn zap_disk(runner: &dyn CommandRunner, disk: &Path) -> Result<()> {
-    let disk_str = disk.to_str().unwrap();
+    let disk_str = disk.to_string_lossy();
 
     // Clear first and last 34 sectors (GPT/MBR signatures)
     let output = runner.run(
@@ -21,7 +21,7 @@ pub fn zap_disk(runner: &dyn CommandRunner, disk: &Path) -> Result<()> {
     check_exit(&output, "dd zero first sectors")?;
 
     // Get disk size for zeroing the end
-    let output = runner.run("blockdev", &["--getsz", disk_str])?;
+    let output = runner.run("blockdev", &["--getsz", &disk_str])?;
     check_exit(&output, "blockdev --getsz")?;
     let sectors: u64 = output
         .stdout
@@ -44,7 +44,7 @@ pub fn zap_disk(runner: &dyn CommandRunner, disk: &Path) -> Result<()> {
     }
 
     // Zap with sgdisk
-    let output = runner.run("sgdisk", &["--zap-all", disk_str])?;
+    let output = runner.run("sgdisk", &["--zap-all", &disk_str])?;
     check_exit(&output, "sgdisk --zap-all")?;
 
     Ok(())
@@ -61,16 +61,16 @@ pub fn create_partitions(
     disk: &Path,
     swap_size: Option<&str>,
 ) -> Result<PartitionLayout> {
-    let disk_str = disk.to_str().unwrap();
+    let disk_str = disk.to_string_lossy();
 
     // Create GPT table
-    let output = runner.run("sgdisk", &["-o", disk_str])?;
+    let output = runner.run("sgdisk", &["-o", &disk_str])?;
     check_exit(&output, "sgdisk create GPT")?;
 
     // Partition 1: EFI (500M)
     let output = runner.run(
         "sgdisk",
-        &["-n", "1:0:+500M", "-t", "1:ef00", "-c", "1:EFI", disk_str],
+        &["-n", "1:0:+500M", "-t", "1:ef00", "-c", "1:EFI", &disk_str],
     )?;
     check_exit(&output, "sgdisk create EFI partition")?;
 
@@ -86,7 +86,7 @@ pub fn create_partitions(
                 "3:8200",
                 "-c",
                 "3:swap",
-                disk_str,
+                &disk_str,
             ],
         )?;
         check_exit(&output, "sgdisk create swap partition")?;
@@ -94,7 +94,7 @@ pub fn create_partitions(
         // Partition 2: ZFS (remaining space)
         let output = runner.run(
             "sgdisk",
-            &["-n", "2:0:0", "-t", "2:bf00", "-c", "2:ZFS", disk_str],
+            &["-n", "2:0:0", "-t", "2:bf00", "-c", "2:ZFS", &disk_str],
         )?;
         check_exit(&output, "sgdisk create ZFS partition")?;
 
@@ -107,7 +107,7 @@ pub fn create_partitions(
         // Partition 2: ZFS (rest of disk)
         let output = runner.run(
             "sgdisk",
-            &["-n", "2:0:0", "-t", "2:bf00", "-c", "2:ZFS", disk_str],
+            &["-n", "2:0:0", "-t", "2:bf00", "-c", "2:ZFS", &disk_str],
         )?;
         check_exit(&output, "sgdisk create ZFS partition")?;
 
@@ -119,7 +119,7 @@ pub fn create_partitions(
     };
 
     // Inform kernel and udev about partition changes
-    let _ = runner.run("partprobe", &[disk_str]);
+    let _ = runner.run("partprobe", &[&*disk_str]);
     let _ = runner.run("udevadm", &["settle"]);
 
     // Wait for by-id symlinks to appear
@@ -140,7 +140,7 @@ pub fn create_partitions(
 
 /// Wait for /dev/disk/by-id partition symlinks to appear after partitioning.
 pub fn wait_for_by_id_partitions(disk: &Path, layout: &PartitionLayout) -> Vec<std::path::PathBuf> {
-    let disk_str = disk.to_str().unwrap();
+    let disk_str = disk.to_string_lossy();
     let mut parts = vec![
         format!("{disk_str}-part{}", layout.efi_part_num),
         format!("{disk_str}-part{}", layout.zfs_part_num),
@@ -168,19 +168,19 @@ pub fn mount_efi(
     efi_partition: &Path,
     mountpoint: &Path,
 ) -> Result<()> {
-    let efi_str = efi_partition.to_str().unwrap();
+    let efi_str = efi_partition.to_string_lossy();
     let mount_path = mountpoint.join("boot/efi");
     std::fs::create_dir_all(&mount_path)?;
-    let mount_str = mount_path.to_str().unwrap();
-    let output = runner.run("mount", &[efi_str, mount_str])?;
+    let mount_str = mount_path.to_string_lossy();
+    let output = runner.run("mount", &[&*efi_str, &*mount_str])?;
     check_exit(&output, "mount EFI")?;
     Ok(())
 }
 
 pub fn umount_efi(runner: &dyn CommandRunner, mountpoint: &Path) -> Result<()> {
     let mount_path = mountpoint.join("boot/efi");
-    let mount_str = mount_path.to_str().unwrap();
-    let _ = runner.run("umount", &[mount_str]);
+    let mount_str = mount_path.to_string_lossy();
+    let _ = runner.run("umount", &[&*mount_str]);
     Ok(())
 }
 

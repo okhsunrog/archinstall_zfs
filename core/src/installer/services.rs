@@ -2,19 +2,19 @@ use std::path::Path;
 
 use color_eyre::eyre::Result;
 
-use crate::system::cmd::{CommandRunner, check_exit};
+use crate::system::cmd::{check_exit, CommandRunner};
 
 pub fn enable_service(runner: &dyn CommandRunner, target: &Path, service: &str) -> Result<()> {
-    let target_str = target.to_str().unwrap();
-    let output = runner.run("systemctl", &["--root", target_str, "enable", service])?;
+    let target_str = target.to_string_lossy();
+    let output = runner.run("systemctl", &["--root", &target_str, "enable", service])?;
     check_exit(&output, &format!("systemctl enable {service}"))?;
     tracing::info!(service, "enabled service");
     Ok(())
 }
 
 pub fn disable_service(runner: &dyn CommandRunner, target: &Path, service: &str) -> Result<()> {
-    let target_str = target.to_str().unwrap();
-    let _ = runner.run("systemctl", &["--root", target_str, "disable", service]);
+    let target_str = target.to_string_lossy();
+    let _ = runner.run("systemctl", &["--root", &target_str, "disable", service]);
     Ok(())
 }
 

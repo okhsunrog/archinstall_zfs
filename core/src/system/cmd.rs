@@ -3,7 +3,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
 
-use color_eyre::eyre::{Context, Result, bail};
+use color_eyre::eyre::{bail, Context, Result};
 
 #[derive(Debug, Clone)]
 pub struct CmdOutput {
@@ -24,7 +24,7 @@ pub trait CommandRunner: Send + Sync {
     fn run_with_stdin(&self, program: &str, args: &[&str], stdin: &[u8]) -> Result<CmdOutput>;
 
     fn run_streaming(&self, program: &str, args: &[&str], tx: &Sender<String>)
-    -> Result<CmdOutput>;
+        -> Result<CmdOutput>;
 }
 
 pub struct RealRunner;
@@ -199,6 +199,7 @@ pub fn check_exit(output: &CmdOutput, context: &str) -> Result<()> {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use std::collections::VecDeque;
     use std::sync::Mutex;
 
     #[derive(Debug, Clone)]
@@ -226,14 +227,14 @@ pub mod tests {
 
     pub struct RecordingRunner {
         pub calls: Mutex<Vec<RecordedCall>>,
-        pub responses: Mutex<Vec<CannedResponse>>,
+        pub responses: Mutex<VecDeque<CannedResponse>>,
     }
 
     impl RecordingRunner {
         pub fn new(responses: Vec<CannedResponse>) -> Self {
             Self {
                 calls: Mutex::new(Vec::new()),
-                responses: Mutex::new(responses),
+                responses: Mutex::new(VecDeque::from(responses)),
             }
         }
 
@@ -243,11 +244,7 @@ pub mod tests {
 
         fn next_response(&self) -> CannedResponse {
             let mut responses = self.responses.lock().unwrap();
-            if responses.is_empty() {
-                CannedResponse::default()
-            } else {
-                responses.remove(0)
-            }
+            responses.pop_front().unwrap_or_default()
         }
 
         fn record(&self, program: &str, args: &[&str]) {

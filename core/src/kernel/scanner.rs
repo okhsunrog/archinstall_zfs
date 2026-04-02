@@ -1,4 +1,7 @@
 use std::collections::HashMap;
+use std::sync::LazyLock;
+
+use regex::Regex;
 
 /// Result of compatibility check for a single kernel.
 #[derive(Debug, Clone)]
@@ -143,10 +146,7 @@ fn check_dkms_compat(versions: &HashMap<String, String>, kernel: &str) -> (bool,
     let kernel_ver = match versions.get(kernel) {
         Some(ver) => ver,
         None => {
-            return (
-                false,
-                vec![format!("Kernel {kernel} not found in repos")],
-            );
+            return (false, vec![format!("Kernel {kernel} not found in repos")]);
         }
     };
 
@@ -211,10 +211,10 @@ fn fetch_zfs_kernel_range(zfs_version: &str) -> Option<(String, String)> {
     parse_kernel_range_from_release_notes(body)
 }
 
-/// Parse kernel compatibility range from OpenZFS release notes body.
-/// Tries multiple patterns for robustness (same as Python version).
-fn parse_kernel_range_from_release_notes(body: &str) -> Option<(String, String)> {
-    let patterns = [
+/// Compiled regex patterns for parsing kernel compatibility ranges from OpenZFS
+/// release notes. Compiled once and reused across calls.
+static KERNEL_RANGE_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+    [
         // **Linux**: compatible with 6.1 - 6.15 kernels
         r"\*\*Linux\*\*:\s*compatible with\s+([\d.]+)\s*-\s*([\d.]+)\s*kernels",
         // Linux ... compatible with 6.1 - 6.15 kernels
@@ -223,10 +223,17 @@ fn parse_kernel_range_from_release_notes(body: &str) -> Option<(String, String)>
         r"Kernel.*?compatibility.*?([\d.]+)\s*-\s*([\d.]+)",
         // Linux kernel 6.1 - 6.15
         r"Linux kernel.*?([\d.]+)\s*-\s*([\d.]+)",
-    ];
+    ]
+    .iter()
+    .map(|p| Regex::new(p).expect("invalid kernel range regex"))
+    .collect()
+});
 
-    for pattern in &patterns {
-        if let Some(caps) = regex::Regex::new(pattern).ok()?.captures(body) {
+/// Parse kernel compatibility range from OpenZFS release notes body.
+/// Tries multiple patterns for robustness (same as Python version).
+fn parse_kernel_range_from_release_notes(body: &str) -> Option<(String, String)> {
+    for pattern in KERNEL_RANGE_PATTERNS.iter() {
+        if let Some(caps) = pattern.captures(body) {
             let min = caps.get(1)?.as_str().to_string();
             let max = caps.get(2)?.as_str().to_string();
             tracing::debug!(min, max, "parsed ZFS kernel compatibility range");
@@ -247,10 +254,7 @@ fn parse_major_minor(version: &str) -> (u32, u32) {
         .chars()
         .take_while(|c| c.is_ascii_digit() || *c == '.')
         .collect();
-    let parts: Vec<u32> = clean
-        .split('.')
-        .filter_map(|s| s.parse().ok())
-        .collect();
+    let parts: Vec<u32> = clean.split('.').filter_map(|s| s.parse().ok()).collect();
     let major = parts.first().copied().unwrap_or(0);
     let minor = parts.get(1).copied().unwrap_or(0);
     (major, minor)
@@ -349,9 +353,7 @@ fn strip_pkgrel(version: &str) -> &str {
 /// "6.18.20.1" -> Some("6.18.20"), "6.18.20" -> None
 fn strip_build_suffix(version: &str) -> Option<&str> {
     match version.rsplit_once('.') {
-        Some((base, suffix))
-            if suffix.len() == 1 && suffix.chars().all(|c| c.is_ascii_digit()) =>
-        {
+        Some((base, suffix)) if suffix.len() == 1 && suffix.chars().all(|c| c.is_ascii_digit()) => {
             Some(base)
         }
         _ => None,
@@ -492,8 +494,9 @@ mod tests {
 
     #[test]
     fn test_dkms_missing_zfs_dkms() {
-        let versions: HashMap<String, String> =
-            [("linux-lts".into(), "6.12.41-2".into())].into_iter().collect();
+        let versions: HashMap<String, String> = [("linux-lts".into(), "6.12.41-2".into())]
+            .into_iter()
+            .collect();
         let (ok, warnings) = check_dkms_compat(&versions, "linux-lts");
         assert!(!ok);
         assert!(warnings.iter().any(|w| w.contains("zfs-dkms not found")));
@@ -501,8 +504,9 @@ mod tests {
 
     #[test]
     fn test_dkms_missing_kernel() {
-        let versions: HashMap<String, String> =
-            [("zfs-dkms".into(), "2.3.3-1".into())].into_iter().collect();
+        let versions: HashMap<String, String> = [("zfs-dkms".into(), "2.3.3-1".into())]
+            .into_iter()
+            .collect();
         let (ok, warnings) = check_dkms_compat(&versions, "linux-lts");
         assert!(!ok);
         assert!(warnings.iter().any(|w| w.contains("not found in repos")));
@@ -555,10 +559,7 @@ mod tests {
     #[test]
     fn test_strip_build_suffix() {
         assert_eq!(strip_build_suffix("6.18.20.1"), Some("6.18.20"));
-        assert_eq!(
-            strip_build_suffix("6.18.20.arch1.1"),
-            Some("6.18.20.arch1")
-        );
+        assert_eq!(strip_build_suffix("6.18.20.arch1.1"), Some("6.18.20.arch1"));
         assert_eq!(strip_build_suffix("6.18.20"), None); // "20" too long
     }
 

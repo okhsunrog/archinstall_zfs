@@ -3,7 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{CommandRunner, check_exit};
+use crate::system::cmd::{check_exit, CommandRunner};
 
 pub fn configure_zram(target: &Path, size_expr: Option<&str>) -> Result<()> {
     let conf_dir = target.join("etc/systemd/zram-generator.conf.d");
@@ -29,19 +29,19 @@ pub fn setup_swap_partition(
     partition: &Path,
     encrypted: bool,
 ) -> Result<()> {
-    let part_str = partition.to_str().unwrap();
+    let part_str = partition.to_string_lossy();
 
     if encrypted {
         // Encrypted swap via crypttab
-        crate::installer::fstab::add_cryptswap_entry(target, part_str)?;
-        tracing::info!(partition = part_str, "configured encrypted swap partition");
+        crate::installer::fstab::add_cryptswap_entry(target, &part_str)?;
+        tracing::info!(partition = %part_str, "configured encrypted swap partition");
     } else {
         // Direct swap
-        let output = runner.run("mkswap", &[part_str])?;
+        let output = runner.run("mkswap", &[&*part_str])?;
         check_exit(&output, "mkswap")?;
 
-        crate::installer::fstab::add_swap_entry(target, part_str)?;
-        tracing::info!(partition = part_str, "configured swap partition");
+        crate::installer::fstab::add_swap_entry(target, &part_str)?;
+        tracing::info!(partition = %part_str, "configured swap partition");
     }
 
     Ok(())

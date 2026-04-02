@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use color_eyre::eyre::{Result, bail};
+use color_eyre::eyre::{bail, Result};
 
-use crate::system::cmd::{CommandRunner, check_exit, chroot};
+use crate::system::cmd::{check_exit, chroot, shell_quote, CommandRunner};
 
 const TEMP_USER: &str = "aurinstall";
 
@@ -13,9 +13,7 @@ fn validate_aur_package_name(name: &str) -> Result<()> {
         bail!("AUR package name cannot be empty");
     }
     if !name.chars().all(|c| {
-        c.is_ascii_lowercase()
-            || c.is_ascii_digit()
-            || matches!(c, '@' | '.' | '_' | '+' | '-')
+        c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '@' | '.' | '_' | '+' | '-')
     }) {
         bail!("AUR package name '{}' contains invalid characters", name);
     }
@@ -62,10 +60,8 @@ pub fn install_aur_packages(
 /// returning package names in correct install order (deps before dependents).
 fn resolve_aur_deps(target: &Path, packages: &[&str]) -> Result<Vec<String>> {
     let target_conf = target.join("etc/pacman.conf");
-    let conf = pacmanconf::Config::from_file(
-        target_conf.to_str().unwrap_or("/etc/pacman.conf"),
-    )
-    .map_err(|e| color_eyre::eyre::eyre!("failed to parse pacman.conf: {e}"))?;
+    let conf = pacmanconf::Config::from_file(target_conf.to_str().unwrap_or("/etc/pacman.conf"))
+        .map_err(|e| color_eyre::eyre::eyre!("failed to parse pacman.conf: {e}"))?;
 
     let target_str = target.to_string_lossy();
     let db_path = format!("{}/var/lib/pacman", target_str);
@@ -79,12 +75,8 @@ fn resolve_aur_deps(target: &Path, packages: &[&str]) -> Result<Vec<String>> {
     let raur_handle = raur::Handle::new();
     let mut cache = raur::Cache::new();
 
-    let resolver = aur_depends::Resolver::new(
-        &alpm,
-        &mut cache,
-        &raur_handle,
-        aur_depends::Flags::new(),
-    );
+    let resolver =
+        aur_depends::Resolver::new(&alpm, &mut cache, &raur_handle, aur_depends::Flags::new());
 
     // resolve_targets is async — bridge with a small tokio runtime
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -136,10 +128,11 @@ fn install_single_aur_package(
     // Clone PKGBUILD from AUR and build with makepkg.
     // --syncdeps installs repo dependencies automatically.
     // --skippgpcheck avoids PGP key issues in automated installs.
+    let quoted_pkg = shell_quote(package);
     let cmd = format!(
         "su - {TEMP_USER} -c 'cd /tmp && \
-         git clone https://aur.archlinux.org/{package}.git && \
-         cd {package} && \
+         git clone https://aur.archlinux.org/{quoted_pkg}.git && \
+         cd {quoted_pkg} && \
          makepkg -si --noconfirm --needed --skippgpcheck'"
     );
     let output = chroot(runner, target, &cmd)?;

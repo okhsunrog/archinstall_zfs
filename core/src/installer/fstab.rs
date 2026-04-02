@@ -3,7 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{CommandRunner, check_exit};
+use crate::system::cmd::{check_exit, CommandRunner};
 
 pub fn generate_fstab(
     runner: &dyn CommandRunner,
@@ -11,10 +11,10 @@ pub fn generate_fstab(
     pool_name: &str,
     prefix: &str,
 ) -> Result<()> {
-    let target_str = target.to_str().unwrap();
+    let target_str = target.to_string_lossy();
 
     // Run genfstab
-    let output = runner.run("genfstab", &["-U", target_str])?;
+    let output = runner.run("genfstab", &["-U", &target_str])?;
     check_exit(&output, "genfstab")?;
 
     // Filter out ZFS lines and fix EFI mount options

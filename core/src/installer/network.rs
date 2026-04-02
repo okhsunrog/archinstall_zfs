@@ -3,7 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{CommandRunner, check_exit};
+use crate::system::cmd::{check_exit, CommandRunner};
 
 pub fn copy_iso_network(runner: &dyn CommandRunner, target: &Path) -> Result<()> {
     // Copy systemd-networkd configs
@@ -29,14 +29,14 @@ pub fn copy_iso_network(runner: &dyn CommandRunner, target: &Path) -> Result<()>
     // Enable services
     let services = ["systemd-networkd", "systemd-resolved"];
     for service in &services {
-        let target_str = target.to_str().unwrap();
-        let _ = runner.run("systemctl", &["--root", target_str, "enable", service]);
+        let target_str = target.to_string_lossy();
+        let _ = runner.run("systemctl", &["--root", &target_str, "enable", service]);
     }
 
     // Enable iwd if configs were copied
     if dst_iwd.exists() {
-        let target_str = target.to_str().unwrap();
-        let _ = runner.run("systemctl", &["--root", target_str, "enable", "iwd"]);
+        let target_str = target.to_string_lossy();
+        let _ = runner.run("systemctl", &["--root", &target_str, "enable", "iwd"]);
     }
 
     tracing::info!("copied ISO network configuration");
@@ -49,10 +49,10 @@ pub fn install_network_manager(runner: &dyn CommandRunner, target: &Path) -> Res
     ctx.sync_databases(false)?;
     ctx.install_packages(&["networkmanager"])?;
 
-    let target_str = target.to_str().unwrap();
+    let target_str = target.to_string_lossy();
     let output = runner.run(
         "systemctl",
-        &["--root", target_str, "enable", "NetworkManager"],
+        &["--root", &target_str, "enable", "NetworkManager"],
     )?;
     check_exit(&output, "enable NetworkManager")?;
 

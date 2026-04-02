@@ -5,7 +5,7 @@ use color_eyre::eyre::{Context, Result};
 use serde::Serialize;
 
 use crate::config::types::InitSystem;
-use crate::system::cmd::{CommandRunner, check_exit, chroot};
+use crate::system::cmd::{check_exit, chroot, CommandRunner};
 
 pub const HOSTID_VALUE: &str = "0x00bab10c";
 
@@ -171,7 +171,7 @@ pub fn install_and_generate_zbm(
 /// Since the cmdline is already embedded in the EFI by generate-zbm,
 /// we don't need to pass -u here.
 pub fn create_efi_entries(runner: &dyn CommandRunner, efi_partition: &Path) -> Result<()> {
-    let efi_str = efi_partition.to_str().unwrap();
+    let efi_str = efi_partition.to_string_lossy();
 
     // Check for existing entries
     let existing = runner.run("efibootmgr", &["-v"])?;
@@ -184,7 +184,7 @@ pub fn create_efi_entries(runner: &dyn CommandRunner, efi_partition: &Path) -> R
             &[
                 "-c",
                 "-d",
-                efi_str,
+                &efi_str,
                 "-L",
                 "ZFSBootMenu",
                 "-l",
@@ -201,7 +201,7 @@ pub fn create_efi_entries(runner: &dyn CommandRunner, efi_partition: &Path) -> R
             &[
                 "-c",
                 "-d",
-                efi_str,
+                &efi_str,
                 "-L",
                 "ZFSBootMenu (Backup)",
                 "-l",
