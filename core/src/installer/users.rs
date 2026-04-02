@@ -3,7 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{CommandRunner, check_exit, chroot_cmd};
+use crate::system::cmd::{check_exit, chroot_cmd, CommandRunner};
 
 pub fn set_root_password(runner: &dyn CommandRunner, target: &Path, password: &str) -> Result<()> {
     let target_str = target.to_string_lossy();

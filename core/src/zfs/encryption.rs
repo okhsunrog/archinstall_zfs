@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use color_eyre::eyre::{Context, Result};
 
 use super::cli::run_zfs;
-use crate::system::cmd::{CommandRunner, check_exit};
+use crate::system::cmd::{check_exit, CommandRunner};
 
 const KEY_FILE_PATH: &str = "etc/zfs/zroot.key";
 
@@ -45,6 +45,7 @@ pub fn load_key(runner: &dyn CommandRunner, pool: &str, key_path: &Path) -> Resu
     Ok(())
 }
 
+/// Check whether an already-imported pool has encryption enabled.
 pub fn detect_encryption(runner: &dyn CommandRunner, pool: &str) -> Result<bool> {
     let output = run_zfs(runner, &["get", "-H", "-o", "value", "encryption", pool])?;
     if !output.success() {
@@ -54,6 +55,8 @@ pub fn detect_encryption(runner: &dyn CommandRunner, pool: &str) -> Result<bool>
     Ok(value != "off" && !value.is_empty())
 }
 
+/// Verify a passphrase against an already-imported pool by writing a temp
+/// key file and attempting load-key.
 pub fn verify_passphrase(runner: &dyn CommandRunner, pool: &str, password: &str) -> Result<bool> {
     // Unload key first (ignore errors)
     let _ = run_zfs(runner, &["unload-key", pool]);
@@ -61,6 +64,75 @@ pub fn verify_passphrase(runner: &dyn CommandRunner, pool: &str, password: &str)
     // Try to load key with the provided password
     let output = runner.run_with_stdin("zfs", &["load-key", pool], password.as_bytes())?;
     Ok(output.success())
+}
+
+/// Detect whether a pool is encrypted using an ephemeral import.
+///
+/// Imports the pool with `-fN` (force, no mount), checks the encryption
+/// property, then always attempts to unload-key and export (best-effort
+/// cleanup). Returns `true` if encryption is present and not "off".
+pub fn detect_pool_encryption(runner: &dyn CommandRunner, pool: &str) -> bool {
+    // Import pool ephemerally
+    let import_output = runner.run("zpool", &["import", "-fN", pool]);
+    if import_output.is_err() || !import_output.as_ref().unwrap().success() {
+        tracing::debug!(pool, "ephemeral import failed for encryption detection");
+        return false;
+    }
+
+    // Check encryption property
+    let encrypted = detect_encryption(runner, pool).unwrap_or(false);
+
+    // Best-effort cleanup: unload key + export
+    let _ = runner.run("zfs", &["unload-key", pool]);
+    let _ = runner.run("zpool", &["export", pool]);
+
+    tracing::info!(pool, encrypted, "detected pool encryption state");
+    encrypted
+}
+
+/// Verify a pool passphrase using an ephemeral import.
+///
+/// Imports the pool with `-fN`, writes the password to a temporary file,
+/// attempts `zfs load-key`, then always cleans up (unload-key, delete
+/// temp file, export pool). Returns `true` if load-key succeeded.
+pub fn verify_pool_passphrase(runner: &dyn CommandRunner, pool: &str, password: &str) -> bool {
+    // Import pool ephemerally
+    let import_output = runner.run("zpool", &["import", "-fN", pool]);
+    if import_output.is_err() || !import_output.as_ref().unwrap().success() {
+        tracing::debug!(pool, "ephemeral import failed for passphrase verification");
+        return false;
+    }
+
+    // Write password to a temporary file
+    let tmp_result = tempfile::NamedTempFile::new();
+    let tmp = match tmp_result {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to create temp key file");
+            let _ = runner.run("zpool", &["export", pool]);
+            return false;
+        }
+    };
+    let key_path = tmp.path().to_path_buf();
+
+    let write_ok = fs::write(&key_path, password).is_ok()
+        && fs::set_permissions(&key_path, fs::Permissions::from_mode(0o000)).is_ok();
+
+    let verified = if write_ok {
+        let key_loc = format!("file://{}", key_path.display());
+        let output = runner.run("zfs", &["load-key", "-L", &key_loc, pool]);
+        output.is_ok() && output.unwrap().success()
+    } else {
+        false
+    };
+
+    // Best-effort cleanup: unload key, remove temp file, export pool
+    let _ = runner.run("zfs", &["unload-key", pool]);
+    let _ = fs::remove_file(&key_path);
+    let _ = runner.run("zpool", &["export", pool]);
+
+    tracing::info!(pool, verified, "verified pool passphrase");
+    verified
 }
 
 #[cfg(test)]

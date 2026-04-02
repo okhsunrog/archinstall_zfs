@@ -3,7 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{CommandRunner, check_exit, chroot};
+use crate::system::cmd::{check_exit, chroot, CommandRunner};
 
 const DRACUT_ZFS_CONF: &str = r#"hostonly="yes"
 hostonly_cmdline="no"
@@ -135,11 +135,10 @@ mod tests {
         configure(&runner, dir.path(), false).unwrap();
 
         assert!(dir.path().join("etc/dracut.conf.d/zfs.conf").exists());
-        assert!(
-            dir.path()
-                .join("etc/pacman.d/hooks/90-dracut-install.hook")
-                .exists()
-        );
+        assert!(dir
+            .path()
+            .join("etc/pacman.d/hooks/90-dracut-install.hook")
+            .exists());
         assert!(dir.path().join("usr/local/bin/dracut-install.sh").exists());
 
         let conf = fs::read_to_string(dir.path().join("etc/dracut.conf.d/zfs.conf")).unwrap();

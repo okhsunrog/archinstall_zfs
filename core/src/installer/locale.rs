@@ -3,7 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{CommandRunner, check_exit, chroot};
+use crate::system::cmd::{check_exit, chroot, CommandRunner};
 
 pub fn set_hostname(target: &Path, hostname: &str) -> Result<()> {
     let path = target.join("etc/hostname");

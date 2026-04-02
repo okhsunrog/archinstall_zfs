@@ -3,7 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{CommandRunner, check_exit, chroot};
+use crate::system::cmd::{check_exit, chroot, CommandRunner};
 
 pub fn configure(target: &Path, encryption: bool) -> Result<()> {
     let conf_path = target.join("etc/mkinitcpio.conf");

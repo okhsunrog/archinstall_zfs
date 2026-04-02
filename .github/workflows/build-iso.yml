@@ -1,0 +1,141 @@
+name: Build ISO
+
+on:
+  # Trigger on version tags like v0.1.0
+  push:
+    tags:
+      - 'v*'
+
+  # Monthly automated builds (4th of each month at 4:30 AM UTC)
+  schedule:
+    - cron: '30 4 4 * *'
+
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      kernel:
+        description: 'Kernel to build (linux, linux-lts, or both)'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - linux
+          - linux-lts
+          - both
+      create_release:
+        description: 'Create GitHub release (manual trigger only)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+      options: --privileged  # Required for archiso
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install system dependencies
+      run: |
+        pacman -Syu --noconfirm
+        pacman -S --noconfirm archiso base-devel git just pacman-contrib pkgconf rsync sudo
+
+    - name: Install Rust
+      run: |
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+    - name: Cache cargo
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-release-
+
+    - name: Set build parameters
+      run: |
+        # Set kernel choice
+        if [ "${{ github.event_name }}" = "push" ] || [ "${{ github.event_name }}" = "schedule" ]; then
+          echo "KERNEL=both" >> $GITHUB_ENV
+        else
+          echo "KERNEL=${{ github.event.inputs.kernel || 'both' }}" >> $GITHUB_ENV
+        fi
+
+        # Set release date for scheduled/manual builds
+        if [ "${{ github.event_name }}" = "schedule" ]; then
+          echo "RELEASE_DATE=$(date +'%Y.%m.%d')" >> $GITHUB_ENV
+          echo "IS_SCHEDULED=true" >> $GITHUB_ENV
+        elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "RELEASE_DATE=manual-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
+        fi
+
+    - name: Build ISO with linux kernel
+      if: env.KERNEL == 'linux' || env.KERNEL == 'both'
+      continue-on-error: true
+      run: |
+        echo "Building linux kernel ISO..."
+        just build-main pre linux || just build-main dkms linux || echo "WARNING: linux kernel build skipped"
+
+    - name: Build ISO with linux-lts kernel
+      if: env.KERNEL == 'linux-lts' || env.KERNEL == 'both'
+      run: |
+        echo "Building linux-lts kernel ISO..."
+        just build-main pre linux-lts || just build-main dkms linux-lts
+
+    - name: Find and list built ISOs
+      run: |
+        echo "Built ISOs:"
+        ls -la gen_iso/out/ || echo "No gen_iso/out directory found"
+
+        ISO_FILES=$(find gen_iso/out/ -name "*.iso" 2>/dev/null | sort | tr '\n' ' ')
+        if [ -z "$ISO_FILES" ]; then
+          echo "Warning: No ISO files found!"
+          if [ "$KERNEL" = "linux" ]; then
+            echo "Error: Expected linux ISO but none found"
+            exit 1
+          fi
+        else
+          for iso in $(find gen_iso/out/ -name "*.iso" | sort); do
+            echo "  $iso ($(du -h $iso | cut -f1))"
+          done
+        fi
+
+    - name: Generate checksums
+      run: |
+        if [ -d "gen_iso/out" ] && [ "$(ls -A gen_iso/out/*.iso 2>/dev/null)" ]; then
+          cd gen_iso/out
+          for iso in *.iso; do
+            if [ -f "$iso" ]; then
+              sha256sum "$iso" > "${iso}.sha256"
+              cat "${iso}.sha256"
+            fi
+          done
+        fi
+
+    - name: Create GitHub Release and upload assets
+      if: github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.event_name == 'push' && github.ref_name || env.RELEASE_DATE }}
+        name: ${{ github.event_name == 'push' && format('Release {0}', github.ref_name) || (github.event_name == 'schedule' && format('Monthly Release - {0}', env.RELEASE_DATE) || format('Manual Release - {0}', env.RELEASE_DATE)) }}
+        generate_release_notes: ${{ github.event_name == 'push' }}
+        body: ${{ github.event_name != 'push' && 'Automated build with latest packages and ZFS modules.' || '' }}
+        draft: ${{ github.event_name == 'workflow_dispatch' }}
+        prerelease: ${{ github.event_name == 'workflow_dispatch' }}
+        files: |
+          gen_iso/out/*.iso
+          gen_iso/out/*.sha256
+        fail_on_unmatched_files: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

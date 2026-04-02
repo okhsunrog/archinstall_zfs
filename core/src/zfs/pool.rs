@@ -112,6 +112,29 @@ pub fn pool_exists(runner: &dyn CommandRunner, name: &str) -> Result<bool> {
     Ok(output.success())
 }
 
+/// Discover ZFS pools available for import by parsing `zpool import` output.
+/// Returns a list of pool names that can be imported.
+pub fn discover_importable_pools(runner: &dyn CommandRunner) -> Vec<String> {
+    let output = match runner.run("zpool", &["import"]) {
+        Ok(o) => o,
+        Err(_) => return Vec::new(),
+    };
+    // zpool import prints to stderr when listing pools, and may exit non-zero
+    // when no pools are found. Parse both stdout and stderr.
+    let text = format!("{}{}", output.stdout, output.stderr);
+    let mut pools = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if let Some(name) = trimmed.strip_prefix("pool: ") {
+            let name = name.trim();
+            if !name.is_empty() {
+                pools.push(name.to_string());
+            }
+        }
+    }
+    pools
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
