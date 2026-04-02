@@ -31,8 +31,11 @@ pub fn install_aur_packages(
 }
 
 fn setup_aur_environment(runner: &dyn CommandRunner, target: &Path) -> Result<()> {
-    // Install dependencies
-    crate::system::pacman::pacstrap(runner, target, &["git", "base-devel", "sudo"])?;
+    // Install dependencies via libalpm (git and sudo; base-devel already in base install)
+    let target_conf = target.join("etc/pacman.conf");
+    let mut ctx = crate::system::alpm_pacman::AlpmContext::for_target(target, &target_conf)?;
+    ctx.sync_databases(false)?;
+    ctx.install_packages(&["git", "sudo"])?;
 
     // Create temp user
     let output = chroot(runner, target, &format!("useradd -m {TEMP_USER}"))?;

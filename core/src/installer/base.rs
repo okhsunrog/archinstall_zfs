@@ -3,15 +3,18 @@ use std::path::Path;
 use color_eyre::eyre::Result;
 
 use crate::config::types::GlobalConfig;
-use crate::system::alpm_pacman::AlpmContext;
+use crate::system::alpm_pacman::{AlpmContext, TargetMounts};
 use crate::system::cmd::CommandRunner;
 use crate::system::sysinfo;
 
+/// Install base system packages into target.
+/// Returns `TargetMounts` which must be kept alive for the duration of the
+/// installation — dropping it unmounts API filesystems (proc, sys, dev, etc.).
 pub fn install_base(
     _runner: &dyn CommandRunner,
     target: &Path,
     config: &GlobalConfig,
-) -> Result<()> {
+) -> Result<TargetMounts> {
     let mut packages: Vec<&str> = vec![
         "base",
         "base-devel",
@@ -43,16 +46,21 @@ pub fn install_base(
     // Set parallel downloads on host before installing
     crate::system::pacman::set_parallel_downloads(None, config.parallel_downloads)?;
 
+    // Mount API filesystems — returned to caller to keep alive
+    let target_mounts = TargetMounts::setup(target)?;
+
     let pacman_conf = Path::new("/etc/pacman.conf");
     let mut ctx = AlpmContext::for_target(target, pacman_conf)?;
     ctx.sync_databases(false)?;
     ctx.install_packages(&packages)?;
     ctx.finalize_target()?;
+    // ctx (AlpmContext) drops here — that's fine, just releases the alpm handle.
+    // target_mounts stays alive via the return value.
 
     // Set parallel downloads on target too
     crate::system::pacman::set_parallel_downloads(Some(target), config.parallel_downloads)?;
 
-    Ok(())
+    Ok(target_mounts)
 }
 
 // Note: install_base now uses AlpmContext directly (libalpm) instead of

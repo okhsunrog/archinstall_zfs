@@ -153,7 +153,7 @@ pub fn run_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Result<
     archinstall_zfs_core::disk::partition::mount_efi(runner, &efi_partition, &mountpoint)?;
 
     tracing::info!("Phase 4-12: Running installer pipeline");
-    let installer = archinstall_zfs_core::installer::Installer::new(runner, config, &mountpoint);
+    let mut installer = archinstall_zfs_core::installer::Installer::new(runner, config, &mountpoint);
     installer.perform_installation()?;
 
     tracing::info!("Phase 13: Setting up ZFSBootMenu");

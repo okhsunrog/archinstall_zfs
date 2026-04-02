@@ -9,15 +9,19 @@ pub mod users;
 
 use std::path::{Path, PathBuf};
 
+use alpm::SigLevel;
 use color_eyre::eyre::{Result, bail};
 
 use crate::config::types::{GlobalConfig, InitSystem, SwapMode, ZfsEncryptionMode};
+use crate::system::alpm_pacman::{AlpmContext, TargetMounts};
 use crate::system::cmd::CommandRunner;
 
 pub struct Installer<'a> {
     pub runner: &'a dyn CommandRunner,
     pub config: &'a GlobalConfig,
     pub target: PathBuf,
+    _target_mounts: Option<TargetMounts>,
+    alpm_ctx: Option<AlpmContext>,
 }
 
 impl<'a> Installer<'a> {
@@ -26,20 +30,29 @@ impl<'a> Installer<'a> {
             runner,
             config,
             target: target.to_path_buf(),
+            _target_mounts: None,
+            alpm_ctx: None,
         }
     }
 
     /// Run the full installation pipeline.
-    /// Matches `perform_installation()` from archinstall_zfs/main.py.
-    pub fn perform_installation(&self) -> Result<()> {
+    pub fn perform_installation(&mut self) -> Result<()> {
         let errors = self.config.validate_for_install();
         if !errors.is_empty() {
             bail!("Config validation failed:\n  {}", errors.join("\n  "));
         }
 
-        // Phase 4: pacstrap base system
+        // Phase 4: install base system via libalpm
         tracing::info!("Phase 4: Installing base system...");
-        base::install_base(self.runner, &self.target, self.config)?;
+        let target_mounts = base::install_base(self.runner, &self.target, self.config)?;
+        self._target_mounts = Some(target_mounts);
+
+        // Create a reusable AlpmContext for all subsequent package installs.
+        // The target now has pacman.conf, keyring, and mirrorlist from finalize_target().
+        let target_conf = self.target.join("etc/pacman.conf");
+        let mut ctx = AlpmContext::for_target(&self.target, &target_conf)?;
+        ctx.sync_databases(false)?;
+        self.alpm_ctx = Some(ctx);
 
         // Phase 5: System config
         tracing::info!("Phase 5: Configuring system...");
@@ -77,6 +90,17 @@ impl<'a> Installer<'a> {
         Ok(())
     }
 
+    /// Install packages into the target via libalpm (replaces pacstrap calls).
+    fn install_target_packages(&mut self, packages: &[&str]) -> Result<()> {
+        if packages.is_empty() {
+            return Ok(());
+        }
+        self.alpm_ctx
+            .as_mut()
+            .expect("alpm_ctx must be initialized before installing packages")
+            .install_packages(packages)
+    }
+
     fn configure_system(&self) -> Result<()> {
         if let Some(ref hostname) = self.config.hostname {
             locale::set_hostname(&self.target, hostname)?;
@@ -109,18 +133,27 @@ impl<'a> Installer<'a> {
         Ok(())
     }
 
-    fn install_zfs_on_target(&self) -> Result<()> {
-        // Add archzfs repo to target
+    fn install_zfs_on_target(&mut self) -> Result<()> {
+        // Edit pacman.conf and import GPG keys (still needs shell for pacman-key)
         crate::system::pacman::add_archzfs_repo(self.runner, Some(&self.target))?;
 
-        // Install ZFS packages inside chroot (not pacstrap, since archzfs
-        // repo is in the target's pacman.conf, not the host's)
+        // Register archzfs repo in the live alpm handle and sync
+        let ctx = self
+            .alpm_ctx
+            .as_mut()
+            .expect("alpm_ctx must be initialized");
+        ctx.register_repo(
+            "archzfs",
+            &["https://github.com/archzfs/archzfs/releases/download/experimental"],
+            SigLevel::PACKAGE_OPTIONAL | SigLevel::DATABASE_OPTIONAL,
+        )?;
+        ctx.sync_databases(true)?;
+
+        // Install ZFS packages via libalpm
         let kernel = self.config.primary_kernel();
         let zfs_packages = crate::kernel::get_zfs_packages(kernel, self.config.zfs_module_mode);
-        let pkg_list = zfs_packages.join(" ");
-        let cmd = format!("pacman --noconfirm --needed --noprogressbar -S {pkg_list}");
-        let output = crate::system::cmd::chroot(self.runner, &self.target, &cmd)?;
-        crate::system::cmd::check_exit(&output, "install ZFS packages in chroot")?;
+        let pkg_refs: Vec<&str> = zfs_packages.iter().map(|s| s.as_str()).collect();
+        ctx.install_packages(&pkg_refs)?;
 
         Ok(())
     }
@@ -171,13 +204,13 @@ impl<'a> Installer<'a> {
         Ok(())
     }
 
-    fn install_profile(&self) -> Result<()> {
+    fn install_profile(&mut self) -> Result<()> {
         if let Some(ref profile_name) = self.config.profile {
             let profile = crate::profile::get_profile(profile_name);
             if let Some(p) = profile {
                 if !p.packages.is_empty() {
                     let pkg_refs: Vec<&str> = p.packages.iter().copied().collect();
-                    crate::system::pacman::pacstrap(self.runner, &self.target, &pkg_refs)?;
+                    self.install_target_packages(&pkg_refs)?;
                 }
                 for service in &p.services {
                     services::enable_service(self.runner, &self.target, service)?;
@@ -189,7 +222,7 @@ impl<'a> Installer<'a> {
 
         // Audio server
         if let Some(audio) = self.config.audio {
-            let pkgs = match audio {
+            let pkgs: Vec<&str> = match audio {
                 crate::config::types::AudioServer::Pipewire => {
                     vec!["pipewire", "pipewire-alsa", "pipewire-pulse", "wireplumber"]
                 }
@@ -197,19 +230,19 @@ impl<'a> Installer<'a> {
                     vec!["pulseaudio", "pulseaudio-alsa"]
                 }
             };
-            crate::system::pacman::pacstrap(self.runner, &self.target, &pkgs)?;
+            self.install_target_packages(&pkgs)?;
         }
 
         // Bluetooth
         if self.config.bluetooth {
-            crate::system::pacman::pacstrap(self.runner, &self.target, &["bluez", "bluez-utils"])?;
+            self.install_target_packages(&["bluez", "bluez-utils"])?;
             services::enable_service(self.runner, &self.target, "bluetooth")?;
         }
 
         Ok(())
     }
 
-    fn install_additional_packages(&self) -> Result<()> {
+    fn install_additional_packages(&mut self) -> Result<()> {
         if !self.config.additional_packages.is_empty() {
             let pkg_refs: Vec<&str> = self
                 .config
@@ -217,7 +250,7 @@ impl<'a> Installer<'a> {
                 .iter()
                 .map(|s| s.as_str())
                 .collect();
-            crate::system::pacman::pacstrap(self.runner, &self.target, &pkg_refs)?;
+            self.install_target_packages(&pkg_refs)?;
         }
 
         let aur_pkgs = self.config.all_aur_packages();
@@ -298,13 +331,13 @@ impl<'a> Installer<'a> {
 mod tests {
     use super::*;
     use crate::config::types::GlobalConfig;
-    use crate::system::cmd::tests::{CannedResponse, RecordingRunner};
+    use crate::system::cmd::tests::RecordingRunner;
 
     #[test]
     fn test_installer_validates_config() {
         let runner = RecordingRunner::new(vec![]);
         let config = GlobalConfig::default(); // missing installation_mode
-        let installer = Installer::new(&runner, &config, Path::new("/mnt"));
+        let mut installer = Installer::new(&runner, &config, Path::new("/mnt"));
         let result = installer.perform_installation();
         assert!(result.is_err());
         assert!(

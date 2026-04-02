@@ -4,13 +4,43 @@ use std::path::{Path, PathBuf};
 use alpm::{Alpm, DownloadEvent, LogLevel, SigLevel, TransFlag};
 use color_eyre::eyre::{Context, Result, bail, eyre};
 
-/// Wraps an alpm handle with lifecycle management for host or target installs.
-/// For target installs, manages API filesystem mounts (proc, sys, dev, etc.).
+/// Manages API filesystem mounts (proc, sys, dev, etc.) for a target chroot.
+/// Mounts are unmounted in reverse order on drop.
+/// This struct should outlive any `AlpmContext` that uses the target.
+pub struct TargetMounts {
+    mounts: Vec<PathBuf>,
+}
+
+impl TargetMounts {
+    /// Prepare target directories and mount API filesystems.
+    /// The mounts persist until this struct is dropped.
+    pub fn setup(target: &Path) -> Result<Self> {
+        prepare_target_dirs(target)?;
+        let mounts = mount_api_filesystems(target)?;
+        Ok(Self { mounts })
+    }
+}
+
+impl Drop for TargetMounts {
+    fn drop(&mut self) {
+        for mount_point in self.mounts.iter().rev() {
+            if let Err(e) = nix::mount::umount2(mount_point, nix::mount::MntFlags::MNT_DETACH) {
+                tracing::warn!(
+                    path = %mount_point.display(),
+                    error = %e,
+                    "failed to unmount API filesystem"
+                );
+            }
+        }
+    }
+}
+
+/// Wraps an alpm handle for host or target installs.
+/// Does NOT own API filesystem mounts — use `TargetMounts` for that.
 pub struct AlpmContext {
     handle: Alpm,
     root: PathBuf,
     is_target: bool,
-    mounts: Vec<PathBuf>, // mounted paths, unmounted on drop (reverse order)
 }
 
 impl AlpmContext {
@@ -30,22 +60,15 @@ impl AlpmContext {
             handle,
             root: PathBuf::from(&conf.root_dir),
             is_target: false,
-            mounts: Vec::new(),
         };
         ctx.setup_callbacks();
         Ok(ctx)
     }
 
     /// Create a context for installing packages into a TARGET chroot.
-    /// Prepares directories and mounts API filesystems.
+    /// Requires that `TargetMounts::setup()` has already been called and
+    /// the returned `TargetMounts` is kept alive for the duration.
     pub fn for_target(target: &Path, pacman_conf_path: &Path) -> Result<Self> {
-        // Prepare target directories (what pacstrap does)
-        prepare_target_dirs(target)?;
-
-        // Mount API filesystems
-        let mounts = mount_api_filesystems(target)?;
-
-        // Parse host pacman.conf for mirror/repo info
         let conf =
             pacmanconf::Config::from_file(pacman_conf_path.to_str().unwrap_or("/etc/pacman.conf"))
                 .wrap_err("failed to parse pacman.conf")?;
@@ -66,11 +89,21 @@ impl AlpmContext {
             .set_cachedirs([cache_dir.as_str()].iter())
             .map_err(|e| eyre!("failed to set cache dir: {e}"))?;
 
+        // Ensure hook directories are set (relative to root, libalpm prepends root)
+        handle
+            .set_hookdirs(
+                [
+                    "/usr/share/libalpm/hooks/",
+                    "/etc/pacman.d/hooks/",
+                ]
+                .iter(),
+            )
+            .map_err(|e| eyre!("failed to set hook dirs: {e}"))?;
+
         let ctx = Self {
             handle,
             root: target.to_path_buf(),
             is_target: true,
-            mounts,
         };
         ctx.setup_callbacks();
         Ok(ctx)
@@ -161,13 +194,22 @@ impl AlpmContext {
             return Ok(());
         }
 
-        // Copy GPG keyring
+        // Copy GPG keyring (using cp -a to handle sockets and special files)
         let src_gpg = Path::new("/etc/pacman.d/gnupg");
         let dst_gpg = self.root.join("etc/pacman.d/gnupg");
         if src_gpg.exists() && !dst_gpg.exists() {
-            let options = fs_extra::dir::CopyOptions::new().copy_inside(true);
-            fs_extra::dir::copy(src_gpg, &dst_gpg, &options)
-                .map_err(|e| eyre!("failed to copy keyring: {e}"))?;
+            fs::create_dir_all(&dst_gpg)?;
+            // Use cp -a --no-preserve=ownership like pacstrap does.
+            // fs_extra::dir::copy fails on socket files (S.keyboxd).
+            let status = std::process::Command::new("cp")
+                .args(["-a", "--no-preserve=ownership"])
+                .arg(format!("{}/.", src_gpg.display()))
+                .arg(&dst_gpg)
+                .status()
+                .wrap_err("failed to run cp for keyring")?;
+            if !status.success() {
+                return Err(eyre!("failed to copy keyring (cp exited with {status})"));
+            }
             tracing::info!("copied GPG keyring to target");
         }
 
@@ -180,12 +222,25 @@ impl AlpmContext {
             tracing::info!("copied mirrorlist to target");
         }
 
-        // Copy pacman.conf
+        // Copy pacman.conf, commenting out DownloadUser (the user may not
+        // exist in the target chroot yet — same as pacstrap's sed workaround)
         let src_conf = Path::new("/etc/pacman.conf");
         let dst_conf = self.root.join("etc/pacman.conf");
         if src_conf.exists() {
-            fs::copy(src_conf, &dst_conf).wrap_err("failed to copy pacman.conf")?;
-            tracing::info!("copied pacman.conf to target");
+            let content = fs::read_to_string(src_conf).wrap_err("failed to read pacman.conf")?;
+            let patched: String = content
+                .lines()
+                .map(|line| {
+                    if line.trim_start().starts_with("DownloadUser") {
+                        format!("#{line}")
+                    } else {
+                        line.to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            fs::write(&dst_conf, patched).wrap_err("failed to write target pacman.conf")?;
+            tracing::info!("copied pacman.conf to target (DownloadUser commented out)");
         }
 
         Ok(())
@@ -294,23 +349,6 @@ impl AlpmContext {
                 _ => {}
             }
         });
-    }
-}
-
-impl Drop for AlpmContext {
-    fn drop(&mut self) {
-        if self.is_target {
-            // Unmount in reverse order
-            for mount_point in self.mounts.iter().rev() {
-                if let Err(e) = nix::mount::umount2(mount_point, nix::mount::MntFlags::MNT_DETACH) {
-                    tracing::warn!(
-                        path = %mount_point.display(),
-                        error = %e,
-                        "failed to unmount API filesystem"
-                    );
-                }
-            }
-        }
     }
 }
 
