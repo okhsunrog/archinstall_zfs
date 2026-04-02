@@ -7,7 +7,7 @@ use std::rc::Rc;
 use std::thread;
 
 use clap::{Parser, Subcommand};
-use color_eyre::eyre::{bail, Result};
+use color_eyre::eyre::{Result, bail};
 use slint::{Model, ModelRc, SharedString, VecModel};
 
 use archinstall_zfs_core::config::types::{
@@ -66,7 +66,12 @@ fn main() -> Result<()> {
             headers,
             fast,
         }) => archinstall_zfs_core::iso::render_profile(
-            profile_dir, out_dir, kernel, zfs, headers, *fast,
+            profile_dir,
+            out_dir,
+            kernel,
+            zfs,
+            headers,
+            *fast,
         ),
         None => {
             let config = if let Some(ref path) = cli.config {
@@ -132,6 +137,32 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
         let cfg = config.clone();
         app.on_select_confirmed(move |key, idx| {
             let Some(app) = weak.upgrade() else { return };
+
+            // Timezone two-step: region selected -> show cities
+            if key == "timezone_region" {
+                let regions = archinstall_zfs_core::installer::locale::list_timezone_regions();
+                if let Some(&region) = regions.get(idx as usize) {
+                    let cities =
+                        archinstall_zfs_core::installer::locale::list_timezone_cities(region);
+                    let city_strs: Vec<&str> = cities.iter().map(|s| s.as_str()).collect();
+                    // Store region for the next callback via the select_key
+                    let tz_key = format!("timezone_city:{region}");
+                    show_select(&app, &tz_key, &format!("{region} /"), &city_strs, 0);
+                }
+                return;
+            }
+
+            // Timezone two-step: city selected -> set timezone
+            if key.starts_with("timezone_city:") {
+                let region = key.strip_prefix("timezone_city:").unwrap();
+                let cities = archinstall_zfs_core::installer::locale::list_timezone_cities(region);
+                if let Some(city) = cities.get(idx as usize) {
+                    cfg.borrow_mut().timezone = Some(format!("{region}/{city}"));
+                    refresh_config_items(&app, &cfg.borrow());
+                }
+                return;
+            }
+
             let mut c = cfg.borrow_mut();
             apply_select(&mut c, &key, idx);
             refresh_config_items(&app, &c);
@@ -160,10 +191,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
 
             let errors = c.validate_for_install();
             if !errors.is_empty() {
-                app.set_status_text(SharedString::from(format!(
-                    "Validation: {}",
-                    errors[0]
-                )));
+                app.set_status_text(SharedString::from(format!("Validation: {}", errors[0])));
                 return;
             }
 
@@ -251,55 +279,143 @@ fn build_config_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     };
 
     vec![
-        ci("installation_mode", "Installation mode",
-            &c.installation_mode.map(|m| m.to_string()).unwrap_or("Not set".into()), 1),
-        ci("disk_by_id", "Disk",
-            &c.disk_by_id.as_ref().map(|p| p.display().to_string()).unwrap_or("Not set".into()), 0),
-        ci("pool_name", "Pool name", &c.pool_name.clone().unwrap_or("Not set".into()), 0),
+        ci(
+            "installation_mode",
+            "Installation mode",
+            &c.installation_mode
+                .map(|m| m.to_string())
+                .unwrap_or("Not set".into()),
+            1,
+        ),
+        ci(
+            "disk_by_id",
+            "Disk",
+            &c.disk_by_id
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or("Not set".into()),
+            0,
+        ),
+        ci(
+            "pool_name",
+            "Pool name",
+            &c.pool_name.clone().unwrap_or("Not set".into()),
+            0,
+        ),
         ci("dataset_prefix", "Dataset prefix", &c.dataset_prefix, 0),
-        ci("encryption", "Encryption", &c.zfs_encryption_mode.to_string(), 1),
+        ci(
+            "encryption",
+            "Encryption",
+            &c.zfs_encryption_mode.to_string(),
+            1,
+        ),
         ci("compression", "Compression", &c.compression.to_string(), 1),
         ci("swap_mode", "Swap", &c.swap_mode.to_string(), 1),
         sep(),
         ci("init_system", "Init system", &c.init_system.to_string(), 1),
-        ci("zfs_module_mode", "ZFS module", &c.zfs_module_mode.to_string(), 1),
-        ci("hostname", "Hostname", &c.hostname.clone().unwrap_or("Not set".into()), 0),
-        ci("locale", "Locale", &c.locale.clone().unwrap_or("Not set".into()), 0),
-        ci("timezone", "Timezone", &c.timezone.clone().unwrap_or("Not set".into()), 0),
+        ci(
+            "zfs_module_mode",
+            "ZFS module",
+            &c.zfs_module_mode.to_string(),
+            1,
+        ),
+        ci(
+            "hostname",
+            "Hostname",
+            &c.hostname.clone().unwrap_or("Not set".into()),
+            0,
+        ),
+        ci(
+            "locale",
+            "Locale",
+            &c.locale.clone().unwrap_or("Not set".into()),
+            0,
+        ),
+        ci(
+            "timezone",
+            "Timezone",
+            &c.timezone.clone().unwrap_or("Not set".into()),
+            1,
+        ),
         ci("keyboard", "Keyboard layout", &c.keyboard_layout, 0),
-        ci("ntp", "NTP (time sync)", if c.ntp { "Enabled" } else { "Disabled" }, 3),
+        ci(
+            "ntp",
+            "NTP (time sync)",
+            if c.ntp { "Enabled" } else { "Disabled" },
+            3,
+        ),
         sep(),
-        ci("root_password", "Root password",
-            if c.root_password.is_some() { "Set" } else { "Not set" }, 2),
-        ci("profile", "Profile", &c.profile.clone().unwrap_or("Not set".into()), 1),
-        ci("audio", "Audio", &c.audio.map(|a| a.to_string()).unwrap_or("None".into()), 1),
-        ci("bluetooth", "Bluetooth", if c.bluetooth { "Enabled" } else { "Disabled" }, 3),
+        ci(
+            "root_password",
+            "Root password",
+            if c.root_password.is_some() {
+                "Set"
+            } else {
+                "Not set"
+            },
+            2,
+        ),
+        ci(
+            "profile",
+            "Profile",
+            &c.profile.clone().unwrap_or("Not set".into()),
+            1,
+        ),
+        ci(
+            "audio",
+            "Audio",
+            &c.audio.map(|a| a.to_string()).unwrap_or("None".into()),
+            1,
+        ),
+        ci(
+            "bluetooth",
+            "Bluetooth",
+            if c.bluetooth { "Enabled" } else { "Disabled" },
+            3,
+        ),
         ci("additional_packages", "Additional packages", &pkg_str, 0),
         ci("aur_packages", "AUR packages", &aur_str, 0),
-        ci("zrepl", "zrepl (snapshots)", if c.zrepl_enabled { "Enabled" } else { "Disabled" }, 3),
+        ci(
+            "zrepl",
+            "zrepl (snapshots)",
+            if c.zrepl_enabled {
+                "Enabled"
+            } else {
+                "Disabled"
+            },
+            3,
+        ),
         sep(),
         ConfigItem {
-            key: "install".into(), label: "Install".into(),
-            value: SharedString::default(), item_type: 5,
+            key: "install".into(),
+            label: "Install".into(),
+            value: SharedString::default(),
+            item_type: 5,
         },
         ConfigItem {
-            key: "quit".into(), label: "Quit".into(),
-            value: SharedString::default(), item_type: 5,
+            key: "quit".into(),
+            label: "Quit".into(),
+            value: SharedString::default(),
+            item_type: 5,
         },
     ]
 }
 
 fn ci(key: &str, label: &str, value: &str, item_type: i32) -> ConfigItem {
     ConfigItem {
-        key: key.into(), label: label.into(),
-        value: value.into(), item_type,
+        key: key.into(),
+        label: label.into(),
+        value: value.into(),
+        item_type,
     }
 }
 
 fn sep() -> ConfigItem {
     ConfigItem {
-        key: SharedString::default(), label: SharedString::default(),
-        value: SharedString::default(), item_type: 4,
+        key: SharedString::default(),
+        label: SharedString::default(),
+        value: SharedString::default(),
+        item_type: 4,
     }
 }
 
@@ -308,65 +424,130 @@ fn sep() -> ConfigItem {
 fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig) {
     match key {
         // Select items
-        "installation_mode" => show_select(app, key, "Installation Mode",
+        "installation_mode" => show_select(
+            app,
+            key,
+            "Installation Mode",
             &["Full Disk", "New Pool", "Existing Pool"],
             match config.installation_mode {
                 Some(InstallationMode::FullDisk) => 0,
                 Some(InstallationMode::NewPool) => 1,
                 Some(InstallationMode::ExistingPool) => 2,
                 None => 0,
-            }),
-        "encryption" => show_select(app, key, "Encryption",
-            &["No encryption", "Encrypt entire pool", "Encrypt base dataset only"],
+            },
+        ),
+        "encryption" => show_select(
+            app,
+            key,
+            "Encryption",
+            &[
+                "No encryption",
+                "Encrypt entire pool",
+                "Encrypt base dataset only",
+            ],
             match config.zfs_encryption_mode {
                 ZfsEncryptionMode::None => 0,
                 ZfsEncryptionMode::Pool => 1,
                 ZfsEncryptionMode::Dataset => 2,
-            }),
-        "compression" => show_select(app, key, "Compression",
+            },
+        ),
+        "compression" => show_select(
+            app,
+            key,
+            "Compression",
             &["lz4", "zstd", "zstd-5", "zstd-10", "off"],
             match config.compression {
-                CompressionAlgo::Lz4 => 0, CompressionAlgo::Zstd => 1,
-                CompressionAlgo::Zstd5 => 2, CompressionAlgo::Zstd10 => 3,
+                CompressionAlgo::Lz4 => 0,
+                CompressionAlgo::Zstd => 1,
+                CompressionAlgo::Zstd5 => 2,
+                CompressionAlgo::Zstd10 => 3,
                 CompressionAlgo::Off => 4,
-            }),
-        "swap_mode" => show_select(app, key, "Swap Mode",
-            &["None", "ZRAM", "Swap partition", "Swap partition (encrypted)"],
+            },
+        ),
+        "swap_mode" => show_select(
+            app,
+            key,
+            "Swap Mode",
+            &[
+                "None",
+                "ZRAM",
+                "Swap partition",
+                "Swap partition (encrypted)",
+            ],
             match config.swap_mode {
-                SwapMode::None => 0, SwapMode::Zram => 1,
-                SwapMode::ZswapPartition => 2, SwapMode::ZswapPartitionEncrypted => 3,
-            }),
-        "init_system" => show_select(app, key, "Init System",
+                SwapMode::None => 0,
+                SwapMode::Zram => 1,
+                SwapMode::ZswapPartition => 2,
+                SwapMode::ZswapPartitionEncrypted => 3,
+            },
+        ),
+        "init_system" => show_select(
+            app,
+            key,
+            "Init System",
             &["dracut", "mkinitcpio"],
             match config.init_system {
-                InitSystem::Dracut => 0, InitSystem::Mkinitcpio => 1,
-            }),
-        "zfs_module_mode" => show_select(app, key, "ZFS Module",
+                InitSystem::Dracut => 0,
+                InitSystem::Mkinitcpio => 1,
+            },
+        ),
+        "zfs_module_mode" => show_select(
+            app,
+            key,
+            "ZFS Module",
             &["precompiled", "dkms"],
             match config.zfs_module_mode {
-                ZfsModuleMode::Precompiled => 0, ZfsModuleMode::Dkms => 1,
-            }),
-        "profile" => show_select(app, key, "Profile",
-            &["None", "gnome", "plasma", "xfce", "sway", "hyprland", "i3",
-              "budgie", "cinnamon", "mate", "lxqt", "deepin", "minimal"],
-            0),
-        "audio" => show_select(app, key, "Audio",
+                ZfsModuleMode::Precompiled => 0,
+                ZfsModuleMode::Dkms => 1,
+            },
+        ),
+        "profile" => show_select(
+            app,
+            key,
+            "Profile",
+            &[
+                "None", "gnome", "plasma", "xfce", "sway", "hyprland", "i3", "budgie", "cinnamon",
+                "mate", "lxqt", "deepin", "minimal",
+            ],
+            0,
+        ),
+        "audio" => show_select(
+            app,
+            key,
+            "Audio",
             &["None", "pipewire", "pulseaudio"],
             match config.audio {
-                None => 0, Some(AudioServer::Pipewire) => 1,
+                None => 0,
+                Some(AudioServer::Pipewire) => 1,
                 Some(AudioServer::Pulseaudio) => 2,
-            }),
+            },
+        ),
+
+        // Timezone: two-step select (region, then city)
+        "timezone" => {
+            let regions = archinstall_zfs_core::installer::locale::list_timezone_regions();
+            show_select(app, "timezone_region", "Timezone region", &regions, 0);
+        }
 
         // Text items
-        "disk_by_id" | "pool_name" | "dataset_prefix" | "hostname" | "locale"
-        | "timezone" | "keyboard" | "additional_packages" | "aur_packages" => {
+        "disk_by_id"
+        | "pool_name"
+        | "dataset_prefix"
+        | "hostname"
+        | "locale"
+        | "keyboard"
+        | "additional_packages"
+        | "aur_packages" => {
             let current = match key {
-                "disk_by_id" => config.disk_by_id.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+                "disk_by_id" => config
+                    .disk_by_id
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default(),
                 "pool_name" => config.pool_name.clone().unwrap_or_default(),
                 "dataset_prefix" => config.dataset_prefix.clone(),
                 "hostname" => config.hostname.clone().unwrap_or_default(),
                 "locale" => config.locale.clone().unwrap_or_default(),
-                "timezone" => config.timezone.clone().unwrap_or_default(),
                 "keyboard" => config.keyboard_layout.clone(),
                 "additional_packages" => config.additional_packages.join(" "),
                 "aur_packages" => config.aur_packages.join(" "),
@@ -387,7 +568,9 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig) {
 fn show_select(app: &App, key: &str, title: &str, options: &[&str], current: i32) {
     let opts: Vec<SelectOption> = options
         .iter()
-        .map(|s| SelectOption { text: SharedString::from(*s) })
+        .map(|s| SelectOption {
+            text: SharedString::from(*s),
+        })
         .collect();
     app.set_select_key(key.into());
     app.set_select_title(title.into());
@@ -408,75 +591,105 @@ fn show_text_input(app: &App, key: &str, title: &str, current: &str, password: b
 
 fn apply_select(config: &mut GlobalConfig, key: &str, idx: i32) {
     match key {
-        "installation_mode" => config.installation_mode = Some(match idx {
-            0 => InstallationMode::FullDisk,
-            1 => InstallationMode::NewPool,
-            _ => InstallationMode::ExistingPool,
-        }),
-        "encryption" => config.zfs_encryption_mode = match idx {
-            0 => ZfsEncryptionMode::None,
-            1 => ZfsEncryptionMode::Pool,
-            _ => ZfsEncryptionMode::Dataset,
-        },
-        "compression" => config.compression = match idx {
-            0 => CompressionAlgo::Lz4,
-            1 => CompressionAlgo::Zstd,
-            2 => CompressionAlgo::Zstd5,
-            3 => CompressionAlgo::Zstd10,
-            _ => CompressionAlgo::Off,
-        },
-        "swap_mode" => config.swap_mode = match idx {
-            0 => SwapMode::None,
-            1 => SwapMode::Zram,
-            2 => SwapMode::ZswapPartition,
-            _ => SwapMode::ZswapPartitionEncrypted,
-        },
-        "init_system" => config.init_system = match idx {
-            0 => InitSystem::Dracut,
-            _ => InitSystem::Mkinitcpio,
-        },
-        "zfs_module_mode" => config.zfs_module_mode = match idx {
-            0 => ZfsModuleMode::Precompiled,
-            _ => ZfsModuleMode::Dkms,
-        },
-        "profile" => config.profile = match idx {
-            0 => None,
-            i => {
-                let profiles = [
-                    "gnome", "plasma", "xfce", "sway", "hyprland", "i3",
-                    "budgie", "cinnamon", "mate", "lxqt", "deepin", "minimal",
-                ];
-                profiles.get((i - 1) as usize).map(|s| s.to_string())
+        "installation_mode" => {
+            config.installation_mode = Some(match idx {
+                0 => InstallationMode::FullDisk,
+                1 => InstallationMode::NewPool,
+                _ => InstallationMode::ExistingPool,
+            })
+        }
+        "encryption" => {
+            config.zfs_encryption_mode = match idx {
+                0 => ZfsEncryptionMode::None,
+                1 => ZfsEncryptionMode::Pool,
+                _ => ZfsEncryptionMode::Dataset,
             }
-        },
-        "audio" => config.audio = match idx {
-            0 => None,
-            1 => Some(AudioServer::Pipewire),
-            _ => Some(AudioServer::Pulseaudio),
-        },
+        }
+        "compression" => {
+            config.compression = match idx {
+                0 => CompressionAlgo::Lz4,
+                1 => CompressionAlgo::Zstd,
+                2 => CompressionAlgo::Zstd5,
+                3 => CompressionAlgo::Zstd10,
+                _ => CompressionAlgo::Off,
+            }
+        }
+        "swap_mode" => {
+            config.swap_mode = match idx {
+                0 => SwapMode::None,
+                1 => SwapMode::Zram,
+                2 => SwapMode::ZswapPartition,
+                _ => SwapMode::ZswapPartitionEncrypted,
+            }
+        }
+        "init_system" => {
+            config.init_system = match idx {
+                0 => InitSystem::Dracut,
+                _ => InitSystem::Mkinitcpio,
+            }
+        }
+        "zfs_module_mode" => {
+            config.zfs_module_mode = match idx {
+                0 => ZfsModuleMode::Precompiled,
+                _ => ZfsModuleMode::Dkms,
+            }
+        }
+        "profile" => {
+            config.profile = match idx {
+                0 => None,
+                i => {
+                    let profiles = [
+                        "gnome", "plasma", "xfce", "sway", "hyprland", "i3", "budgie", "cinnamon",
+                        "mate", "lxqt", "deepin", "minimal",
+                    ];
+                    profiles.get((i - 1) as usize).map(|s| s.to_string())
+                }
+            }
+        }
+        "audio" => {
+            config.audio = match idx {
+                0 => None,
+                1 => Some(AudioServer::Pipewire),
+                _ => Some(AudioServer::Pulseaudio),
+            }
+        }
         _ => {}
     }
 }
 
 fn apply_text(config: &mut GlobalConfig, key: &str, val: &str) {
-    let opt = if val.is_empty() { None } else { Some(val.to_string()) };
+    let opt = if val.is_empty() {
+        None
+    } else {
+        Some(val.to_string())
+    };
     match key {
         "pool_name" => config.pool_name = opt,
-        "dataset_prefix" => { if !val.is_empty() { config.dataset_prefix = val.to_string(); } }
+        "dataset_prefix" => {
+            if !val.is_empty() {
+                config.dataset_prefix = val.to_string();
+            }
+        }
         "hostname" => config.hostname = opt,
         "locale" => config.locale = opt,
         "timezone" => config.timezone = opt,
-        "keyboard" => { if !val.is_empty() { config.keyboard_layout = val.to_string(); } }
+        "keyboard" => {
+            if !val.is_empty() {
+                config.keyboard_layout = val.to_string();
+            }
+        }
         "root_password" => config.root_password = opt,
         "disk_by_id" => config.disk_by_id = opt.map(PathBuf::from),
         "additional_packages" => {
-            config.additional_packages = val.split_whitespace()
+            config.additional_packages = val
+                .split_whitespace()
                 .map(|s| s.trim_matches(',').to_string())
                 .filter(|s| !s.is_empty())
                 .collect();
         }
         "aur_packages" => {
-            config.aur_packages = val.split_whitespace()
+            config.aur_packages = val
+                .split_whitespace()
                 .map(|s| s.trim_matches(',').to_string())
                 .filter(|s| !s.is_empty())
                 .collect();

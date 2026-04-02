@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use color_eyre::eyre::{bail, Result};
+use color_eyre::eyre::{Result, bail};
 
 use archinstall_zfs_core::config::types::{
     GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode,
@@ -50,7 +50,11 @@ pub fn run_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Result<
                 archinstall_zfs_core::disk::partition::wait_for_by_id_partitions(disk, &layout);
             let efi = parts[0].clone();
             let zfs = parts[1].clone();
-            let swap = if parts.len() > 2 { Some(parts[2].clone()) } else { None };
+            let swap = if parts.len() > 2 {
+                Some(parts[2].clone())
+            } else {
+                None
+            };
             (efi, zfs, swap)
         }
         InstallationMode::NewPool => {
@@ -90,13 +94,26 @@ pub fn run_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Result<
             let enc_refs: Vec<(&str, &str)> =
                 enc_props.iter().map(|(k, v)| (*k, v.as_str())).collect();
             archinstall_zfs_core::zfs::pool::create_pool(
-                runner, pool_name, &zfs_partition, &mountpoint, &compression, &enc_refs,
+                runner,
+                pool_name,
+                &zfs_partition,
+                &mountpoint,
+                &compression,
+                &enc_refs,
             )?;
-            archinstall_zfs_core::zfs::pool::set_pool_property(runner, pool_name, "cachefile", "none")?;
+            archinstall_zfs_core::zfs::pool::set_pool_property(
+                runner,
+                pool_name,
+                "cachefile",
+                "none",
+            )?;
 
             let base_props: Vec<(&str, String)> = match encryption {
                 ZfsEncryptionMode::Dataset => {
-                    let mut p = archinstall_zfs_core::zfs::encryption::dataset_encryption_properties(&key_path);
+                    let mut p =
+                        archinstall_zfs_core::zfs::encryption::dataset_encryption_properties(
+                            &key_path,
+                        );
                     p.push(("mountpoint", "none".to_string()));
                     p.push(("compression", compression.clone()));
                     p
@@ -108,10 +125,14 @@ pub fn run_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Result<
             };
             let base_refs: Vec<(&str, &str)> =
                 base_props.iter().map(|(k, v)| (*k, v.as_str())).collect();
-            archinstall_zfs_core::zfs::dataset::create_base_dataset(runner, pool_name, prefix, &base_refs)?;
+            archinstall_zfs_core::zfs::dataset::create_base_dataset(
+                runner, pool_name, prefix, &base_refs,
+            )?;
 
             let datasets = archinstall_zfs_core::zfs::dataset::default_datasets();
-            archinstall_zfs_core::zfs::dataset::create_child_datasets(runner, pool_name, prefix, &datasets)?;
+            archinstall_zfs_core::zfs::dataset::create_child_datasets(
+                runner, pool_name, prefix, &datasets,
+            )?;
             archinstall_zfs_core::zfs::pool::export_pool(runner, pool_name)?;
             archinstall_zfs_core::zfs::pool::import_pool_no_mount(runner, pool_name, &mountpoint)?;
         }
@@ -124,7 +145,9 @@ pub fn run_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Result<
     }
 
     let datasets = archinstall_zfs_core::zfs::dataset::default_datasets();
-    archinstall_zfs_core::zfs::dataset::mount_datasets_ordered(runner, pool_name, prefix, &datasets)?;
+    archinstall_zfs_core::zfs::dataset::mount_datasets_ordered(
+        runner, pool_name, prefix, &datasets,
+    )?;
 
     tracing::info!("Phase 3: Mounting EFI partition");
     archinstall_zfs_core::disk::partition::mount_efi(runner, &efi_partition, &mountpoint)?;
@@ -139,9 +162,18 @@ pub fn run_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Result<
         SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
     );
     archinstall_zfs_core::zfs::bootmenu::set_zbm_properties(
-        runner, pool_name, prefix, config.init_system, zswap_on, config.set_bootfs,
+        runner,
+        pool_name,
+        prefix,
+        config.init_system,
+        zswap_on,
+        config.set_bootfs,
     )?;
-    archinstall_zfs_core::zfs::bootmenu::install_and_generate_zbm(runner, &mountpoint, config.init_system)?;
+    archinstall_zfs_core::zfs::bootmenu::install_and_generate_zbm(
+        runner,
+        &mountpoint,
+        config.init_system,
+    )?;
     archinstall_zfs_core::zfs::bootmenu::create_efi_entries(runner, &efi_partition)?;
 
     tracing::info!("Phase 14: Cleanup");

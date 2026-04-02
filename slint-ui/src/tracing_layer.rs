@@ -1,10 +1,10 @@
 use std::fmt;
 
 use crossbeam_channel::Sender;
-use tracing::field::{Field, Visit};
 use tracing::Subscriber;
-use tracing_subscriber::layer::Context;
+use tracing::field::{Field, Visit};
 use tracing_subscriber::Layer;
+use tracing_subscriber::layer::Context;
 
 /// Tracing layer that sends log messages to a crossbeam channel for the Slint UI.
 pub struct UiLogLayer {

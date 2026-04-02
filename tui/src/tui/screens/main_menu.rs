@@ -214,7 +214,7 @@ impl MainMenu {
                 key: "timezone",
                 label: "Timezone",
                 value: c.timezone.clone().unwrap_or("Not set".into()),
-                kind: MenuKind::Text,
+                kind: MenuKind::Action, // handled specially in activate_item
             },
             MenuItem {
                 key: "keyboard",
@@ -399,6 +399,11 @@ impl MainMenu {
             MenuKind::Action => match key {
                 "install" => return Ok(Action::Install),
                 "quit" => return Ok(Action::Quit),
+                "timezone" => {
+                    if let Some(tz) = self.pick_timezone(terminal)? {
+                        self.config.timezone = Some(tz);
+                    }
+                }
                 _ => {}
             },
             MenuKind::Toggle => {
@@ -433,6 +438,32 @@ impl MainMenu {
             MenuKind::Separator => {}
         }
         Ok(Action::Continue)
+    }
+
+    fn pick_timezone(
+        &self,
+        terminal: &mut ratatui::DefaultTerminal,
+    ) -> color_eyre::eyre::Result<Option<String>> {
+        use archinstall_zfs_core::installer::locale;
+
+        // Step 1: pick region
+        let regions = locale::list_timezone_regions();
+        let region_strs: Vec<&str> = regions.iter().copied().collect();
+        let result = run_select(terminal, "Timezone region", &region_strs, 0)?;
+        let Some(region_idx) = result.selected else {
+            return Ok(None);
+        };
+        let region = regions[region_idx];
+
+        // Step 2: pick city
+        let cities = locale::list_timezone_cities(region);
+        let city_strs: Vec<&str> = cities.iter().map(|s| s.as_str()).collect();
+        let result = run_select(terminal, &format!("{region} /"), &city_strs, 0)?;
+        let Some(city_idx) = result.selected else {
+            return Ok(None);
+        };
+
+        Ok(Some(format!("{region}/{}", cities[city_idx])))
     }
 
     fn apply_toggle(&mut self, key: &str) {

@@ -47,6 +47,58 @@ pub fn set_keyboard(_runner: &dyn CommandRunner, target: &Path, layout: &str) ->
     Ok(())
 }
 
+const TIMEZONE_REGIONS: &[&str] = &[
+    "Africa",
+    "America",
+    "Antarctica",
+    "Arctic",
+    "Asia",
+    "Atlantic",
+    "Australia",
+    "Europe",
+    "Indian",
+    "Pacific",
+];
+
+/// List available timezone regions (e.g. Europe, America, Asia).
+pub fn list_timezone_regions() -> Vec<&'static str> {
+    TIMEZONE_REGIONS.to_vec()
+}
+
+/// List cities/zones within a region by reading /usr/share/zoneinfo/<region>.
+pub fn list_timezone_cities(region: &str) -> Vec<String> {
+    let dir = Path::new("/usr/share/zoneinfo").join(region);
+    let mut cities = Vec::new();
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            // Skip non-files (symlinks to directories like posix/)
+            if !path.is_file() {
+                // Could be a subdirectory (e.g. America/Argentina/Buenos_Aires)
+                if path.is_dir() {
+                    if let Some(subdir) = path.file_name().and_then(|n| n.to_str()) {
+                        if let Ok(sub_entries) = fs::read_dir(&path) {
+                            for sub_entry in sub_entries.flatten() {
+                                if sub_entry.path().is_file() {
+                                    if let Some(name) = sub_entry.file_name().to_str() {
+                                        cities.push(format!("{subdir}/{name}"));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                cities.push(name.to_string());
+            }
+        }
+    }
+    cities.sort();
+    cities
+}
+
 pub fn set_timezone(target: &Path, timezone: &str) -> Result<()> {
     let localtime = target.join("etc/localtime");
     let zoneinfo = format!("/usr/share/zoneinfo/{timezone}");
