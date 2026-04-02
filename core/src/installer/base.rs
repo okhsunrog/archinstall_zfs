@@ -23,13 +23,8 @@ pub fn install_base(
         "sof-firmware",
     ];
 
-    // Add selected kernels (fall back to primary if none configured)
-    let kernels = config.effective_kernels();
-    if kernels.is_empty() {
-        packages.push(config.primary_kernel());
-    } else {
-        packages.extend(kernels.iter().map(|s| s.as_str()));
-    }
+    // Add selected kernels
+    packages.extend(config.effective_kernels());
 
     // Add initramfs package
     let initramfs_pkg = match config.init_system {

@@ -291,23 +291,20 @@ impl GlobalConfig {
         pkgs
     }
 
-    pub fn effective_kernels(&self) -> &[String] {
+    /// Return the list of kernels to install. Always contains at least one
+    /// entry — defaults to `["linux-lts"]` when none are configured.
+    pub fn effective_kernels(&self) -> Vec<&str> {
         match &self.kernels {
-            Some(k) if !k.is_empty() => k,
-            _ => {
-                // Can't return a reference to a temporary, so callers that
-                // need the default should use primary_kernel() instead.
-                // This returns empty — base.rs handles it by also using primary_kernel.
-                &[]
-            }
+            Some(k) if !k.is_empty() => k.iter().map(|s| s.as_str()).collect(),
+            _ => vec!["linux-lts"],
         }
     }
 
     pub fn primary_kernel(&self) -> &str {
-        self.effective_kernels()
-            .first()
-            .map(|s| s.as_str())
-            .unwrap_or("linux-lts")
+        match &self.kernels {
+            Some(k) if !k.is_empty() => k[0].as_str(),
+            _ => "linux-lts",
+        }
     }
 }
 
