@@ -21,12 +21,13 @@ Auto-detect GPU and install appropriate drivers. Without this, desktop profiles 
 
 Installer is unusable on laptops without ethernet.
 
-- [ ] Detect wireless interfaces (`/sys/class/net/*/wireless` or `iw dev`)
-- [ ] Scan networks via `iwctl` or `wpa_cli`
+- [x] Detect wireless interfaces (`system::wifi::detect_wifi_interfaces`)
+- [x] Scan networks via `iwctl` (`system::wifi::scan_networks`)
+- [x] Connection via `iwctl --passphrase` (`system::wifi::connect`)
+- [x] Connection verification (`system::wifi::check_connected`)
+- [x] Copy WiFi config to target (handled by `network::copy_iso_network` — iwd saves profiles to `/var/lib/iwd`)
 - [ ] TUI network selection screen with signal strength
-- [ ] Password prompt for secured networks
-- [ ] Connection verification
-- [ ] Copy WiFi config to target
+- [ ] TUI password prompt for secured networks
 
 ### X11/Wayland Keyboard Layout
 
@@ -69,7 +70,7 @@ Profile system improvements:
 Basic user creation works. Missing:
 
 - [x] SSH public key setup (`~user/.ssh/authorized_keys`) — `ssh_authorized_keys: Vec<String>` in `UserConfig`
-- [ ] Auto-login configuration per display manager
+- [x] Auto-login configuration per display manager — GDM, SDDM, LightDM, Ly (`autologin: bool` in `UserConfig`)
 - [ ] Password strength feedback in TUI
 
 ### Post-Install Customization

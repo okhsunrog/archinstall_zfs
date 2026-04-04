@@ -1,4 +1,5 @@
 pub mod aur;
+pub mod autologin;
 pub mod base;
 pub mod fstab;
 pub mod initramfs;
@@ -243,8 +244,8 @@ impl Installer {
     }
 
     fn install_profile(&mut self) -> Result<()> {
-        if let Some(ref profile_name) = self.config.profile {
-            let profile = crate::profile::get_profile(profile_name);
+        if let Some(profile_name) = self.config.profile.clone() {
+            let profile = crate::profile::get_profile(&profile_name);
             if let Some(p) = profile {
                 if !p.packages.is_empty() {
                     let pkg_refs: Vec<&str> = p.packages.to_vec();
@@ -253,8 +254,23 @@ impl Installer {
                 for service in &p.services {
                     services::enable_service(&*self.runner, &self.target, service)?;
                 }
+
+                // Configure autologin for the first user that requests it.
+                if let Some(dm) = p.display_manager()
+                    && let Some(ref user_list) = self.config.users
+                        && let Some(user) = user_list.iter().find(|u| u.autologin) {
+                            // Derive the session name from the profile for SDDM.
+                            let session = sddm_session_for_profile(&profile_name);
+                            autologin::configure(
+                                &*self.runner,
+                                &self.target,
+                                dm,
+                                &user.username,
+                                session,
+                            )?;
+                        }
             } else {
-                tracing::warn!(profile = profile_name, "unknown profile, skipping");
+                tracing::warn!(profile = %profile_name, "unknown profile, skipping");
             }
         }
 
@@ -455,6 +471,22 @@ impl Installer {
         }
 
         Ok(())
+    }
+}
+
+/// Map an installer profile name to the SDDM session name (.desktop file stem).
+/// Returns `None` when the mapping is unknown — SDDM will use its default.
+fn sddm_session_for_profile(profile: &str) -> Option<&'static str> {
+    match profile {
+        "kde" => Some("plasma"),
+        "hyprland" => Some("hyprland"),
+        "sway" => Some("sway"),
+        "i3" => Some("i3"),
+        "lxqt" => Some("lxqt"),
+        "labwc" => Some("labwc"),
+        "niri" => Some("niri"),
+        "river" => Some("river"),
+        _ => None,
     }
 }
 

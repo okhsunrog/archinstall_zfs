@@ -203,6 +203,8 @@ pub struct UserConfig {
     pub groups: Option<Vec<String>>,
     #[serde(default)]
     pub ssh_authorized_keys: Vec<String>,
+    #[serde(default)]
+    pub autologin: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

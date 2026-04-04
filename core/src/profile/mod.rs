@@ -8,6 +8,18 @@ pub struct Profile {
     pub services: Vec<&'static str>,
 }
 
+const DISPLAY_MANAGERS: &[&str] = &["gdm", "sddm", "lightdm", "ly", "cosmic-greeter"];
+
+impl Profile {
+    /// Return the display manager service this profile uses, if any.
+    pub fn display_manager(&self) -> Option<&str> {
+        self.services
+            .iter()
+            .find(|s| DISPLAY_MANAGERS.contains(s))
+            .copied()
+    }
+}
+
 pub fn get_profile(name: &str) -> Option<Profile> {
     let all = all_profiles();
     all.into_iter().find(|p| p.name == name)

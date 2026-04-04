@@ -394,6 +394,7 @@ mod tests {
             shell: None,
             groups: None,
             ssh_authorized_keys: Vec::new(),
+            autologin: false,
         }]);
         let errors = cfg.validate_for_install();
         assert!(errors.is_empty(), "Expected no errors, got: {errors:?}");
@@ -409,6 +410,7 @@ mod tests {
             shell: None,
             groups: None,
             ssh_authorized_keys: Vec::new(),
+            autologin: false,
         }]);
         let errors = cfg.validate_for_install();
         assert!(errors.iter().any(|e| e.contains("Username")));
@@ -424,6 +426,7 @@ mod tests {
             shell: None,
             groups: None,
             ssh_authorized_keys: Vec::new(),
+            autologin: false,
         }]);
         let errors = cfg.validate_for_install();
         assert!(errors.iter().any(|e| e.contains("Username")));
@@ -439,6 +442,7 @@ mod tests {
             shell: None,
             groups: None,
             ssh_authorized_keys: Vec::new(),
+            autologin: false,
         }]);
         let errors = cfg.validate_for_install();
         assert!(errors.iter().any(|e| e.contains("Username")));

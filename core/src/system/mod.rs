@@ -5,3 +5,4 @@ pub mod gpu;
 pub mod net;
 pub mod pacman;
 pub mod sysinfo;
+pub mod wifi;
