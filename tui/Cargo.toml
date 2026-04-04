@@ -21,3 +21,4 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 tui-scrollview = "0.6.3"
 tui-textarea-2 = "0.10.2"
 tui-widget-list = "0.15.2"
+zxcvbn = "3.1.0"

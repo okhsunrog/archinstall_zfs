@@ -71,7 +71,7 @@ Basic user creation works. Missing:
 
 - [x] SSH public key setup (`~user/.ssh/authorized_keys`) — `ssh_authorized_keys: Vec<String>` in `UserConfig`
 - [x] Auto-login configuration per display manager — GDM, SDDM, LightDM, Ly (`autologin: bool` in `UserConfig`)
-- [ ] Password strength feedback in TUI
+- [x] Password strength feedback in TUI — zxcvbn score bar + crack time / suggestion shown live in every masked `run_edit` popup
 
 ### Post-Install Customization
 
