@@ -10,11 +10,12 @@ Compared against archinstall (Python). Excludes non-ZFS filesystems and non-ZFSB
 
 Auto-detect GPU and install appropriate drivers. Without this, desktop profiles are broken on NVIDIA (Wayland won't start).
 
-- [ ] Detect GPU vendor from `lspci` or sysfs
-- [ ] Map vendor to package sets (mesa, vulkan-radeon, nvidia, etc.)
+- [x] Detect GPU vendor from `lspci` (`system::gpu::detect_gpus`)
+- [x] Map vendor to package sets (`GfxDriver::packages()` — mesa, vulkan-radeon, nvidia-open-dkms, etc.)
+- [x] Auto-suggest driver from detected hardware (`system::gpu::suggested_driver`)
+- [x] Integrate with profile system — `gfx_driver: Option<GfxDriver>` in config, installed in `install_profile`
+- [x] Handle multi-GPU setups (Intel+NVIDIA → `AllOpenSource`)
 - [ ] TUI selection for driver preference (open vs proprietary for NVIDIA)
-- [ ] Integrate with profile system — desktop profiles should trigger GPU driver install
-- [ ] Handle multi-GPU setups (e.g. laptop with Intel iGPU + NVIDIA dGPU)
 
 ### WiFi Configuration During Install
 
@@ -31,10 +32,10 @@ Installer is unusable on laptops without ethernet.
 
 Currently only console keymap (vconsole.conf) is set. Graphical sessions need X11/Wayland keymap too.
 
-- [ ] Add X11 keymap fields to config (`x11_keymap`, `x11_variant`)
-- [ ] Write `/etc/X11/xorg.conf.d/00-keyboard.conf` or use `localectl set-x11-keymap`
-- [ ] TUI: layout selection (can default to matching console keymap)
-- [ ] Handle layout variants (e.g. `us` with `intl` variant)
+- [x] Add `x11_variant` to config
+- [x] Write `/etc/X11/xorg.conf.d/00-keyboard.conf` (`locale::set_x11_keyboard`) — uses `keyboard_layout` + optional `x11_variant`
+- [ ] TUI: variant selection field
+- [x] Handle layout variants (e.g. `us` with `intl` variant)
 
 ---
 
@@ -45,14 +46,14 @@ Currently only console keymap (vconsole.conf) is set. Graphical sessions need X1
 Current: GNOME, KDE Plasma, Xfce, Cinnamon, Budgie, MATE, Deepin, LXQt, Hyprland, Sway, i3, Cosmic.
 
 Missing WMs:
-- [ ] Awesome
-- [ ] Bspwm
+- [x] Awesome
+- [x] Bspwm
 - [ ] Enlightenment
-- [ ] LabWC
-- [ ] Niri
-- [ ] QtILE
-- [ ] River
-- [ ] xmonad
+- [x] LabWC
+- [x] Niri
+- [x] Qtile
+- [x] River
+- [x] XMonad
 
 Missing servers:
 - [ ] Lighttpd
@@ -74,7 +75,7 @@ Basic user creation works. Missing:
 ### Post-Install Customization
 
 - [ ] Custom chroot commands (`post_install_commands` config field)
-- [ ] SSD detection + auto-enable `fstrim.timer`
+- [x] SSD detection + ZFS-native TRIM: NVMe → `autotrim=on`, SATA SSD → `zfs-trim-weekly@<pool>.timer` (`fstrim.timer` is not used — it silently skips ZFS pools)
 - [ ] Service enable verification (report warnings on failure)
 
 ---

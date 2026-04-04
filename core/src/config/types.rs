@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::system::gpu::GfxDriver;
+
 pub const ZFS_PASSPHRASE_MIN_LENGTH: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -166,6 +168,7 @@ pub struct GlobalConfig {
     pub locale: Option<String>,
     #[serde(default = "default_keyboard_layout")]
     pub keyboard_layout: String,
+    pub x11_variant: Option<String>,
     pub timezone: Option<String>,
     #[serde(default = "default_ntp")]
     pub ntp: bool,
@@ -173,6 +176,7 @@ pub struct GlobalConfig {
     pub users: Option<Vec<UserConfig>>,
     pub kernels: Option<Vec<String>>,
     pub profile: Option<String>,
+    pub gfx_driver: Option<GfxDriver>,
     pub mirror_regions: Option<Vec<String>>,
     #[serde(default)]
     pub additional_packages: Vec<String>,
@@ -261,12 +265,14 @@ impl Default for GlobalConfig {
             hostname: Some("archzfs".to_string()),
             locale: None,
             keyboard_layout: default_keyboard_layout(),
+            x11_variant: None,
             timezone: None,
             ntp: true,
             root_password: None,
             users: None,
             kernels: None,
             profile: None,
+            gfx_driver: None,
             mirror_regions: None,
             additional_packages: Vec::new(),
             network_copy_iso: false,

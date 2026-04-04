@@ -6,6 +6,9 @@ use super::cli::{run_zpool, run_zpool_json};
 use super::models::{ZpoolListOutput, ZpoolStatusOutput};
 use crate::system::cmd::{CommandRunner, check_exit};
 
+// autotrim is intentionally absent here — it is set dynamically after pool
+// creation based on the detected storage type (NVMe vs SATA SSD vs HDD).
+// See `crate::system::sysinfo::StorageType` for the rationale.
 pub const DEFAULT_POOL_OPTIONS: &[&str] = &[
     "-o",
     "ashift=12",
@@ -15,8 +18,6 @@ pub const DEFAULT_POOL_OPTIONS: &[&str] = &[
     "relatime=on",
     "-O",
     "xattr=sa",
-    "-o",
-    "autotrim=on",
     "-O",
     "dnodesize=auto",
     "-O",

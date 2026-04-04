@@ -47,6 +47,27 @@ pub fn set_keyboard(_runner: &dyn CommandRunner, target: &Path, layout: &str) ->
     Ok(())
 }
 
+/// Write /etc/X11/xorg.conf.d/00-keyboard.conf for graphical sessions.
+/// Uses `layout` (same as vconsole by default) with an optional variant.
+pub fn set_x11_keyboard(target: &Path, layout: &str, variant: Option<&str>) -> Result<()> {
+    let conf_dir = target.join("etc/X11/xorg.conf.d");
+    fs::create_dir_all(&conf_dir).wrap_err("failed to create xorg.conf.d")?;
+
+    let variant_line = match variant {
+        Some(v) => format!("    Option \"XkbVariant\" \"{v}\"\n"),
+        None => String::new(),
+    };
+
+    let content = format!(
+        "Section \"InputClass\"\n    Identifier \"system-keyboard\"\n    MatchIsKeyboard \"on\"\n    Option \"XkbLayout\" \"{layout}\"\n{variant_line}EndSection\n"
+    );
+
+    let conf_path = conf_dir.join("00-keyboard.conf");
+    fs::write(&conf_path, content).wrap_err("failed to write 00-keyboard.conf")?;
+    tracing::info!(layout, variant, "set X11 keyboard layout");
+    Ok(())
+}
+
 const TIMEZONE_REGIONS: &[&str] = &[
     "Africa",
     "America",
@@ -168,6 +189,28 @@ mod tests {
 
         let content = fs::read_to_string(dir.path().join("etc/vconsole.conf")).unwrap();
         assert_eq!(content, "KEYMAP=de-latin1\n");
+    }
+
+    #[test]
+    fn test_set_x11_keyboard_no_variant() {
+        let dir = tempfile::tempdir().unwrap();
+        set_x11_keyboard(dir.path(), "us", None).unwrap();
+
+        let content =
+            fs::read_to_string(dir.path().join("etc/X11/xorg.conf.d/00-keyboard.conf")).unwrap();
+        assert!(content.contains("XkbLayout\" \"us\""));
+        assert!(!content.contains("XkbVariant"));
+    }
+
+    #[test]
+    fn test_set_x11_keyboard_with_variant() {
+        let dir = tempfile::tempdir().unwrap();
+        set_x11_keyboard(dir.path(), "us", Some("intl")).unwrap();
+
+        let content =
+            fs::read_to_string(dir.path().join("etc/X11/xorg.conf.d/00-keyboard.conf")).unwrap();
+        assert!(content.contains("XkbLayout\" \"us\""));
+        assert!(content.contains("XkbVariant\" \"intl\""));
     }
 
     #[test]
