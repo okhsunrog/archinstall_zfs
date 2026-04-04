@@ -61,9 +61,11 @@ Missing servers:
 - [x] Tomcat
 
 Profile system improvements:
-- [ ] Display manager / greeter selection per profile (GDM, SDDM, LightDM, Ly)
-- [ ] Profile post-install hooks (e.g. enable PipeWire user services)
-- [ ] Per-profile recommended vs optional packages
+- [x] Display manager / greeter selection per profile — `display_manager_override` in config + TUI picker
+- [x] Profile post-install hooks — `PostInstallStep` enum (RunAsUser/RunAsRoot/AddUsersToGroup); postgresql/mariadb/docker wired up
+- [x] Per-profile recommended vs optional packages — `optional_packages` field + `run_multiselect` checklist in TUI
+- [x] Wayland seat access — `needs_seat_access` flag on Wayland profiles; `SeatAccess` (seatd/polkit) in config + TUI
+- [x] PipeWire user services — `systemctl --global enable` for pipewire/pipewire-pulse/wireplumber when Pipewire selected
 
 ### User Management
 

@@ -7,6 +7,8 @@ pub fn desktop_profiles() -> Vec<Profile> {
             display_name: "GNOME",
             packages: vec!["gnome", "gnome-tweaks"],
             services: vec!["gdm"],
+            optional_packages: vec!["gnome-extra", "gnome-software", "flatpak"],
+            ..Profile::default()
         },
         Profile {
             name: "kde",
@@ -20,12 +22,16 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "plasma-workspace",
             ],
             services: vec!["sddm"],
+            optional_packages: vec!["kde-applications", "flatpak", "discover"],
+            ..Profile::default()
         },
         Profile {
             name: "xfce",
             display_name: "Xfce",
             packages: vec!["xfce4", "xfce4-goodies", "pavucontrol", "gvfs", "xarchiver"],
             services: vec!["lightdm"],
+            optional_packages: vec!["thunar", "mousepad", "ristretto"],
+            ..Profile::default()
         },
         Profile {
             name: "cinnamon",
@@ -42,6 +48,7 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "xdg-user-dirs-gtk",
             ],
             services: vec!["lightdm"],
+            ..Profile::default()
         },
         Profile {
             name: "budgie",
@@ -54,18 +61,21 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "papirus-icon-theme",
             ],
             services: vec!["lightdm"],
+            ..Profile::default()
         },
         Profile {
             name: "mate",
             display_name: "MATE",
             packages: vec!["mate", "mate-extra"],
             services: vec!["lightdm"],
+            ..Profile::default()
         },
         Profile {
             name: "deepin",
             display_name: "Deepin",
             packages: vec!["deepin", "deepin-terminal", "deepin-editor"],
             services: vec!["lightdm"],
+            ..Profile::default()
         },
         Profile {
             name: "lxqt",
@@ -80,6 +90,7 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "slock",
             ],
             services: vec!["sddm"],
+            ..Profile::default()
         },
         Profile {
             name: "hyprland",
@@ -99,6 +110,16 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "slurp",
             ],
             services: vec!["sddm"],
+            needs_seat_access: true,
+            optional_packages: vec![
+                "hyprpaper",
+                "hypridle",
+                "hyprlock",
+                "swww",
+                "mako",
+                "wl-clipboard",
+            ],
+            ..Profile::default()
         },
         Profile {
             name: "sway",
@@ -118,6 +139,9 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "xorg-xwayland",
             ],
             services: vec!["lightdm"],
+            needs_seat_access: true,
+            optional_packages: vec!["swaylock-effects", "wl-clipboard", "mako"],
+            ..Profile::default()
         },
         Profile {
             name: "i3",
@@ -134,12 +158,15 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "dmenu",
             ],
             services: vec!["lightdm"],
+            optional_packages: vec!["polybar", "rofi", "feh", "nitrogen"],
+            ..Profile::default()
         },
         Profile {
             name: "cosmic",
             display_name: "COSMIC",
             packages: vec!["cosmic", "xdg-user-dirs"],
             services: vec!["cosmic-greeter"],
+            ..Profile::default()
         },
         Profile {
             name: "enlightenment",
@@ -152,6 +179,7 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "xdg-user-dirs",
             ],
             services: vec!["lightdm"],
+            ..Profile::default()
         },
         Profile {
             name: "awesome",
@@ -166,6 +194,7 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "xdg-user-dirs",
             ],
             services: vec!["lightdm"],
+            ..Profile::default()
         },
         Profile {
             name: "bspwm",
@@ -181,6 +210,7 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "xdg-user-dirs",
             ],
             services: vec!["lightdm"],
+            ..Profile::default()
         },
         Profile {
             name: "labwc",
@@ -195,6 +225,8 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "sddm",
             ],
             services: vec!["sddm"],
+            needs_seat_access: true,
+            ..Profile::default()
         },
         Profile {
             name: "niri",
@@ -210,6 +242,8 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "sddm",
             ],
             services: vec!["sddm"],
+            needs_seat_access: true,
+            ..Profile::default()
         },
         Profile {
             name: "qtile",
@@ -223,6 +257,7 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "xdg-user-dirs",
             ],
             services: vec!["lightdm"],
+            ..Profile::default()
         },
         Profile {
             name: "river",
@@ -237,6 +272,8 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "sddm",
             ],
             services: vec!["sddm"],
+            needs_seat_access: true,
+            ..Profile::default()
         },
         Profile {
             name: "xmonad",
@@ -251,6 +288,7 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "xdg-user-dirs",
             ],
             services: vec!["lightdm"],
+            ..Profile::default()
         },
     ]
 }

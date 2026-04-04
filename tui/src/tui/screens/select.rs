@@ -4,13 +4,183 @@ use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, Borders, Clear, HighlightSpacing, List, ListItem, ListState, Paragraph,
+    Block, BorderType, Borders, Clear, HighlightSpacing, List, ListItem, ListState, Paragraph,
 };
 
 use crate::tui::theme;
 
 pub struct SelectResult {
     pub selected: Option<usize>,
+}
+
+pub struct MultiSelectResult {
+    /// Indices of checked items. `None` means the user cancelled.
+    pub selected: Option<Vec<usize>>,
+}
+
+/// Show a modal checklist and block until the user confirms or cancels.
+///
+/// `initially_checked` contains the indices that should start pre-checked.
+/// Returns `selected: None` on cancel — callers treat this as "nothing chosen",
+/// not as an error.
+pub fn run_multiselect(
+    terminal: &mut ratatui::DefaultTerminal,
+    title: &str,
+    items: &[&str],
+    initially_checked: &[usize],
+) -> color_eyre::eyre::Result<MultiSelectResult> {
+    let mut list_state = ListState::default().with_selected(Some(0));
+    let mut checked: Vec<bool> = (0..items.len())
+        .map(|i| initially_checked.contains(&i))
+        .collect();
+
+    loop {
+        terminal.draw(|frame| render_multiselect(frame, title, items, &list_state, &checked))?;
+
+        if crossterm::event::poll(std::time::Duration::from_millis(50))? {
+            let ev = crossterm::event::read()?;
+            if let Event::Key(key) = ev {
+                let selected = list_state.selected().unwrap_or(0);
+                match (key.code, key.modifiers) {
+                    (KeyCode::Esc, _)
+                    | (KeyCode::Char('q'), _)
+                    | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                        return Ok(MultiSelectResult { selected: None });
+                    }
+                    (KeyCode::Enter, _) => {
+                        let indices = checked
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, c)| **c)
+                            .map(|(i, _)| i)
+                            .collect();
+                        return Ok(MultiSelectResult {
+                            selected: Some(indices),
+                        });
+                    }
+                    (KeyCode::Up | KeyCode::Char('k'), _) => {
+                        let i = if selected == 0 {
+                            items.len() - 1
+                        } else {
+                            selected - 1
+                        };
+                        list_state.select(Some(i));
+                    }
+                    (KeyCode::Down | KeyCode::Char('j'), _) => {
+                        let i = if selected >= items.len() - 1 {
+                            0
+                        } else {
+                            selected + 1
+                        };
+                        list_state.select(Some(i));
+                    }
+                    (KeyCode::Char(' '), _) => {
+                        if selected < checked.len() {
+                            checked[selected] = !checked[selected];
+                        }
+                    }
+                    (KeyCode::Char('a'), KeyModifiers::NONE) => {
+                        checked.iter_mut().for_each(|c| *c = true);
+                    }
+                    (KeyCode::Char('A'), _) => {
+                        checked.iter_mut().for_each(|c| *c = false);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+fn render_multiselect(
+    frame: &mut Frame,
+    title: &str,
+    items: &[&str],
+    list_state: &ListState,
+    checked: &[bool],
+) {
+    let area = frame.area();
+    let bg = Paragraph::new("").style(Style::default().add_modifier(Modifier::DIM));
+    frame.render_widget(bg, area);
+
+    let popup_width = (items.iter().map(|s| s.len() + 8).max().unwrap_or(30) + 4).min(72) as u16;
+    let popup_height = (items.len() as u16 + 4).min(area.height.saturating_sub(4));
+    let popup = multiselect_centered_rect(popup_width, popup_height, area);
+
+    frame.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .title(format!(" {title} "))
+        .title_style(theme::HEADER_STYLE)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(theme::BORDER_STYLE)
+        .style(theme::BG_STYLE);
+
+    let cursor = list_state.selected().unwrap_or(0);
+    let list_items: Vec<ListItem> = items
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let (box_str, box_style) = if checked[i] {
+                ("[✓] ", theme::VALUE_STYLE)
+            } else {
+                ("[ ] ", theme::DIMMED_STYLE)
+            };
+            let label_style = if i == cursor {
+                theme::SELECTED_STYLE
+            } else {
+                theme::NORMAL_STYLE
+            };
+            ListItem::new(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(box_str, box_style),
+                Span::styled(*s, label_style),
+            ]))
+        })
+        .collect();
+
+    let list = List::new(list_items)
+        .block(block)
+        .highlight_style(theme::SELECTED_STYLE)
+        .highlight_spacing(HighlightSpacing::Always);
+
+    let mut state = *list_state;
+    frame.render_stateful_widget(list, popup, &mut state);
+
+    let footer_area = Rect::new(popup.x, popup.y + popup.height, popup.width, 1);
+    if footer_area.y < area.height {
+        let footer = Paragraph::new(Line::from(vec![
+            Span::styled(" Space", theme::ACCENT_STYLE),
+            Span::styled(" toggle  ", theme::DIMMED_STYLE),
+            Span::styled("a", theme::ACCENT_STYLE),
+            Span::styled(" all  ", theme::DIMMED_STYLE),
+            Span::styled("A", theme::ACCENT_STYLE),
+            Span::styled(" none  ", theme::DIMMED_STYLE),
+            Span::styled("Enter", theme::ACCENT_STYLE),
+            Span::styled(" confirm  ", theme::DIMMED_STYLE),
+            Span::styled("Esc", theme::ACCENT_STYLE),
+            Span::styled(" cancel ", theme::DIMMED_STYLE),
+        ]))
+        .alignment(Alignment::Center);
+        frame.render_widget(footer, footer_area);
+    }
+}
+
+fn multiselect_centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+    let [_, v, _] = Layout::vertical([
+        Constraint::Fill(1),
+        Constraint::Length(height),
+        Constraint::Fill(1),
+    ])
+    .areas(area);
+    let [_, h, _] = Layout::horizontal([
+        Constraint::Fill(1),
+        Constraint::Length(width),
+        Constraint::Fill(1),
+    ])
+    .areas(v);
+    h
 }
 
 /// Show a modal select list and block until the user picks an item or cancels.

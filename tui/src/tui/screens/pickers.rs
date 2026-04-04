@@ -3,13 +3,13 @@ use std::path::PathBuf;
 use color_eyre::eyre::Result;
 
 use archinstall_zfs_core::config::types::{
-    AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, SwapMode, UserConfig,
-    ZfsEncryptionMode, ZfsModuleMode,
+    AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, SeatAccess, SwapMode,
+    UserConfig, ZfsEncryptionMode, ZfsModuleMode,
 };
 use archinstall_zfs_core::system::gpu::{GfxDriver, detect_gpus, suggested_driver};
 
 use super::edit::run_edit;
-use super::select::run_select;
+use super::select::{run_multiselect, run_select};
 
 // ── Pickers ─────────────────────────────────────────
 
@@ -284,15 +284,140 @@ pub fn pick_gpu_driver(
     }
 }
 
-pub fn pick_profile(terminal: &mut ratatui::DefaultTerminal) -> Result<Option<String>> {
+/// Full profile selection flow: profile → optional packages → DM → seat access.
+///
+/// Mutates `config` directly. Returns without changing config if cancelled.
+pub fn pick_profile(
+    config: &mut GlobalConfig,
+    terminal: &mut ratatui::DefaultTerminal,
+) -> Result<()> {
     let profiles = archinstall_zfs_core::profile::all_profiles();
-    let mut names: Vec<&str> = vec!["None"];
-    names.extend(profiles.iter().map(|p| p.name));
-    let result = run_select(terminal, "Profile", &names, 0)?;
+
+    let mut display_names: Vec<&str> = vec!["None"];
+    display_names.extend(profiles.iter().map(|p| p.display_name));
+
+    // Pre-select the current profile
+    let initial = config
+        .profile
+        .as_deref()
+        .and_then(|name| profiles.iter().position(|p| p.name == name))
+        .map(|i| i + 1)
+        .unwrap_or(0);
+
+    let result = run_select(terminal, "Profile", &display_names, initial)?;
+    let Some(idx) = result.selected else {
+        return Ok(()); // cancelled — no change
+    };
+
+    if idx == 0 {
+        // "None" selected — clear profile-related config
+        config.profile = None;
+        config.seat_access = None;
+        config.display_manager_override = None;
+        return Ok(());
+    }
+
+    let chosen = &profiles[idx - 1];
+
+    // Remove optional packages from the previous profile before switching
+    if let Some(ref old_name) = config.profile.clone()
+        && let Some(old_profile) = archinstall_zfs_core::profile::get_profile(old_name)
+    {
+        config
+            .additional_packages
+            .retain(|pkg| !old_profile.optional_packages.contains(&pkg.as_str()));
+    }
+
+    config.profile = Some(chosen.name.to_string());
+
+    // Optional packages checklist
+    if !chosen.optional_packages.is_empty() {
+        let extras = pick_optional_packages(terminal, &chosen.optional_packages)?;
+        for pkg in extras {
+            if !config.additional_packages.contains(&pkg) {
+                config.additional_packages.push(pkg);
+            }
+        }
+    }
+
+    // Display manager override
+    if let Some(dm_result) = pick_display_manager(terminal, chosen.display_manager())? {
+        config.display_manager_override = dm_result;
+    }
+
+    // Seat access (Wayland compositors only)
+    if chosen.needs_seat_access {
+        if let Some(seat) = pick_seat_access(terminal)? {
+            config.seat_access = Some(seat);
+        }
+    } else {
+        config.seat_access = None;
+    }
+
+    Ok(())
+}
+
+/// Show an optional-packages checklist. Returns selected package names.
+/// Cancelling returns an empty Vec (treated as "skip optional packages").
+pub fn pick_optional_packages(
+    terminal: &mut ratatui::DefaultTerminal,
+    optional: &[&str],
+) -> Result<Vec<String>> {
+    if optional.is_empty() {
+        return Ok(Vec::new());
+    }
+    let result = run_multiselect(
+        terminal,
+        "Optional packages (Space to toggle)",
+        optional,
+        &[],
+    )?;
     match result.selected {
-        Some(0) => Ok(Some(String::new())), // "None" selected
-        Some(idx) => Ok(Some(names[idx].to_string())),
+        Some(indices) => Ok(indices.iter().map(|&i| optional[i].to_string()).collect()),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// Pick a display manager override.
+///
+/// Returns:
+/// - `None`         — user cancelled (no change)
+/// - `Some(None)`   — user chose "Use profile default" (clear override)
+/// - `Some(Some(s))`— user selected a specific DM
+pub fn pick_display_manager(
+    terminal: &mut ratatui::DefaultTerminal,
+    profile_default: Option<&str>,
+) -> Result<Option<Option<String>>> {
+    const DMS: &[&str] = &["gdm", "sddm", "lightdm", "ly"];
+
+    let default_label = format!(
+        "Use profile default ({})",
+        profile_default.unwrap_or("none")
+    );
+    let mut labels: Vec<String> = vec![default_label];
+    labels.extend(DMS.iter().map(|s| s.to_string()));
+    let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
+
+    let result = run_select(terminal, "Display manager", &label_refs, 0)?;
+    match result.selected {
         None => Ok(None),
+        Some(0) => Ok(Some(None)),
+        Some(idx) => Ok(Some(Some(DMS[idx - 1].to_string()))),
+    }
+}
+
+/// Pick a seat access mechanism for Wayland compositors.
+/// Returns `None` if the user cancels.
+pub fn pick_seat_access(terminal: &mut ratatui::DefaultTerminal) -> Result<Option<SeatAccess>> {
+    let options = [
+        "seatd  — dedicated seat daemon + add users to seat group",
+        "polkit — rely on polkit (often already a compositor dependency)",
+    ];
+    let result = run_select(terminal, "Seat access (Wayland)", &options, 0)?;
+    match result.selected {
+        Some(0) => Ok(Some(SeatAccess::Seatd)),
+        Some(1) => Ok(Some(SeatAccess::Polkit)),
+        _ => Ok(None),
     }
 }
 
@@ -478,6 +603,14 @@ pub fn apply_select(
         }
         "network" => {
             config.network_copy_iso = idx == 0;
+        }
+        "seat_access" => {
+            config.seat_access = match idx {
+                0 => None,
+                1 => Some(SeatAccess::Seatd),
+                2 => Some(SeatAccess::Polkit),
+                _ => return Ok(()),
+            };
         }
         _ => {}
     }

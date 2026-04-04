@@ -258,12 +258,21 @@ impl Wizard {
                     }
                 }
                 "profile" => {
-                    if let Some(profile) = pickers::pick_profile(terminal)? {
-                        self.config.profile = if profile.is_empty() {
-                            None
-                        } else {
-                            Some(profile)
-                        };
+                    pickers::pick_profile(&mut self.config, terminal)?;
+                }
+                "display_manager" => {
+                    // Show the effective DM as the current default
+                    let eff_dm = self.config.display_manager_override.clone().or_else(|| {
+                        self.config
+                            .profile
+                            .as_deref()
+                            .and_then(archinstall_zfs_core::profile::get_profile)
+                            .and_then(|p| p.display_manager().map(str::to_string))
+                    });
+                    if let Some(result) =
+                        pickers::pick_display_manager(terminal, eff_dm.as_deref())?
+                    {
+                        self.config.display_manager_override = result;
                     }
                 }
                 "gpu_driver" => {

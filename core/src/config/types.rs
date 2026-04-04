@@ -102,6 +102,24 @@ impl std::fmt::Display for CompressionAlgo {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SeatAccess {
+    /// Install seatd, enable seatd.service, add users to the `seat` group.
+    Seatd,
+    /// Rely on polkit (typically already present as a compositor dependency).
+    Polkit,
+}
+
+impl std::fmt::Display for SeatAccess {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Seatd => write!(f, "seatd"),
+            Self::Polkit => write!(f, "polkit"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SwapMode {
@@ -177,6 +195,12 @@ pub struct GlobalConfig {
     pub kernels: Option<Vec<String>>,
     pub profile: Option<String>,
     pub gfx_driver: Option<GfxDriver>,
+    /// Override the display manager provided by the selected profile.
+    #[serde(default)]
+    pub display_manager_override: Option<String>,
+    /// Seat access mechanism for Wayland compositors.
+    #[serde(default)]
+    pub seat_access: Option<SeatAccess>,
     pub mirror_regions: Option<Vec<String>>,
     #[serde(default)]
     pub additional_packages: Vec<String>,
@@ -279,6 +303,8 @@ impl Default for GlobalConfig {
             kernels: None,
             profile: None,
             gfx_driver: None,
+            display_manager_override: None,
+            seat_access: None,
             mirror_regions: None,
             additional_packages: Vec::new(),
             network_copy_iso: false,

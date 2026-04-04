@@ -247,23 +247,51 @@ impl Installer {
         if let Some(profile_name) = self.config.profile.clone() {
             let profile = crate::profile::get_profile(&profile_name);
             if let Some(p) = profile {
+                // 1. Install packages
                 if !p.packages.is_empty() {
                     let pkg_refs: Vec<&str> = p.packages.to_vec();
                     self.install_target_packages(&pkg_refs)?;
                 }
+
+                // 2. Enable system services
                 for service in &p.services {
                     services::enable_service(&*self.runner, &self.target, service)?;
                 }
 
-                // Configure autologin for the first user that requests it.
-                if let Some(dm) = p.display_manager()
+                // 3. Enable user services globally
+                for service in &p.user_services {
+                    services::enable_user_service(&*self.runner, &self.target, service)?;
+                }
+
+                // 4. Autologin — use effective DM (override or profile default)
+                let eff_dm = self.effective_display_manager(&p);
+                if let Some(dm) = eff_dm
                     && let Some(ref user_list) = self.config.users
                     && let Some(user) = user_list.iter().find(|u| u.autologin)
                 {
-                    // Derive the session name from the profile for SDDM.
                     let session = sddm_session_for_profile(&profile_name);
                     autologin::configure(&*self.runner, &self.target, dm, &user.username, session)?;
                 }
+
+                // 5. Display manager override
+                if let Some(ref new_dm) = self.config.display_manager_override.clone() {
+                    let profile_dm = p.display_manager();
+                    if Some(new_dm.as_str()) != profile_dm {
+                        self.install_target_packages(&[new_dm.as_str()])?;
+                        if let Some(old_dm) = profile_dm {
+                            services::disable_service(&*self.runner, &self.target, old_dm)?;
+                        }
+                        services::enable_service(&*self.runner, &self.target, new_dm)?;
+                    }
+                }
+
+                // 6. Seat access for Wayland compositors
+                if p.needs_seat_access {
+                    self.configure_seat_access()?;
+                }
+
+                // 7. Post-install steps (db init, group membership, etc.)
+                self.run_post_install_steps(&p.post_install_steps)?;
             } else {
                 tracing::warn!(profile = %profile_name, "unknown profile, skipping");
             }
@@ -280,6 +308,15 @@ impl Installer {
                 }
             };
             self.install_target_packages(&pkgs)?;
+
+            // PipeWire user services must be enabled globally for auto-start.
+            // system services (like pipewire-pulse.socket) are not enough —
+            // each user session needs the user units enabled.
+            if matches!(audio, crate::config::types::AudioServer::Pipewire) {
+                for svc in &["pipewire", "pipewire-pulse", "wireplumber"] {
+                    services::enable_user_service(&*self.runner, &self.target, svc)?;
+                }
+            }
         }
 
         // Bluetooth
@@ -295,6 +332,125 @@ impl Installer {
             tracing::info!(?driver, "installed GPU driver packages");
         }
 
+        Ok(())
+    }
+
+    /// Return the display manager to use: `display_manager_override` takes
+    /// priority over the profile's built-in DM.
+    fn effective_display_manager<'a>(
+        &'a self,
+        profile: &'a crate::profile::Profile,
+    ) -> Option<&'a str> {
+        self.config
+            .display_manager_override
+            .as_deref()
+            .or_else(|| profile.display_manager())
+    }
+
+    /// Configure seat access for Wayland compositors based on `config.seat_access`.
+    fn configure_seat_access(&mut self) -> Result<()> {
+        use crate::config::types::SeatAccess;
+        use crate::system::cmd::{check_exit, chroot_cmd};
+
+        match self.config.seat_access {
+            Some(SeatAccess::Seatd) => {
+                self.install_target_packages(&["seatd"])?;
+                services::enable_service(&*self.runner, &self.target, "seatd")?;
+                // Add all installer-created users to the `seat` group
+                if let Some(ref user_list) = self.config.users.clone() {
+                    // groupadd -f is idempotent
+                    let _ = chroot_cmd(&*self.runner, &self.target, "groupadd", &["-f", "seat"]);
+                    for user in user_list {
+                        let output = chroot_cmd(
+                            &*self.runner,
+                            &self.target,
+                            "usermod",
+                            &["-aG", "seat", &user.username],
+                        )?;
+                        check_exit(&output, &format!("add {} to seat group", user.username))?;
+                    }
+                }
+                tracing::info!("configured seatd for seat access");
+            }
+            Some(SeatAccess::Polkit) => {
+                // polkit is typically already a compositor dependency; ensure it
+                // is present and let dbus activate it on demand.
+                self.install_target_packages(&["polkit"])?;
+                tracing::info!("configured polkit for seat access");
+            }
+            None => {
+                tracing::warn!(
+                    "profile needs_seat_access=true but no seat_access configured; \
+                     Wayland compositor may fail for non-root users"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Run profile-defined post-install steps (db init, group membership, etc.).
+    ///
+    /// Failures are logged as warnings rather than aborting — `initdb` will fail
+    /// if the data directory already exists on a reinstall, and that is fine.
+    fn run_post_install_steps(&self, steps: &[crate::profile::PostInstallStep]) -> Result<()> {
+        use crate::profile::PostInstallStep;
+        use crate::system::cmd::{check_exit, chroot_cmd};
+
+        for step in steps {
+            match step {
+                PostInstallStep::RunAsUser { user, cmd, args } => {
+                    tracing::info!(user, cmd, "running post-install step as user");
+                    let target_str = self.target.to_string_lossy();
+                    // arch-chroot <target> runuser -u <user> -- <cmd> [args...]
+                    let mut full_args: Vec<&str> =
+                        vec![&*target_str, "runuser", "-u", user, "--", cmd];
+                    full_args.extend_from_slice(args);
+                    let output = self.runner.run("arch-chroot", &full_args)?;
+                    if !output.success() {
+                        tracing::warn!(
+                            user,
+                            cmd,
+                            exit_code = output.exit_code,
+                            stderr = %output.stderr,
+                            "post-install step failed (non-fatal)"
+                        );
+                    }
+                }
+                PostInstallStep::RunAsRoot { cmd, args } => {
+                    tracing::info!(cmd, "running post-install step as root");
+                    let target_str = self.target.to_string_lossy();
+                    let mut full_args: Vec<&str> = vec![&*target_str, cmd];
+                    full_args.extend_from_slice(args);
+                    let output = self.runner.run("arch-chroot", &full_args)?;
+                    if !output.success() {
+                        tracing::warn!(
+                            cmd,
+                            exit_code = output.exit_code,
+                            stderr = %output.stderr,
+                            "post-install step failed (non-fatal)"
+                        );
+                    }
+                }
+                PostInstallStep::AddUsersToGroup { group } => {
+                    tracing::info!(group, "adding installer users to group");
+                    if let Some(ref user_list) = self.config.users {
+                        let _ = chroot_cmd(&*self.runner, &self.target, "groupadd", &["-f", group]);
+                        for user in user_list {
+                            let output = chroot_cmd(
+                                &*self.runner,
+                                &self.target,
+                                "usermod",
+                                &["-aG", group, &user.username],
+                            )?;
+                            check_exit(
+                                &output,
+                                &format!("add {} to {} group", user.username, group),
+                            )?;
+                        }
+                    }
+                }
+            }
+        }
         Ok(())
     }
 

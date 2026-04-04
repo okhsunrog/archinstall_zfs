@@ -1,4 +1,4 @@
-use archinstall_zfs_core::config::types::{AudioServer, GlobalConfig};
+use archinstall_zfs_core::config::types::{AudioServer, GlobalConfig, SeatAccess};
 
 use super::{MenuItem, MenuKind};
 
@@ -7,8 +7,42 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
         MenuItem {
             key: "profile",
             label: "Profile",
-            value: config.profile.clone().unwrap_or("Not set".into()),
+            value: config
+                .profile
+                .as_deref()
+                .and_then(archinstall_zfs_core::profile::get_profile)
+                .map(|p| p.display_name.to_string())
+                .unwrap_or("Not set".into()),
             kind: MenuKind::Custom,
+        },
+        MenuItem {
+            key: "display_manager",
+            label: "Display manager",
+            value: config.display_manager_override.clone().unwrap_or_else(|| {
+                config
+                    .profile
+                    .as_deref()
+                    .and_then(archinstall_zfs_core::profile::get_profile)
+                    .and_then(|p| p.display_manager().map(str::to_string))
+                    .unwrap_or("Profile default".into())
+            }),
+            kind: MenuKind::Custom,
+        },
+        MenuItem {
+            key: "seat_access",
+            label: "Seat access",
+            value: config
+                .seat_access
+                .map(|s| s.to_string())
+                .unwrap_or("None".into()),
+            kind: MenuKind::Select {
+                options: vec!["None", "seatd", "polkit"],
+                current: match config.seat_access {
+                    None => 0,
+                    Some(SeatAccess::Seatd) => 1,
+                    Some(SeatAccess::Polkit) => 2,
+                },
+            },
         },
         MenuItem {
             key: "gpu_driver",

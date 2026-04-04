@@ -12,6 +12,22 @@ pub fn enable_service(runner: &dyn CommandRunner, target: &Path, service: &str) 
     Ok(())
 }
 
+/// Enable a user-level systemd unit globally for all users in the target.
+///
+/// Uses `systemctl --root <target> --global enable` which writes symlinks into
+/// `<target>/etc/systemd/user/` — the same approach as `enable_service` but
+/// targeting user units instead of system units.
+pub fn enable_user_service(runner: &dyn CommandRunner, target: &Path, service: &str) -> Result<()> {
+    let target_str = target.to_string_lossy();
+    let output = runner.run(
+        "systemctl",
+        &["--root", &target_str, "--global", "enable", service],
+    )?;
+    check_exit(&output, &format!("systemctl --global enable {service}"))?;
+    tracing::info!(service, "enabled user service globally");
+    Ok(())
+}
+
 pub fn disable_service(runner: &dyn CommandRunner, target: &Path, service: &str) -> Result<()> {
     let target_str = target.to_string_lossy();
     let _ = runner.run("systemctl", &["--root", &target_str, "disable", service]);
