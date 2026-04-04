@@ -225,6 +225,7 @@ dependencies = [
  "nix 0.31.2",
  "ratatui",
  "ratatui-macros",
+ "ratatui-themes",
  "ratatui-widgets",
  "tokio",
  "tokio-util",
@@ -3800,6 +3801,16 @@ checksum = "0f76fe0bd0ed4295f0321b1676732e2454024c15a35d01904ddb315afd3d545c"
 dependencies = [
  "ratatui-core",
  "termwiz",
+]
+
+[[package]]
+name = "ratatui-themes"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd1a71b2897e290f5e18ba55138074b4ceb1a765ba0d7219e55fef5459497d5f"
+dependencies = [
+ "ratatui",
+ "serde",
 ]
 
 [[package]]
