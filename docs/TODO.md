@@ -1,0 +1,95 @@
+# TODO — Missing Features
+
+Compared against archinstall (Python). Excludes non-ZFS filesystems and non-ZFSBootMenu bootloaders.
+
+---
+
+## High Priority
+
+### GPU Driver Detection & Installation
+
+Auto-detect GPU and install appropriate drivers. Without this, desktop profiles are broken on NVIDIA (Wayland won't start).
+
+- [ ] Detect GPU vendor from `lspci` or sysfs
+- [ ] Map vendor to package sets (mesa, vulkan-radeon, nvidia, etc.)
+- [ ] TUI selection for driver preference (open vs proprietary for NVIDIA)
+- [ ] Integrate with profile system — desktop profiles should trigger GPU driver install
+- [ ] Handle multi-GPU setups (e.g. laptop with Intel iGPU + NVIDIA dGPU)
+
+### WiFi Configuration During Install
+
+Installer is unusable on laptops without ethernet.
+
+- [ ] Detect wireless interfaces (`/sys/class/net/*/wireless` or `iw dev`)
+- [ ] Scan networks via `iwctl` or `wpa_cli`
+- [ ] TUI network selection screen with signal strength
+- [ ] Password prompt for secured networks
+- [ ] Connection verification
+- [ ] Copy WiFi config to target
+
+### X11/Wayland Keyboard Layout
+
+Currently only console keymap (vconsole.conf) is set. Graphical sessions need X11/Wayland keymap too.
+
+- [ ] Add X11 keymap fields to config (`x11_keymap`, `x11_variant`)
+- [ ] Write `/etc/X11/xorg.conf.d/00-keyboard.conf` or use `localectl set-x11-keymap`
+- [ ] TUI: layout selection (can default to matching console keymap)
+- [ ] Handle layout variants (e.g. `us` with `intl` variant)
+
+---
+
+## Medium Priority
+
+### More Desktop/WM Profiles
+
+Current: GNOME, KDE Plasma, Xfce, Cinnamon, Budgie, MATE, Deepin, LXQt, Hyprland, Sway, i3, Cosmic.
+
+Missing WMs:
+- [ ] Awesome
+- [ ] Bspwm
+- [ ] Enlightenment
+- [ ] LabWC
+- [ ] Niri
+- [ ] QtILE
+- [ ] River
+- [ ] xmonad
+
+Missing servers:
+- [ ] Lighttpd
+- [ ] Tomcat
+
+Profile system improvements:
+- [ ] Display manager / greeter selection per profile (GDM, SDDM, LightDM, Ly)
+- [ ] Profile post-install hooks (e.g. enable PipeWire user services)
+- [ ] Per-profile recommended vs optional packages
+
+### User Management
+
+Basic user creation works. Missing:
+
+- [ ] SSH public key setup (`~user/.ssh/authorized_keys`)
+- [ ] Auto-login configuration per display manager
+- [ ] Password strength feedback in TUI
+
+### Post-Install Customization
+
+- [ ] Custom chroot commands (`post_install_commands` config field)
+- [ ] SSD detection + auto-enable `fstrim.timer`
+- [ ] Service enable verification (report warnings on failure)
+
+---
+
+## Low Priority
+
+### Security
+
+- [ ] Optional firewall setup (ufw): default deny incoming, allow SSH if enabled
+- [ ] Encrypted passwords in config (yescrypt hash instead of plaintext)
+- [ ] Secure Boot — blocked on upstream ZFSBootMenu support
+
+### Internationalization
+
+- [ ] Choose i18n framework (fluent-rs, gettext, or key-value)
+- [ ] Extract all user-facing strings from TUI
+- [ ] Language selection at startup
+- [ ] Start with 3-5 languages: English, Russian, German, Spanish, Chinese
