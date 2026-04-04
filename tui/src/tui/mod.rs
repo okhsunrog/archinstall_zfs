@@ -50,7 +50,15 @@ pub enum Action {
     Quit,
 }
 
-async fn run_app(terminal: &mut DefaultTerminal, config: GlobalConfig) -> Result<()> {
+async fn run_app(terminal: &mut DefaultTerminal, mut config: GlobalConfig) -> Result<()> {
+    // Check connectivity before the wizard. If the user connects via WiFi,
+    // automatically enable network_copy_iso so the iwd profile is copied to
+    // the installed system (saved at /var/lib/iwd/<ssid>.psk by iwd).
+    let wifi_connected = screens::wifi::run_wifi_setup(terminal).await?;
+    if wifi_connected {
+        config.network_copy_iso = true;
+    }
+
     let mut wizard = Wizard::new(config);
     let mut events = EventStream::new();
 

@@ -26,8 +26,8 @@ Installer is unusable on laptops without ethernet.
 - [x] Connection via `iwctl --passphrase` (`system::wifi::connect`)
 - [x] Connection verification (`system::wifi::check_connected`)
 - [x] Copy WiFi config to target (handled by `network::copy_iso_network` — iwd saves profiles to `/var/lib/iwd`)
-- [ ] TUI network selection screen with signal strength
-- [ ] TUI password prompt for secured networks
+- [x] TUI network selection screen with signal strength (`screens/wifi.rs`, shown before wizard on first launch)
+- [x] TUI password prompt for secured networks (masked `run_edit` popup)
 
 ### X11/Wayland Keyboard Layout
 

@@ -297,6 +297,8 @@ pub fn manage_users(
                     sudo,
                     shell: None,
                     groups: None,
+                    ssh_authorized_keys: Vec::new(),
+                    autologin: false,
                 };
                 config.users.get_or_insert_with(Vec::new).push(user);
             }

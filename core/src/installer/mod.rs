@@ -258,17 +258,12 @@ impl Installer {
                 // Configure autologin for the first user that requests it.
                 if let Some(dm) = p.display_manager()
                     && let Some(ref user_list) = self.config.users
-                        && let Some(user) = user_list.iter().find(|u| u.autologin) {
-                            // Derive the session name from the profile for SDDM.
-                            let session = sddm_session_for_profile(&profile_name);
-                            autologin::configure(
-                                &*self.runner,
-                                &self.target,
-                                dm,
-                                &user.username,
-                                session,
-                            )?;
-                        }
+                    && let Some(user) = user_list.iter().find(|u| u.autologin)
+                {
+                    // Derive the session name from the profile for SDDM.
+                    let session = sddm_session_for_profile(&profile_name);
+                    autologin::configure(&*self.runner, &self.target, dm, &user.username, session)?;
+                }
             } else {
                 tracing::warn!(profile = %profile_name, "unknown profile, skipping");
             }
