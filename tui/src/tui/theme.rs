@@ -1,21 +1,20 @@
 use ratatui::style::{Color, Modifier, Style};
 
-// ── Catppuccin Mocha palette ────────────────────────
-pub const BASE: Color = Color::Rgb(30, 30, 46);
-pub const MANTLE: Color = Color::Rgb(24, 24, 37);
-pub const SURFACE0: Color = Color::Rgb(49, 50, 68);
-pub const SURFACE1: Color = Color::Rgb(69, 71, 90);
-pub const OVERLAY0: Color = Color::Rgb(108, 112, 134);
-pub const TEXT: Color = Color::Rgb(205, 214, 244);
-pub const SUBTEXT0: Color = Color::Rgb(166, 173, 200);
-pub const BLUE: Color = Color::Rgb(137, 180, 250);
-pub const GREEN: Color = Color::Rgb(166, 227, 161);
-pub const RED: Color = Color::Rgb(243, 139, 168);
-pub const YELLOW: Color = Color::Rgb(249, 226, 175);
-pub const MAUVE: Color = Color::Rgb(203, 166, 247);
-pub const TEAL: Color = Color::Rgb(148, 226, 213);
-pub const PEACH: Color = Color::Rgb(250, 179, 135);
-pub const LAVENDER: Color = Color::Rgb(180, 190, 254);
+// ── ANSI colors (work in all terminals including linux tty) ──
+const BASE: Color = Color::Black;
+const MANTLE: Color = Color::Black;
+const SURFACE0: Color = Color::DarkGray;
+const OVERLAY0: Color = Color::DarkGray;
+const TEXT: Color = Color::White;
+const SUBTEXT0: Color = Color::Gray;
+const BLUE: Color = Color::LightBlue;
+const GREEN: Color = Color::LightGreen;
+const RED: Color = Color::LightRed;
+const YELLOW: Color = Color::LightYellow;
+const MAUVE: Color = Color::LightMagenta;
+const TEAL: Color = Color::LightCyan;
+const PEACH: Color = Color::Yellow;
+const LAVENDER: Color = Color::LightMagenta;
 
 // ── Background styles ──────────────────────────────
 pub const BG_STYLE: Style = Style::new().bg(BASE).fg(TEXT);
@@ -28,8 +27,8 @@ pub const DIMMED_STYLE: Style = Style::new().fg(OVERLAY0);
 pub const LABEL_STYLE: Style = Style::new().fg(SUBTEXT0);
 
 // ── Interactive element styles ─────────────────────
-pub const SELECTED_STYLE: Style = Style::new().fg(BASE).bg(BLUE);
-pub const SELECTED_VALUE_STYLE: Style = Style::new().fg(BASE).bg(BLUE);
+pub const SELECTED_STYLE: Style = Style::new().fg(Color::Black).bg(BLUE);
+pub const SELECTED_VALUE_STYLE: Style = Style::new().fg(Color::Black).bg(BLUE);
 pub const HOVER_BG: Style = Style::new().bg(SURFACE0);
 
 // ── Status styles ──────────────────────────────────
@@ -43,7 +42,7 @@ pub const ACTION_STYLE: Style = Style::new().fg(PEACH).add_modifier(Modifier::BO
 pub const ACCENT_STYLE: Style = Style::new().fg(TEAL);
 
 // ── Border/header styles ───────────────────────────
-pub const BORDER_STYLE: Style = Style::new().fg(SURFACE1);
+pub const BORDER_STYLE: Style = Style::new().fg(SURFACE0);
 pub const HEADER_STYLE: Style = Style::new().fg(LAVENDER).add_modifier(Modifier::BOLD);
 
 // ── Sidebar styles ─────────────────────────────────
