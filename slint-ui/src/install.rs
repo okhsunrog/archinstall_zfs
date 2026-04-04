@@ -7,10 +7,15 @@ use tokio_util::sync::CancellationToken;
 use archinstall_zfs_core::config::types::{
     GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode,
 };
+use archinstall_zfs_core::system::async_download::DownloadProgress;
 use archinstall_zfs_core::system::cmd::CommandRunner;
 
 /// Full installation pipeline. All progress reported via tracing.
-pub fn run_install(runner: Arc<dyn CommandRunner>, config: &GlobalConfig) -> Result<()> {
+pub fn run_install(
+    runner: Arc<dyn CommandRunner>,
+    config: &GlobalConfig,
+    download_progress_tx: Option<Arc<tokio::sync::watch::Sender<DownloadProgress>>>,
+) -> Result<()> {
     let cancel = CancellationToken::new();
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -188,7 +193,7 @@ pub fn run_install(runner: Arc<dyn CommandRunner>, config: &GlobalConfig) -> Res
         config.clone(),
         &mountpoint,
         cancel.clone(),
-        None,
+        download_progress_tx,
     );
     if let Some(swap) = swap_partition {
         installer.set_swap_partition(swap);

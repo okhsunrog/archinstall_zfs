@@ -98,7 +98,7 @@ fn main() -> Result<()> {
                 }
                 let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
                     Arc::new(archinstall_zfs_core::system::cmd::RealRunner);
-                install::run_install(runner, &config)
+                install::run_install(runner, &config, None)
             } else {
                 run_gui(config)
             }
@@ -374,6 +374,110 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 }
             });
 
+            // Download progress channel
+            let (download_tx, download_rx) = tokio::sync::watch::channel(
+                archinstall_zfs_core::system::async_download::DownloadProgress {
+                    packages: vec![],
+                    total_bytes: 0,
+                    downloaded_bytes: 0,
+                    active_downloads: 0,
+                    completed: 0,
+                    failed: 0,
+                },
+            );
+            let download_tx = Arc::new(download_tx);
+
+            // Download progress consumer thread — polls every 100ms
+            let weak_dl = app.as_weak();
+            thread::spawn(move || {
+                let mut rx = download_rx;
+                loop {
+                    thread::sleep(std::time::Duration::from_millis(100));
+
+                    // Check if sender is gone
+                    match rx.has_changed() {
+                        Err(_) => {
+                            let _ = weak_dl.upgrade_in_event_loop(|app| {
+                                app.set_download_active(false);
+                            });
+                            break;
+                        }
+                        Ok(false) => continue,
+                        Ok(true) => {}
+                    }
+
+                    let progress = rx.borrow_and_update().clone();
+                    let is_active = progress.total_bytes > 0
+                        && (progress.active_downloads > 0
+                            || (progress.completed + progress.failed < progress.packages.len()
+                                && !progress.packages.is_empty()));
+
+                    let pct = if progress.total_bytes > 0 {
+                        (progress.downloaded_bytes as f64 / progress.total_bytes as f64 * 100.0)
+                            as i32
+                    } else {
+                        0
+                    };
+
+                    let speed = progress.total_speed_bps();
+                    let speed_str = format_speed(speed);
+                    let eta_str = progress
+                        .eta()
+                        .map(format_duration)
+                        .unwrap_or_else(|| "--:--".to_string());
+                    let status = format!(
+                        "Downloads {}/{} | {} | ETA {}",
+                        progress.completed,
+                        progress.packages.len(),
+                        speed_str,
+                        eta_str,
+                    );
+
+                    let mut dl_items = Vec::new();
+                    for pkg in &progress.packages {
+                        match pkg {
+                            archinstall_zfs_core::system::async_download::PackageState::Downloading {
+                                filename,
+                                downloaded,
+                                total,
+                                speed_bps,
+                                ..
+                            } => {
+                                let pkg_pct = if *total > 0 {
+                                    (*downloaded as f64 / *total as f64 * 100.0) as i32
+                                } else {
+                                    0
+                                };
+                                dl_items.push(DownloadInfo {
+                                    filename: truncate_str(filename, 30).into(),
+                                    pct: pkg_pct,
+                                    speed: format_speed(*speed_bps).into(),
+                                    state: 0,
+                                });
+                            }
+                            archinstall_zfs_core::system::async_download::PackageState::Verifying {
+                                filename,
+                            } => {
+                                dl_items.push(DownloadInfo {
+                                    filename: truncate_str(filename, 30).into(),
+                                    pct: 100,
+                                    speed: SharedString::default(),
+                                    state: 1,
+                                });
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    let _ = weak_dl.upgrade_in_event_loop(move |app| {
+                        app.set_download_active(is_active);
+                        app.set_download_pct(pct);
+                        app.set_download_status(SharedString::from(&status));
+                        app.set_download_items(ModelRc::new(VecModel::from(dl_items)));
+                    });
+                }
+            });
+
             let weak_install = app.as_weak();
             thread::spawn(move || {
                 use tracing_subscriber::layer::SubscriberExt;
@@ -396,7 +500,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
 
                 let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
                     Arc::new(archinstall_zfs_core::system::cmd::RealRunner);
-                let result = install::run_install(runner, &c);
+                let result = install::run_install(runner, &c, Some(download_tx));
 
                 let state = if result.is_ok() { 2 } else { 3 };
                 let _ = weak_install.upgrade_in_event_loop(move |app| {
@@ -1169,4 +1273,33 @@ fn apply_text(config: &mut GlobalConfig, key: &str, val: &str) {
         }
         _ => {}
     }
+}
+
+// ── Download progress helpers ───────────────────────
+
+fn format_speed(bps: u64) -> String {
+    if bps >= 1_000_000 {
+        format!("{:.1} MB/s", bps as f64 / 1_000_000.0)
+    } else if bps >= 1_000 {
+        format!("{:.0} KB/s", bps as f64 / 1_000.0)
+    } else if bps > 0 {
+        format!("{bps} B/s")
+    } else {
+        "-- B/s".to_string()
+    }
+}
+
+fn format_duration(d: std::time::Duration) -> String {
+    let secs = d.as_secs();
+    if secs >= 3600 {
+        format!("{}h{:02}m", secs / 3600, (secs % 3600) / 60)
+    } else if secs >= 60 {
+        format!("{}m{:02}s", secs / 60, secs % 60)
+    } else {
+        format!("{secs}s")
+    }
+}
+
+fn truncate_str(s: &str, max: usize) -> &str {
+    if s.len() <= max { s } else { &s[..max] }
 }

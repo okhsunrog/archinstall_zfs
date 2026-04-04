@@ -16,7 +16,7 @@ slint = { git = "https://github.com/okhsunrog/slint.git", branch = "feat/rendere
     "backend-linuxkms-noseat",
     "renderer-skia-software",
 ] }
-tokio = { version = "1.51.0", features = ["rt", "rt-multi-thread"] }
+tokio = { version = "1.51.0", features = ["rt", "rt-multi-thread", "sync"] }
 tokio-util = { version = "0.7.18", features = ["rt"] }
 tracing = "0.1.44"
 tracing-appender = "0.2.4"

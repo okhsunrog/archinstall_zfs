@@ -57,6 +57,13 @@ export struct LogMessage {
     level: int,
 }
 
+export struct DownloadInfo {
+    filename: string,
+    pct: int,
+    speed: string,
+    state: int, // 0=downloading, 1=verifying, 2=done
+}
+
 export struct StepInfo {
     label: string,
     state: int, // 0=pending, 1=current, 2=done
@@ -337,6 +344,12 @@ export component App inherits Window {
 
     // Log messages
     in property <[LogMessage]> log-messages;
+
+    // Download progress
+    in property <[DownloadInfo]> download-items;
+    in property <int> download-pct: 0;
+    in property <string> download-status: "";
+    in property <bool> download-active: false;
 
     // Status text
     in property <string> status-text;
@@ -675,6 +688,88 @@ export component App inherits Window {
         property <int> scroll-trigger: log-messages.length;
         changed scroll-trigger => {
             log-view.viewport-y = -100000px;
+        }
+
+        // ── Download progress panel ─────────────────
+        if download-active: Rectangle {
+            height: 120px;
+            background: Theme.c.mantle;
+            border-radius: 4px;
+            border-color: Theme.c.surface1;
+            border-width: 1px;
+
+            VerticalLayout {
+                padding: 12px;
+                spacing: 6px;
+
+                // Header: status text
+                Text {
+                    text: download-status;
+                    color: Theme.c.teal;
+                    font-size: 13px;
+                    font-weight: 600;
+                }
+
+                // Overall progress bar
+                Rectangle {
+                    height: 16px;
+                    background: Theme.c.surface0;
+                    border-radius: 3px;
+                    clip: true;
+
+                    Rectangle {
+                        x: 0;
+                        y: 0;
+                        height: parent.height;
+                        width: parent.width * (download-pct / 100);
+                        background: Theme.c.teal;
+                        border-radius: 3px;
+                    }
+
+                    Text {
+                        text: download-pct + "%";
+                        color: Theme.c.text;
+                        font-size: 11px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Per-package download lines
+                ListView {
+                    for dl[index] in download-items: Rectangle {
+                        height: 20px;
+
+                        HorizontalLayout {
+                            padding-left: 4px;
+                            padding-right: 4px;
+                            spacing: 8px;
+
+                            Text {
+                                text: dl.filename;
+                                color: dl.state == 1 ? Theme.c.overlay0
+                                     : dl.state == 2 ? Theme.c.green
+                                     : Theme.c.text;
+                                font-size: 11px;
+                                font-family: "monospace";
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                                vertical-alignment: center;
+                            }
+
+                            Text {
+                                text: dl.state == 1 ? "verifying..."
+                                     : dl.state == 2 ? "done"
+                                     : dl.pct + "% " + dl.speed;
+                                color: dl.state == 2 ? Theme.c.green : Theme.c.overlay0;
+                                font-size: 11px;
+                                font-family: "monospace";
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         if install-state >= 2: Rectangle {
