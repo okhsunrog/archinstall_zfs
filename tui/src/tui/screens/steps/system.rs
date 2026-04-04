@@ -1,9 +1,9 @@
 use archinstall_zfs_core::config::types::GlobalConfig;
 
-use super::{MenuItem, MenuKind};
+use super::{MenuItem, MenuKind, radio_group};
 
 pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
-    vec![
+    let mut items = vec![
         MenuItem {
             key: "kernel",
             label: "Kernel",
@@ -50,25 +50,21 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
             value: if config.ntp { "Enabled" } else { "Disabled" }.into(),
             kind: MenuKind::Toggle,
         },
-        MenuItem {
-            key: "network",
-            label: "Network",
-            value: if config.network_copy_iso {
-                "Copy from ISO"
-            } else {
-                "Manual"
-            }
-            .into(),
-            kind: MenuKind::Select {
-                options: vec!["Copy from ISO", "Manual"],
-                current: if config.network_copy_iso { 0 } else { 1 },
-            },
-        },
-        MenuItem {
-            key: "parallel_downloads",
-            label: "Parallel downloads",
-            value: config.parallel_downloads.to_string(),
-            kind: MenuKind::Custom,
-        },
-    ]
+    ];
+
+    items.extend(radio_group(
+        "network",
+        "Network",
+        &["Copy from ISO", "Manual"],
+        if config.network_copy_iso { 0 } else { 1 },
+    ));
+
+    items.push(MenuItem {
+        key: "parallel_downloads",
+        label: "Parallel downloads",
+        value: config.parallel_downloads.to_string(),
+        kind: MenuKind::Custom,
+    });
+
+    items
 }

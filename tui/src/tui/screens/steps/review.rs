@@ -6,9 +6,7 @@ use super::{MenuItem, MenuKind, StepId};
 pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     let mut items = Vec::new();
 
-    // Collect items from each step as read-only summary lines
     for step in &StepId::ALL[..6] {
-        // Add section header for each step
         items.push(MenuItem {
             key: "section",
             label: step.label(),
@@ -26,14 +24,42 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
             StepId::Review => unreachable!(),
         };
 
-        for item in step_items {
-            // Convert all items to non-interactive summary (Custom kind renders as read-only)
-            items.push(MenuItem {
-                key: item.key,
-                label: item.label,
-                value: item.value,
-                kind: MenuKind::SectionHeader, // read-only display
-            });
+        // Flatten radio groups: show "Header: Selected option" as one summary line
+        let mut i = 0;
+        while i < step_items.len() {
+            let item = &step_items[i];
+            match &item.kind {
+                MenuKind::RadioHeader => {
+                    let header_label = item.label;
+                    let mut selected_label = "Not set";
+                    i += 1;
+                    while i < step_items.len() {
+                        if let MenuKind::RadioOption { selected, .. } = &step_items[i].kind {
+                            if *selected {
+                                selected_label = step_items[i].label;
+                            }
+                            i += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    items.push(MenuItem {
+                        key: "summary",
+                        label: header_label,
+                        value: selected_label.to_string(),
+                        kind: MenuKind::SectionHeader,
+                    });
+                }
+                _ => {
+                    items.push(MenuItem {
+                        key: item.key,
+                        label: item.label,
+                        value: item.value.clone(),
+                        kind: MenuKind::SectionHeader,
+                    });
+                    i += 1;
+                }
+            }
         }
     }
 
@@ -62,7 +88,6 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
         }
     }
 
-    // Separator before actions
     items.push(MenuItem {
         key: "sep_actions",
         label: "",
@@ -70,7 +95,6 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
         kind: MenuKind::SectionHeader,
     });
 
-    // Actions
     items.extend([
         MenuItem {
             key: "save",

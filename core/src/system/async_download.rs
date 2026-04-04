@@ -72,39 +72,80 @@ pub enum PackageState {
     },
 }
 
-/// Aggregate download progress, broadcast via `watch` channel.
+/// Aggregate package progress, broadcast via `watch` channel.
+/// Covers both the download phase and the install phase sequentially.
 #[derive(Clone, Debug)]
-pub struct DownloadProgress {
-    pub packages: Vec<PackageState>,
-    pub total_bytes: u64,
-    pub downloaded_bytes: u64,
-    pub active_downloads: usize,
-    pub completed: usize,
-    pub failed: usize,
+pub enum PackageProgress {
+    /// Downloading packages from mirrors.
+    Downloading {
+        packages: Vec<PackageState>,
+        total_bytes: u64,
+        downloaded_bytes: u64,
+        active_downloads: usize,
+        completed: usize,
+        failed: usize,
+    },
+    /// Installing/upgrading packages locally.
+    Installing {
+        package: String,
+        current: usize,
+        total: usize,
+        percent: u32,
+    },
+    /// All done (download + install finished).
+    Done,
 }
 
-impl DownloadProgress {
-    /// Overall speed in bytes/sec (sum of all active downloads).
-    pub fn total_speed_bps(&self) -> u64 {
-        self.packages
-            .iter()
-            .filter_map(|p| match p {
-                PackageState::Downloading { speed_bps, .. } => Some(*speed_bps),
-                _ => None,
-            })
-            .sum()
-    }
-
-    /// Estimated time remaining based on current speed.
-    pub fn eta(&self) -> Option<Duration> {
-        let speed = self.total_speed_bps();
-        if speed == 0 {
-            return None;
+impl Default for PackageProgress {
+    fn default() -> Self {
+        Self::Downloading {
+            packages: Vec::new(),
+            total_bytes: 0,
+            downloaded_bytes: 0,
+            active_downloads: 0,
+            completed: 0,
+            failed: 0,
         }
-        let remaining = self.total_bytes.saturating_sub(self.downloaded_bytes);
-        Some(Duration::from_secs(remaining / speed))
     }
 }
+
+impl PackageProgress {
+    /// Overall download speed in bytes/sec (only meaningful in Downloading phase).
+    pub fn total_speed_bps(&self) -> u64 {
+        match self {
+            Self::Downloading { packages, .. } => packages
+                .iter()
+                .filter_map(|p| match p {
+                    PackageState::Downloading { speed_bps, .. } => Some(*speed_bps),
+                    _ => None,
+                })
+                .sum(),
+            _ => 0,
+        }
+    }
+
+    /// Estimated time remaining for download phase.
+    pub fn eta(&self) -> Option<Duration> {
+        match self {
+            Self::Downloading {
+                total_bytes,
+                downloaded_bytes,
+                ..
+            } => {
+                let speed = self.total_speed_bps();
+                if speed == 0 {
+                    return None;
+                }
+                let remaining = total_bytes.saturating_sub(*downloaded_bytes);
+                Some(Duration::from_secs(remaining / speed))
+            }
+            _ => None,
+        }
+    }
+}
+
+// Keep the old name as an alias during migration
+pub type DownloadProgress = PackageProgress;
 
 // ── Download manager ──────────────────────────────────
 
@@ -129,7 +170,7 @@ pub fn start_downloads(
     let total_bytes: u64 = tasks.iter().map(|t| t.size.max(0) as u64).sum();
     let pkg_count = tasks.len();
 
-    let initial = DownloadProgress {
+    let initial = PackageProgress::Downloading {
         packages: vec![PackageState::Queued; pkg_count],
         total_bytes,
         downloaded_bytes: 0,
@@ -186,32 +227,43 @@ struct SharedProgress {
 impl SharedProgress {
     fn update_package(&self, index: usize, state: PackageState) {
         self.tx.send_modify(|progress| {
+            let PackageProgress::Downloading {
+                packages,
+                active_downloads,
+                completed,
+                failed,
+                downloaded_bytes,
+                ..
+            } = progress
+            else {
+                return;
+            };
             // Update aggregate counters based on transition
-            match (&progress.packages[index], &state) {
+            match (&packages[index], &state) {
                 (PackageState::Queued, PackageState::Downloading { .. }) => {
-                    progress.active_downloads += 1;
+                    *active_downloads += 1;
                 }
                 (PackageState::Downloading { .. }, PackageState::Verifying { .. }) => {
-                    progress.active_downloads -= 1;
+                    *active_downloads -= 1;
                 }
                 (PackageState::Downloading { .. }, PackageState::Done { .. }) => {
-                    progress.active_downloads -= 1;
-                    progress.completed += 1;
+                    *active_downloads -= 1;
+                    *completed += 1;
                 }
                 (PackageState::Downloading { .. }, PackageState::Failed { .. }) => {
-                    progress.active_downloads -= 1;
-                    progress.failed += 1;
+                    *active_downloads -= 1;
+                    *failed += 1;
                 }
                 (PackageState::Verifying { .. }, PackageState::Done { .. }) => {
-                    progress.completed += 1;
+                    *completed += 1;
                 }
                 (PackageState::Verifying { .. }, PackageState::Failed { .. }) => {
-                    progress.failed += 1;
+                    *failed += 1;
                 }
                 _ => {}
             }
-            progress.packages[index] = state;
-            progress.downloaded_bytes = self.downloaded_bytes.load(Ordering::Relaxed);
+            packages[index] = state;
+            *downloaded_bytes = self.downloaded_bytes.load(Ordering::Relaxed);
         });
     }
 
@@ -747,7 +799,7 @@ mod tests {
 
     #[test]
     fn test_download_progress_eta() {
-        let progress = DownloadProgress {
+        let progress = PackageProgress::Downloading {
             packages: vec![PackageState::Downloading {
                 filename: "test".into(),
                 downloaded: 50,
@@ -769,7 +821,7 @@ mod tests {
 
     #[test]
     fn test_download_progress_eta_zero_speed() {
-        let progress = DownloadProgress {
+        let progress = PackageProgress::Downloading {
             packages: vec![PackageState::Queued],
             total_bytes: 100,
             downloaded_bytes: 0,

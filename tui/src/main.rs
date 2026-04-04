@@ -71,9 +71,10 @@ fn setup_logging() -> Result<()> {
         .with_target(false)
         .with_filter(console_filter);
 
-    // File: always trace level for full diagnostics
+    // File: trace for our code, warn for noisy deps (h2, hyper, reqwest, rustls)
     let file_appender = tracing_appender::rolling::never("/tmp", "archinstall-zfs.log");
-    let file_filter = EnvFilter::new("trace");
+    let file_filter =
+        EnvFilter::new("trace,h2=warn,hyper=warn,reqwest=warn,rustls=warn,pacman=info");
     let file_layer = fmt::layer()
         .with_writer(file_appender)
         .with_ansi(false)

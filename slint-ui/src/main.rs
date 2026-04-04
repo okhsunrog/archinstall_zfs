@@ -158,6 +158,19 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
         let wiz = wizard.clone();
         app.on_item_activated(move |key| {
             let Some(app) = weak.upgrade() else { return };
+
+            // Handle inline radio option clicks: "radio:{group_key}:{index}"
+            if let Some(rest) = key.strip_prefix("radio:") {
+                if let Some((group_key, idx_str)) = rest.rsplit_once(':')
+                    && let Ok(idx) = idx_str.parse::<i32>()
+                {
+                    let mut c = cfg.borrow_mut();
+                    apply_radio(&mut c, group_key, idx);
+                    refresh_ui(&app, &c, &wiz.borrow());
+                }
+                return;
+            }
+
             handle_item_activated(&app, &key, &cfg.borrow(), &wiz.borrow());
         });
     }
@@ -210,46 +223,12 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 return;
             }
 
-            if let Some(field) = partition_select_field(&key) {
-                let paths = if key == "disk_select" {
-                    archinstall_zfs_core::disk::by_id::list_disks_by_id().ok()
-                } else {
-                    archinstall_zfs_core::disk::by_id::list_partitions_by_id().ok()
-                };
-                if let Some(paths) = paths
-                    && let Some(path) = paths.get(idx as usize)
-                {
-                    let path = path.clone();
-                    let mut c = cfg.borrow_mut();
-                    match field {
-                        "disk_by_id" => c.disk_by_id = Some(path),
-                        "efi_partition_by_id" => c.efi_partition_by_id = Some(path),
-                        "zfs_partition_by_id" => c.zfs_partition_by_id = Some(path),
-                        "swap_partition_by_id" => c.swap_partition_by_id = Some(path),
-                        _ => {}
-                    }
-                    refresh_ui(&app, &c, &wiz.borrow());
-                }
-                return;
-            }
-
             if key == "kernel_select" {
                 let kernels = archinstall_zfs_core::kernel::AVAILABLE_KERNELS;
                 if let Some(info) = kernels.get(idx as usize) {
                     cfg.borrow_mut().kernels = Some(vec![info.name.to_string()]);
                     refresh_ui(&app, &cfg.borrow(), &wiz.borrow());
                 }
-                return;
-            }
-
-            if key == "profile_select" {
-                let profiles = archinstall_zfs_core::profile::all_profiles();
-                cfg.borrow_mut().profile = if idx == 0 {
-                    None
-                } else {
-                    profiles.get((idx - 1) as usize).map(|p| p.name.to_string())
-                };
-                refresh_ui(&app, &cfg.borrow(), &wiz.borrow());
                 return;
             }
 
@@ -359,14 +338,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
 
             // Download progress channel
             let (download_tx, download_rx) = tokio::sync::watch::channel(
-                archinstall_zfs_core::system::async_download::DownloadProgress {
-                    packages: vec![],
-                    total_bytes: 0,
-                    downloaded_bytes: 0,
-                    active_downloads: 0,
-                    completed: 0,
-                    failed: 0,
-                },
+                archinstall_zfs_core::system::async_download::PackageProgress::default(),
             );
             let download_tx = Arc::new(download_tx);
 
@@ -389,96 +361,133 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                         Ok(true) => {}
                     }
 
-                    let progress = rx.borrow_and_update().clone();
-                    let is_active = progress.total_bytes > 0
-                        && (progress.active_downloads > 0
-                            || (progress.completed + progress.failed < progress.packages.len()
-                                && !progress.packages.is_empty()));
-
-                    let pct = if progress.total_bytes > 0 {
-                        (progress.downloaded_bytes as f64 / progress.total_bytes as f64 * 100.0)
-                            as i32
-                    } else {
-                        0
+                    use archinstall_zfs_core::system::async_download::{
+                        PackageProgress, PackageState,
                     };
 
-                    let speed = progress.total_speed_bps();
-                    let speed_str = format_speed(speed);
-                    let eta_str = progress
-                        .eta()
-                        .map(format_duration)
-                        .unwrap_or_else(|| "--:--".to_string());
-                    let status = format!(
-                        "Downloads {}/{} | {} | ETA {}",
-                        progress.completed,
-                        progress.packages.len(),
-                        speed_str,
-                        eta_str,
-                    );
+                    let progress = rx.borrow_and_update().clone();
 
-                    let mut dl_items = Vec::new();
-                    for pkg in &progress.packages {
-                        match pkg {
-                            archinstall_zfs_core::system::async_download::PackageState::Downloading {
-                                filename,
-                                downloaded,
-                                total,
-                                speed_bps,
-                                ..
-                            } => {
-                                let pkg_pct = if *total > 0 {
-                                    (*downloaded as f64 / *total as f64 * 100.0) as i32
-                                } else {
-                                    0
-                                };
-                                dl_items.push(DownloadInfo {
-                                    filename: truncate_str(filename, 30).into(),
-                                    pct: pkg_pct,
-                                    speed: format_speed(*speed_bps).into(),
-                                    state: 0,
-                                });
+                    match progress {
+                        PackageProgress::Downloading {
+                            ref packages,
+                            total_bytes,
+                            downloaded_bytes,
+                            active_downloads,
+                            completed,
+                            failed,
+                        } => {
+                            let is_active = total_bytes > 0
+                                && (active_downloads > 0
+                                    || (completed + failed < packages.len()
+                                        && !packages.is_empty()));
+
+                            let pct = if total_bytes > 0 {
+                                (downloaded_bytes as f64 / total_bytes as f64 * 100.0) as i32
+                            } else {
+                                0
+                            };
+
+                            let speed = progress.total_speed_bps();
+                            let speed_str = format_speed(speed);
+                            let eta_str = progress
+                                .eta()
+                                .map(format_duration)
+                                .unwrap_or_else(|| "--:--".to_string());
+                            let status = format!(
+                                "Downloads {}/{} | {} | ETA {}",
+                                completed,
+                                packages.len(),
+                                speed_str,
+                                eta_str,
+                            );
+
+                            let mut dl_items = Vec::new();
+                            for pkg in packages {
+                                match pkg {
+                                    PackageState::Downloading {
+                                        filename,
+                                        downloaded,
+                                        total,
+                                        speed_bps,
+                                        ..
+                                    } => {
+                                        let pkg_pct = if *total > 0 {
+                                            (*downloaded as f64 / *total as f64 * 100.0) as i32
+                                        } else {
+                                            0
+                                        };
+                                        dl_items.push(DownloadInfo {
+                                            filename: truncate_str(filename, 30).into(),
+                                            pct: pkg_pct,
+                                            speed: format_speed(*speed_bps).into(),
+                                            state: 0,
+                                        });
+                                    }
+                                    PackageState::Verifying { filename } => {
+                                        dl_items.push(DownloadInfo {
+                                            filename: truncate_str(filename, 30).into(),
+                                            pct: 100,
+                                            speed: SharedString::default(),
+                                            state: 1,
+                                        });
+                                    }
+                                    _ => {}
+                                }
                             }
-                            archinstall_zfs_core::system::async_download::PackageState::Verifying {
-                                filename,
-                            } => {
-                                dl_items.push(DownloadInfo {
-                                    filename: truncate_str(filename, 30).into(),
-                                    pct: 100,
-                                    speed: SharedString::default(),
-                                    state: 1,
-                                });
-                            }
-                            _ => {}
+
+                            let _ = weak_dl.upgrade_in_event_loop(move |app| {
+                                app.set_download_active(is_active);
+                                app.set_download_pct(pct);
+                                app.set_download_status(SharedString::from(&status));
+                                app.set_download_items(ModelRc::new(VecModel::from(dl_items)));
+                            });
+                        }
+                        PackageProgress::Installing {
+                            package,
+                            current,
+                            total,
+                            percent,
+                        } => {
+                            let status = format!("Installing {current}/{total}: {package}");
+                            let pct = percent as i32;
+                            let _ = weak_dl.upgrade_in_event_loop(move |app| {
+                                app.set_download_active(true);
+                                app.set_download_pct(pct);
+                                app.set_download_status(SharedString::from(&status));
+                                app.set_download_items(ModelRc::default());
+                            });
+                        }
+                        PackageProgress::Done => {
+                            let _ = weak_dl.upgrade_in_event_loop(|app| {
+                                app.set_download_active(false);
+                            });
                         }
                     }
-
-                    let _ = weak_dl.upgrade_in_event_loop(move |app| {
-                        app.set_download_active(is_active);
-                        app.set_download_pct(pct);
-                        app.set_download_status(SharedString::from(&status));
-                        app.set_download_items(ModelRc::new(VecModel::from(dl_items)));
-                    });
                 }
             });
 
             let weak_install = app.as_weak();
             thread::spawn(move || {
-                use tracing_subscriber::layer::SubscriberExt;
+                use tracing_subscriber::Layer as _;
+                use tracing_subscriber::layer::SubscriberExt as _;
 
                 let layer = tracing_layer::UiLogLayer::new(log_tx);
-                let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("trace"));
+                let ui_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
 
                 let file_appender = tracing_appender::rolling::never("/tmp", "archinstall-zfs.log");
+                let file_filter = tracing_subscriber::EnvFilter::new(
+                    "trace,h2=warn,hyper=warn,reqwest=warn,rustls=warn,pacman=info",
+                );
                 let file_layer = tracing_subscriber::fmt::layer()
                     .with_writer(file_appender)
                     .with_ansi(false)
-                    .with_target(true);
+                    .with_target(true)
+                    .with_filter(file_filter);
 
                 let subscriber = tracing_subscriber::registry()
-                    .with(filter)
-                    .with(file_layer)
-                    .with(layer);
+                    .with(layer.with_filter(ui_filter))
+                    .with(file_layer);
                 let _guard = tracing::subscriber::set_default(subscriber);
 
                 let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
@@ -540,8 +549,67 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 }
             } else if item_type == 3 {
                 app.invoke_toggle_activated(key);
-            } else if item_type != 4 && item_type != 6 && item_type != 7 {
+            } else if item_type != 4 && item_type != 6 && item_type != 7 && item_type != 8 {
                 app.invoke_item_activated(key);
+            }
+        });
+    }
+
+    // ── Select filter changed (fuzzy search for locale etc.) ──
+    {
+        let weak = app.as_weak();
+        app.on_select_filter_changed(move |key, filter_text| {
+            let Some(app) = weak.upgrade() else { return };
+            let filter = filter_text.to_lowercase();
+
+            if key == "locale_select" {
+                let all_locales = archinstall_zfs_core::installer::locale::list_locales();
+                let filtered: Vec<SelectOption> = if filter.is_empty() {
+                    all_locales
+                        .iter()
+                        .map(|s| SelectOption {
+                            text: SharedString::from(s.as_str()),
+                        })
+                        .collect()
+                } else {
+                    all_locales
+                        .iter()
+                        .filter(|s| s.to_lowercase().contains(&filter))
+                        .map(|s| SelectOption {
+                            text: SharedString::from(s.as_str()),
+                        })
+                        .collect()
+                };
+                app.set_select_options(ModelRc::new(VecModel::from(filtered)));
+                app.set_select_index(-1);
+            }
+        });
+    }
+
+    // ── Text input edited (password strength) ───────
+    {
+        let weak = app.as_weak();
+        app.on_text_input_edited(move |key, value| {
+            let Some(app) = weak.upgrade() else { return };
+
+            if key == "root_password" || key == "encryption_password" {
+                if value.is_empty() {
+                    app.set_password_strength_score(-1);
+                    return;
+                }
+                let entropy = zxcvbn::zxcvbn(value.as_str(), &[]);
+                let score = u8::from(entropy.score());
+                let theme = app.global::<Theme>().get_c();
+                let (label, color) = match score {
+                    0 => ("Very weak", theme.red),
+                    1 => ("Weak", theme.red),
+                    2 => ("Fair", theme.yellow),
+                    3 => ("Strong", theme.green),
+                    _ => ("Very strong", theme.teal),
+                };
+                app.set_password_strength_score(score as i32);
+                app.set_password_strength_label(SharedString::from(label));
+                app.set_password_strength_color(color);
             }
         });
     }
@@ -609,14 +677,17 @@ fn build_step_items(step: usize, c: &GlobalConfig) -> Vec<ConfigItem> {
 }
 
 fn build_welcome_items(c: &GlobalConfig) -> Vec<ConfigItem> {
-    vec![ci(
+    radio_group(
         "installation_mode",
         "Installation mode",
-        &c.installation_mode
-            .map(|m| m.to_string())
-            .unwrap_or("Not set".into()),
-        1,
-    )]
+        &["Full Disk", "New Pool", "Existing Pool"],
+        match c.installation_mode {
+            Some(InstallationMode::FullDisk) => 0,
+            Some(InstallationMode::NewPool) => 1,
+            Some(InstallationMode::ExistingPool) => 2,
+            None => -1,
+        },
+    )
 }
 
 fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
@@ -624,42 +695,53 @@ fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     let mut items = Vec::new();
 
     if matches!(mode, Some(InstallationMode::FullDisk) | None) {
-        items.push(ci(
-            "disk_by_id",
-            "Disk",
-            &c.disk_by_id
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or("Not set".into()),
-            1,
-        ));
+        let disks = archinstall_zfs_core::disk::by_id::list_disks_by_id().unwrap_or_default();
+        let disk_strs: Vec<String> = disks.iter().map(|p| p.display().to_string()).collect();
+        let disk_refs: Vec<&str> = disk_strs.iter().map(|s| s.as_str()).collect();
+        let selected = c
+            .disk_by_id
+            .as_ref()
+            .and_then(|sel| disks.iter().position(|d| d == sel))
+            .map(|i| i as i32)
+            .unwrap_or(-1);
+        items.extend(radio_group("disk_by_id", "Disk", &disk_refs, selected));
     }
 
     if matches!(
         mode,
         Some(InstallationMode::NewPool) | Some(InstallationMode::ExistingPool)
     ) {
-        items.push(ci(
+        let parts = archinstall_zfs_core::disk::by_id::list_partitions_by_id().unwrap_or_default();
+        let part_strs: Vec<String> = parts.iter().map(|p| p.display().to_string()).collect();
+        let part_refs: Vec<&str> = part_strs.iter().map(|s| s.as_str()).collect();
+
+        let efi_selected = c
+            .efi_partition_by_id
+            .as_ref()
+            .and_then(|sel| parts.iter().position(|p| p == sel))
+            .map(|i| i as i32)
+            .unwrap_or(-1);
+        items.extend(radio_group(
             "efi_partition",
             "EFI partition",
-            &c.efi_partition_by_id
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or("Not set".into()),
-            1,
+            &part_refs,
+            efi_selected,
         ));
-    }
 
-    if matches!(mode, Some(InstallationMode::NewPool)) {
-        items.push(ci(
-            "zfs_partition",
-            "ZFS partition",
-            &c.zfs_partition_by_id
+        if matches!(mode, Some(InstallationMode::NewPool)) {
+            let zfs_selected = c
+                .zfs_partition_by_id
                 .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or("Not set".into()),
-            1,
-        ));
+                .and_then(|sel| parts.iter().position(|p| p == sel))
+                .map(|i| i as i32)
+                .unwrap_or(-1);
+            items.extend(radio_group(
+                "zfs_partition",
+                "ZFS partition",
+                &part_refs,
+                zfs_selected,
+            ));
+        }
     }
 
     items
@@ -680,14 +762,35 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             0,
         ),
         ci("dataset_prefix", "Dataset prefix", &c.dataset_prefix, 0),
-        ci("compression", "Compression", &c.compression.to_string(), 1),
-        ci(
-            "encryption",
-            "Encryption",
-            &c.zfs_encryption_mode.to_string(),
-            1,
-        ),
     ];
+
+    items.extend(radio_group(
+        "compression",
+        "Compression",
+        &["lz4", "zstd", "zstd-5", "zstd-10", "off"],
+        match c.compression {
+            CompressionAlgo::Lz4 => 0,
+            CompressionAlgo::Zstd => 1,
+            CompressionAlgo::Zstd5 => 2,
+            CompressionAlgo::Zstd10 => 3,
+            CompressionAlgo::Off => 4,
+        },
+    ));
+
+    items.extend(radio_group(
+        "encryption",
+        "Encryption",
+        &[
+            "No encryption",
+            "Encrypt entire pool",
+            "Encrypt base dataset only",
+        ],
+        match c.zfs_encryption_mode {
+            ZfsEncryptionMode::None => 0,
+            ZfsEncryptionMode::Pool => 1,
+            ZfsEncryptionMode::Dataset => 2,
+        },
+    ));
 
     if c.zfs_encryption_mode != ZfsEncryptionMode::None {
         items.push(ci(
@@ -702,7 +805,22 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         ));
     }
 
-    items.push(ci("swap_mode", "Swap", &c.swap_mode.to_string(), 1));
+    items.extend(radio_group(
+        "swap_mode",
+        "Swap",
+        &[
+            "None",
+            "ZRAM",
+            "Swap partition",
+            "Swap partition (encrypted)",
+        ],
+        match c.swap_mode {
+            SwapMode::None => 0,
+            SwapMode::Zram => 1,
+            SwapMode::ZswapPartition => 2,
+            SwapMode::ZswapPartitionEncrypted => 3,
+        },
+    ));
 
     if matches!(mode, Some(InstallationMode::FullDisk)) && has_swap_partition {
         items.push(ci(
@@ -713,32 +831,48 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         ));
     }
     if !matches!(mode, Some(InstallationMode::FullDisk) | None) && has_swap_partition {
-        items.push(ci(
+        let parts = archinstall_zfs_core::disk::by_id::list_partitions_by_id().unwrap_or_default();
+        let part_strs: Vec<String> = parts.iter().map(|p| p.display().to_string()).collect();
+        let part_refs: Vec<&str> = part_strs.iter().map(|s| s.as_str()).collect();
+        let swap_selected = c
+            .swap_partition_by_id
+            .as_ref()
+            .and_then(|sel| parts.iter().position(|p| p == sel))
+            .map(|i| i as i32)
+            .unwrap_or(-1);
+        items.extend(radio_group(
             "swap_partition",
             "Swap partition",
-            &c.swap_partition_by_id
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or("Not set".into()),
-            1,
+            &part_refs,
+            swap_selected,
         ));
     }
 
-    items.extend([
-        ci("init_system", "Init system", &c.init_system.to_string(), 1),
-        ci(
-            "zfs_module_mode",
-            "ZFS module",
-            &c.zfs_module_mode.to_string(),
-            1,
-        ),
-    ]);
+    items.extend(radio_group(
+        "init_system",
+        "Init system",
+        &["dracut", "mkinitcpio"],
+        match c.init_system {
+            InitSystem::Dracut => 0,
+            InitSystem::Mkinitcpio => 1,
+        },
+    ));
+
+    items.extend(radio_group(
+        "zfs_module_mode",
+        "ZFS module",
+        &["precompiled", "dkms"],
+        match c.zfs_module_mode {
+            ZfsModuleMode::Precompiled => 0,
+            ZfsModuleMode::Dkms => 1,
+        },
+    ));
 
     items
 }
 
 fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
-    vec![
+    let mut items = vec![
         ci(
             "kernel",
             "Kernel",
@@ -773,13 +907,18 @@ fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             if c.ntp { "Enabled" } else { "Disabled" },
             3,
         ),
-        ci(
-            "parallel_downloads",
-            "Parallel downloads",
-            &c.parallel_downloads.to_string(),
-            1,
-        ),
-    ]
+    ];
+
+    let dl_options: Vec<String> = (1..=10).map(|n| n.to_string()).collect();
+    let dl_refs: Vec<&str> = dl_options.iter().map(|s| s.as_str()).collect();
+    items.extend(radio_group(
+        "parallel_downloads",
+        "Parallel downloads",
+        &dl_refs,
+        (c.parallel_downloads as i32) - 1,
+    ));
+
+    items
 }
 
 fn build_users_items(c: &GlobalConfig) -> Vec<ConfigItem> {
@@ -812,19 +951,31 @@ fn build_users_items(c: &GlobalConfig) -> Vec<ConfigItem> {
 }
 
 fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
-    vec![
-        ci(
-            "profile",
-            "Profile",
-            &c.profile.clone().unwrap_or("Not set".into()),
-            1,
-        ),
-        ci(
-            "audio",
-            "Audio",
-            &c.audio.map(|a| a.to_string()).unwrap_or("None".into()),
-            1,
-        ),
+    let profiles = archinstall_zfs_core::profile::all_profiles();
+    let mut profile_names: Vec<String> = vec!["None".to_string()];
+    profile_names.extend(profiles.iter().map(|p| p.name.to_string()));
+    let profile_refs: Vec<&str> = profile_names.iter().map(|s| s.as_str()).collect();
+    let profile_selected = c
+        .profile
+        .as_ref()
+        .and_then(|sel| profiles.iter().position(|p| p.name == *sel))
+        .map(|i| (i + 1) as i32) // +1 because "None" is at index 0
+        .unwrap_or(0);
+
+    let mut items = radio_group("profile", "Profile", &profile_refs, profile_selected);
+
+    items.extend(radio_group(
+        "audio",
+        "Audio",
+        &["None", "pipewire", "pulseaudio"],
+        match c.audio {
+            None => 0,
+            Some(AudioServer::Pipewire) => 1,
+            Some(AudioServer::Pulseaudio) => 2,
+        },
+    ));
+
+    items.extend([
         ci(
             "bluetooth",
             "Bluetooth",
@@ -871,7 +1022,9 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             },
             3,
         ),
-    ]
+    ]);
+
+    items
 }
 
 fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
@@ -887,13 +1040,36 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             item_type: 4, // separator used as section label
         });
 
-        for item in build_step_items(step, c) {
-            items.push(ConfigItem {
-                key: item.key,
-                label: item.label,
-                value: item.value,
-                item_type: 6, // read-only
-            });
+        let step_items = build_step_items(step, c);
+        let mut i = 0;
+        while i < step_items.len() {
+            let item = &step_items[i];
+            if item.item_type == 8 {
+                // Radio header: find the selected option and show as "Header: Selected"
+                let header_label = item.label.clone();
+                let mut selected_label: SharedString = "Not set".into();
+                i += 1;
+                while i < step_items.len() && step_items[i].item_type == 9 {
+                    if step_items[i].value == "selected" {
+                        selected_label = step_items[i].label.clone();
+                    }
+                    i += 1;
+                }
+                items.push(ConfigItem {
+                    key: SharedString::default(),
+                    label: header_label,
+                    value: selected_label,
+                    item_type: 6,
+                });
+            } else {
+                items.push(ConfigItem {
+                    key: item.key.clone(),
+                    label: item.label.clone(),
+                    value: item.value.clone(),
+                    item_type: 6,
+                });
+                i += 1;
+            }
         }
     }
 
@@ -946,87 +1122,36 @@ fn sep() -> ConfigItem {
     }
 }
 
+/// Emit a radio group: a header (item_type 8) followed by clickable options (item_type 9).
+/// `key` is the logical group key (e.g. "compression").
+/// `selected` is the currently selected index.
+fn radio_group(key: &str, label: &str, options: &[&str], selected: i32) -> Vec<ConfigItem> {
+    let mut items = vec![ConfigItem {
+        key: SharedString::default(),
+        label: label.into(),
+        value: SharedString::default(),
+        item_type: 8, // radio header
+    }];
+    for (i, opt) in options.iter().enumerate() {
+        items.push(ConfigItem {
+            key: format!("radio:{key}:{i}").into(),
+            label: (*opt).into(),
+            value: if i as i32 == selected {
+                "selected".into()
+            } else {
+                SharedString::default()
+            },
+            item_type: 9, // radio option
+        });
+    }
+    items
+}
+
 // ── Item activation (open popup) ─────────────────────
 
 fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, _wizard: &WizardState) {
     match key {
-        "installation_mode" => show_select(
-            app,
-            key,
-            "Installation Mode",
-            &["Full Disk", "New Pool", "Existing Pool"],
-            match config.installation_mode {
-                Some(InstallationMode::FullDisk) => 0,
-                Some(InstallationMode::NewPool) => 1,
-                Some(InstallationMode::ExistingPool) => 2,
-                None => 0,
-            },
-        ),
-        "encryption" => show_select(
-            app,
-            key,
-            "Encryption",
-            &[
-                "No encryption",
-                "Encrypt entire pool",
-                "Encrypt base dataset only",
-            ],
-            match config.zfs_encryption_mode {
-                ZfsEncryptionMode::None => 0,
-                ZfsEncryptionMode::Pool => 1,
-                ZfsEncryptionMode::Dataset => 2,
-            },
-        ),
-        "compression" => show_select(
-            app,
-            key,
-            "Compression",
-            &["lz4", "zstd", "zstd-5", "zstd-10", "off"],
-            match config.compression {
-                CompressionAlgo::Lz4 => 0,
-                CompressionAlgo::Zstd => 1,
-                CompressionAlgo::Zstd5 => 2,
-                CompressionAlgo::Zstd10 => 3,
-                CompressionAlgo::Off => 4,
-            },
-        ),
-        "swap_mode" => show_select(
-            app,
-            key,
-            "Swap Mode",
-            &[
-                "None",
-                "ZRAM",
-                "Swap partition",
-                "Swap partition (encrypted)",
-            ],
-            match config.swap_mode {
-                SwapMode::None => 0,
-                SwapMode::Zram => 1,
-                SwapMode::ZswapPartition => 2,
-                SwapMode::ZswapPartitionEncrypted => 3,
-            },
-        ),
-        "init_system" => show_select(
-            app,
-            key,
-            "Init System",
-            &["dracut", "mkinitcpio"],
-            match config.init_system {
-                InitSystem::Dracut => 0,
-                InitSystem::Mkinitcpio => 1,
-            },
-        ),
-        "zfs_module_mode" => show_select(
-            app,
-            key,
-            "ZFS Module",
-            &["precompiled", "dkms"],
-            match config.zfs_module_mode {
-                ZfsModuleMode::Precompiled => 0,
-                ZfsModuleMode::Dkms => 1,
-            },
-        ),
+        // Popup selects — only for items with too many options or async scan
         "kernel" => {
             let Ok(rt) = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -1062,30 +1187,6 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, _wizard: &
                 current_idx as i32,
             );
         }
-        "profile" => {
-            let profiles = archinstall_zfs_core::profile::all_profiles();
-            let mut names: Vec<String> = vec!["None".to_string()];
-            names.extend(profiles.iter().map(|p| p.name.to_string()));
-            let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
-            show_select(app, "profile_select", "Profile", &name_refs, 0);
-        }
-        "audio" => show_select(
-            app,
-            key,
-            "Audio",
-            &["None", "pipewire", "pulseaudio"],
-            match config.audio {
-                None => 0,
-                Some(AudioServer::Pipewire) => 1,
-                Some(AudioServer::Pulseaudio) => 2,
-            },
-        ),
-        "parallel_downloads" => {
-            let options: Vec<String> = (1..=10).map(|n| n.to_string()).collect();
-            let opt_refs: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
-            let current = (config.parallel_downloads as i32) - 1;
-            show_select(app, key, "Parallel downloads", &opt_refs, current);
-        }
         "timezone" => {
             let regions = archinstall_zfs_core::installer::locale::list_timezone_regions();
             show_select(app, "timezone_region", "Timezone region", &regions, 0);
@@ -1093,27 +1194,22 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, _wizard: &
         "locale" => {
             let locales = archinstall_zfs_core::installer::locale::list_locales();
             let locale_strs: Vec<&str> = locales.iter().map(|s| s.as_str()).collect();
-            show_select(app, "locale_select", "Locale", &locale_strs, 0);
+            let current_idx = config
+                .locale
+                .as_ref()
+                .and_then(|l| locales.iter().position(|x| x == l))
+                .map(|i| i as i32)
+                .unwrap_or(0);
+            show_select_with_filter(
+                app,
+                "locale_select",
+                "Locale (type to filter)",
+                &locale_strs,
+                current_idx,
+                true,
+            );
         }
-        "disk_by_id" | "efi_partition" | "zfs_partition" | "swap_partition" => {
-            let (select_key, title, is_disk) = match key {
-                "disk_by_id" => ("disk_select", "Select disk", true),
-                "efi_partition" => ("efi_partition_select", "EFI partition", false),
-                "zfs_partition" => ("zfs_partition_select", "ZFS partition", false),
-                "swap_partition" => ("swap_partition_select", "Swap partition", false),
-                _ => return,
-            };
-            let paths = if is_disk {
-                archinstall_zfs_core::disk::by_id::list_disks_by_id().ok()
-            } else {
-                archinstall_zfs_core::disk::by_id::list_partitions_by_id().ok()
-            };
-            if let Some(paths) = paths {
-                let strs: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
-                let refs: Vec<&str> = strs.iter().map(|s| s.as_str()).collect();
-                show_select(app, select_key, title, &refs, 0);
-            }
-        }
+        // Text input popups
         "pool_name"
         | "dataset_prefix"
         | "hostname"
@@ -1154,6 +1250,17 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, _wizard: &
 }
 
 fn show_select(app: &App, key: &str, title: &str, options: &[&str], current: i32) {
+    show_select_with_filter(app, key, title, options, current, false);
+}
+
+fn show_select_with_filter(
+    app: &App,
+    key: &str,
+    title: &str,
+    options: &[&str],
+    current: i32,
+    filterable: bool,
+) {
     let opts: Vec<SelectOption> = options
         .iter()
         .map(|s| SelectOption {
@@ -1164,6 +1271,7 @@ fn show_select(app: &App, key: &str, title: &str, options: &[&str], current: i32
     app.set_select_title(title.into());
     app.set_select_options(ModelRc::new(VecModel::from(opts)));
     app.set_select_index(current);
+    app.set_select_show_filter(filterable);
     app.set_select_visible(true);
 }
 
@@ -1172,6 +1280,7 @@ fn show_text_input(app: &App, key: &str, title: &str, current: &str, password: b
     app.set_text_input_title(title.into());
     app.set_text_input_value(current.into());
     app.set_text_input_password(password);
+    app.set_password_strength_score(-1);
     app.set_text_input_visible(true);
 }
 
@@ -1184,28 +1293,25 @@ fn next_selectable_index(items: &[ConfigItem], current: i32, dir: i32) -> i32 {
     for offset in 1..=len {
         let idx = ((current + dir * offset) % len + len) % len;
         let t = items[idx as usize].item_type;
-        if t != 4 && t != 6 && t != 7 {
+        // Skip separator (4), readonly (6), warning (7), radio-header (8)
+        if t != 4 && t != 6 && t != 7 && t != 8 {
             return idx;
         }
     }
     current
 }
 
-/// Maps a partition select key (from on_select_confirmed) to the config field name.
-fn partition_select_field(key: &str) -> Option<&'static str> {
-    match key {
-        "disk_select" => Some("disk_by_id"),
-        "efi_partition_select" => Some("efi_partition_by_id"),
-        "zfs_partition_select" => Some("zfs_partition_by_id"),
-        "swap_partition_select" => Some("swap_partition_by_id"),
-        _ => None,
-    }
-}
-
 // ── Apply mutations ──────────────────────────────────
 
 fn apply_select(config: &mut GlobalConfig, key: &str, idx: i32) {
-    match key {
+    // Fallback for any popup selects not handled explicitly in on_select_confirmed.
+    // Most selects are now inline radio groups handled by apply_radio.
+    apply_radio(config, key, idx);
+}
+
+/// Apply an inline radio selection. `group_key` is e.g. "compression", `idx` is the option index.
+fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
+    match group_key {
         "installation_mode" => {
             let new_mode = match idx {
                 0 => InstallationMode::FullDisk,
@@ -1220,14 +1326,32 @@ fn apply_select(config: &mut GlobalConfig, key: &str, idx: i32) {
             }
             config.installation_mode = Some(new_mode);
         }
-        "encryption" => {
-            config.zfs_encryption_mode = match idx {
-                0 => ZfsEncryptionMode::None,
-                1 => ZfsEncryptionMode::Pool,
-                _ => ZfsEncryptionMode::Dataset,
-            };
-            if config.zfs_encryption_mode == ZfsEncryptionMode::None {
-                config.zfs_encryption_password = None;
+        "disk_by_id" => {
+            if let Ok(disks) = archinstall_zfs_core::disk::by_id::list_disks_by_id()
+                && let Some(path) = disks.get(idx as usize)
+            {
+                config.disk_by_id = Some(path.clone());
+            }
+        }
+        "efi_partition" => {
+            if let Ok(parts) = archinstall_zfs_core::disk::by_id::list_partitions_by_id()
+                && let Some(path) = parts.get(idx as usize)
+            {
+                config.efi_partition_by_id = Some(path.clone());
+            }
+        }
+        "zfs_partition" => {
+            if let Ok(parts) = archinstall_zfs_core::disk::by_id::list_partitions_by_id()
+                && let Some(path) = parts.get(idx as usize)
+            {
+                config.zfs_partition_by_id = Some(path.clone());
+            }
+        }
+        "swap_partition" => {
+            if let Ok(parts) = archinstall_zfs_core::disk::by_id::list_partitions_by_id()
+                && let Some(path) = parts.get(idx as usize)
+            {
+                config.swap_partition_by_id = Some(path.clone());
             }
         }
         "compression" => {
@@ -1237,6 +1361,16 @@ fn apply_select(config: &mut GlobalConfig, key: &str, idx: i32) {
                 2 => CompressionAlgo::Zstd5,
                 3 => CompressionAlgo::Zstd10,
                 _ => CompressionAlgo::Off,
+            }
+        }
+        "encryption" => {
+            config.zfs_encryption_mode = match idx {
+                0 => ZfsEncryptionMode::None,
+                1 => ZfsEncryptionMode::Pool,
+                _ => ZfsEncryptionMode::Dataset,
+            };
+            if config.zfs_encryption_mode == ZfsEncryptionMode::None {
+                config.zfs_encryption_password = None;
             }
         }
         "swap_mode" => {
@@ -1258,6 +1392,14 @@ fn apply_select(config: &mut GlobalConfig, key: &str, idx: i32) {
                 0 => ZfsModuleMode::Precompiled,
                 _ => ZfsModuleMode::Dkms,
             }
+        }
+        "profile" => {
+            let profiles = archinstall_zfs_core::profile::all_profiles();
+            config.profile = if idx == 0 {
+                None
+            } else {
+                profiles.get((idx - 1) as usize).map(|p| p.name.to_string())
+            };
         }
         "audio" => {
             config.audio = match idx {
@@ -1348,5 +1490,12 @@ fn format_duration(d: std::time::Duration) -> String {
 }
 
 fn truncate_str(s: &str, max: usize) -> &str {
-    if s.len() <= max { s } else { &s[..max] }
+    if s.len() <= max {
+        s
+    } else {
+        match s.char_indices().nth(max) {
+            Some((idx, _)) => &s[..idx],
+            None => s,
+        }
+    }
 }

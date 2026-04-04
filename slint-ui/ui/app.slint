@@ -1,7 +1,7 @@
 import { ListView, ScrollView } from "std-widgets.slint";
 
 // Catppuccin Mocha color palette
-struct Catppuccin {
+export struct Catppuccin {
     base: color,
     mantle: color,
     surface0: color,
@@ -20,7 +20,7 @@ struct Catppuccin {
     peach: color,
 }
 
-global Theme {
+export global Theme {
     out property <Catppuccin> c: {
         base: #1e1e2e,
         mantle: #181825,
@@ -76,9 +76,14 @@ component TextInputPopup inherits Rectangle {
     in-out property <string> input-text;
     in property <bool> is-password: false;
     in property <bool> popup-visible;
+    // Password strength (set from Rust)
+    in property <int> strength-score: -1; // -1=hidden, 0..4=zxcvbn score
+    in property <string> strength-label;
+    in property <color> strength-color: Theme.c.overlay0;
 
     callback confirmed(string);
     callback cancelled();
+    callback text-edited(string);
 
     if popup-visible: Rectangle {
         background: #00000080;
@@ -90,11 +95,13 @@ component TextInputPopup inherits Rectangle {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             width: min(500px, parent.width - 40px);
-            height: 140px;
+            height: is-password ? 190px : 140px;
             background: Theme.c.mantle;
             border-radius: 8px;
             border-color: Theme.c.surface1;
             border-width: 1px;
+            accessible-role: groupbox;
+            accessible-label: title;
 
             VerticalLayout {
                 padding: 16px;
@@ -104,7 +111,7 @@ component TextInputPopup inherits Rectangle {
                     text: title;
                     color: Theme.c.blue;
                     font-size: 16px;
-                    font-weight: 600;
+                    font-weight: FontWeight.semi-bold;
                 }
 
                 Rectangle {
@@ -113,19 +120,63 @@ component TextInputPopup inherits Rectangle {
                     border-radius: 4px;
                     border-color: Theme.c.blue;
                     border-width: 1px;
+                    clip: true;
 
                     input := TextInput {
+                        width: max(parent.width - 16px, self.preferred-width);
                         x: 8px;
-                        width: parent.width - 16px;
                         vertical-alignment: center;
                         color: Theme.c.text;
                         font-size: 14px;
                         text: input-text;
                         input-type: is-password ? InputType.password : InputType.text;
 
+                        private property <length> margin: 8px;
+                        cursor-position-changed(cursor-position) => {
+                            if cursor-position.x + self.x < margin {
+                                self.x = - cursor-position.x + margin;
+                            } else if cursor-position.x + self.x > parent.width - margin - self.text-cursor-width {
+                                self.x = parent.width - cursor-position.x - margin - self.text-cursor-width;
+                            }
+                        }
+
+                        edited => {
+                            text-edited(self.text);
+                        }
+
                         accepted => {
                             confirmed(self.text);
                         }
+                    }
+
+                    init => { input.focus(); }
+                }
+
+                // Password strength bar
+                if is-password && strength-score >= 0: VerticalLayout {
+                    spacing: 4px;
+
+                    Rectangle {
+                        height: 6px;
+                        background: Theme.c.surface0;
+                        border-radius: 3px;
+                        clip: true;
+
+                        Rectangle {
+                            x: 0;
+                            y: 0;
+                            height: parent.height;
+                            width: parent.width * (strength-score + 1) / 5;
+                            background: strength-color;
+                            border-radius: 3px;
+                        }
+                    }
+
+                    Text {
+                        text: strength-label;
+                        color: strength-color;
+                        font-size: 12px;
+                        horizontal-alignment: center;
                     }
                 }
 
@@ -138,6 +189,8 @@ component TextInputPopup inherits Rectangle {
                         height: 30px;
                         background: cancel-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
                         border-radius: 4px;
+                        accessible-role: button;
+                        accessible-label: "Cancel";
 
                         cancel-ta := TouchArea {
                             clicked => { cancelled(); }
@@ -157,6 +210,8 @@ component TextInputPopup inherits Rectangle {
                         height: 30px;
                         background: ok-ta.has-hover ? Theme.c.sky : Theme.c.blue;
                         border-radius: 4px;
+                        accessible-role: button;
+                        accessible-label: "OK";
 
                         ok-ta := TouchArea {
                             clicked => { confirmed(input.text); }
@@ -166,7 +221,7 @@ component TextInputPopup inherits Rectangle {
                             text: "OK";
                             color: Theme.c.base;
                             font-size: 13px;
-                            font-weight: 600;
+                            font-weight: FontWeight.semi-bold;
                             horizontal-alignment: center;
                             vertical-alignment: center;
                         }
@@ -185,9 +240,11 @@ component SelectPopup inherits Rectangle {
     in property <int> selected-index;
     out property <int> result-index: selected-index;
     in property <bool> popup-visible;
+    in property <bool> show-filter: false;
 
     callback accepted(int);
     callback cancelled();
+    callback filter-changed(string);
 
     if popup-visible: Rectangle {
         background: #00000080;
@@ -210,6 +267,8 @@ component SelectPopup inherits Rectangle {
             border-color: Theme.c.surface1;
             border-width: 1px;
             clip: true;
+            accessible-role: groupbox;
+            accessible-label: title;
 
             VerticalLayout {
                 padding: 16px;
@@ -219,8 +278,40 @@ component SelectPopup inherits Rectangle {
                     text: title;
                     color: Theme.c.blue;
                     font-size: 16px;
-                    font-weight: 600;
+                    font-weight: FontWeight.semi-bold;
                     height: 24px;
+                }
+
+                if show-filter: Rectangle {
+                    height: 32px;
+                    background: Theme.c.surface0;
+                    border-radius: 4px;
+                    border-color: Theme.c.blue;
+                    border-width: 1px;
+                    clip: true;
+
+                    filter-input := TextInput {
+                        width: max(parent.width - 16px, self.preferred-width);
+                        x: 8px;
+                        vertical-alignment: center;
+                        color: Theme.c.text;
+                        font-size: 13px;
+
+                        private property <length> margin: 8px;
+                        cursor-position-changed(cursor-position) => {
+                            if cursor-position.x + self.x < margin {
+                                self.x = - cursor-position.x + margin;
+                            } else if cursor-position.x + self.x > parent.width - margin - self.text-cursor-width {
+                                self.x = parent.width - cursor-position.x - margin - self.text-cursor-width;
+                            }
+                        }
+
+                        edited => {
+                            filter-changed(self.text);
+                        }
+                    }
+
+                    init => { filter-input.focus(); }
                 }
 
                 ListView {
@@ -230,6 +321,11 @@ component SelectPopup inherits Rectangle {
                                   : index == result-index ? Theme.c.surface0
                                   : transparent;
                         border-radius: 4px;
+                        accessible-role: list-item;
+                        accessible-label: option.text;
+                        accessible-item-selected: index == result-index;
+                        accessible-item-index: index;
+                        accessible-item-count: options.length;
 
                         item-ta := TouchArea {
                             clicked => {
@@ -264,6 +360,10 @@ component SidebarItem inherits Rectangle {
     in property <int> step-index;
 
     callback clicked();
+
+    accessible-role: button;
+    accessible-label: label;
+    accessible-enabled: state == 1 || state == 2;
 
     height: 36px;
     background: state == 1 ? Theme.c.surface0
@@ -303,7 +403,7 @@ component SidebarItem inherits Rectangle {
                  : state == 2 ? Theme.c.green
                  : Theme.c.overlay0;
             font-size: 14px;
-            font-weight: state == 1 ? 600 : 400;
+            font-weight: state == 1 ? FontWeight.semi-bold : FontWeight.normal;
             vertical-alignment: center;
         }
     }
@@ -316,6 +416,7 @@ export component App inherits Window {
     preferred-width: 800px;
     preferred-height: 600px;
     title: "archinstall-zfs";
+    forward-focus: main-focus-scope;
 
     // Wizard state
     in property <[StepInfo]> steps;
@@ -323,6 +424,8 @@ export component App inherits Window {
     in property <int> total-steps: 7;
 
     // Config items model (per-step)
+    // item-type: 0=text, 1=select(popup), 2=password, 3=toggle, 4=separator,
+    //            5=action, 6=readonly, 7=warning, 8=radio-header, 9=radio-option
     in property <[ConfigItem]> config-items;
 
     // Select popup state
@@ -331,6 +434,7 @@ export component App inherits Window {
     in-out property <[SelectOption]> select-options;
     in-out property <int> select-index;
     in-out property <string> select-key;
+    in-out property <bool> select-show-filter: false;
 
     // Text input popup state
     in-out property <bool> text-input-visible: false;
@@ -338,6 +442,11 @@ export component App inherits Window {
     in-out property <string> text-input-value;
     in-out property <bool> text-input-password: false;
     in-out property <string> text-input-key;
+
+    // Password strength (driven from Rust)
+    in-out property <int> password-strength-score: -1;
+    in-out property <string> password-strength-label;
+    in-out property <color> password-strength-color: Theme.c.overlay0;
 
     // Install state: 0=config, 1=installing, 2=done, 3=failed
     in-out property <int> install-state: 0;
@@ -360,7 +469,9 @@ export component App inherits Window {
     // Callbacks to Rust
     callback item-activated(string);
     callback select-confirmed(string, int);
+    callback select-filter-changed(string, string); // (select-key, filter-text)
     callback text-confirmed(string, string);
+    callback text-input-edited(string, string); // (text-input-key, current-text)
     callback toggle-activated(string);
     callback install-requested();
     callback quit-requested();
@@ -372,7 +483,8 @@ export component App inherits Window {
     callback key-nav-activate();
 
     // ── Keyboard navigation ─────────────────────────
-    if install-state == 0 && !select-visible && !text-input-visible: FocusScope {
+    main-focus-scope := FocusScope {
+        enabled: install-state == 0 && !select-visible && !text-input-visible;
         key-pressed(e) => {
             if e.text == Key.DownArrow || e.text == "j" {
                 key-nav-down();
@@ -427,7 +539,7 @@ export component App inherits Window {
                     text: "archinstall-zfs";
                     color: Theme.c.blue;
                     font-size: 22px;
-                    font-weight: 700;
+                    font-weight: FontWeight.bold;
                     vertical-alignment: center;
                     horizontal-stretch: 1;
                 }
@@ -491,7 +603,7 @@ export component App inherits Window {
                                 ? steps[current-step].label : "";
                             color: Theme.c.mauve;
                             font-size: 18px;
-                            font-weight: 600;
+                            font-weight: FontWeight.semi-bold;
                             vertical-alignment: center;
                         }
                     }
@@ -508,12 +620,14 @@ export component App inherits Window {
                         for item[index] in config-items: Rectangle {
                             height: item.item-type == 4 ? 16px
                                   : item.item-type == 7 ? 28px
+                                  : item.item-type == 8 ? 28px
                                   : 34px;
                             border-radius: 4px;
                             background: (row-ta.has-hover || index == focused-index)
                                 && item.item-type != 4
                                 && item.item-type != 6
                                 && item.item-type != 7
+                                && item.item-type != 8
                                 ? Theme.c.surface0 : transparent;
 
                             // Separator
@@ -536,8 +650,46 @@ export component App inherits Window {
                                 }
                             }
 
+                            // Radio group header
+                            if item.item-type == 8: HorizontalLayout {
+                                padding-left: 16px;
+                                padding-top: 4px;
+                                alignment: start;
+
+                                Text {
+                                    text: item.label;
+                                    color: Theme.c.subtext1;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // Radio option
+                            if item.item-type == 9: HorizontalLayout {
+                                padding-left: 28px;
+                                padding-right: 16px;
+                                spacing: 8px;
+                                alignment: start;
+
+                                Text {
+                                    text: item.value == "selected" ? "\u{25cf}" : "\u{25cb}";
+                                    color: item.value == "selected" ? Theme.c.green : Theme.c.overlay0;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                    width: 16px;
+                                }
+
+                                Text {
+                                    text: item.label;
+                                    color: item.value == "selected" ? Theme.c.green : Theme.c.text;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                }
+                            }
+
                             row-ta := TouchArea {
-                                mouse-cursor: item.item-type == 4 || item.item-type == 6 || item.item-type == 7
+                                mouse-cursor: item.item-type == 4 || item.item-type == 6
+                                    || item.item-type == 7 || item.item-type == 8
                                     ? default : pointer;
                                 clicked => {
                                     focused-index = index;
@@ -548,7 +700,8 @@ export component App inherits Window {
                                         toggle-activated(item.key);
                                     } else if item.item-type != 4
                                            && item.item-type != 6
-                                           && item.item-type != 7 {
+                                           && item.item-type != 7
+                                           && item.item-type != 8 {
                                         item-activated(item.key);
                                     }
                                 }
@@ -563,7 +716,7 @@ export component App inherits Window {
                                     text: item.label;
                                     color: Theme.c.peach;
                                     font-size: 14px;
-                                    font-weight: 600;
+                                    font-weight: FontWeight.semi-bold;
                                     vertical-alignment: center;
                                 }
                             }
@@ -592,8 +745,8 @@ export component App inherits Window {
                             }
 
                             // Normal config items (text, select, password, toggle)
-                            if item.item-type != 4 && item.item-type != 5
-                                && item.item-type != 6 && item.item-type != 7: HorizontalLayout {
+                            if item.item-type == 0 || item.item-type == 1
+                                || item.item-type == 2 || item.item-type == 3: HorizontalLayout {
                                 padding-left: 16px;
                                 padding-right: 16px;
 
@@ -674,7 +827,7 @@ export component App inherits Window {
                                 text: "Next \u{25b8}";
                                 color: Theme.c.base;
                                 font-size: 13px;
-                                font-weight: 600;
+                                font-weight: FontWeight.semi-bold;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                             }
@@ -703,7 +856,7 @@ export component App inherits Window {
                     : install-state == 2 ? Theme.c.green
                     : Theme.c.red;
                 font-size: 20px;
-                font-weight: 700;
+                font-weight: FontWeight.bold;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
@@ -752,7 +905,7 @@ export component App inherits Window {
                     text: download-status;
                     color: Theme.c.teal;
                     font-size: 13px;
-                    font-weight: 600;
+                    font-weight: FontWeight.semi-bold;
                 }
 
                 // Overall progress bar
@@ -766,7 +919,7 @@ export component App inherits Window {
                         x: 0;
                         y: 0;
                         height: parent.height;
-                        width: parent.width * (download-pct / 100);
+                        width: parent.width * download-pct / 100;
                         background: Theme.c.teal;
                         border-radius: 3px;
                     }
@@ -846,6 +999,7 @@ export component App inherits Window {
         options: select-options;
         selected-index: select-index;
         popup-visible: select-visible;
+        show-filter: select-show-filter;
 
         accepted(idx) => {
             select-visible = false;
@@ -854,6 +1008,9 @@ export component App inherits Window {
         cancelled() => {
             select-visible = false;
         }
+        filter-changed(text) => {
+            select-filter-changed(select-key, text);
+        }
     }
 
     TextInputPopup {
@@ -861,6 +1018,9 @@ export component App inherits Window {
         input-text: text-input-value;
         is-password: text-input-password;
         popup-visible: text-input-visible;
+        strength-score: password-strength-score;
+        strength-label: password-strength-label;
+        strength-color: password-strength-color;
 
         confirmed(val) => {
             text-input-visible = false;
@@ -868,6 +1028,9 @@ export component App inherits Window {
         }
         cancelled() => {
             text-input-visible = false;
+        }
+        text-edited(val) => {
+            text-input-edited(text-input-key, val);
         }
     }
 }

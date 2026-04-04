@@ -196,11 +196,24 @@ impl AlpmContext {
                 cache_dir,
                 5,
                 cancel.clone(),
-                progress_tx,
+                progress_tx.clone(),
             ))?;
         }
 
         tracing::info!("installing packages");
+
+        // Set up install progress callback
+        if let Some(tx) = progress_tx {
+            self.handle
+                .set_progress_cb(tx, |_kind, pkgname, percent, howmany, current, tx| {
+                    tx.send_replace(super::async_download::PackageProgress::Installing {
+                        package: pkgname.to_string(),
+                        current,
+                        total: howmany,
+                        percent: percent as u32,
+                    });
+                });
+        }
 
         // Commit — libalpm finds packages in cache, skips download phase
         self.handle.trans_commit().map_err(|e| {
@@ -314,19 +327,6 @@ impl AlpmContext {
     }
 
     fn setup_callbacks(&self) {
-        self.handle
-            .set_progress_cb((), |progress, pkgname, percent, howmany, current, _| {
-                tracing::info!(
-                    target: "pacman.progress",
-                    kind = ?progress,
-                    package = pkgname,
-                    percent,
-                    total = howmany,
-                    current,
-                    "{pkgname} ({current}/{howmany}) {percent}%"
-                );
-            });
-
         self.handle
             .set_dl_cb((), |filename, event, _| match event.event() {
                 DownloadEvent::Progress(p) => {

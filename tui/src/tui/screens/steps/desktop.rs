@@ -1,9 +1,9 @@
 use archinstall_zfs_core::config::types::{AudioServer, GlobalConfig, SeatAccess};
 
-use super::{MenuItem, MenuKind};
+use super::{MenuItem, MenuKind, radio_group};
 
 pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
-    vec![
+    let mut items = vec![
         MenuItem {
             key: "profile",
             label: "Profile",
@@ -28,44 +28,41 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
             }),
             kind: MenuKind::Custom,
         },
-        MenuItem {
-            key: "seat_access",
-            label: "Seat access",
-            value: config
-                .seat_access
-                .map(|s| s.to_string())
-                .unwrap_or("None".into()),
-            kind: MenuKind::Select {
-                options: vec!["None", "seatd", "polkit"],
-                current: match config.seat_access {
-                    None => 0,
-                    Some(SeatAccess::Seatd) => 1,
-                    Some(SeatAccess::Polkit) => 2,
-                },
-            },
+    ];
+
+    items.extend(radio_group(
+        "seat_access",
+        "Seat access",
+        &["None", "seatd", "polkit"],
+        match config.seat_access {
+            None => 0,
+            Some(SeatAccess::Seatd) => 1,
+            Some(SeatAccess::Polkit) => 2,
         },
-        MenuItem {
-            key: "gpu_driver",
-            label: "GPU driver",
-            value: config
-                .gfx_driver
-                .map(|d| d.to_string())
-                .unwrap_or("None".into()),
-            kind: MenuKind::Custom,
+    ));
+
+    items.push(MenuItem {
+        key: "gpu_driver",
+        label: "GPU driver",
+        value: config
+            .gfx_driver
+            .map(|d| d.to_string())
+            .unwrap_or("None".into()),
+        kind: MenuKind::Custom,
+    });
+
+    items.extend(radio_group(
+        "audio",
+        "Audio",
+        &["None", "pipewire", "pulseaudio"],
+        match config.audio {
+            None => 0,
+            Some(AudioServer::Pipewire) => 1,
+            Some(AudioServer::Pulseaudio) => 2,
         },
-        MenuItem {
-            key: "audio",
-            label: "Audio",
-            value: config.audio.map(|a| a.to_string()).unwrap_or("None".into()),
-            kind: MenuKind::Select {
-                options: vec!["None", "pipewire", "pulseaudio"],
-                current: match config.audio {
-                    None => 0,
-                    Some(AudioServer::Pipewire) => 1,
-                    Some(AudioServer::Pulseaudio) => 2,
-                },
-            },
-        },
+    ));
+
+    items.extend([
         MenuItem {
             key: "bluetooth",
             label: "Bluetooth",
@@ -118,5 +115,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
             .into(),
             kind: MenuKind::Toggle,
         },
-    ]
+    ]);
+
+    items
 }

@@ -293,7 +293,7 @@ impl Default for GlobalConfig {
             zrepl_enabled: false,
             aur_packages: Vec::new(),
             hostname: Some("archzfs".to_string()),
-            locale: None,
+            locale: Some("en_US.UTF-8 UTF-8".to_string()),
             keyboard_layout: default_keyboard_layout(),
             x11_variant: None,
             timezone: None,

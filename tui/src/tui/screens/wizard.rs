@@ -21,11 +21,8 @@ use super::steps::{MenuItem, MenuKind, StepId};
 pub struct Wizard {
     config: GlobalConfig,
     current_step: StepId,
-    /// Per-step cursor positions
     step_cursors: [usize; 7],
-    /// Per-step scroll offsets
     step_scrolls: [usize; 7],
-    /// Highest step index visited (for jump-back gating)
     max_visited: usize,
 }
 
@@ -110,7 +107,6 @@ impl Wizard {
         if step.index() > self.max_visited {
             self.max_visited = step.index();
         }
-        // Ensure cursor is on a selectable item
         let indices = self.selectable_indices();
         let cursor = self.cursor();
         if !indices.contains(&cursor)
@@ -163,7 +159,6 @@ impl Wizard {
                         self.set_cursor(last);
                     }
                 }
-                // Number keys 1-7 to jump to visited steps
                 (KeyCode::Char(c @ '1'..='7'), _) => {
                     let target = (c as usize) - ('1' as usize);
                     if target <= self.max_visited
@@ -190,6 +185,11 @@ impl Wizard {
         let key = item.key;
 
         match &item.kind {
+            MenuKind::RadioOption {
+                group_key, index, ..
+            } => {
+                pickers::apply_select(&mut self.config, group_key, *index, terminal)?;
+            }
             MenuKind::Action => match key {
                 "install" => {
                     let errors = self.config.validate_for_install();
@@ -261,7 +261,6 @@ impl Wizard {
                     pickers::pick_profile(&mut self.config, terminal)?;
                 }
                 "display_manager" => {
-                    // Show the effective DM as the current default
                     let eff_dm = self.config.display_manager_override.clone().or_else(|| {
                         self.config
                             .profile
@@ -325,7 +324,7 @@ impl Wizard {
                     pickers::apply_text(&mut self.config, key, &val);
                 }
             }
-            MenuKind::SectionHeader => {}
+            MenuKind::SectionHeader | MenuKind::RadioHeader => {}
         }
         Ok(Action::Continue)
     }
@@ -337,7 +336,6 @@ impl Wizard {
 
         let area = frame.area();
         let items = self.items();
-        let step_idx = self.current_step.index();
 
         // Vertical: title | body | footer
         let v_chunks = Layout::default()
@@ -349,44 +347,62 @@ impl Wizard {
             ])
             .split(area);
 
-        // Title bar
+        self.render_title(frame, v_chunks[0]);
+
+        // Body: sidebar | separator | content
+        let h_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Length(18),
+                Constraint::Length(1),
+                Constraint::Min(0),
+            ])
+            .split(v_chunks[1]);
+
+        self.render_sidebar(frame, h_chunks[0]);
+
+        // Vertical separator line
+        let sep = Block::default()
+            .borders(Borders::LEFT)
+            .border_type(BorderType::Plain)
+            .border_style(theme::BORDER_STYLE);
+        frame.render_widget(sep, h_chunks[1]);
+
+        self.render_content(frame, h_chunks[2], &items);
+        self.render_footer(frame, v_chunks[2]);
+    }
+
+    fn render_title(&self, frame: &mut Frame, area: Rect) {
+        let step_idx = self.current_step.index();
+
         let title = Paragraph::new(Line::from(vec![
             Span::styled(" archinstall", theme::TITLE_STYLE),
-            Span::styled("-zfs ", theme::ACCENT_STYLE),
+            Span::styled("-zfs", theme::ACCENT_STYLE),
             Span::raw("  "),
             Span::styled(
-                format!("{} / {}", step_idx + 1, StepId::ALL.len()),
+                format!("step {} of {}", step_idx + 1, StepId::ALL.len()),
                 theme::DIMMED_STYLE,
             ),
         ]))
         .block(
             Block::default()
                 .borders(Borders::BOTTOM)
-                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Plain)
                 .border_style(theme::BORDER_STYLE),
         );
-        frame.render_widget(title, v_chunks[0]);
-
-        // Body: sidebar | content
-        let h_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(14), Constraint::Min(0)])
-            .split(v_chunks[1]);
-
-        self.render_sidebar(frame, h_chunks[0]);
-        self.render_content(frame, h_chunks[1], &items);
-
-        // Footer
-        self.render_footer(frame, v_chunks[2]);
+        frame.render_widget(title, area);
     }
 
     fn render_sidebar(&self, frame: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::RIGHT)
-            .border_type(BorderType::Rounded)
-            .border_style(theme::BORDER_STYLE);
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
+        // Fill sidebar background
+        frame.render_widget(Block::default().style(theme::SIDEBAR_BG), area);
+
+        let inner = Rect::new(
+            area.x,
+            area.y + 1,
+            area.width,
+            area.height.saturating_sub(1),
+        );
 
         for (i, step) in StepId::ALL.iter().enumerate() {
             if i as u16 >= inner.height {
@@ -399,16 +415,21 @@ impl Wizard {
             let is_visited = i <= self.max_visited;
 
             let (icon, style) = if is_current {
-                (theme::ICON_ARROW, theme::SIDEBAR_ACTIVE_STYLE)
+                ("\u{25b8}", theme::SIDEBAR_CURRENT) // ▸
             } else if is_visited {
-                (theme::ICON_SET, theme::SIDEBAR_DONE_STYLE)
+                ("\u{2713}", theme::SIDEBAR_DONE) // ✓
             } else {
-                (theme::ICON_UNSET, theme::SIDEBAR_PENDING_STYLE)
+                ("\u{00b7}", theme::SIDEBAR_PENDING) // ·
             };
+
+            // Full-line background for current step
+            if is_current {
+                frame.render_widget(Block::default().style(theme::SIDEBAR_CURRENT), line_area);
+            }
 
             let line = Line::from(vec![
                 Span::styled(format!(" {icon} "), style),
-                Span::styled(step.label(), style),
+                Span::styled(format!("{} ", step.label()), style),
             ]);
             frame.render_widget(Paragraph::new(line), line_area);
         }
@@ -417,22 +438,26 @@ impl Wizard {
     fn render_content(&self, frame: &mut Frame, area: Rect, items: &[MenuItem]) {
         let step = self.current_step;
 
-        // Content block with step title
-        let block = Block::default()
-            .title(format!(" {} ", step.label()))
-            .title_style(theme::HEADER_STYLE)
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(theme::BORDER_STYLE);
+        // Step title inside content area
+        let title_area = Rect::new(area.x, area.y, area.width, 2);
+        let title_line = Line::from(vec![
+            Span::styled("  ", theme::NORMAL_STYLE),
+            Span::styled(step.label(), theme::SECTION_STYLE),
+        ]);
+        frame.render_widget(Paragraph::new(title_line), title_area);
 
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
+        let content_area = Rect::new(
+            area.x,
+            area.y + 2,
+            area.width,
+            area.height.saturating_sub(2),
+        );
 
-        let visible_height = inner.height as usize;
+        let visible_height = content_area.height as usize;
         let total_items = items.len();
         let cursor = self.cursor();
 
-        // Derive scroll offset from cursor position each frame
+        // Scrolling
         let mut scroll = self.scroll();
         if cursor >= scroll + visible_height {
             scroll = cursor - visible_height + 1;
@@ -442,147 +467,104 @@ impl Wizard {
         }
 
         for (vi, item) in items.iter().enumerate().skip(scroll).take(visible_height) {
-            let y = inner.y + (vi - scroll) as u16;
-            let line_area = Rect::new(inner.x, y, inner.width, 1);
+            let y = content_area.y + (vi - scroll) as u16;
+            let line_area = Rect::new(content_area.x, y, content_area.width, 1);
+            let is_selected = vi == cursor;
 
-            if matches!(item.kind, MenuKind::SectionHeader) {
-                // Review step: render summary items or section headers
-                if item.label.is_empty() && item.value.is_empty() {
-                    // Empty separator
-                    let sep = Paragraph::new(Line::from(Span::styled(
-                        "\u{2500}".repeat(inner.width as usize),
-                        theme::BORDER_STYLE,
-                    )));
-                    frame.render_widget(sep, line_area);
-                } else if !item.label.is_empty() && item.value.is_empty() {
-                    // Section header
-                    let label = format!(" {} ", item.label);
-                    let pad_total = (inner.width as usize)
-                        .saturating_sub(label.len())
-                        .saturating_sub(4);
-                    let pad_left = pad_total / 2;
-                    let pad_right = pad_total - pad_left;
+            // Full-line highlight for selected item
+            if is_selected && item.is_selectable() {
+                frame.render_widget(Block::default().style(theme::HOVER_BG), line_area);
+            }
+
+            match &item.kind {
+                MenuKind::SectionHeader => {
+                    self.render_section_header(frame, line_area, item);
+                }
+                MenuKind::RadioHeader => {
                     let line = Line::from(vec![
-                        Span::styled(
-                            format!("  {}\u{2500}", "\u{2500}".repeat(pad_left)),
-                            theme::BORDER_STYLE,
-                        ),
-                        Span::styled(label, theme::SECTION_STYLE),
-                        Span::styled(
-                            format!("\u{2500}{}", "\u{2500}".repeat(pad_right)),
-                            theme::BORDER_STYLE,
-                        ),
-                    ]);
-                    frame.render_widget(Paragraph::new(line), line_area);
-                } else if item.label.is_empty() && !item.value.is_empty() {
-                    // Error line in review
-                    let line = Line::from(vec![
-                        Span::styled("   \u{26a0} ", theme::WARN_STYLE),
-                        Span::styled(&item.value, theme::WARN_STYLE),
-                    ]);
-                    frame.render_widget(Paragraph::new(line), line_area);
-                } else {
-                    // Summary line in review (label + value, read-only)
-                    let label_text = format!("{:<20}", item.label);
-                    let value_text = &item.value;
-                    let is_unset = value_text.contains("Not set")
-                        || value_text == "None"
-                        || value_text.is_empty();
-                    let icon = if is_unset {
-                        theme::ICON_UNSET
-                    } else {
-                        theme::ICON_SET
-                    };
-                    let icon_style = if is_unset {
-                        theme::UNSET_STYLE
-                    } else {
-                        theme::VALUE_STYLE
-                    };
-                    let value_style = if is_unset {
-                        theme::UNSET_STYLE
-                    } else {
-                        theme::VALUE_STYLE
-                    };
-                    let dots_len = (inner.width as usize)
-                        .saturating_sub(3 + 1 + 20 + 2 + value_text.len() + 1);
-                    let dots = ".".repeat(dots_len);
-                    let line = Line::from(vec![
-                        Span::raw("   "),
-                        Span::styled(format!("{icon} "), icon_style),
-                        Span::styled(label_text, theme::NORMAL_STYLE),
-                        Span::styled(dots, theme::DIMMED_STYLE),
-                        Span::styled(format!(" {value_text} "), value_style),
+                        Span::styled("  ", theme::NORMAL_STYLE),
+                        Span::styled(item.label, theme::LABEL_STYLE),
                     ]);
                     frame.render_widget(Paragraph::new(line), line_area);
                 }
-                continue;
+                MenuKind::RadioOption { selected, .. } => {
+                    let (icon, icon_style) = if *selected {
+                        ("\u{25cf}", theme::RADIO_SELECTED) // ●
+                    } else {
+                        ("\u{25cb}", theme::RADIO_UNSELECTED) // ○
+                    };
+                    let label_style = if is_selected {
+                        theme::SELECTED_STYLE
+                    } else if *selected {
+                        theme::VALUE_STYLE
+                    } else {
+                        theme::NORMAL_STYLE
+                    };
+                    let line = Line::from(vec![
+                        Span::styled("    ", theme::NORMAL_STYLE),
+                        Span::styled(
+                            format!("{icon} "),
+                            if is_selected {
+                                theme::SELECTED_STYLE
+                            } else {
+                                icon_style
+                            },
+                        ),
+                        Span::styled(item.label, label_style),
+                    ]);
+                    frame.render_widget(Paragraph::new(line), line_area);
+                }
+                MenuKind::Toggle => {
+                    let is_on = item.value == "Enabled";
+                    let (indicator, ind_style) = if is_on {
+                        ("[ON] ", theme::TOGGLE_ON)
+                    } else {
+                        ("[OFF]", theme::TOGGLE_OFF)
+                    };
+                    let label_style = if is_selected {
+                        theme::SELECTED_STYLE
+                    } else {
+                        theme::NORMAL_STYLE
+                    };
+                    let line = Line::from(vec![
+                        Span::styled("  ", theme::NORMAL_STYLE),
+                        Span::styled(
+                            indicator,
+                            if is_selected {
+                                theme::SELECTED_STYLE
+                            } else {
+                                ind_style
+                            },
+                        ),
+                        Span::styled(format!(" {}", item.label), label_style),
+                    ]);
+                    frame.render_widget(Paragraph::new(line), line_area);
+                }
+                MenuKind::Action => {
+                    let style = if is_selected {
+                        theme::SELECTED_STYLE
+                    } else {
+                        theme::ACTION_STYLE
+                    };
+                    let line = Line::from(vec![
+                        Span::styled("  ", theme::NORMAL_STYLE),
+                        Span::styled(format!("\u{25b8} {}", item.label), style),
+                    ]);
+                    frame.render_widget(Paragraph::new(line), line_area);
+                }
+                MenuKind::Password => {
+                    self.render_kv_item(frame, line_area, item, is_selected, "\u{1f512} ");
+                }
+                MenuKind::Text => {
+                    self.render_kv_item(frame, line_area, item, is_selected, "\u{270e} ");
+                }
+                MenuKind::Custom => {
+                    self.render_kv_item(frame, line_area, item, is_selected, "");
+                }
+                MenuKind::Select { .. } => {
+                    self.render_kv_item(frame, line_area, item, is_selected, "\u{25bc} ");
+                }
             }
-
-            let is_selected = vi == cursor;
-            let is_action = matches!(item.kind, MenuKind::Action);
-            let is_unset =
-                item.value.contains("Not set") || item.value == "None" || item.value.is_empty();
-
-            let icon = if is_action {
-                ""
-            } else if is_unset {
-                theme::ICON_UNSET
-            } else {
-                theme::ICON_SET
-            };
-
-            let icon_style = if is_selected {
-                theme::SELECTED_STYLE
-            } else if is_unset {
-                theme::UNSET_STYLE
-            } else {
-                theme::VALUE_STYLE
-            };
-
-            let label_style = if is_selected {
-                theme::SELECTED_STYLE
-            } else {
-                theme::NORMAL_STYLE
-            };
-
-            let value_style = if is_selected {
-                theme::SELECTED_STYLE
-            } else if is_action {
-                theme::ACTION_STYLE
-            } else if is_unset {
-                theme::UNSET_STYLE
-            } else {
-                theme::VALUE_STYLE
-            };
-
-            let arrow = if is_selected {
-                format!(" {} ", theme::ICON_ARROW)
-            } else {
-                "   ".to_string()
-            };
-
-            let line = if is_action {
-                Line::from(vec![
-                    Span::styled(&arrow, label_style),
-                    Span::styled(item.label, value_style),
-                ])
-            } else {
-                let label_text = format!("{:<20}", item.label);
-                let value_text = &item.value;
-                let dots_len =
-                    (inner.width as usize).saturating_sub(3 + 1 + 20 + 2 + value_text.len() + 1);
-                let dots = ".".repeat(dots_len);
-
-                Line::from(vec![
-                    Span::styled(&arrow, label_style),
-                    Span::styled(format!("{icon} "), icon_style),
-                    Span::styled(label_text, label_style),
-                    Span::styled(dots, theme::DIMMED_STYLE),
-                    Span::styled(format!(" {value_text} "), value_style),
-                ])
-            };
-
-            frame.render_widget(Paragraph::new(line), line_area);
         }
 
         // Scrollbar
@@ -596,36 +578,139 @@ impl Wizard {
         }
     }
 
+    /// Render a key-value item: `  icon label          value`
+    fn render_kv_item(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        item: &MenuItem,
+        is_selected: bool,
+        icon: &str,
+    ) {
+        let is_unset =
+            item.value.contains("Not set") || item.value == "None" || item.value.is_empty();
+
+        let label_style = if is_selected {
+            theme::SELECTED_STYLE
+        } else {
+            theme::NORMAL_STYLE
+        };
+
+        let value_style = if is_selected {
+            theme::SELECTED_VALUE_STYLE
+        } else if is_unset {
+            theme::UNSET_STYLE
+        } else {
+            theme::VALUE_STYLE
+        };
+
+        let icon_style = if is_selected {
+            theme::SELECTED_STYLE
+        } else {
+            theme::DIMMED_STYLE
+        };
+
+        // Calculate padding between label and value
+        let icon_width = icon.chars().count();
+        let label_width = item.label.chars().count();
+        let value_width = item.value.chars().count();
+        let available =
+            (area.width as usize).saturating_sub(2 + icon_width + label_width + value_width + 2);
+        let padding = " ".repeat(available);
+
+        let line = Line::from(vec![
+            Span::styled("  ", theme::NORMAL_STYLE),
+            Span::styled(icon, icon_style),
+            Span::styled(item.label, label_style),
+            Span::styled(padding, label_style),
+            Span::styled(format!("{} ", &item.value), value_style),
+        ]);
+        frame.render_widget(Paragraph::new(line), area);
+    }
+
+    fn render_section_header(&self, frame: &mut Frame, area: Rect, item: &MenuItem) {
+        if item.label.is_empty() && item.value.is_empty() {
+            // Empty separator
+            let sep = Paragraph::new(Line::from(Span::styled(
+                "\u{2500}".repeat(area.width as usize),
+                theme::BORDER_STYLE,
+            )));
+            frame.render_widget(sep, area);
+        } else if !item.label.is_empty() && item.value.is_empty() {
+            // Section header
+            let line = Line::from(vec![
+                Span::styled(" \u{2500}\u{2500} ", theme::BORDER_STYLE),
+                Span::styled(item.label, theme::SECTION_STYLE),
+                Span::styled(
+                    format!(
+                        " {}",
+                        "\u{2500}"
+                            .repeat((area.width as usize).saturating_sub(item.label.len() + 5))
+                    ),
+                    theme::BORDER_STYLE,
+                ),
+            ]);
+            frame.render_widget(Paragraph::new(line), area);
+        } else if item.label.is_empty() && !item.value.is_empty() {
+            // Error/warning line
+            let line = Line::from(vec![
+                Span::styled("  \u{26a0} ", theme::WARN_STYLE),
+                Span::styled(&item.value, theme::WARN_STYLE),
+            ]);
+            frame.render_widget(Paragraph::new(line), area);
+        } else {
+            // Summary line (review step): label + value
+            let is_unset =
+                item.value.contains("Not set") || item.value == "None" || item.value.is_empty();
+            let value_style = if is_unset {
+                theme::UNSET_STYLE
+            } else {
+                theme::VALUE_STYLE
+            };
+            let label_width = item.label.chars().count();
+            let value_width = item.value.chars().count();
+            let available = (area.width as usize).saturating_sub(4 + label_width + value_width + 2);
+            let padding = " ".repeat(available);
+
+            let line = Line::from(vec![
+                Span::styled("    ", theme::NORMAL_STYLE),
+                Span::styled(item.label, theme::LABEL_STYLE),
+                Span::styled(padding, theme::NORMAL_STYLE),
+                Span::styled(format!("{} ", &item.value), value_style),
+            ]);
+            frame.render_widget(Paragraph::new(line), area);
+        }
+    }
+
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
         let step = self.current_step;
         let mut spans = vec![];
 
-        // Navigation hints
         spans.extend([
-            Span::styled(" j/k", theme::ACCENT_STYLE),
-            Span::styled(" navigate  ", theme::DIMMED_STYLE),
-            Span::styled("Enter", theme::ACCENT_STYLE),
-            Span::styled(" edit  ", theme::DIMMED_STYLE),
+            Span::styled(" \u{2191}\u{2193}", theme::ACCENT_STYLE),
+            Span::styled(" nav ", theme::DIMMED_STYLE),
+            Span::styled("\u{23ce}", theme::ACCENT_STYLE),
+            Span::styled(" select ", theme::DIMMED_STYLE),
         ]);
 
         if step != StepId::Welcome {
             spans.extend([
-                Span::styled("Shift+Tab", theme::ACCENT_STYLE),
-                Span::styled(" back  ", theme::DIMMED_STYLE),
+                Span::styled("S-Tab", theme::ACCENT_STYLE),
+                Span::styled(" back ", theme::DIMMED_STYLE),
             ]);
         }
         if step != StepId::Review {
             spans.extend([
                 Span::styled("Tab", theme::ACCENT_STYLE),
-                Span::styled(" next  ", theme::DIMMED_STYLE),
+                Span::styled(" next ", theme::DIMMED_STYLE),
             ]);
         }
 
         spans.extend([
             Span::styled("1-7", theme::ACCENT_STYLE),
-            Span::styled(" jump  ", theme::DIMMED_STYLE),
+            Span::styled(" jump ", theme::DIMMED_STYLE),
             Span::styled("q", theme::ACCENT_STYLE),
-            Span::styled(" quit ", theme::DIMMED_STYLE),
+            Span::styled(" quit", theme::DIMMED_STYLE),
         ]);
 
         let footer = Paragraph::new(Line::from(spans)).alignment(Alignment::Center);

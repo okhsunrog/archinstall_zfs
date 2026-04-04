@@ -11,10 +11,10 @@ use ratatui::widgets::{
     Block, Borders, Gauge, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
 
-use tracing_subscriber::layer::SubscriberExt;
-
 use archinstall_zfs_core::config::types::GlobalConfig;
-use archinstall_zfs_core::system::async_download::{DownloadProgress, PackageState};
+use archinstall_zfs_core::system::async_download::{
+    DownloadProgress, PackageProgress, PackageState,
+};
 
 use crate::tui::theme;
 use crate::tui::tracing_layer::ChannelLayer;
@@ -35,6 +35,7 @@ const LEVEL_NAMES: &[&str] = &["TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
 pub struct InstallProgress {
     log_entries: Vec<LogEntry>,
     scroll: usize,
+    auto_scroll: bool,
     state: InstallState,
     rx: mpsc::UnboundedReceiver<(String, i32)>,
     download_rx: watch::Receiver<DownloadProgress>,
@@ -48,32 +49,31 @@ impl InstallProgress {
         let cancel = CancellationToken::new();
 
         // Create download progress channel — sender goes to download engine, receiver stays here
-        let (download_tx, download_rx) = watch::channel(DownloadProgress {
-            packages: vec![],
-            total_bytes: 0,
-            downloaded_bytes: 0,
-            active_downloads: 0,
-            completed: 0,
-            failed: 0,
-        });
+        let (download_tx, download_rx) = watch::channel(DownloadProgress::default());
         let download_tx = Arc::new(download_tx);
 
         let tx_clone = tx.clone();
         let cancel_clone = cancel.clone();
         let download_tx_clone = download_tx.clone();
         tokio::spawn(async move {
+            use tracing_subscriber::Layer as _;
+            use tracing_subscriber::layer::SubscriberExt as _;
+
             let channel_layer = ChannelLayer::new(tx_clone.clone());
-            let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("trace"));
+            let ui_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
             let file_appender = tracing_appender::rolling::never("/tmp", "archinstall-zfs.log");
+            let file_filter = tracing_subscriber::EnvFilter::new(
+                "trace,h2=warn,hyper=warn,reqwest=warn,rustls=warn,pacman=info",
+            );
             let file_layer = tracing_subscriber::fmt::layer()
                 .with_writer(file_appender)
                 .with_ansi(false)
-                .with_target(true);
+                .with_target(true)
+                .with_filter(file_filter);
             let subscriber = tracing_subscriber::registry()
-                .with(filter)
-                .with(file_layer)
-                .with(channel_layer);
+                .with(channel_layer.with_filter(ui_filter))
+                .with(file_layer);
             let _guard = tracing::subscriber::set_default(subscriber);
 
             let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
@@ -98,19 +98,13 @@ impl InstallProgress {
                 level: 2,
             }],
             scroll: 0,
+            auto_scroll: true,
             state: InstallState::Running,
             rx,
             download_rx,
             cancel,
             min_level: 2,
         }
-    }
-
-    fn filtered_lines(&self) -> Vec<&LogEntry> {
-        self.log_entries
-            .iter()
-            .filter(|e| e.level >= self.min_level)
-            .collect()
     }
 
     pub fn tick(&mut self) {
@@ -122,8 +116,6 @@ impl InstallProgress {
                 self.state = InstallState::Failed(err);
             }
             self.log_entries.push(LogEntry { text, level });
-            let filtered_count = self.filtered_lines().len();
-            self.scroll = filtered_count.saturating_sub(1);
         }
     }
 
@@ -131,12 +123,23 @@ impl InstallProgress {
         !matches!(self.state, InstallState::Running)
     }
 
-    fn is_downloading(&self) -> bool {
-        let progress = self.download_rx.borrow();
-        progress.total_bytes > 0
-            && (progress.active_downloads > 0
-                || (progress.completed + progress.failed < progress.packages.len()
-                    && !progress.packages.is_empty()))
+    fn has_progress(&self) -> bool {
+        match &*self.download_rx.borrow() {
+            PackageProgress::Downloading {
+                total_bytes,
+                active_downloads,
+                completed,
+                failed,
+                packages,
+                ..
+            } => {
+                *total_bytes > 0
+                    && (*active_downloads > 0
+                        || (*completed + *failed < packages.len() && !packages.is_empty()))
+            }
+            PackageProgress::Installing { .. } => true,
+            PackageProgress::Done => false,
+        }
     }
 
     pub fn handle_event(&mut self, ev: Event) -> bool {
@@ -155,15 +158,19 @@ impl InstallProgress {
                 }
                 (KeyCode::Enter, _) if self.is_done() => return true,
                 (KeyCode::Up | KeyCode::Char('k'), _) => {
+                    self.auto_scroll = false;
                     self.scroll = self.scroll.saturating_sub(1);
                 }
                 (KeyCode::Down | KeyCode::Char('j'), _) => {
-                    let max = self.filtered_lines().len().saturating_sub(1);
-                    self.scroll = (self.scroll + 1).min(max);
+                    self.scroll += 1;
+                    // auto_scroll re-enabled in render if at bottom
                 }
-                (KeyCode::Home, _) => self.scroll = 0,
+                (KeyCode::Home, _) => {
+                    self.auto_scroll = false;
+                    self.scroll = 0;
+                }
                 (KeyCode::End, _) => {
-                    self.scroll = self.filtered_lines().len().saturating_sub(1);
+                    self.auto_scroll = true;
                 }
                 (KeyCode::Char('l'), _) => {
                     self.min_level = match self.min_level {
@@ -172,8 +179,6 @@ impl InstallProgress {
                         1 => 0,
                         _ => 2,
                     };
-                    let max = self.filtered_lines().len().saturating_sub(1);
-                    self.scroll = self.scroll.min(max);
                 }
                 _ => {}
             }
@@ -181,16 +186,16 @@ impl InstallProgress {
         false
     }
 
-    pub fn render(&self, frame: &mut Frame) {
+    pub fn render(&mut self, frame: &mut Frame) {
         use ratatui::widgets::BorderType;
 
         frame.render_widget(Block::default().style(theme::BG_STYLE), frame.area());
 
         let area = frame.area();
-        let is_downloading = self.is_downloading();
+        let has_progress = self.has_progress();
 
         // Layout: title | log | [download progress] | footer
-        let constraints = if is_downloading {
+        let constraints = if has_progress {
             vec![
                 Constraint::Length(3), // title
                 Constraint::Min(5),    // log
@@ -240,42 +245,61 @@ impl InstallProgress {
         let inner = log_block.inner(chunks[1]);
         frame.render_widget(log_block, chunks[1]);
 
-        let filtered = self.filtered_lines();
+        // Collect filtered entries as (text, level) to break the borrow on self
+        let filtered: Vec<(&str, i32)> = self
+            .log_entries
+            .iter()
+            .filter(|e| e.level >= self.min_level)
+            .map(|e| (e.text.as_str(), e.level))
+            .collect();
+
+        // Compute total wrapped height: each line takes ceil(len / width) rows, min 1
+        let width = inner.width.max(1) as usize;
+        let total_wrapped: usize = filtered
+            .iter()
+            .map(|(text, _)| {
+                let len = text.chars().count();
+                if len == 0 { 1 } else { len.div_ceil(width) }
+            })
+            .sum();
         let visible_height = inner.height as usize;
-        let total = filtered.len();
 
-        let start = if self.scroll + visible_height > total {
-            total.saturating_sub(visible_height)
+        // Auto-scroll: pin to bottom; otherwise clamp
+        if self.auto_scroll {
+            self.scroll = total_wrapped.saturating_sub(visible_height);
         } else {
-            self.scroll
-        };
-
-        for (i, entry) in filtered.iter().skip(start).take(visible_height).enumerate() {
-            let y = inner.y + i as u16;
-            let style = match entry.level {
-                4 => theme::ERROR_STYLE,
-                3 => theme::WARN_STYLE,
-                2 => {
-                    if entry.text.contains("Phase ") {
-                        theme::SECTION_STYLE
-                    } else if entry.text.contains("complete") || entry.text.contains("Complete") {
-                        theme::SUCCESS_STYLE
-                    } else {
-                        theme::NORMAL_STYLE
-                    }
-                }
-                1 => theme::DIMMED_STYLE,
-                _ => theme::DIMMED_STYLE,
-            };
-            let line_area = Rect::new(inner.x, y, inner.width, 1);
-            frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(entry.text.as_str(), style))),
-                line_area,
-            );
+            let max_scroll = total_wrapped.saturating_sub(visible_height);
+            self.scroll = self.scroll.min(max_scroll);
         }
 
-        if total > visible_height {
-            let mut scrollbar_state = ScrollbarState::new(total).position(start);
+        let lines: Vec<Line> = filtered
+            .iter()
+            .map(|(text, level)| {
+                let style = match level {
+                    4 => theme::ERROR_STYLE,
+                    3 => theme::WARN_STYLE,
+                    2 => {
+                        if text.contains("Phase ") {
+                            theme::SECTION_STYLE
+                        } else if text.contains("complete") || text.contains("Complete") {
+                            theme::SUCCESS_STYLE
+                        } else {
+                            theme::NORMAL_STYLE
+                        }
+                    }
+                    _ => theme::DIMMED_STYLE,
+                };
+                Line::from(Span::styled(*text, style))
+            })
+            .collect();
+
+        let log_paragraph = Paragraph::new(lines)
+            .wrap(ratatui::widgets::Wrap { trim: false })
+            .scroll((self.scroll as u16, 0));
+        frame.render_widget(log_paragraph, inner);
+
+        if total_wrapped > visible_height {
+            let mut scrollbar_state = ScrollbarState::new(total_wrapped).position(self.scroll);
             frame.render_stateful_widget(
                 Scrollbar::new(ScrollbarOrientation::VerticalRight),
                 chunks[1],
@@ -284,13 +308,13 @@ impl InstallProgress {
         }
 
         // Download progress panel (only shown during active downloads)
-        if is_downloading {
+        if has_progress {
             let dl_chunk = chunks[2];
-            self.render_download_progress(frame, dl_chunk);
+            self.render_progress_panel(frame, dl_chunk);
         }
 
         // Footer
-        let footer_chunk = if is_downloading { chunks[3] } else { chunks[2] };
+        let footer_chunk = if has_progress { chunks[3] } else { chunks[2] };
         let footer = if self.is_done() {
             Line::from(vec![
                 Span::styled(" Enter/q", theme::ACCENT_STYLE),
@@ -314,100 +338,137 @@ impl InstallProgress {
         );
     }
 
-    fn render_download_progress(&self, frame: &mut Frame, area: Rect) {
+    fn render_progress_panel(&self, frame: &mut Frame, area: Rect) {
         use ratatui::widgets::BorderType;
 
         let progress = self.download_rx.borrow();
 
-        // Overall progress bar
-        let pct = if progress.total_bytes > 0 {
-            (progress.downloaded_bytes as f64 / progress.total_bytes as f64 * 100.0) as u16
-        } else {
-            0
-        };
+        match &*progress {
+            PackageProgress::Downloading {
+                packages,
+                total_bytes,
+                downloaded_bytes,
+                completed,
+                ..
+            } => {
+                let pct = if *total_bytes > 0 {
+                    (*downloaded_bytes as f64 / *total_bytes as f64 * 100.0) as u16
+                } else {
+                    0
+                };
 
-        let speed = progress.total_speed_bps();
-        let speed_str = format_speed(speed);
-        let eta_str = progress
-            .eta()
-            .map(format_duration)
-            .unwrap_or_else(|| "--:--".to_string());
+                let speed = progress.total_speed_bps();
+                let speed_str = format_speed(speed);
+                let eta_str = progress
+                    .eta()
+                    .map(format_duration)
+                    .unwrap_or_else(|| "--:--".to_string());
 
-        let title = format!(
-            " Downloads {}/{} | {} | ETA {} ",
-            progress.completed,
-            progress.packages.len(),
-            speed_str,
-            eta_str,
-        );
+                let title = format!(
+                    " Downloads {}/{} | {} | ETA {} ",
+                    completed,
+                    packages.len(),
+                    speed_str,
+                    eta_str,
+                );
 
-        let dl_block = Block::default()
-            .title(title)
-            .title_style(theme::HEADER_STYLE)
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(theme::BORDER_STYLE);
-        let inner = dl_block.inner(area);
-        frame.render_widget(dl_block, area);
+                let dl_block = Block::default()
+                    .title(title)
+                    .title_style(theme::HEADER_STYLE)
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(theme::BORDER_STYLE);
+                let inner = dl_block.inner(area);
+                frame.render_widget(dl_block, area);
 
-        if inner.height == 0 {
-            return;
-        }
-
-        // Overall gauge on first line
-        let gauge_area = Rect::new(inner.x, inner.y, inner.width, 1);
-        let overall_label = format!(
-            "{} / {} ({}%)",
-            format_bytes(progress.downloaded_bytes),
-            format_bytes(progress.total_bytes),
-            pct
-        );
-        let gauge = Gauge::default()
-            .gauge_style(theme::ACCENT_STYLE)
-            .ratio(progress.downloaded_bytes as f64 / progress.total_bytes.max(1) as f64)
-            .label(overall_label);
-        frame.render_widget(gauge, gauge_area);
-
-        // Per-package status lines (active downloads)
-        let mut y = inner.y + 1;
-        for pkg in &progress.packages {
-            if y >= inner.y + inner.height {
-                break;
-            }
-            match pkg {
-                PackageState::Downloading {
-                    filename,
-                    downloaded,
-                    total,
-                    speed_bps,
-                    ..
-                } => {
-                    let name = truncate_filename(filename, 30);
-                    let pkg_pct = if *total > 0 {
-                        (*downloaded as f64 / *total as f64 * 100.0) as u64
-                    } else {
-                        0
-                    };
-                    let line = format!("  {} {}% {}", name, pkg_pct, format_speed(*speed_bps),);
-                    let line_area = Rect::new(inner.x, y, inner.width, 1);
-                    frame.render_widget(
-                        Paragraph::new(Line::from(Span::styled(line, theme::NORMAL_STYLE))),
-                        line_area,
-                    );
-                    y += 1;
+                if inner.height == 0 {
+                    return;
                 }
-                PackageState::Verifying { filename } => {
-                    let name = truncate_filename(filename, 30);
-                    let line = format!("  {} verifying SHA256...", name);
-                    let line_area = Rect::new(inner.x, y, inner.width, 1);
-                    frame.render_widget(
-                        Paragraph::new(Line::from(Span::styled(line, theme::DIMMED_STYLE))),
-                        line_area,
-                    );
-                    y += 1;
+
+                let gauge_area = Rect::new(inner.x, inner.y, inner.width, 1);
+                let overall_label = format!(
+                    "{} / {} ({}%)",
+                    format_bytes(*downloaded_bytes),
+                    format_bytes(*total_bytes),
+                    pct
+                );
+                let gauge = Gauge::default()
+                    .gauge_style(theme::ACCENT_STYLE)
+                    .ratio(*downloaded_bytes as f64 / (*total_bytes).max(1) as f64)
+                    .label(overall_label);
+                frame.render_widget(gauge, gauge_area);
+
+                let mut y = inner.y + 1;
+                for pkg in packages {
+                    if y >= inner.y + inner.height {
+                        break;
+                    }
+                    match pkg {
+                        PackageState::Downloading {
+                            filename,
+                            downloaded,
+                            total,
+                            speed_bps,
+                            ..
+                        } => {
+                            let name = truncate_filename(filename, 30);
+                            let pkg_pct = if *total > 0 {
+                                (*downloaded as f64 / *total as f64 * 100.0) as u64
+                            } else {
+                                0
+                            };
+                            let line =
+                                format!("  {} {}% {}", name, pkg_pct, format_speed(*speed_bps));
+                            let line_area = Rect::new(inner.x, y, inner.width, 1);
+                            frame.render_widget(
+                                Paragraph::new(Line::from(Span::styled(line, theme::NORMAL_STYLE))),
+                                line_area,
+                            );
+                            y += 1;
+                        }
+                        PackageState::Verifying { filename } => {
+                            let name = truncate_filename(filename, 30);
+                            let line = format!("  {} verifying...", name);
+                            let line_area = Rect::new(inner.x, y, inner.width, 1);
+                            frame.render_widget(
+                                Paragraph::new(Line::from(Span::styled(line, theme::DIMMED_STYLE))),
+                                line_area,
+                            );
+                            y += 1;
+                        }
+                        _ => {}
+                    }
                 }
-                _ => {}
             }
+            PackageProgress::Installing {
+                package,
+                current,
+                total,
+                percent,
+            } => {
+                let title = format!(" Installing {current}/{total} ");
+
+                let dl_block = Block::default()
+                    .title(title)
+                    .title_style(theme::HEADER_STYLE)
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(theme::BORDER_STYLE);
+                let inner = dl_block.inner(area);
+                frame.render_widget(dl_block, area);
+
+                if inner.height == 0 {
+                    return;
+                }
+
+                let gauge_area = Rect::new(inner.x, inner.y, inner.width, 1);
+                let gauge = Gauge::default()
+                    .gauge_style(theme::ACCENT_STYLE)
+                    .percent(*percent as u16)
+                    .label(format!("{package} ({percent}%)"));
+                frame.render_widget(gauge, gauge_area);
+            }
+            PackageProgress::Done => {}
         }
     }
 }

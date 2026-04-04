@@ -67,7 +67,16 @@ impl StepId {
 pub enum MenuKind {
     /// Section header with label, or empty separator (not selectable)
     SectionHeader,
-    /// Select from a list of options
+    /// Inline radio group header (not selectable, groups RadioOption items below)
+    RadioHeader,
+    /// Inline radio option (selectable, carries group key + index)
+    RadioOption {
+        group_key: &'static str,
+        index: usize,
+        selected: bool,
+    },
+    /// Select from a list via popup (for long lists: locale, timezone, kernel)
+    #[allow(dead_code)]
     Select {
         options: Vec<&'static str>,
         current: usize,
@@ -94,6 +103,34 @@ pub struct MenuItem {
 
 impl MenuItem {
     pub fn is_selectable(&self) -> bool {
-        !matches!(self.kind, MenuKind::SectionHeader)
+        !matches!(self.kind, MenuKind::SectionHeader | MenuKind::RadioHeader)
     }
+}
+
+/// Helper: emit a radio group header + options as a flat list of MenuItems.
+pub fn radio_group(
+    key: &'static str,
+    label: &'static str,
+    options: &[&'static str],
+    current: usize,
+) -> Vec<MenuItem> {
+    let mut items = vec![MenuItem {
+        key,
+        label,
+        value: String::new(),
+        kind: MenuKind::RadioHeader,
+    }];
+    for (i, &opt) in options.iter().enumerate() {
+        items.push(MenuItem {
+            key,
+            label: opt,
+            value: String::new(),
+            kind: MenuKind::RadioOption {
+                group_key: key,
+                index: i,
+                selected: i == current,
+            },
+        });
+    }
+    items
 }
