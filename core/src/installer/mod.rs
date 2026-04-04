@@ -3,6 +3,7 @@ pub mod base;
 pub mod fstab;
 pub mod initramfs;
 pub mod locale;
+pub mod mirrors;
 pub mod network;
 pub mod services;
 pub mod users;
@@ -145,8 +146,8 @@ impl Installer {
         }
 
         // Mirror config
-        if let Some(ref _regions) = self.config.mirror_regions {
-            // TODO: set mirrors from region list
+        if let Some(ref regions) = self.config.mirror_regions {
+            mirrors::configure_mirrors(&*self.runner, &self.target, regions)?;
         }
 
         // Network

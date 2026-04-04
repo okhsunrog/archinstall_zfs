@@ -97,6 +97,11 @@ pub fn list_mounts(runner: &dyn CommandRunner) -> Result<ZfsMountOutput> {
     run_zfs_json(runner, &["mount"])
 }
 
+/// Check if a dataset exists.
+pub fn dataset_exists(runner: &dyn CommandRunner, name: &str) -> bool {
+    run_zfs(runner, &["list", "-H", name]).is_ok_and(|output| output.success())
+}
+
 pub fn create_base_dataset(
     runner: &dyn CommandRunner,
     pool_name: &str,
@@ -104,6 +109,12 @@ pub fn create_base_dataset(
     encryption_props: &[(&str, &str)],
 ) -> Result<()> {
     let base_name = format!("{pool_name}/{prefix}");
+    if dataset_exists(runner, &base_name) {
+        color_eyre::eyre::bail!(
+            "Dataset '{base_name}' already exists. \
+             Choose a different dataset prefix or use Existing Pool mode."
+        );
+    }
     create_dataset(runner, &base_name, encryption_props)
 }
 
