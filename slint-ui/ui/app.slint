@@ -17,6 +17,7 @@ struct Catppuccin {
     mauve: color,
     teal: color,
     sky: color,
+    peach: color,
 }
 
 global Theme {
@@ -36,6 +37,7 @@ global Theme {
         mauve: #cba6f7,
         teal: #94e2d5,
         sky: #89dceb,
+        peach: #fab387,
     };
 }
 
@@ -43,7 +45,7 @@ export struct ConfigItem {
     key: string,
     label: string,
     value: string,
-    item-type: int, // 0=text, 1=select, 2=password, 3=toggle, 4=separator, 5=action
+    item-type: int, // 0=text, 1=select, 2=password, 3=toggle, 4=separator, 5=action, 6=readonly, 7=warning
 }
 
 export struct SelectOption {
@@ -53,6 +55,11 @@ export struct SelectOption {
 export struct LogMessage {
     text: string,
     level: int,
+}
+
+export struct StepInfo {
+    label: string,
+    state: int, // 0=pending, 1=current, 2=done
 }
 
 // ── Text input popup ─────────────────────────────────
@@ -119,7 +126,6 @@ component TextInputPopup inherits Rectangle {
                     spacing: 8px;
                     alignment: end;
 
-                    // Cancel button
                     Rectangle {
                         width: 80px;
                         height: 30px;
@@ -139,7 +145,6 @@ component TextInputPopup inherits Rectangle {
                         }
                     }
 
-                    // Confirm button
                     Rectangle {
                         width: 80px;
                         height: 30px;
@@ -181,11 +186,9 @@ component SelectPopup inherits Rectangle {
         background: #00000080;
         width: 100%; height: 100%;
 
-        // Block clicks/scroll from reaching the background
         TouchArea {
             clicked => { cancelled(); }
             scroll-event(e) => {
-                // Consume scroll so it doesn't reach the main window
                 return accept;
             }
         }
@@ -246,6 +249,59 @@ component SelectPopup inherits Rectangle {
     }
 }
 
+// ── Sidebar step item ────────────────────────────────
+
+component SidebarItem inherits Rectangle {
+    in property <string> label;
+    in property <int> state; // 0=pending, 1=current, 2=done
+    in property <int> step-index;
+
+    callback clicked();
+
+    height: 36px;
+    background: state == 1 ? Theme.c.surface0
+              : step-ta.has-hover && state == 2 ? Theme.c.surface0
+              : transparent;
+    border-radius: 4px;
+
+    step-ta := TouchArea {
+        mouse-cursor: state == 2 ? pointer : default;
+        clicked => {
+            if state == 2 || state == 1 {
+                root.clicked();
+            }
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        spacing: 8px;
+        alignment: start;
+
+        Text {
+            text: state == 1 ? "\u{25b8}"  // ▸
+                : state == 2 ? "\u{25cf}"   // ●
+                : "\u{25cb}";               // ○
+            color: state == 1 ? Theme.c.blue
+                 : state == 2 ? Theme.c.green
+                 : Theme.c.overlay0;
+            font-size: 14px;
+            vertical-alignment: center;
+            width: 16px;
+        }
+
+        Text {
+            text: label;
+            color: state == 1 ? Theme.c.blue
+                 : state == 2 ? Theme.c.green
+                 : Theme.c.overlay0;
+            font-size: 14px;
+            font-weight: state == 1 ? 600 : 400;
+            vertical-alignment: center;
+        }
+    }
+}
+
 // ── Main application ─────────────────────────────────
 
 export component App inherits Window {
@@ -254,7 +310,12 @@ export component App inherits Window {
     preferred-height: 600px;
     title: "archinstall-zfs";
 
-    // Config items model
+    // Wizard state
+    in property <[StepInfo]> steps;
+    in property <int> current-step: 0;
+    in property <int> total-steps: 7;
+
+    // Config items model (per-step)
     in property <[ConfigItem]> config-items;
 
     // Select popup state
@@ -283,114 +344,285 @@ export component App inherits Window {
     // Callbacks to Rust
     callback item-activated(string);
     callback select-confirmed(string, int);
-    callback text-confirmed(string, string); // key, value
+    callback text-confirmed(string, string);
     callback toggle-activated(string);
     callback install-requested();
     callback quit-requested();
+    callback step-clicked(int);
+    callback next-step();
+    callback prev-step();
 
-    // ── Config screen ────────────────────────────────
+    // ── Wizard config screen ─────────────────────────
     if install-state == 0: VerticalLayout {
-        padding: 16px;
+        padding: 0px;
         spacing: 0px;
 
         // Title bar
         Rectangle {
             height: 48px;
             background: Theme.c.mantle;
-            border-radius: 4px;
 
-            Text {
-                text: "archinstall-zfs";
-                color: Theme.c.blue;
-                font-size: 24px;
-                font-weight: 700;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-        }
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
 
-        Rectangle { height: 8px; }
+                Text {
+                    text: "archinstall-zfs";
+                    color: Theme.c.blue;
+                    font-size: 22px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
 
-        // Config list
-        ScrollView {
-
-            VerticalLayout {
-                spacing: 2px;
-                padding: 4px;
-
-                for item[index] in config-items: Rectangle {
-                    height: item.item-type == 4 ? 16px : 34px;
-                    border-radius: 4px;
-                    background: row-ta.has-hover && item.item-type != 4
-                        ? Theme.c.surface0 : transparent;
-
-                    if item.item-type == 4: Rectangle {
-                        height: 1px;
-                        y: 8px;
-                        background: Theme.c.surface0;
-                    }
-
-                    row-ta := TouchArea {
-                        mouse-cursor: item.item-type == 4 ? default : pointer;
-                        clicked => {
-                            if item.item-type == 5 {
-                                if item.key == "install" { install-requested(); }
-                                if item.key == "quit" { quit-requested(); }
-                            } else if item.item-type == 3 {
-                                toggle-activated(item.key);
-                            } else if item.item-type != 4 {
-                                item-activated(item.key);
-                            }
-                        }
-                    }
-
-                    if item.item-type == 5: HorizontalLayout {
-                        padding-left: 16px;
-                        alignment: start;
-
-                        Text {
-                            text: item.label;
-                            color: Theme.c.mauve;
-                            font-size: 14px;
-                            font-weight: 600;
-                            vertical-alignment: center;
-                        }
-                    }
-
-                    if item.item-type != 4 && item.item-type != 5: HorizontalLayout {
-                        padding-left: 16px;
-                        padding-right: 16px;
-
-                        Text {
-                            text: item.label;
-                            color: Theme.c.subtext1;
-                            font-size: 14px;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                        }
-
-                        Text {
-                            text: item.value;
-                            color: item.value == "Not set" || item.value == "None" || item.value == "Disabled"
-                                ? Theme.c.overlay0
-                                : Theme.c.green;
-                            font-size: 14px;
-                            vertical-alignment: center;
-                        }
-                    }
+                Text {
+                    text: (current-step + 1) + " / " + total-steps;
+                    color: Theme.c.overlay0;
+                    font-size: 14px;
+                    vertical-alignment: center;
                 }
             }
         }
 
-        // Footer
-        Rectangle {
-            height: 28px;
-            Text {
-                text: status-text;
-                color: Theme.c.overlay0;
-                font-size: 12px;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+        // Body: sidebar + content
+        HorizontalLayout {
+            spacing: 0px;
+
+            // Sidebar
+            Rectangle {
+                width: 140px;
+                background: Theme.c.mantle;
+
+                VerticalLayout {
+                    padding: 8px;
+                    spacing: 2px;
+                    alignment: start;
+
+                    for step[index] in steps: SidebarItem {
+                        label: step.label;
+                        state: step.state;
+                        step-index: index;
+
+                        clicked => {
+                            step-clicked(index);
+                        }
+                    }
+                }
+            }
+
+            // Vertical separator
+            Rectangle {
+                width: 1px;
+                background: Theme.c.surface1;
+            }
+
+            // Content area
+            VerticalLayout {
+                spacing: 0px;
+
+                // Step title
+                Rectangle {
+                    height: 40px;
+                    background: transparent;
+
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        alignment: start;
+
+                        Text {
+                            text: steps.length > 0 && current-step < steps.length
+                                ? steps[current-step].label : "";
+                            color: Theme.c.mauve;
+                            font-size: 18px;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                // Config items list
+                ScrollView {
+                    VerticalLayout {
+                        spacing: 2px;
+                        padding: 4px;
+                        padding-left: 8px;
+                        padding-right: 8px;
+
+                        for item[index] in config-items: Rectangle {
+                            height: item.item-type == 4 ? 16px
+                                  : item.item-type == 7 ? 28px
+                                  : 34px;
+                            border-radius: 4px;
+                            background: row-ta.has-hover
+                                && item.item-type != 4
+                                && item.item-type != 6
+                                && item.item-type != 7
+                                ? Theme.c.surface0 : transparent;
+
+                            // Separator
+                            if item.item-type == 4: Rectangle {
+                                height: 1px;
+                                y: 8px;
+                                background: Theme.c.surface0;
+                            }
+
+                            // Warning line
+                            if item.item-type == 7: HorizontalLayout {
+                                padding-left: 16px;
+                                alignment: start;
+
+                                Text {
+                                    text: "\u{26a0} " + item.value;
+                                    color: Theme.c.yellow;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            row-ta := TouchArea {
+                                mouse-cursor: item.item-type == 4 || item.item-type == 6 || item.item-type == 7
+                                    ? default : pointer;
+                                clicked => {
+                                    if item.item-type == 5 {
+                                        if item.key == "install" { install-requested(); }
+                                        if item.key == "quit" { quit-requested(); }
+                                    } else if item.item-type == 3 {
+                                        toggle-activated(item.key);
+                                    } else if item.item-type != 4
+                                           && item.item-type != 6
+                                           && item.item-type != 7 {
+                                        item-activated(item.key);
+                                    }
+                                }
+                            }
+
+                            // Action items
+                            if item.item-type == 5: HorizontalLayout {
+                                padding-left: 16px;
+                                alignment: start;
+
+                                Text {
+                                    text: item.label;
+                                    color: Theme.c.peach;
+                                    font-size: 14px;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // Read-only summary items (review step)
+                            if item.item-type == 6: HorizontalLayout {
+                                padding-left: 16px;
+                                padding-right: 16px;
+
+                                Text {
+                                    text: item.label;
+                                    color: Theme.c.overlay0;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                Text {
+                                    text: item.value;
+                                    color: item.value == "Not set" || item.value == "None" || item.value == "Disabled"
+                                        ? Theme.c.overlay0
+                                        : Theme.c.green;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // Normal config items (text, select, password, toggle)
+                            if item.item-type != 4 && item.item-type != 5
+                                && item.item-type != 6 && item.item-type != 7: HorizontalLayout {
+                                padding-left: 16px;
+                                padding-right: 16px;
+
+                                Text {
+                                    text: item.label;
+                                    color: Theme.c.subtext1;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                Text {
+                                    text: item.value;
+                                    color: item.value == "Not set" || item.value == "None" || item.value == "Disabled"
+                                        ? Theme.c.overlay0
+                                        : Theme.c.green;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Footer with navigation buttons
+                Rectangle {
+                    height: 44px;
+                    background: Theme.c.mantle;
+
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        spacing: 8px;
+                        alignment: center;
+
+                        // Back button
+                        if current-step > 0: Rectangle {
+                            width: 80px;
+                            height: 32px;
+                            background: back-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
+                            border-radius: 4px;
+
+                            back-ta := TouchArea {
+                                clicked => { prev-step(); }
+                            }
+
+                            Text {
+                                text: "\u{25c2} Back";
+                                color: Theme.c.subtext0;
+                                font-size: 13px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        // Status text
+                        Text {
+                            text: status-text;
+                            color: Theme.c.overlay0;
+                            font-size: 12px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+
+                        // Next button
+                        if current-step < total-steps - 1: Rectangle {
+                            width: 80px;
+                            height: 32px;
+                            background: next-ta.has-hover ? Theme.c.sky : Theme.c.blue;
+                            border-radius: 4px;
+
+                            next-ta := TouchArea {
+                                clicked => { next-step(); }
+                            }
+
+                            Text {
+                                text: "Next \u{25b8}";
+                                color: Theme.c.base;
+                                font-size: 13px;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -467,7 +699,7 @@ export component App inherits Window {
         }
     }
 
-    // ── Popup overlays (order matters — last renders on top) ──
+    // ── Popup overlays ──────────────────────────────────
 
     SelectPopup {
         title: select-title;
