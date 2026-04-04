@@ -16,6 +16,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::types::{GlobalConfig, InitSystem, SwapMode, ZfsEncryptionMode};
 use crate::system::alpm_pacman::{AlpmContext, TargetMounts};
+use crate::system::async_download::DownloadProgress;
 use crate::system::cmd::CommandRunner;
 
 pub struct Installer {
@@ -23,6 +24,7 @@ pub struct Installer {
     pub config: GlobalConfig,
     pub target: PathBuf,
     cancel: CancellationToken,
+    download_progress_tx: Option<Arc<tokio::sync::watch::Sender<DownloadProgress>>>,
     /// Swap partition computed at runtime (e.g. from full-disk partitioning).
     /// Overrides `config.swap_partition_by_id` when set.
     swap_partition: Option<PathBuf>,
@@ -36,12 +38,14 @@ impl Installer {
         config: GlobalConfig,
         target: &Path,
         cancel: CancellationToken,
+        download_progress_tx: Option<Arc<tokio::sync::watch::Sender<DownloadProgress>>>,
     ) -> Self {
         Self {
             runner,
             config,
             target: target.to_path_buf(),
             cancel,
+            download_progress_tx,
             swap_partition: None,
             _target_mounts: None,
             alpm_ctx: None,
@@ -118,7 +122,7 @@ impl Installer {
         self.alpm_ctx
             .as_mut()
             .expect("alpm_ctx must be initialized before installing packages")
-            .install_packages(packages, &self.cancel)
+            .install_packages(packages, &self.cancel, self.download_progress_tx.clone())
     }
 
     fn configure_system(&self) -> Result<()> {
@@ -173,7 +177,7 @@ impl Installer {
         let kernel = self.config.primary_kernel();
         let zfs_packages = crate::kernel::get_zfs_packages(kernel, self.config.zfs_module_mode);
         let pkg_refs: Vec<&str> = zfs_packages.iter().map(|s| s.as_str()).collect();
-        ctx.install_packages(&pkg_refs, &self.cancel)?;
+        ctx.install_packages(&pkg_refs, &self.cancel, self.download_progress_tx.clone())?;
 
         Ok(())
     }
@@ -370,8 +374,13 @@ mod tests {
     fn test_installer_validates_config() {
         let runner: Arc<dyn CommandRunner> = Arc::new(RecordingRunner::new(vec![]));
         let config = GlobalConfig::default(); // missing installation_mode
-        let mut installer =
-            Installer::new(runner, config, Path::new("/mnt"), CancellationToken::new());
+        let mut installer = Installer::new(
+            runner,
+            config,
+            Path::new("/mnt"),
+            CancellationToken::new(),
+            None,
+        );
         let result = installer.perform_installation();
         assert!(result.is_err());
         assert!(

@@ -120,7 +120,7 @@ fn setup_aur_environment(
     let target_conf = target.join("etc/pacman.conf");
     let mut ctx = crate::system::alpm_pacman::AlpmContext::for_target(target, &target_conf)?;
     ctx.sync_databases(false)?;
-    ctx.install_packages(&["git", "sudo"], cancel)?;
+    ctx.install_packages(&["git", "sudo"], cancel, None)?;
 
     // Create temp user
     let output = chroot_cmd(runner, target, "useradd", &["-m", TEMP_USER])?;

@@ -147,7 +147,7 @@ pub fn install_zfs_on_host(
     let pacman_conf = Path::new("/etc/pacman.conf");
     let mut ctx = AlpmContext::for_host(pacman_conf)?;
     ctx.sync_databases(false)?;
-    ctx.install_packages(&pkg_refs, cancel)?;
+    ctx.install_packages(&pkg_refs, cancel, None)?;
     Ok(())
 }
 

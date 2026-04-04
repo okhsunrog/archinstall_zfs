@@ -49,7 +49,7 @@ pub fn install_base(
     let pacman_conf = Path::new("/etc/pacman.conf");
     let mut ctx = AlpmContext::for_target(target, pacman_conf)?;
     ctx.sync_databases(false)?;
-    ctx.install_packages(&packages, cancel)?;
+    ctx.install_packages(&packages, cancel, None)?;
     ctx.finalize_target()?;
     // ctx (AlpmContext) drops here — that's fine, just releases the alpm handle.
     // target_mounts stays alive via the return value.

@@ -1,10 +1,16 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Context, Result, bail};
 use futures::stream::{self, StreamExt};
 use sha2::{Digest, Sha256};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncSeekExt, AsyncWriteExt};
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
+
+// ── Public types ──────────────────────────────────────
 
 /// Metadata needed to download a single package.
 pub struct DownloadTask {
@@ -15,45 +21,251 @@ pub struct DownloadTask {
     pub sig_required: bool,
 }
 
-/// Download all packages to `cache_dir` in parallel.
+/// Configuration for the download manager.
+#[derive(Clone, Debug)]
+pub struct DownloadConfig {
+    /// Max parallel downloads (default: 5).
+    pub concurrency: usize,
+    /// Max retries per mirror before moving to the next (default: 3).
+    pub retries_per_mirror: u32,
+    /// Base delay for exponential backoff (default: 1s).
+    pub backoff_base: Duration,
+    /// Connection timeout (default: 10s).
+    pub connect_timeout: Duration,
+    /// Idle timeout — abort if no data received for this long (default: 30s).
+    pub idle_timeout: Duration,
+}
+
+impl Default for DownloadConfig {
+    fn default() -> Self {
+        Self {
+            concurrency: 5,
+            retries_per_mirror: 3,
+            backoff_base: Duration::from_secs(1),
+            connect_timeout: Duration::from_secs(10),
+            idle_timeout: Duration::from_secs(30),
+        }
+    }
+}
+
+/// State of a single package download.
+#[derive(Clone, Debug)]
+pub enum PackageState {
+    Queued,
+    Downloading {
+        filename: String,
+        downloaded: u64,
+        total: u64,
+        speed_bps: u64,
+        mirror: String,
+        attempt: u32,
+    },
+    Verifying {
+        filename: String,
+    },
+    Done {
+        filename: String,
+    },
+    Failed {
+        filename: String,
+        error: String,
+    },
+}
+
+/// Aggregate download progress, broadcast via `watch` channel.
+#[derive(Clone, Debug)]
+pub struct DownloadProgress {
+    pub packages: Vec<PackageState>,
+    pub total_bytes: u64,
+    pub downloaded_bytes: u64,
+    pub active_downloads: usize,
+    pub completed: usize,
+    pub failed: usize,
+}
+
+impl DownloadProgress {
+    /// Overall speed in bytes/sec (sum of all active downloads).
+    pub fn total_speed_bps(&self) -> u64 {
+        self.packages
+            .iter()
+            .filter_map(|p| match p {
+                PackageState::Downloading { speed_bps, .. } => Some(*speed_bps),
+                _ => None,
+            })
+            .sum()
+    }
+
+    /// Estimated time remaining based on current speed.
+    pub fn eta(&self) -> Option<Duration> {
+        let speed = self.total_speed_bps();
+        if speed == 0 {
+            return None;
+        }
+        let remaining = self.total_bytes.saturating_sub(self.downloaded_bytes);
+        Some(Duration::from_secs(remaining / speed))
+    }
+}
+
+// ── Download manager ──────────────────────────────────
+
+/// Download all packages to `cache_dir` with full progress tracking.
 ///
-/// Designed to be called from `spawn_blocking` via `Handle::block_on()`.
-/// Downloads are cancellable via the provided `CancellationToken`.
+/// If `progress_tx` is provided (from TUI), uses it for progress reporting.
+/// Otherwise creates an internal channel (headless mode).
+///
+/// Returns a `watch::Receiver<DownloadProgress>` for TUI rendering and
+/// a `JoinHandle` for the download task. The caller should `.await` the
+/// handle to get the result.
+pub fn start_downloads(
+    tasks: Vec<DownloadTask>,
+    cache_dir: PathBuf,
+    config: DownloadConfig,
+    cancel: CancellationToken,
+    progress_tx: Option<Arc<watch::Sender<DownloadProgress>>>,
+) -> (
+    watch::Receiver<DownloadProgress>,
+    tokio::task::JoinHandle<Result<()>>,
+) {
+    let total_bytes: u64 = tasks.iter().map(|t| t.size.max(0) as u64).sum();
+    let pkg_count = tasks.len();
+
+    let initial = DownloadProgress {
+        packages: vec![PackageState::Queued; pkg_count],
+        total_bytes,
+        downloaded_bytes: 0,
+        active_downloads: 0,
+        completed: 0,
+        failed: 0,
+    };
+
+    let (tx, rx) = if let Some(ref tx) = progress_tx {
+        tx.send_replace(initial);
+        let rx = tx.subscribe();
+        (tx.clone(), rx)
+    } else {
+        let (tx, rx) = watch::channel(initial);
+        (Arc::new(tx), rx)
+    };
+
+    let handle =
+        tokio::spawn(async move { run_downloads(tasks, cache_dir, config, cancel, tx).await });
+
+    (rx, handle)
+}
+
+/// Convenience wrapper that starts downloads and awaits completion.
+/// Used from `AlpmContext::install_packages` via `block_on`.
 pub async fn download_packages(
     tasks: Vec<DownloadTask>,
     cache_dir: PathBuf,
     concurrency: usize,
     cancel: CancellationToken,
+    progress_tx: Option<Arc<watch::Sender<DownloadProgress>>>,
 ) -> Result<()> {
     if tasks.is_empty() {
         return Ok(());
     }
 
-    let total_size: i64 = tasks.iter().map(|t| t.size).sum();
+    let config = DownloadConfig {
+        concurrency,
+        ..Default::default()
+    };
+
+    let (_rx, handle) = start_downloads(tasks, cache_dir, config, cancel, progress_tx);
+    handle.await?
+}
+
+// ── Internal implementation ───────────────────────────
+
+/// Shared state for coordinating progress updates.
+struct SharedProgress {
+    tx: Arc<watch::Sender<DownloadProgress>>,
+    downloaded_bytes: AtomicU64,
+}
+
+impl SharedProgress {
+    fn update_package(&self, index: usize, state: PackageState) {
+        self.tx.send_modify(|progress| {
+            // Update aggregate counters based on transition
+            match (&progress.packages[index], &state) {
+                (PackageState::Queued, PackageState::Downloading { .. }) => {
+                    progress.active_downloads += 1;
+                }
+                (PackageState::Downloading { .. }, PackageState::Verifying { .. }) => {
+                    progress.active_downloads -= 1;
+                }
+                (PackageState::Downloading { .. }, PackageState::Done { .. }) => {
+                    progress.active_downloads -= 1;
+                    progress.completed += 1;
+                }
+                (PackageState::Downloading { .. }, PackageState::Failed { .. }) => {
+                    progress.active_downloads -= 1;
+                    progress.failed += 1;
+                }
+                (PackageState::Verifying { .. }, PackageState::Done { .. }) => {
+                    progress.completed += 1;
+                }
+                (PackageState::Verifying { .. }, PackageState::Failed { .. }) => {
+                    progress.failed += 1;
+                }
+                _ => {}
+            }
+            progress.packages[index] = state;
+            progress.downloaded_bytes = self.downloaded_bytes.load(Ordering::Relaxed);
+        });
+    }
+
+    fn add_bytes(&self, n: u64) {
+        self.downloaded_bytes.fetch_add(n, Ordering::Relaxed);
+    }
+}
+
+async fn run_downloads(
+    tasks: Vec<DownloadTask>,
+    cache_dir: PathBuf,
+    config: DownloadConfig,
+    cancel: CancellationToken,
+    tx: Arc<watch::Sender<DownloadProgress>>,
+) -> Result<()> {
+    let total_bytes: u64 = tasks.iter().map(|t| t.size.max(0) as u64).sum();
     let total_count = tasks.len();
+
     tracing::info!(
         count = total_count,
-        total_bytes = total_size,
+        total_bytes,
         "downloading {total_count} packages"
     );
 
+    let shared = Arc::new(SharedProgress {
+        tx,
+        downloaded_bytes: AtomicU64::new(0),
+    });
+
     let client = reqwest::Client::builder()
         .user_agent("archinstall-zfs-rs")
+        .connect_timeout(config.connect_timeout)
         .build()
         .wrap_err("failed to create HTTP client")?;
 
-    let results: Vec<Result<()>> = stream::iter(tasks)
-        .map(|task| {
+    // Sort by size descending — start large packages first
+    let mut indexed_tasks: Vec<(usize, DownloadTask)> = tasks.into_iter().enumerate().collect();
+    indexed_tasks.sort_by(|a, b| b.1.size.cmp(&a.1.size));
+
+    let results: Vec<Result<()>> = stream::iter(indexed_tasks)
+        .map(|(index, task)| {
             let client = client.clone();
             let cache_dir = cache_dir.clone();
             let cancel = cancel.clone();
-            async move { download_single(&client, task, &cache_dir, &cancel).await }
+            let config = config.clone();
+            let shared = shared.clone();
+            async move {
+                download_single(&client, task, index, &cache_dir, &cancel, &config, &shared).await
+            }
         })
-        .buffer_unordered(concurrency)
+        .buffer_unordered(config.concurrency)
         .collect()
         .await;
 
-    // Check for errors
     let mut errors = Vec::new();
     for result in results {
         if let Err(e) = result {
@@ -76,8 +288,11 @@ pub async fn download_packages(
 async fn download_single(
     client: &reqwest::Client,
     task: DownloadTask,
+    index: usize,
     cache_dir: &Path,
     cancel: &CancellationToken,
+    config: &DownloadConfig,
+    shared: &SharedProgress,
 ) -> Result<()> {
     let dest = cache_dir.join(&task.filename);
     let dest_sig = cache_dir.join(format!("{}.sig", &task.filename));
@@ -88,88 +303,202 @@ async fn download_single(
         && (!task.sig_required || dest_sig.exists())
     {
         tracing::debug!(file = %task.filename, "already cached, skipping");
+        shared.update_package(
+            index,
+            PackageState::Done {
+                filename: task.filename.clone(),
+            },
+        );
+        // Count cached bytes as already downloaded
+        if let Ok(meta) = std::fs::metadata(&dest) {
+            shared.add_bytes(meta.len());
+        }
         return Ok(());
     }
 
-    tracing::info!(
-        file = %task.filename,
-        size = task.size,
-        "downloading"
-    );
+    let total_size = task.size.max(0) as u64;
 
-    // Try each mirror in order
+    // Try each mirror
     let mut last_error = None;
     for server in &task.servers {
-        let url = format!("{}/{}", server, task.filename);
+        // Retry on same mirror with exponential backoff
+        for attempt in 1..=config.retries_per_mirror {
+            let url = format!("{}/{}", server, task.filename);
 
-        match download_file(client, &url, &dest, task.sha256.as_deref(), cancel).await {
-            Ok(()) => {
-                // Download signature if required
-                if task.sig_required {
-                    let sig_url = format!("{}.sig", url);
-                    if let Err(e) = download_file(client, &sig_url, &dest_sig, None, cancel).await {
-                        tracing::warn!(
-                            file = %task.filename,
-                            server,
-                            "failed to download signature: {e}"
+            shared.update_package(
+                index,
+                PackageState::Downloading {
+                    filename: task.filename.clone(),
+                    downloaded: 0,
+                    total: total_size,
+                    speed_bps: 0,
+                    mirror: server.clone(),
+                    attempt,
+                },
+            );
+
+            match download_file_with_progress(
+                client,
+                &url,
+                &dest,
+                total_size,
+                task.sha256.as_deref(),
+                cancel,
+                config,
+                index,
+                &task.filename,
+                server,
+                attempt,
+                shared,
+            )
+            .await
+            {
+                Ok(()) => {
+                    // Download signature if required
+                    if task.sig_required {
+                        let sig_url = format!("{}.sig", url);
+                        if let Err(e) =
+                            download_file_simple(client, &sig_url, &dest_sig, cancel).await
+                        {
+                            tracing::warn!(
+                                file = %task.filename,
+                                server,
+                                "failed to download signature: {e}"
+                            );
+                            last_error = Some(e);
+                            continue;
+                        }
+                    }
+
+                    shared.update_package(
+                        index,
+                        PackageState::Done {
+                            filename: task.filename.clone(),
+                        },
+                    );
+                    tracing::info!(file = %task.filename, "download complete");
+                    return Ok(());
+                }
+                Err(e) => {
+                    if cancel.is_cancelled() {
+                        shared.update_package(
+                            index,
+                            PackageState::Failed {
+                                filename: task.filename.clone(),
+                                error: "cancelled".to_string(),
+                            },
                         );
-                        // Try next mirror for both pkg + sig
-                        last_error = Some(e);
-                        continue;
+                        bail!("download cancelled");
+                    }
+
+                    tracing::debug!(
+                        file = %task.filename,
+                        server,
+                        attempt,
+                        "attempt failed: {e}"
+                    );
+                    last_error = Some(e);
+
+                    // Exponential backoff before retry (on same mirror)
+                    if attempt < config.retries_per_mirror {
+                        let delay = config.backoff_base * 2u32.pow(attempt - 1);
+                        tokio::time::sleep(delay).await;
                     }
                 }
-
-                tracing::info!(file = %task.filename, "download complete");
-                return Ok(());
-            }
-            Err(e) => {
-                if cancel.is_cancelled() {
-                    bail!("download cancelled");
-                }
-                tracing::debug!(
-                    file = %task.filename,
-                    server,
-                    "mirror failed: {e}, trying next"
-                );
-                last_error = Some(e);
-                continue;
             }
         }
     }
 
-    Err(last_error
-        .unwrap_or_else(|| color_eyre::eyre::eyre!("no mirrors available for {}", task.filename)))
+    let error = last_error
+        .unwrap_or_else(|| color_eyre::eyre::eyre!("no mirrors available for {}", task.filename));
+    shared.update_package(
+        index,
+        PackageState::Failed {
+            filename: task.filename.clone(),
+            error: error.to_string(),
+        },
+    );
+    Err(error)
 }
 
-async fn download_file(
+/// Download a file with progress reporting, resume support, and SHA256 verification.
+#[expect(clippy::too_many_arguments)]
+async fn download_file_with_progress(
     client: &reqwest::Client,
     url: &str,
     dest: &Path,
+    total_size: u64,
     expected_sha256: Option<&str>,
     cancel: &CancellationToken,
+    _config: &DownloadConfig,
+    index: usize,
+    filename: &str,
+    mirror: &str,
+    attempt: u32,
+    shared: &SharedProgress,
 ) -> Result<()> {
-    let resp = client
-        .get(url)
+    let part_path = part_file_path(dest);
+
+    // Check for existing .part file for resume
+    let existing_size = tokio::fs::metadata(&part_path)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(0);
+
+    let mut request = client.get(url);
+    let mut resume_offset = 0u64;
+
+    if existing_size > 0 {
+        // Try HTTP Range resume
+        request = request.header("Range", format!("bytes={existing_size}-"));
+        resume_offset = existing_size;
+        tracing::debug!(file = filename, existing_size, "attempting resume");
+    }
+
+    let resp = request
         .send()
         .await
         .wrap_err_with(|| format!("HTTP request failed: {url}"))?;
 
-    if !resp.status().is_success() {
-        bail!("HTTP {} for {url}", resp.status());
+    let status = resp.status();
+    if !status.is_success() && status != reqwest::StatusCode::PARTIAL_CONTENT {
+        // If resume was rejected (416 Range Not Satisfiable), start fresh
+        if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE && resume_offset > 0 {
+            tokio::fs::remove_file(&part_path).await.ok();
+            return Err(color_eyre::eyre::eyre!(
+                "resume rejected, will retry from start"
+            ));
+        }
+        bail!("HTTP {} for {url}", status);
     }
 
-    // Write to .part file, then rename on success
-    let part_path = dest.with_extension(format!(
-        "{}.part",
-        dest.extension().unwrap_or_default().to_string_lossy()
-    ));
+    let resuming = status == reqwest::StatusCode::PARTIAL_CONTENT;
 
-    let mut file = tokio::fs::File::create(&part_path)
-        .await
-        .wrap_err_with(|| format!("failed to create {}", part_path.display()))?;
+    // Open file for writing (append if resuming, create if fresh)
+    let mut file = if resuming {
+        let mut f = tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&part_path)
+            .await
+            .wrap_err_with(|| format!("failed to open for resume: {}", part_path.display()))?;
+        f.seek(std::io::SeekFrom::End(0)).await?;
+        f
+    } else {
+        resume_offset = 0;
+        tokio::fs::File::create(&part_path)
+            .await
+            .wrap_err_with(|| format!("failed to create {}", part_path.display()))?
+    };
 
-    let mut hasher = Sha256::new();
+    // SHA256: if resuming, we can't incrementally hash — we'll verify the whole file at the end.
+    // If fresh download, hash as we go.
+    let mut hasher = if !resuming { Some(Sha256::new()) } else { None };
+
+    let mut bytes_downloaded = resume_offset;
     let mut stream = resp.bytes_stream();
+
+    // Speed tracking: sliding window
+    let mut speed_tracker = SpeedTracker::new();
 
     loop {
         tokio::select! {
@@ -177,23 +506,39 @@ async fn download_file(
 
             _ = cancel.cancelled() => {
                 drop(file);
-                tokio::fs::remove_file(&part_path).await.ok();
                 bail!("download cancelled");
             }
 
             chunk = stream.next() => {
                 match chunk {
                     Some(Ok(bytes)) => {
-                        hasher.update(&bytes);
+                        let len = bytes.len() as u64;
+                        if let Some(ref mut h) = hasher {
+                            h.update(&bytes);
+                        }
                         file.write_all(&bytes).await
                             .wrap_err("failed to write chunk")?;
+
+                        bytes_downloaded += len;
+                        shared.add_bytes(len);
+                        speed_tracker.record(len);
+
+                        // Update progress state
+                        shared.update_package(index, PackageState::Downloading {
+                            filename: filename.to_string(),
+                            downloaded: bytes_downloaded,
+                            total: total_size,
+                            speed_bps: speed_tracker.speed_bps(),
+                            mirror: mirror.to_string(),
+                            attempt,
+                        });
                     }
                     Some(Err(e)) => {
                         drop(file);
-                        tokio::fs::remove_file(&part_path).await.ok();
+                        // Don't delete .part — we can resume
                         return Err(e).wrap_err("download stream error");
                     }
-                    None => break, // stream finished
+                    None => break,
                 }
             }
         }
@@ -204,7 +549,21 @@ async fn download_file(
 
     // Verify SHA256
     if let Some(expected) = expected_sha256 {
-        let actual = hex::encode(hasher.finalize());
+        shared.update_package(
+            index,
+            PackageState::Verifying {
+                filename: filename.to_string(),
+            },
+        );
+
+        let actual = if let Some(hasher) = hasher {
+            // Fresh download — use incremental hash
+            hex::encode(hasher.finalize())
+        } else {
+            // Resumed download — hash the whole file
+            verify_sha256_full(&part_path).await?
+        };
+
         if actual != expected {
             tokio::fs::remove_file(&part_path).await.ok();
             bail!(
@@ -222,11 +581,91 @@ async fn download_file(
     Ok(())
 }
 
+/// Simple download without progress tracking (for .sig files).
+async fn download_file_simple(
+    client: &reqwest::Client,
+    url: &str,
+    dest: &Path,
+    cancel: &CancellationToken,
+) -> Result<()> {
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .wrap_err_with(|| format!("HTTP request failed: {url}"))?;
+
+    if !resp.status().is_success() {
+        bail!("HTTP {} for {url}", resp.status());
+    }
+
+    let bytes = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => bail!("download cancelled"),
+        result = resp.bytes() => result.wrap_err("failed to read response body")?,
+    };
+
+    tokio::fs::write(dest, &bytes)
+        .await
+        .wrap_err_with(|| format!("failed to write {}", dest.display()))?;
+
+    Ok(())
+}
+
+// ── Speed tracker ─────────────────────────────────────
+
+/// Sliding window speed tracker over the last 5 seconds.
+struct SpeedTracker {
+    window: Vec<(Instant, u64)>,
+    window_duration: Duration,
+}
+
+impl SpeedTracker {
+    fn new() -> Self {
+        Self {
+            window: Vec::new(),
+            window_duration: Duration::from_secs(5),
+        }
+    }
+
+    fn record(&mut self, bytes: u64) {
+        let now = Instant::now();
+        self.window.push((now, bytes));
+        // Trim entries older than window
+        let cutoff = now - self.window_duration;
+        self.window.retain(|(t, _)| *t >= cutoff);
+    }
+
+    fn speed_bps(&self) -> u64 {
+        if self.window.len() < 2 {
+            return 0;
+        }
+        let total_bytes: u64 = self.window.iter().map(|(_, b)| b).sum();
+        let elapsed = self
+            .window
+            .last()
+            .unwrap()
+            .0
+            .duration_since(self.window.first().unwrap().0);
+        if elapsed.is_zero() {
+            return 0;
+        }
+        (total_bytes as f64 / elapsed.as_secs_f64()) as u64
+    }
+}
+
+// ── Utility functions ─────────────────────────────────
+
+fn part_file_path(dest: &Path) -> PathBuf {
+    let mut name = dest.file_name().unwrap_or_default().to_os_string();
+    name.push(".part");
+    dest.with_file_name(name)
+}
+
 /// Synchronous SHA256 verification for checking already-cached files.
 fn verify_sha256_sync(path: &Path, expected: Option<&str>) -> bool {
     let expected = match expected {
         Some(e) => e,
-        None => return true, // no checksum in DB, assume valid
+        None => return true,
     };
 
     let data = match std::fs::read(path) {
@@ -236,6 +675,14 @@ fn verify_sha256_sync(path: &Path, expected: Option<&str>) -> bool {
 
     let actual = hex::encode(Sha256::digest(&data));
     actual == expected
+}
+
+/// Async SHA256 of a whole file (used after resume).
+async fn verify_sha256_full(path: &Path) -> Result<String> {
+    let data = tokio::fs::read(path)
+        .await
+        .wrap_err_with(|| format!("failed to read {} for SHA256", path.display()))?;
+    Ok(hex::encode(Sha256::digest(&data)))
 }
 
 #[cfg(test)]
@@ -276,5 +723,70 @@ mod tests {
     #[test]
     fn test_verify_sha256_sync_missing_file() {
         assert!(!verify_sha256_sync(Path::new("/nonexistent"), Some("abc")));
+    }
+
+    #[test]
+    fn test_part_file_path() {
+        let dest = Path::new("/cache/linux-6.8.1-x86_64.pkg.tar.zst");
+        let part = part_file_path(dest);
+        assert_eq!(
+            part,
+            Path::new("/cache/linux-6.8.1-x86_64.pkg.tar.zst.part")
+        );
+    }
+
+    #[test]
+    fn test_speed_tracker() {
+        let mut tracker = SpeedTracker::new();
+        assert_eq!(tracker.speed_bps(), 0);
+
+        tracker.record(1000);
+        // Single entry — can't compute speed
+        assert_eq!(tracker.speed_bps(), 0);
+    }
+
+    #[test]
+    fn test_download_progress_eta() {
+        let progress = DownloadProgress {
+            packages: vec![PackageState::Downloading {
+                filename: "test".into(),
+                downloaded: 50,
+                total: 100,
+                speed_bps: 10,
+                mirror: "mirror".into(),
+                attempt: 1,
+            }],
+            total_bytes: 100,
+            downloaded_bytes: 50,
+            active_downloads: 1,
+            completed: 0,
+            failed: 0,
+        };
+
+        assert_eq!(progress.total_speed_bps(), 10);
+        assert_eq!(progress.eta(), Some(Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn test_download_progress_eta_zero_speed() {
+        let progress = DownloadProgress {
+            packages: vec![PackageState::Queued],
+            total_bytes: 100,
+            downloaded_bytes: 0,
+            active_downloads: 0,
+            completed: 0,
+            failed: 0,
+        };
+
+        assert!(progress.eta().is_none());
+    }
+
+    #[test]
+    fn test_download_config_default() {
+        let config = DownloadConfig::default();
+        assert_eq!(config.concurrency, 5);
+        assert_eq!(config.retries_per_mirror, 3);
+        assert_eq!(config.connect_timeout, Duration::from_secs(10));
+        assert_eq!(config.idle_timeout, Duration::from_secs(30));
     }
 }

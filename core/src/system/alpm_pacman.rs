@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 
 use alpm::{Alpm, DownloadEvent, LogLevel, SigLevel, TransFlag};
 use color_eyre::eyre::{Context, Result, bail, eyre};
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
-use super::async_download::DownloadTask;
+use super::async_download::{DownloadProgress, DownloadTask};
 
 /// Manages API filesystem mounts (proc, sys, dev, etc.) for a target chroot.
 /// Mounts are unmounted in reverse order on drop.
@@ -124,6 +125,7 @@ impl AlpmContext {
         &mut self,
         packages: &[&str],
         cancel: &CancellationToken,
+        progress_tx: Option<std::sync::Arc<watch::Sender<DownloadProgress>>>,
     ) -> Result<()> {
         if packages.is_empty() {
             return Ok(());
@@ -194,6 +196,7 @@ impl AlpmContext {
                 cache_dir,
                 5,
                 cancel.clone(),
+                progress_tx,
             ))?;
         }
 

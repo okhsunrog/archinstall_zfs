@@ -51,7 +51,7 @@ pub fn install_network_manager(
     let target_conf = target.join("etc/pacman.conf");
     let mut ctx = crate::system::alpm_pacman::AlpmContext::for_target(target, &target_conf)?;
     ctx.sync_databases(false)?;
-    ctx.install_packages(&["networkmanager"], cancel)?;
+    ctx.install_packages(&["networkmanager"], cancel, None)?;
 
     let target_str = target.to_string_lossy();
     let output = runner.run(

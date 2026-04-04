@@ -30,7 +30,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         tracing::info!("silent mode: config valid, starting installation");
         let runner: Arc<dyn CommandRunner> = Arc::new(RealRunner);
         let cancel = CancellationToken::new();
-        return run_install(runner, config, cancel).await;
+        return run_install(runner, config, cancel, None).await;
     }
 
     // Interactive TUI mode
@@ -46,6 +46,13 @@ pub async fn run_install(
     runner: Arc<dyn CommandRunner>,
     config: GlobalConfig,
     cancel: CancellationToken,
+    download_progress_tx: Option<
+        Arc<
+            tokio::sync::watch::Sender<
+                archinstall_zfs_core::system::async_download::DownloadProgress,
+            >,
+        >,
+    >,
 ) -> Result<()> {
     let mountpoint = PathBuf::from("/mnt");
     let mode = config.installation_mode.unwrap();
@@ -250,9 +257,15 @@ pub async fn run_install(
         let mountpoint = mountpoint.clone();
         let cancel = cancel.clone();
         let swap = swap_partition;
+        let download_tx = download_progress_tx.clone();
         tokio::task::spawn_blocking(move || -> Result<()> {
-            let mut installer =
-                archinstall_zfs_core::installer::Installer::new(r, config, &mountpoint, cancel);
+            let mut installer = archinstall_zfs_core::installer::Installer::new(
+                r,
+                config,
+                &mountpoint,
+                cancel,
+                download_tx,
+            );
             if let Some(swap) = swap {
                 installer.set_swap_partition(swap);
             }

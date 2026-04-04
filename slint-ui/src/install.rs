@@ -173,6 +173,7 @@ pub fn run_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Result<
         config,
         &mountpoint,
         cancel.clone(),
+        None,
     );
     if let Some(swap) = swap_partition {
         installer.set_swap_partition(swap);
