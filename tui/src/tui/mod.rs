@@ -18,7 +18,7 @@ use ratatui::prelude::CrosstermBackend;
 use archinstall_zfs_core::config::types::GlobalConfig;
 
 use self::screens::install_progress::InstallProgress;
-use self::screens::main_menu::MainMenu;
+use self::screens::wizard::Wizard;
 
 pub async fn run_tui(config: GlobalConfig, _dry_run: bool) -> Result<()> {
     let mut terminal = setup_terminal()?;
@@ -51,17 +51,17 @@ pub enum Action {
 }
 
 async fn run_app(terminal: &mut DefaultTerminal, config: GlobalConfig) -> Result<()> {
-    let mut menu = MainMenu::new(config);
+    let mut wizard = Wizard::new(config);
     let mut events = EventStream::new();
 
     loop {
-        terminal.draw(|frame| menu.render(frame))?;
+        terminal.draw(|frame| wizard.render(frame))?;
 
         match tokio::time::timeout(Duration::from_millis(50), events.next()).await {
-            Ok(Some(Ok(ev))) => match menu.handle_event(ev, terminal).await? {
+            Ok(Some(Ok(ev))) => match wizard.handle_event(ev, terminal).await? {
                 Action::Continue => {}
                 Action::Install => {
-                    let config = menu.into_config();
+                    let config = wizard.into_config();
                     run_install_screen(terminal, config).await?;
                     return Ok(());
                 }

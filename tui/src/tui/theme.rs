@@ -31,6 +31,11 @@ pub const WARN_STYLE: Style = Style::new().fg(YELLOW);
 pub const ACTION_STYLE: Style = Style::new().fg(PEACH).add_modifier(Modifier::BOLD);
 pub const BG_STYLE: Style = Style::new().bg(BASE).fg(TEXT);
 
+// ── Sidebar styles ─────────────────────────────────
+pub const SIDEBAR_ACTIVE_STYLE: Style = Style::new().fg(BLUE).add_modifier(Modifier::BOLD);
+pub const SIDEBAR_DONE_STYLE: Style = Style::new().fg(GREEN);
+pub const SIDEBAR_PENDING_STYLE: Style = Style::new().fg(OVERLAY0);
+
 // ── Status icons ────────────────────────────────────
 pub const ICON_SET: &str = "\u{25cf}"; // ● filled circle (set)
 pub const ICON_UNSET: &str = "\u{25cb}"; // ○ empty circle (unset)

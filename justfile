@@ -158,18 +158,18 @@ upload:
 # ─── Integration Tests ─────────────────────────────────
 
 # Full cycle: fresh disk, install, boot, verify
-test-vm:
+test-vm *ARGS:
     just build
-    cargo xtask test-vm
+    cargo xtask test-vm {{ARGS}}
 
 # Install only: fresh disk, run installer, verify exit code
-test-install:
+test-install *ARGS:
     just build
-    cargo xtask test-install
+    cargo xtask test-install {{ARGS}}
 
 # Boot only: boot existing disk, verify system health
-test-boot:
-    cargo xtask test-boot
+test-boot *ARGS:
+    cargo xtask test-boot {{ARGS}}
 
 # ─── Cleanup ───────────────────────────────────────────
 
