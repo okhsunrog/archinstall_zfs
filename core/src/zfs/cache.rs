@@ -3,7 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{CommandRunner, check_exit, chroot};
+use crate::system::cmd::{CommandRunner, check_exit, chroot_cmd};
 
 use super::bootmenu::HOSTID_VALUE;
 
@@ -107,10 +107,11 @@ pub fn install_zed_cache_hook(runner: &dyn CommandRunner, target: &Path) -> Resu
     let hook_path = zed_dir.join("history_event-zfs-list-cacher.sh");
 
     // Remove immutable flag if file already exists (e.g., from ZFS package)
-    let _ = chroot(
+    let _ = chroot_cmd(
         runner,
         target,
-        "chattr -i /etc/zfs/zed.d/history_event-zfs-list-cacher.sh",
+        "chattr",
+        &["-i", "/etc/zfs/zed.d/history_event-zfs-list-cacher.sh"],
     );
 
     // Remove existing file
@@ -129,10 +130,11 @@ pub fn install_zed_cache_hook(runner: &dyn CommandRunner, target: &Path) -> Resu
     }
 
     // Mark immutable so ZFS package updates don't overwrite it
-    let output = chroot(
+    let output = chroot_cmd(
         runner,
         target,
-        "chattr +i /etc/zfs/zed.d/history_event-zfs-list-cacher.sh",
+        "chattr",
+        &["+i", "/etc/zfs/zed.d/history_event-zfs-list-cacher.sh"],
     )?;
     if !output.success() {
         tracing::warn!("failed to set immutable flag on ZED hook (non-fatal)");
@@ -229,8 +231,9 @@ mod tests {
         let calls = runner.calls();
         let chattr_call = calls
             .iter()
-            .find(|c| c.args.iter().any(|a| a.contains("chattr +i")))
+            .find(|c| c.args.contains(&"+i".to_string()))
             .expect("should call chattr +i");
         assert_eq!(chattr_call.program, "arch-chroot");
+        assert!(chattr_call.args.contains(&"chattr".to_string()));
     }
 }

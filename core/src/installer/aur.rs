@@ -2,7 +2,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Result, bail};
 
-use crate::system::cmd::{CommandRunner, check_exit, chroot, shell_quote};
+use crate::system::cmd::{CommandRunner, check_exit, chroot, chroot_cmd, shell_quote};
 
 const TEMP_USER: &str = "aurinstall";
 
@@ -105,7 +105,7 @@ fn setup_aur_environment(runner: &dyn CommandRunner, target: &Path) -> Result<()
     ctx.install_packages(&["git", "sudo"])?;
 
     // Create temp user
-    let output = chroot(runner, target, &format!("useradd -m {TEMP_USER}"))?;
+    let output = chroot_cmd(runner, target, "useradd", &["-m", TEMP_USER])?;
     check_exit(&output, "create AUR temp user")?;
 
     // Enable NOPASSWD sudo
@@ -142,7 +142,7 @@ fn install_single_aur_package(
 
 fn cleanup_aur_environment(runner: &dyn CommandRunner, target: &Path) -> Result<()> {
     let _ = std::fs::remove_file(target.join(format!("etc/sudoers.d/99_{TEMP_USER}")));
-    let _ = chroot(runner, target, &format!("userdel -r {TEMP_USER}"));
+    let _ = chroot_cmd(runner, target, "userdel", &["-r", TEMP_USER]);
 
     tracing::info!("cleaned up AUR environment");
     Ok(())

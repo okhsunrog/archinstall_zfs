@@ -51,16 +51,28 @@ pub fn add_archzfs_repo(runner: &dyn CommandRunner, target: Option<&Path>) -> Re
 
     // Initialize keyring
     let init_result = if let Some(t) = target {
-        crate::system::cmd::chroot(
-            runner,
-            t,
-            "pacman-key --init && pacman-key --populate archlinux",
-        )
+        let r = crate::system::cmd::chroot_cmd(runner, t, "pacman-key", &["--init"]);
+        if let Ok(ref output) = r
+            && output.success()
+        {
+            crate::system::cmd::chroot_cmd(
+                runner,
+                t,
+                "pacman-key",
+                &["--populate", "archlinux"],
+            )
+        } else {
+            r
+        }
     } else {
-        runner.run(
-            "bash",
-            &["-c", "pacman-key --init && pacman-key --populate archlinux"],
-        )
+        let r = runner.run("pacman-key", &["--init"]);
+        if let Ok(ref output) = r
+            && output.success()
+        {
+            runner.run("pacman-key", &["--populate", "archlinux"])
+        } else {
+            r
+        }
     };
     if let Ok(ref output) = init_result
         && !output.success()
@@ -75,11 +87,15 @@ pub fn add_archzfs_repo(runner: &dyn CommandRunner, target: Option<&Path>) -> Re
     for key_id in ARCHZFS_KEY_IDS {
         let mut received = false;
         for server in KEYSERVERS {
-            let cmd = format!("pacman-key --keyserver {server} -r {key_id}");
             let output = if let Some(t) = target {
-                crate::system::cmd::chroot(runner, t, &cmd)
+                crate::system::cmd::chroot_cmd(
+                    runner,
+                    t,
+                    "pacman-key",
+                    &["--keyserver", server, "-r", key_id],
+                )
             } else {
-                runner.run("bash", &["-c", &cmd])
+                runner.run("pacman-key", &["--keyserver", server, "-r", key_id])
             };
             if output.is_ok() && output.as_ref().unwrap().success() {
                 tracing::info!(key = key_id, server, "received archzfs key");
@@ -92,11 +108,10 @@ pub fn add_archzfs_repo(runner: &dyn CommandRunner, target: Option<&Path>) -> Re
         }
 
         // Locally sign the key
-        let lsign_cmd = format!("pacman-key --lsign-key {key_id}");
         let _ = if let Some(t) = target {
-            crate::system::cmd::chroot(runner, t, &lsign_cmd)
+            crate::system::cmd::chroot_cmd(runner, t, "pacman-key", &["--lsign-key", key_id])
         } else {
-            runner.run("bash", &["-c", &lsign_cmd])
+            runner.run("pacman-key", &["--lsign-key", key_id])
         };
     }
 

@@ -3,7 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{CommandRunner, check_exit, chroot};
+use crate::system::cmd::{CommandRunner, check_exit, chroot_cmd};
 
 pub fn configure(target: &Path, encryption: bool) -> Result<()> {
     let conf_path = target.join("etc/mkinitcpio.conf");
@@ -73,7 +73,7 @@ pub fn configure(target: &Path, encryption: bool) -> Result<()> {
 }
 
 pub fn generate(runner: &dyn CommandRunner, target: &Path) -> Result<()> {
-    let output = chroot(runner, target, "mkinitcpio -P")?;
+    let output = chroot_cmd(runner, target, "mkinitcpio", &["-P"])?;
     check_exit(&output, "mkinitcpio -P")?;
     tracing::info!("generated initramfs with mkinitcpio");
     Ok(())

@@ -5,7 +5,7 @@ use color_eyre::eyre::{Context, Result};
 use serde::Serialize;
 
 use crate::config::types::InitSystem;
-use crate::system::cmd::{CommandRunner, check_exit, chroot};
+use crate::system::cmd::{CommandRunner, check_exit, chroot_cmd};
 
 pub const HOSTID_VALUE: &str = "0x00bab10c";
 
@@ -126,7 +126,7 @@ pub fn install_and_generate_zbm(
 
     // 4. Run generate-zbm inside chroot
     tracing::info!("running generate-zbm to build EFI bundle");
-    let output = chroot(runner, target, "generate-zbm")?;
+    let output = chroot_cmd(runner, target, "generate-zbm", &[])?;
     check_exit(&output, "generate-zbm")?;
 
     // 5. Copy main EFI to UEFI fallback path (EFI/BOOT/BOOTX64.EFI)
