@@ -61,6 +61,7 @@ pub async fn run_install(
     let compression = config.compression.to_string();
     let encryption = config.zfs_encryption_mode;
     let kernel = config.primary_kernel().to_string();
+    let config = Arc::new(config);
 
     // ── Phase 0: Pre-installation checks ───────────────────────
     tracing::info!("Phase 0: Pre-installation checks");
@@ -261,7 +262,7 @@ pub async fn run_install(
         tokio::task::spawn_blocking(move || -> Result<()> {
             let mut installer = archinstall_zfs_core::installer::Installer::new(
                 r,
-                config,
+                (*config).clone(),
                 &mountpoint,
                 cancel,
                 download_tx,
@@ -320,40 +321,34 @@ pub async fn run_install(
 
     // ── Phase 14: Cleanup (sync) ──────────────────────────────
     tracing::info!("Phase 14: Cleanup");
-    {
-        let r = runner;
-        let pool_name = pool_name.clone();
-        let prefix = prefix.clone();
-        let mountpoint = mountpoint.clone();
-        tokio::task::spawn_blocking(move || -> Result<()> {
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        nix::unistd::sync();
+
+        let root_ds = format!("{pool_name}/{prefix}/root");
+        archinstall_zfs_core::disk::partition::umount_efi(&*runner, &mountpoint)?;
+
+        for attempt in 1..=4 {
+            let _result = match attempt {
+                1 => runner.run("zfs", &["umount", "-a"]),
+                2 => runner.run("zfs", &["unmount", &root_ds]),
+                3 => runner.run("zfs", &["umount", "-af"]),
+                4 => runner.run("zfs", &["unmount", "-f", &root_ds]),
+                _ => unreachable!(),
+            };
+            std::thread::sleep(std::time::Duration::from_secs(1));
             nix::unistd::sync();
+        }
 
-            let root_ds = format!("{pool_name}/{prefix}/root");
-            archinstall_zfs_core::disk::partition::umount_efi(&*r, &mountpoint)?;
+        let output = runner.run("zpool", &["export", &pool_name])?;
+        if !output.success() {
+            tracing::warn!("zpool export failed, trying force");
+            let _ = runner.run("zpool", &["export", "-f", &pool_name]);
+        }
 
-            for attempt in 1..=4 {
-                let _result = match attempt {
-                    1 => r.run("zfs", &["umount", "-a"]),
-                    2 => r.run("zfs", &["unmount", &root_ds]),
-                    3 => r.run("zfs", &["umount", "-af"]),
-                    4 => r.run("zfs", &["unmount", "-f", &root_ds]),
-                    _ => unreachable!(),
-                };
-                std::thread::sleep(std::time::Duration::from_secs(1));
-                nix::unistd::sync();
-            }
-
-            let output = r.run("zpool", &["export", &pool_name])?;
-            if !output.success() {
-                tracing::warn!("zpool export failed, trying force");
-                let _ = r.run("zpool", &["export", "-f", &pool_name]);
-            }
-
-            tracing::info!("Installation complete!");
-            Ok(())
-        })
-        .await??;
-    }
+        tracing::info!("Installation complete!");
+        Ok(())
+    })
+    .await??;
 
     Ok(())
 }

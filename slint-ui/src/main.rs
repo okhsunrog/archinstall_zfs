@@ -4,6 +4,7 @@ mod tracing_layer;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::thread;
 
 use clap::{Parser, Subcommand};
@@ -88,8 +89,9 @@ fn main() -> Result<()> {
                 if !errors.is_empty() {
                     bail!("Config validation failed:\n  {}", errors.join("\n  "));
                 }
-                let runner = archinstall_zfs_core::system::cmd::RealRunner;
-                install::run_install(&runner, &config)
+                let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
+                    Arc::new(archinstall_zfs_core::system::cmd::RealRunner);
+                install::run_install(runner, &config)
             } else {
                 run_gui(config)
             }
@@ -288,8 +290,9 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                     .with(layer);
                 let _guard = tracing::subscriber::set_default(subscriber);
 
-                let runner = archinstall_zfs_core::system::cmd::RealRunner;
-                let result = install::run_install(&runner, &c);
+                let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
+                    Arc::new(archinstall_zfs_core::system::cmd::RealRunner);
+                let result = install::run_install(runner, &c);
 
                 let state = if result.is_ok() { 2 } else { 3 };
                 let _ = weak_install.upgrade_in_event_loop(move |app| {
@@ -564,7 +567,11 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig) {
             },
         ),
         "kernel" => {
-            let results = archinstall_zfs_core::kernel::scanner::scan_all_kernels();
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime");
+            let results = rt.block_on(archinstall_zfs_core::kernel::scanner::scan_all_kernels());
             let mut options = Vec::new();
             for (info, result) in archinstall_zfs_core::kernel::AVAILABLE_KERNELS
                 .iter()

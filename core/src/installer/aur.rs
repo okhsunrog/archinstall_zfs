@@ -95,7 +95,11 @@ fn resolve_aur_deps(target: &Path, packages: &[&str]) -> Result<Vec<String>> {
     let resolver =
         aur_depends::Resolver::new(&alpm, &mut cache, &raur_handle, aur_depends::Flags::new());
 
-    // resolve_targets is async — bridge via block_on (resolver is !Send due to alpm ref)
+    // resolve_targets is async — bridge via block_on. This is called from
+    // spawn_blocking, but block_on works because we captured the tokio Handle
+    // before entering the blocking context. The resolver borrows alpm (&Alpm)
+    // which is !Send, so we cannot spawn it as a tokio task — block_on on the
+    // current thread is the correct approach here.
     let rt = tokio::runtime::Handle::current();
 
     let targets: Vec<String> = packages.iter().map(|s| s.to_string()).collect();

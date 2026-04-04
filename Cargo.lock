@@ -205,6 +205,8 @@ dependencies = [
  "nix 0.31.2",
  "slint",
  "slint-build",
+ "tokio",
+ "tokio-util",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",

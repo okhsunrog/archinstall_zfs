@@ -16,12 +16,13 @@ pub struct CompatibilityResult {
 }
 
 /// Scan all known kernels for ZFS compatibility using libalpm.
+/// Scans run concurrently since each one may do HTTP requests.
 pub async fn scan_all_kernels() -> Vec<CompatibilityResult> {
-    let mut results = Vec::new();
-    for k in super::AVAILABLE_KERNELS {
-        results.push(scan_kernel(k.name).await);
-    }
-    results
+    let futures: Vec<_> = super::AVAILABLE_KERNELS
+        .iter()
+        .map(|k| scan_kernel(k.name))
+        .collect();
+    futures::future::join_all(futures).await
 }
 
 /// Scan a single kernel for ZFS compatibility.
