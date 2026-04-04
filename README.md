@@ -244,12 +244,6 @@ Recovery: Boot from the installer USB and run repair commands via chroot.
 
 ## Links
 
-### Project
-- [Releases](https://github.com/okhsunrog/archinstall_zfs/releases)
-- [Issues](https://github.com/okhsunrog/archinstall_zfs/issues)
-- [Discussions](https://github.com/okhsunrog/archinstall_zfs/discussions)
-- [Previous Python version](https://github.com/okhsunrog/archinstall_zfs/tree/old_python)
-
 ### Articles
 - [Meet archinstall_zfs: The TUI That Tames Arch Linux ZFS Installation](https://okhsunrog.dev/posts/archinstall-zfs/) (English)
 - [Arch Linux on ZFS for humans: archinstall_zfs](https://habr.com/ru/articles/942396/) (Habr, Russian)
