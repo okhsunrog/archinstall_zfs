@@ -8,18 +8,21 @@ pub mod services;
 pub mod users;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use alpm::SigLevel;
 use color_eyre::eyre::{Result, bail};
+use tokio_util::sync::CancellationToken;
 
 use crate::config::types::{GlobalConfig, InitSystem, SwapMode, ZfsEncryptionMode};
 use crate::system::alpm_pacman::{AlpmContext, TargetMounts};
 use crate::system::cmd::CommandRunner;
 
-pub struct Installer<'a> {
-    pub runner: &'a dyn CommandRunner,
-    pub config: &'a GlobalConfig,
+pub struct Installer {
+    pub runner: Arc<dyn CommandRunner>,
+    pub config: GlobalConfig,
     pub target: PathBuf,
+    cancel: CancellationToken,
     /// Swap partition computed at runtime (e.g. from full-disk partitioning).
     /// Overrides `config.swap_partition_by_id` when set.
     swap_partition: Option<PathBuf>,
@@ -27,12 +30,18 @@ pub struct Installer<'a> {
     alpm_ctx: Option<AlpmContext>,
 }
 
-impl<'a> Installer<'a> {
-    pub fn new(runner: &'a dyn CommandRunner, config: &'a GlobalConfig, target: &Path) -> Self {
+impl Installer {
+    pub fn new(
+        runner: Arc<dyn CommandRunner>,
+        config: GlobalConfig,
+        target: &Path,
+        cancel: CancellationToken,
+    ) -> Self {
         Self {
             runner,
             config,
             target: target.to_path_buf(),
+            cancel,
             swap_partition: None,
             _target_mounts: None,
             alpm_ctx: None,
@@ -54,7 +63,8 @@ impl<'a> Installer<'a> {
 
         // Phase 4: install base system via libalpm
         tracing::info!("Phase 4: Installing base system...");
-        let target_mounts = base::install_base(self.runner, &self.target, self.config)?;
+        let target_mounts =
+            base::install_base(&*self.runner, &self.target, &self.config, &self.cancel)?;
         self._target_mounts = Some(target_mounts);
 
         // Create a reusable AlpmContext for all subsequent package installs.
@@ -108,7 +118,7 @@ impl<'a> Installer<'a> {
         self.alpm_ctx
             .as_mut()
             .expect("alpm_ctx must be initialized before installing packages")
-            .install_packages(packages)
+            .install_packages(packages, &self.cancel)
     }
 
     fn configure_system(&self) -> Result<()> {
@@ -117,17 +127,17 @@ impl<'a> Installer<'a> {
         }
 
         if let Some(ref locale) = self.config.locale {
-            locale::set_locale(self.runner, &self.target, locale)?;
+            locale::set_locale(&*self.runner, &self.target, locale)?;
         }
 
-        locale::set_keyboard(self.runner, &self.target, &self.config.keyboard_layout)?;
+        locale::set_keyboard(&*self.runner, &self.target, &self.config.keyboard_layout)?;
 
         if let Some(ref tz) = self.config.timezone {
             locale::set_timezone(&self.target, tz)?;
         }
 
         if self.config.ntp {
-            services::enable_service(self.runner, &self.target, "systemd-timesyncd")?;
+            services::enable_service(&*self.runner, &self.target, "systemd-timesyncd")?;
         }
 
         // Mirror config
@@ -137,7 +147,7 @@ impl<'a> Installer<'a> {
 
         // Network
         if self.config.network_copy_iso {
-            network::copy_iso_network(self.runner, &self.target)?;
+            network::copy_iso_network(&*self.runner, &self.target)?;
         }
 
         Ok(())
@@ -145,7 +155,7 @@ impl<'a> Installer<'a> {
 
     fn install_zfs_on_target(&mut self) -> Result<()> {
         // Edit pacman.conf and import GPG keys (still needs shell for pacman-key)
-        crate::system::pacman::add_archzfs_repo(self.runner, Some(&self.target))?;
+        crate::system::pacman::add_archzfs_repo(&*self.runner, Some(&self.target))?;
 
         // Register archzfs repo in the live alpm handle and sync
         let ctx = self
@@ -163,7 +173,7 @@ impl<'a> Installer<'a> {
         let kernel = self.config.primary_kernel();
         let zfs_packages = crate::kernel::get_zfs_packages(kernel, self.config.zfs_module_mode);
         let pkg_refs: Vec<&str> = zfs_packages.iter().map(|s| s.as_str()).collect();
-        ctx.install_packages(&pkg_refs)?;
+        ctx.install_packages(&pkg_refs, &self.cancel)?;
 
         Ok(())
     }
@@ -173,12 +183,12 @@ impl<'a> Installer<'a> {
 
         match self.config.init_system {
             InitSystem::Dracut => {
-                initramfs::dracut::configure(self.runner, &self.target, encryption)?;
-                initramfs::dracut::generate(self.runner, &self.target)?;
+                initramfs::dracut::configure(&*self.runner, &self.target, encryption)?;
+                initramfs::dracut::generate(&*self.runner, &self.target)?;
             }
             InitSystem::Mkinitcpio => {
                 initramfs::mkinitcpio::configure(&self.target, encryption)?;
-                initramfs::mkinitcpio::generate(self.runner, &self.target)?;
+                initramfs::mkinitcpio::generate(&*self.runner, &self.target)?;
             }
         }
 
@@ -187,7 +197,7 @@ impl<'a> Installer<'a> {
 
     fn configure_users(&self) -> Result<()> {
         if let Some(ref pw) = self.config.root_password {
-            users::set_root_password(self.runner, &self.target, pw)?;
+            users::set_root_password(&*self.runner, &self.target, pw)?;
 
             // If sshd is in extra_services, allow root login
             if self.config.extra_services.iter().any(|s| s == "sshd") {
@@ -200,7 +210,7 @@ impl<'a> Installer<'a> {
         if let Some(ref user_list) = self.config.users {
             for user in user_list {
                 users::create_user(
-                    self.runner,
+                    &*self.runner,
                     &self.target,
                     &user.username,
                     user.password.as_deref(),
@@ -223,7 +233,7 @@ impl<'a> Installer<'a> {
                     self.install_target_packages(&pkg_refs)?;
                 }
                 for service in &p.services {
-                    services::enable_service(self.runner, &self.target, service)?;
+                    services::enable_service(&*self.runner, &self.target, service)?;
                 }
             } else {
                 tracing::warn!(profile = profile_name, "unknown profile, skipping");
@@ -246,31 +256,35 @@ impl<'a> Installer<'a> {
         // Bluetooth
         if self.config.bluetooth {
             self.install_target_packages(&["bluez", "bluez-utils"])?;
-            services::enable_service(self.runner, &self.target, "bluetooth")?;
+            services::enable_service(&*self.runner, &self.target, "bluetooth")?;
         }
 
         Ok(())
     }
 
     fn install_additional_packages(&mut self) -> Result<()> {
-        if !self.config.additional_packages.is_empty() {
-            let pkg_refs: Vec<&str> = self
-                .config
-                .additional_packages
-                .iter()
-                .map(|s| s.as_str())
-                .collect();
+        let additional: Vec<String> = self.config.additional_packages.clone();
+        if !additional.is_empty() {
+            let pkg_refs: Vec<&str> = additional.iter().map(|s| s.as_str()).collect();
             self.install_target_packages(&pkg_refs)?;
         }
 
         let aur_pkgs = self.config.all_aur_packages();
         if !aur_pkgs.is_empty() {
-            aur::install_aur_packages(self.runner, &self.target, &aur_pkgs)?;
+            // AUR install is async (dependency resolution uses async raur).
+            // Bridge via block_on — justified because Installer holds !Send AlpmContext.
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(aur::install_aur_packages(
+                self.runner.clone(),
+                &self.target,
+                &aur_pkgs,
+                &self.cancel,
+            ))?;
         }
 
         // Enable extra services
         for service in &self.config.extra_services {
-            services::enable_service(self.runner, &self.target, service)?;
+            services::enable_service(&*self.runner, &self.target, service)?;
         }
 
         Ok(())
@@ -284,13 +298,13 @@ impl<'a> Installer<'a> {
             SwapMode::ZswapPartition => {
                 let part = self.effective_swap_partition();
                 if let Some(part) = part {
-                    crate::swap::setup_swap_partition(self.runner, &self.target, part, false)?;
+                    crate::swap::setup_swap_partition(&*self.runner, &self.target, part, false)?;
                 }
             }
             SwapMode::ZswapPartitionEncrypted => {
                 let part = self.effective_swap_partition();
                 if let Some(part) = part {
-                    crate::swap::setup_swap_partition(self.runner, &self.target, part, true)?;
+                    crate::swap::setup_swap_partition(&*self.runner, &self.target, part, true)?;
                 }
             }
             SwapMode::None => {}
@@ -311,15 +325,15 @@ impl<'a> Installer<'a> {
 
         // Enable ZFS services
         for service in crate::zfs::ZFS_SERVICES {
-            services::enable_service(self.runner, &self.target, service)?;
+            services::enable_service(&*self.runner, &self.target, service)?;
         }
 
         // genfstab
-        fstab::generate_fstab(self.runner, &self.target, pool_name, prefix)?;
+        fstab::generate_fstab(&*self.runner, &self.target, pool_name, prefix)?;
 
         // Copy misc files (hostid, zfs cache)
         crate::zfs::cache::copy_misc_files(
-            self.runner,
+            &*self.runner,
             &self.target,
             pool_name,
             Path::new("/mnt"),
@@ -354,9 +368,10 @@ mod tests {
 
     #[test]
     fn test_installer_validates_config() {
-        let runner = RecordingRunner::new(vec![]);
+        let runner: Arc<dyn CommandRunner> = Arc::new(RecordingRunner::new(vec![]));
         let config = GlobalConfig::default(); // missing installation_mode
-        let mut installer = Installer::new(&runner, &config, Path::new("/mnt"));
+        let mut installer =
+            Installer::new(runner, config, Path::new("/mnt"), CancellationToken::new());
         let result = installer.perform_installation();
         assert!(result.is_err());
         assert!(

@@ -108,63 +108,63 @@ fn install_zbm_pacman_hook(target: &Path) -> Result<()> {
 /// Install zfsbootmenu from AUR and run generate-zbm to build the EFI bundle.
 /// This replaces the old pre-built download approach with a locally built ZBM
 /// that uses the same kernel and ZFS modules as the installed system.
-pub fn install_and_generate_zbm(
-    runner: &dyn CommandRunner,
+pub async fn install_and_generate_zbm(
+    runner: std::sync::Arc<dyn CommandRunner>,
     target: &Path,
     init_system: InitSystem,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<()> {
-    // 1. Install zfsbootmenu from AUR (aur-depends resolves AUR dep chains
-    //    like perl-boolean automatically)
+    // 1. Install zfsbootmenu from AUR (async: AUR dependency resolution)
     tracing::info!("installing zfsbootmenu from AUR");
-    crate::installer::aur::install_aur_packages(runner, target, &["zfsbootmenu"])?;
+    crate::installer::aur::install_aur_packages(runner.clone(), target, &["zfsbootmenu"], cancel)
+        .await?;
 
-    // 2. Write config.yaml
-    write_zbm_config(target, init_system)?;
+    // 2-5. Sync operations: config, hooks, generate-zbm, copy EFI
+    let r = runner;
+    let t = target.to_path_buf();
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        write_zbm_config(&t, init_system)?;
+        install_zbm_pacman_hook(&t)?;
 
-    // 3. Install pacman hook for automatic regeneration
-    install_zbm_pacman_hook(target)?;
+        tracing::info!("running generate-zbm to build EFI bundle");
+        let output = chroot_cmd(&*r, &t, "generate-zbm", &[])?;
+        check_exit(&output, "generate-zbm")?;
 
-    // 4. Run generate-zbm inside chroot
-    tracing::info!("running generate-zbm to build EFI bundle");
-    let output = chroot_cmd(runner, target, "generate-zbm", &[])?;
-    check_exit(&output, "generate-zbm")?;
-
-    // 5. Copy main EFI to UEFI fallback path (EFI/BOOT/BOOTX64.EFI)
-    // generate-zbm with Versions: false creates vmlinuz.EFI in ImageDir
-    let efi_src = target.join("boot/efi/EFI/zbm/vmlinuz.EFI");
-    let fallback_dir = target.join("boot/efi/EFI/BOOT");
-    fs::create_dir_all(&fallback_dir)?;
-    if efi_src.exists() {
-        fs::copy(&efi_src, fallback_dir.join("BOOTX64.EFI"))
-            .wrap_err("failed to copy ZBM EFI to fallback path")?;
-        tracing::info!("copied ZBM EFI to EFI/BOOT/BOOTX64.EFI fallback");
-    } else {
-        tracing::warn!("generate-zbm output not found at expected path, checking alternatives");
-        // generate-zbm may use the kernel prefix; look for any .EFI in the dir
-        let zbm_dir = target.join("boot/efi/EFI/zbm");
-        if zbm_dir.exists() {
-            for entry in fs::read_dir(&zbm_dir)? {
-                let entry = entry?;
-                let path = entry.path();
-                if path
-                    .extension()
-                    .is_some_and(|e| e.eq_ignore_ascii_case("efi"))
-                    && !path.to_string_lossy().contains("backup")
-                {
-                    fs::copy(&path, fallback_dir.join("BOOTX64.EFI"))
-                        .wrap_err("failed to copy ZBM EFI to fallback path")?;
-                    tracing::info!(
-                        src = %path.display(),
-                        "copied ZBM EFI to EFI/BOOT/BOOTX64.EFI fallback"
-                    );
-                    break;
+        let efi_src = t.join("boot/efi/EFI/zbm/vmlinuz.EFI");
+        let fallback_dir = t.join("boot/efi/EFI/BOOT");
+        fs::create_dir_all(&fallback_dir)?;
+        if efi_src.exists() {
+            fs::copy(&efi_src, fallback_dir.join("BOOTX64.EFI"))
+                .wrap_err("failed to copy ZBM EFI to fallback path")?;
+            tracing::info!("copied ZBM EFI to EFI/BOOT/BOOTX64.EFI fallback");
+        } else {
+            tracing::warn!("generate-zbm output not found at expected path, checking alternatives");
+            let zbm_dir = t.join("boot/efi/EFI/zbm");
+            if zbm_dir.exists() {
+                for entry in fs::read_dir(&zbm_dir)? {
+                    let entry = entry?;
+                    let path = entry.path();
+                    if path
+                        .extension()
+                        .is_some_and(|e| e.eq_ignore_ascii_case("efi"))
+                        && !path.to_string_lossy().contains("backup")
+                    {
+                        fs::copy(&path, fallback_dir.join("BOOTX64.EFI"))
+                            .wrap_err("failed to copy ZBM EFI to fallback path")?;
+                        tracing::info!(
+                            src = %path.display(),
+                            "copied ZBM EFI to EFI/BOOT/BOOTX64.EFI fallback"
+                        );
+                        break;
+                    }
                 }
             }
         }
-    }
 
-    tracing::info!("ZFSBootMenu built and installed locally");
-    Ok(())
+        tracing::info!("ZFSBootMenu built and installed locally");
+        Ok(())
+    })
+    .await?
 }
 
 /// Create efibootmgr entries pointing to the locally-built ZBM EFI bundle.

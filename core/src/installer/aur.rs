@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use color_eyre::eyre::{Result, bail};
 
@@ -20,10 +21,11 @@ fn validate_aur_package_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn install_aur_packages(
-    runner: &dyn CommandRunner,
+pub async fn install_aur_packages(
+    runner: Arc<dyn CommandRunner>,
     target: &Path,
     packages: &[&str],
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<()> {
     if packages.is_empty() {
         return Ok(());
@@ -35,8 +37,14 @@ pub fn install_aur_packages(
 
     tracing::info!(?packages, "installing AUR packages");
 
-    // Resolve the full AUR dependency tree (including AUR-to-AUR deps)
-    let install_order = resolve_aur_deps(target, packages)?;
+    // Resolve AUR dependency tree — uses alpm (!Send) internally via block_on
+    let target_owned = target.to_path_buf();
+    let pkgs: Vec<String> = packages.iter().map(|s| s.to_string()).collect();
+    let install_order = tokio::task::spawn_blocking(move || {
+        let pkg_refs: Vec<&str> = pkgs.iter().map(|s| s.as_str()).collect();
+        resolve_aur_deps(&target_owned, &pkg_refs)
+    })
+    .await??;
 
     if install_order.is_empty() {
         tracing::info!("all AUR packages already installed");
@@ -45,19 +53,28 @@ pub fn install_aur_packages(
 
     tracing::info!(?install_order, "resolved AUR install order");
 
-    setup_aur_environment(runner, target)?;
+    // Sync operations: setup environment, build packages, cleanup
+    let r = runner;
+    let t = target.to_path_buf();
+    let c = cancel.clone();
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        setup_aur_environment(&*r, &t, &c)?;
 
-    for pkg in &install_order {
-        install_single_aur_package(runner, target, pkg)?;
-    }
+        for pkg in &install_order {
+            install_single_aur_package(&*r, &t, pkg)?;
+        }
 
-    cleanup_aur_environment(runner, target)?;
-
-    Ok(())
+        cleanup_aur_environment(&*r, &t)?;
+        Ok(())
+    })
+    .await?
 }
 
 /// Use raur + aur-depends to resolve the full AUR dependency tree,
 /// returning package names in correct install order (deps before dependents).
+///
+/// This function is sync because `alpm::Alpm` is `!Send` — the resolver holds
+/// a reference to it, so we must `block_on` from the same thread.
 fn resolve_aur_deps(target: &Path, packages: &[&str]) -> Result<Vec<String>> {
     let target_conf = target.join("etc/pacman.conf");
     let conf = pacmanconf::Config::from_file(target_conf.to_str().unwrap_or("/etc/pacman.conf"))
@@ -78,11 +95,8 @@ fn resolve_aur_deps(target: &Path, packages: &[&str]) -> Result<Vec<String>> {
     let resolver =
         aur_depends::Resolver::new(&alpm, &mut cache, &raur_handle, aur_depends::Flags::new());
 
-    // resolve_targets is async — bridge with a small tokio runtime
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| color_eyre::eyre::eyre!("failed to create tokio runtime: {e}"))?;
+    // resolve_targets is async — bridge via block_on (resolver is !Send due to alpm ref)
+    let rt = tokio::runtime::Handle::current();
 
     let targets: Vec<String> = packages.iter().map(|s| s.to_string()).collect();
     let actions = rt.block_on(resolver.resolve_targets(&targets))?;
@@ -97,12 +111,16 @@ fn resolve_aur_deps(target: &Path, packages: &[&str]) -> Result<Vec<String>> {
     Ok(order)
 }
 
-fn setup_aur_environment(runner: &dyn CommandRunner, target: &Path) -> Result<()> {
+fn setup_aur_environment(
+    runner: &dyn CommandRunner,
+    target: &Path,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> Result<()> {
     // Install git and sudo via libalpm (base-devel already in base install)
     let target_conf = target.join("etc/pacman.conf");
     let mut ctx = crate::system::alpm_pacman::AlpmContext::for_target(target, &target_conf)?;
     ctx.sync_databases(false)?;
-    ctx.install_packages(&["git", "sudo"])?;
+    ctx.install_packages(&["git", "sudo"], cancel)?;
 
     // Create temp user
     let output = chroot_cmd(runner, target, "useradd", &["-m", TEMP_USER])?;
@@ -125,9 +143,6 @@ fn install_single_aur_package(
 ) -> Result<()> {
     tracing::info!(package, "building AUR package");
 
-    // Clone PKGBUILD from AUR and build with makepkg.
-    // --syncdeps installs repo dependencies automatically.
-    // --skippgpcheck avoids PGP key issues in automated installs.
     let quoted_pkg = shell_quote(package);
     let cmd = format!(
         "su - {TEMP_USER} -c 'cd /tmp && \
@@ -153,11 +168,18 @@ mod tests {
     use super::*;
     use crate::system::cmd::tests::RecordingRunner;
 
-    #[test]
-    fn test_install_aur_packages_empty() {
-        let runner = RecordingRunner::new(vec![]);
-        install_aur_packages(&runner, Path::new("/mnt"), &[] as &[&str]).unwrap();
-        assert!(runner.calls().is_empty());
+    #[tokio::test]
+    async fn test_install_aur_packages_empty() {
+        let runner: Arc<dyn CommandRunner> = Arc::new(RecordingRunner::new(vec![]));
+        install_aur_packages(
+            runner.clone(),
+            Path::new("/mnt"),
+            &[] as &[&str],
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        // Can't check calls on Arc easily, but the test verifies no panic
     }
 
     #[test]

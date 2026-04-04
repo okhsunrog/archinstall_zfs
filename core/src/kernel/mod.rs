@@ -74,8 +74,8 @@ pub fn supports_precompiled(kernel: &str) -> bool {
 
 /// Query a package version from the local pacman sync database using libalpm.
 /// Returns None if the package is not found in any configured repo.
-pub fn query_package_version(package: &str) -> Result<Option<String>> {
-    let versions = query_packages(&[package])?;
+pub async fn query_package_version(package: &str) -> Result<Option<String>> {
+    let versions = query_packages(&[package]).await?;
     Ok(versions.get(package).cloned())
 }
 
@@ -105,33 +105,39 @@ fn init_alpm() -> Result<alpm::Alpm> {
 /// Query multiple packages at once, returning a map of name -> version.
 /// For ZFS packages (zfs-*), falls back to downloading archzfs.db directly
 /// if the package isn't found in locally configured repos.
-pub fn query_packages(packages: &[&str]) -> Result<std::collections::HashMap<String, String>> {
-    let handle = init_alpm()?;
+pub async fn query_packages(
+    packages: &[&str],
+) -> Result<std::collections::HashMap<String, String>> {
+    // Phase 1: query local alpm database (sync — alpm is !Send)
+    let packages_owned: Vec<String> = packages.iter().map(|s| s.to_string()).collect();
+    let (mut result, missing_zfs) = tokio::task::spawn_blocking(move || -> Result<_> {
+        let handle = init_alpm()?;
+        let mut result = std::collections::HashMap::new();
+        let mut missing_zfs = Vec::new();
 
-    let mut result = std::collections::HashMap::new();
-    let mut missing_zfs = Vec::new();
-
-    for &pkg_name in packages {
-        let mut found = false;
-        for db in handle.syncdbs() {
-            if let Ok(pkg) = db.pkg(pkg_name.as_bytes()) {
-                result.insert(pkg_name.to_string(), pkg.version().to_string());
-                found = true;
-                break;
+        for pkg_name in &packages_owned {
+            let mut found = false;
+            for db in handle.syncdbs() {
+                if let Ok(pkg) = db.pkg(pkg_name.as_bytes()) {
+                    result.insert(pkg_name.to_string(), pkg.version().to_string());
+                    found = true;
+                    break;
+                }
+            }
+            if !found && pkg_name.starts_with("zfs-") {
+                missing_zfs.push(pkg_name.clone());
             }
         }
-        // Track ZFS packages not found locally — we'll try archzfs.db fallback
-        if !found && pkg_name.starts_with("zfs-") {
-            missing_zfs.push(pkg_name);
-        }
-    }
+        Ok((result, missing_zfs))
+    })
+    .await??;
 
-    // Fallback: download archzfs.db for ZFS packages not in local repos
+    // Phase 2: async HTTP fallback for missing ZFS packages
     if !missing_zfs.is_empty()
-        && let Some(archzfs_versions) = fetch_archzfs_db_versions()
+        && let Some(archzfs_versions) = fetch_archzfs_db_versions().await
     {
-        for &pkg_name in &missing_zfs {
-            if let Some(ver) = archzfs_versions.get(pkg_name) {
+        for pkg_name in &missing_zfs {
+            if let Some(ver) = archzfs_versions.get(pkg_name.as_str()) {
                 tracing::debug!(
                     package = pkg_name,
                     version = ver,
@@ -148,17 +154,17 @@ pub fn query_packages(packages: &[&str]) -> Result<std::collections::HashMap<Str
 /// Download and parse the archzfs package database to get ZFS package versions.
 /// This works even when archzfs repo isn't configured locally (e.g., before
 /// add_archzfs_repo is called, or in CI environments).
-fn fetch_archzfs_db_versions() -> Option<std::collections::HashMap<String, String>> {
+async fn fetch_archzfs_db_versions() -> Option<std::collections::HashMap<String, String>> {
     let url = "https://github.com/archzfs/archzfs/releases/download/experimental/archzfs.db";
     tracing::debug!("downloading archzfs.db from {url}");
 
-    let client = reqwest::blocking::Client::new();
-    let resp = client
+    let resp = reqwest::Client::new()
         .get(url)
         .header("User-Agent", "archinstall-zfs-rs")
         .send()
+        .await
         .ok()?;
-    let data = resp.bytes().ok()?;
+    let data = resp.bytes().await.ok()?;
 
     // archzfs.db is an XZ-compressed tar archive
     let mut decompressed = Vec::new();
@@ -251,12 +257,12 @@ mod tests {
     }
 
     // Integration test: only runs on Arch with synced pacman DB
-    #[test]
-    fn test_query_package_version_on_arch() {
+    #[tokio::test]
+    async fn test_query_package_version_on_arch() {
         if !std::path::Path::new("/var/lib/pacman/sync").exists() {
             return; // Skip on non-Arch
         }
-        let ver = query_package_version("linux-lts");
+        let ver = query_package_version("linux-lts").await;
         match ver {
             Ok(Some(v)) => {
                 assert!(!v.is_empty());

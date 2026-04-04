@@ -88,7 +88,8 @@ fn setup_logging() -> Result<()> {
     Ok(())
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     color_eyre::install()?;
     setup_logging()?;
 
@@ -111,6 +112,6 @@ fn main() -> Result<()> {
             headers,
             *fast,
         ),
-        None => app::run(cli),
+        None => app::run(cli).await,
     }
 }

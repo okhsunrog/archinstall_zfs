@@ -43,11 +43,15 @@ pub fn copy_iso_network(runner: &dyn CommandRunner, target: &Path) -> Result<()>
     Ok(())
 }
 
-pub fn install_network_manager(runner: &dyn CommandRunner, target: &Path) -> Result<()> {
+pub fn install_network_manager(
+    runner: &dyn CommandRunner,
+    target: &Path,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> Result<()> {
     let target_conf = target.join("etc/pacman.conf");
     let mut ctx = crate::system::alpm_pacman::AlpmContext::for_target(target, &target_conf)?;
     ctx.sync_databases(false)?;
-    ctx.install_packages(&["networkmanager"])?;
+    ctx.install_packages(&["networkmanager"], cancel)?;
 
     let target_str = target.to_string_lossy();
     let output = runner.run(

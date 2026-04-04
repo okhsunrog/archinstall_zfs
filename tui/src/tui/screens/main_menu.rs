@@ -502,7 +502,7 @@ impl MainMenu {
         }
     }
 
-    pub fn handle_event(
+    pub async fn handle_event(
         &mut self,
         ev: Event,
         terminal: &mut ratatui::DefaultTerminal,
@@ -515,7 +515,7 @@ impl MainMenu {
                 (KeyCode::Up | KeyCode::Char('k'), _) => self.move_up(),
                 (KeyCode::Down | KeyCode::Char('j'), _) => self.move_down(),
                 (KeyCode::Enter | KeyCode::Right, _) => {
-                    return self.activate_item(terminal);
+                    return self.activate_item(terminal).await;
                 }
                 (KeyCode::Home, _) => {
                     let indices = self.selectable_indices();
@@ -535,7 +535,7 @@ impl MainMenu {
         Ok(Action::Continue)
     }
 
-    fn activate_item(
+    async fn activate_item(
         &mut self,
         terminal: &mut ratatui::DefaultTerminal,
     ) -> color_eyre::eyre::Result<Action> {
@@ -608,7 +608,7 @@ impl MainMenu {
                     }
                 }
                 "kernel" => {
-                    if let Some(kernels) = self.pick_kernel(terminal)? {
+                    if let Some(kernels) = self.pick_kernel(terminal).await? {
                         self.config.kernels = Some(kernels);
                     }
                 }
@@ -863,14 +863,14 @@ impl MainMenu {
         }
     }
 
-    fn pick_kernel(
+    async fn pick_kernel(
         &self,
         terminal: &mut ratatui::DefaultTerminal,
     ) -> color_eyre::eyre::Result<Option<Vec<String>>> {
         use archinstall_zfs_core::kernel::AVAILABLE_KERNELS;
         use archinstall_zfs_core::kernel::scanner::scan_all_kernels;
 
-        let results = scan_all_kernels();
+        let results = scan_all_kernels().await;
 
         let mut options = Vec::new();
         let mut kernel_names = Vec::new();

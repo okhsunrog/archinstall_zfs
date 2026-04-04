@@ -16,15 +16,16 @@ pub struct CompatibilityResult {
 }
 
 /// Scan all known kernels for ZFS compatibility using libalpm.
-pub fn scan_all_kernels() -> Vec<CompatibilityResult> {
-    super::AVAILABLE_KERNELS
-        .iter()
-        .map(|k| scan_kernel(k.name))
-        .collect()
+pub async fn scan_all_kernels() -> Vec<CompatibilityResult> {
+    let mut results = Vec::new();
+    for k in super::AVAILABLE_KERNELS {
+        results.push(scan_kernel(k.name).await);
+    }
+    results
 }
 
 /// Scan a single kernel for ZFS compatibility.
-pub fn scan_kernel(kernel: &str) -> CompatibilityResult {
+pub async fn scan_kernel(kernel: &str) -> CompatibilityResult {
     let info = match super::get_kernel_info(kernel) {
         Some(i) => i,
         None => {
@@ -47,7 +48,7 @@ pub fn scan_kernel(kernel: &str) -> CompatibilityResult {
     }
 
     // Query all at once via alpm
-    let versions = match super::query_packages(&pkg_names) {
+    let versions = match super::query_packages(&pkg_names).await {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!(kernel, error = %e, "alpm query failed, assuming compatible");
@@ -70,7 +71,7 @@ pub fn scan_kernel(kernel: &str) -> CompatibilityResult {
     let kernel_version = versions.get(kernel).cloned();
 
     // DKMS check: zfs-dkms must be available AND kernel must be in supported range
-    let (dkms_ok, dkms_warn) = check_dkms_compat(&versions, kernel);
+    let (dkms_ok, dkms_warn) = check_dkms_compat(&versions, kernel).await;
 
     // Precompiled check: kernel version must match the version embedded in the ZFS package
     let (pre_ok, pre_ver, pre_warn) = check_precompiled_compat(info, &versions);
@@ -88,7 +89,7 @@ pub fn scan_kernel(kernel: &str) -> CompatibilityResult {
 
 /// Validate a kernel/ZFS plan before installation.
 /// Returns a list of warnings (empty = no issues).
-pub fn validate_kernel_zfs_plan(
+pub async fn validate_kernel_zfs_plan(
     kernel: &str,
     mode: crate::config::types::ZfsModuleMode,
 ) -> Vec<String> {
@@ -118,7 +119,7 @@ pub fn validate_kernel_zfs_plan(
     }
 
     // Run the full compatibility scan
-    let result = scan_kernel(kernel);
+    let result = scan_kernel(kernel).await;
     match mode {
         crate::config::types::ZfsModuleMode::Precompiled => {
             if !result.precompiled_compatible {
@@ -137,7 +138,10 @@ pub fn validate_kernel_zfs_plan(
 
 // ── DKMS compatibility ──────────────────────────────
 
-fn check_dkms_compat(versions: &HashMap<String, String>, kernel: &str) -> (bool, Vec<String>) {
+async fn check_dkms_compat(
+    versions: &HashMap<String, String>,
+    kernel: &str,
+) -> (bool, Vec<String>) {
     let dkms_ver = match versions.get("zfs-dkms") {
         Some(ver) => ver,
         None => return (false, vec!["zfs-dkms not found in repos".to_string()]),
@@ -152,7 +156,7 @@ fn check_dkms_compat(versions: &HashMap<String, String>, kernel: &str) -> (bool,
 
     // Fetch kernel compatibility range from OpenZFS GitHub releases
     let base_zfs_ver = dkms_ver.split('-').next().unwrap_or(dkms_ver);
-    match fetch_zfs_kernel_range(base_zfs_ver) {
+    match fetch_zfs_kernel_range(base_zfs_ver).await {
         Some((min_ver, max_ver)) => {
             let kernel_base = kernel_ver.split('-').next().unwrap_or(kernel_ver);
             let kernel_parsed = parse_major_minor(kernel_base);
@@ -192,21 +196,21 @@ fn check_dkms_compat(versions: &HashMap<String, String>, kernel: &str) -> (bool,
 /// Fetch the supported kernel version range for a ZFS version from the
 /// OpenZFS GitHub release notes.
 /// Returns (min_kernel, max_kernel) or None if unavailable.
-fn fetch_zfs_kernel_range(zfs_version: &str) -> Option<(String, String)> {
+async fn fetch_zfs_kernel_range(zfs_version: &str) -> Option<(String, String)> {
     let tag = format!("zfs-{zfs_version}");
     let url = format!("https://api.github.com/repos/openzfs/zfs/releases/tags/{tag}");
 
     tracing::debug!(url, "fetching ZFS kernel compatibility from GitHub");
 
-    let client = reqwest::blocking::Client::new();
-    let resp = client
+    let resp = reqwest::Client::new()
         .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "archinstall-zfs-rs")
         .send()
+        .await
         .ok()?;
 
-    let data: serde_json::Value = resp.json().ok()?;
+    let data: serde_json::Value = resp.json().await.ok()?;
     let body = data.get("body")?.as_str()?;
     parse_kernel_range_from_release_notes(body)
 }
@@ -492,22 +496,22 @@ mod tests {
         assert!(!(kernel_parsed >= min_parsed && kernel_parsed <= max_parsed));
     }
 
-    #[test]
-    fn test_dkms_missing_zfs_dkms() {
+    #[tokio::test]
+    async fn test_dkms_missing_zfs_dkms() {
         let versions: HashMap<String, String> = [("linux-lts".into(), "6.12.41-2".into())]
             .into_iter()
             .collect();
-        let (ok, warnings) = check_dkms_compat(&versions, "linux-lts");
+        let (ok, warnings) = check_dkms_compat(&versions, "linux-lts").await;
         assert!(!ok);
         assert!(warnings.iter().any(|w| w.contains("zfs-dkms not found")));
     }
 
-    #[test]
-    fn test_dkms_missing_kernel() {
+    #[tokio::test]
+    async fn test_dkms_missing_kernel() {
         let versions: HashMap<String, String> = [("zfs-dkms".into(), "2.3.3-1".into())]
             .into_iter()
             .collect();
-        let (ok, warnings) = check_dkms_compat(&versions, "linux-lts");
+        let (ok, warnings) = check_dkms_compat(&versions, "linux-lts").await;
         assert!(!ok);
         assert!(warnings.iter().any(|w| w.contains("not found in repos")));
     }
@@ -565,18 +569,18 @@ mod tests {
 
     // ── validate_kernel_zfs_plan (matches Python TestValidation) ──
 
-    #[test]
-    fn test_validate_plan_invalid_kernel() {
-        let warnings = validate_kernel_zfs_plan("linux-invalid", ZfsModuleMode::Precompiled);
+    #[tokio::test]
+    async fn test_validate_plan_invalid_kernel() {
+        let warnings = validate_kernel_zfs_plan("linux-invalid", ZfsModuleMode::Precompiled).await;
         assert!(!warnings.is_empty());
         assert!(warnings[0].contains("Unsupported kernel"));
     }
 
     // ── Scan result structure (matches Python TestKernelScanningLogic) ──
 
-    #[test]
-    fn test_scan_unknown_kernel() {
-        let result = scan_kernel("linux-nonexistent");
+    #[tokio::test]
+    async fn test_scan_unknown_kernel() {
+        let result = scan_kernel("linux-nonexistent").await;
         assert!(!result.dkms_compatible);
         assert!(!result.precompiled_compatible);
         assert!(result.dkms_warnings[0].contains("Unknown kernel"));
@@ -651,12 +655,12 @@ mod tests {
 
     // ── Integration test: only on Arch with synced DB ───
 
-    #[test]
-    fn test_scan_kernel_on_arch() {
+    #[tokio::test]
+    async fn test_scan_kernel_on_arch() {
         if !std::path::Path::new("/var/lib/pacman/sync").exists() {
             return;
         }
-        let result = scan_kernel("linux-lts");
+        let result = scan_kernel("linux-lts").await;
         // Should at least not crash and return meaningful data
         assert_eq!(result.kernel_name, "linux-lts");
         tracing::info!(?result, "scan result for linux-lts");

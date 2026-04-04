@@ -55,12 +55,7 @@ pub fn add_archzfs_repo(runner: &dyn CommandRunner, target: Option<&Path>) -> Re
         if let Ok(ref output) = r
             && output.success()
         {
-            crate::system::cmd::chroot_cmd(
-                runner,
-                t,
-                "pacman-key",
-                &["--populate", "archlinux"],
-            )
+            crate::system::cmd::chroot_cmd(runner, t, "pacman-key", &["--populate", "archlinux"])
         } else {
             r
         }

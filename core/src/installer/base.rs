@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use color_eyre::eyre::Result;
+use tokio_util::sync::CancellationToken;
 
 use crate::config::types::GlobalConfig;
 use crate::system::alpm_pacman::{AlpmContext, TargetMounts};
@@ -14,6 +15,7 @@ pub fn install_base(
     _runner: &dyn CommandRunner,
     target: &Path,
     config: &GlobalConfig,
+    cancel: &CancellationToken,
 ) -> Result<TargetMounts> {
     let mut packages: Vec<&str> = vec![
         "base",
@@ -47,7 +49,7 @@ pub fn install_base(
     let pacman_conf = Path::new("/etc/pacman.conf");
     let mut ctx = AlpmContext::for_target(target, pacman_conf)?;
     ctx.sync_databases(false)?;
-    ctx.install_packages(&packages)?;
+    ctx.install_packages(&packages, cancel)?;
     ctx.finalize_target()?;
     // ctx (AlpmContext) drops here — that's fine, just releases the alpm handle.
     // target_mounts stays alive via the return value.

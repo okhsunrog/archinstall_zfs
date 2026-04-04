@@ -3,12 +3,15 @@ pub mod theme;
 pub mod tracing_layer;
 pub mod widgets;
 
+use std::time::Duration;
+
 use color_eyre::eyre::Result;
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture, EventStream};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+use futures::StreamExt;
 use ratatui::DefaultTerminal;
 use ratatui::prelude::CrosstermBackend;
 
@@ -17,9 +20,9 @@ use archinstall_zfs_core::config::types::GlobalConfig;
 use self::screens::install_progress::InstallProgress;
 use self::screens::main_menu::MainMenu;
 
-pub fn run_tui(config: GlobalConfig, _dry_run: bool) -> Result<()> {
+pub async fn run_tui(config: GlobalConfig, _dry_run: bool) -> Result<()> {
     let mut terminal = setup_terminal()?;
-    let result = run_app(&mut terminal, config);
+    let result = run_app(&mut terminal, config).await;
     restore_terminal()?;
     result
 }
@@ -47,40 +50,48 @@ pub enum Action {
     Quit,
 }
 
-fn run_app(terminal: &mut DefaultTerminal, config: GlobalConfig) -> Result<()> {
+async fn run_app(terminal: &mut DefaultTerminal, config: GlobalConfig) -> Result<()> {
     let mut menu = MainMenu::new(config);
+    let mut events = EventStream::new();
 
     loop {
         terminal.draw(|frame| menu.render(frame))?;
 
-        if crossterm::event::poll(std::time::Duration::from_millis(50))? {
-            let ev = crossterm::event::read()?;
-            match menu.handle_event(ev, terminal)? {
+        match tokio::time::timeout(Duration::from_millis(50), events.next()).await {
+            Ok(Some(Ok(ev))) => match menu.handle_event(ev, terminal).await? {
                 Action::Continue => {}
                 Action::Install => {
                     let config = menu.into_config();
-                    run_install_screen(terminal, config)?;
+                    run_install_screen(terminal, config).await?;
                     return Ok(());
                 }
                 Action::Quit => return Ok(()),
-            }
+            },
+            Ok(Some(Err(e))) => return Err(e.into()),
+            Ok(None) => return Ok(()), // stream ended
+            Err(_) => {}               // timeout, continue loop
         }
     }
 }
 
-fn run_install_screen(terminal: &mut DefaultTerminal, config: GlobalConfig) -> Result<()> {
+async fn run_install_screen(terminal: &mut DefaultTerminal, config: GlobalConfig) -> Result<()> {
     let mut progress = InstallProgress::start(config);
+    let mut events = EventStream::new();
 
     loop {
         progress.tick();
 
         terminal.draw(|frame| progress.render(frame))?;
 
-        if crossterm::event::poll(std::time::Duration::from_millis(50))? {
-            let ev = crossterm::event::read()?;
-            if progress.handle_event(ev) {
-                return Ok(());
+        match tokio::time::timeout(Duration::from_millis(50), events.next()).await {
+            Ok(Some(Ok(ev))) => {
+                if progress.handle_event(ev) {
+                    return Ok(());
+                }
             }
+            Ok(Some(Err(e))) => return Err(e.into()),
+            Ok(None) => return Ok(()),
+            Err(_) => {} // timeout
         }
     }
 }

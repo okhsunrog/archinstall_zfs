@@ -1,19 +1,19 @@
 use std::fmt;
-use std::sync::mpsc::Sender;
 
+use tokio::sync::mpsc::UnboundedSender;
 use tracing::Subscriber;
 use tracing::field::{Field, Visit};
 use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 
-/// A tracing layer that sends (message, level) pairs to an mpsc channel.
+/// A tracing layer that sends (message, level) pairs to a tokio mpsc channel.
 /// Level: 0=trace, 1=debug, 2=info, 3=warn, 4=error
 pub struct ChannelLayer {
-    tx: Sender<(String, i32)>,
+    tx: UnboundedSender<(String, i32)>,
 }
 
 impl ChannelLayer {
-    pub fn new(tx: Sender<(String, i32)>) -> Self {
+    pub fn new(tx: UnboundedSender<(String, i32)>) -> Self {
         Self { tx }
     }
 }

@@ -126,7 +126,11 @@ pub fn refresh_mirrors_if_stale(runner: &dyn CommandRunner) -> Result<()> {
     Ok(())
 }
 
-pub fn install_zfs_on_host(kernel: &str, precompiled: bool) -> Result<()> {
+pub fn install_zfs_on_host(
+    kernel: &str,
+    precompiled: bool,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> Result<()> {
     let packages = if precompiled {
         let zfs_pkg = format!("zfs-{kernel}");
         vec!["zfs-utils".to_string(), zfs_pkg]
@@ -143,13 +147,18 @@ pub fn install_zfs_on_host(kernel: &str, precompiled: bool) -> Result<()> {
     let pacman_conf = Path::new("/etc/pacman.conf");
     let mut ctx = AlpmContext::for_host(pacman_conf)?;
     ctx.sync_databases(false)?;
-    ctx.install_packages(&pkg_refs)?;
+    ctx.install_packages(&pkg_refs, cancel)?;
     Ok(())
 }
 
 /// Full ZFS initialization on the live host.
 /// Matches Python initialize_zfs() from kmod_setup.py.
-pub fn initialize_zfs(runner: &dyn CommandRunner, kernel: &str, mode: ZfsModuleMode) -> Result<()> {
+pub fn initialize_zfs(
+    runner: &dyn CommandRunner,
+    kernel: &str,
+    mode: ZfsModuleMode,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> Result<()> {
     // 1. Wait for reflector and stop it
     ensure_reflector_finished_and_stopped(runner)?;
 
@@ -174,10 +183,10 @@ pub fn initialize_zfs(runner: &dyn CommandRunner, kernel: &str, mode: ZfsModuleM
 
     // 6. Install ZFS packages (precompiled first, fallback to DKMS)
     let precompiled = mode == ZfsModuleMode::Precompiled;
-    if let Err(e) = install_zfs_on_host(kernel, precompiled) {
+    if let Err(e) = install_zfs_on_host(kernel, precompiled, cancel) {
         if precompiled {
             tracing::warn!("precompiled ZFS install failed ({e}), falling back to DKMS");
-            install_zfs_on_host(kernel, false)?;
+            install_zfs_on_host(kernel, false, cancel)?;
         } else {
             return Err(e);
         }
@@ -240,7 +249,13 @@ mod tests {
             CannedResponse::default(),
         ]);
 
-        initialize_zfs(&runner, "linux-lts", ZfsModuleMode::Precompiled).unwrap();
+        initialize_zfs(
+            &runner,
+            "linux-lts",
+            ZfsModuleMode::Precompiled,
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .unwrap();
 
         // Should return early without attempting package installation
         // since ZFS was already available

@@ -7,11 +7,14 @@ edition = "2024"
 archinstall-zfs-core = { path = "../core" }
 clap = { version = "4.6.0", features = ["derive"] }
 color-eyre = "0.6.5"
-crossterm = "0.29.0"
+crossterm = { version = "0.29.0", features = ["event-stream"] }
+futures = "0.3.32"
 nix = { version = "0.31.2", features = ["fs"] }
 ratatui = "0.30.0"
 ratatui-macros = "0.7.0"
 ratatui-widgets = "0.3.0"
+tokio = { version = "1.51.0", features = ["rt", "rt-multi-thread", "macros"] }
+tokio-util = { version = "0.7.18", features = ["rt"] }
 tracing = "0.1.44"
 tracing-appender = "0.2.4"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

@@ -3,6 +3,9 @@ use std::path::{Path, PathBuf};
 
 use alpm::{Alpm, DownloadEvent, LogLevel, SigLevel, TransFlag};
 use color_eyre::eyre::{Context, Result, bail, eyre};
+use tokio_util::sync::CancellationToken;
+
+use super::async_download::DownloadTask;
 
 /// Manages API filesystem mounts (proc, sys, dev, etc.) for a target chroot.
 /// Mounts are unmounted in reverse order on drop.
@@ -114,7 +117,14 @@ impl AlpmContext {
     }
 
     /// Install packages by name (equivalent to `pacman -S --needed`).
-    pub fn install_packages(&mut self, packages: &[&str]) -> Result<()> {
+    ///
+    /// Downloads are performed asynchronously via reqwest (parallel, cancellable),
+    /// then `trans_commit()` finds them in cache and only does the install phase.
+    pub fn install_packages(
+        &mut self,
+        packages: &[&str],
+        cancel: &CancellationToken,
+    ) -> Result<()> {
         if packages.is_empty() {
             return Ok(());
         }
@@ -150,9 +160,46 @@ impl AlpmContext {
             return Ok(());
         }
 
-        tracing::info!(count, "transaction prepared, installing");
+        tracing::info!(count, "transaction prepared, downloading packages");
 
-        // Commit (download + install)
+        // Extract download tasks from resolved packages
+        let tasks: Vec<DownloadTask> = self
+            .handle
+            .trans_add()
+            .iter()
+            .filter_map(|pkg| {
+                let db = pkg.db()?;
+                Some(DownloadTask {
+                    filename: pkg.filename()?.to_string(),
+                    servers: db.servers().iter().map(|s| s.to_string()).collect(),
+                    sha256: pkg.sha256sum().map(|s| s.to_string()),
+                    size: pkg.size(),
+                    sig_required: db.siglevel().contains(SigLevel::PACKAGE),
+                })
+            })
+            .collect();
+
+        if !tasks.is_empty() {
+            let cache_dir = PathBuf::from(
+                self.handle
+                    .cachedirs()
+                    .first()
+                    .unwrap_or("/var/cache/pacman/pkg/"),
+            );
+
+            // Async download via the existing tokio runtime
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(super::async_download::download_packages(
+                tasks,
+                cache_dir,
+                5,
+                cancel.clone(),
+            ))?;
+        }
+
+        tracing::info!("installing packages");
+
+        // Commit — libalpm finds packages in cache, skips download phase
         self.handle.trans_commit().map_err(|e| {
             let msg = format!("transaction commit failed: {e}");
             eyre!(msg)

@@ -1,5 +1,5 @@
-use std::sync::mpsc;
-use std::thread;
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 use crossterm::event::{Event, KeyCode, KeyModifiers};
 use ratatui::Frame;
@@ -33,18 +33,21 @@ pub struct InstallProgress {
     log_entries: Vec<LogEntry>,
     scroll: usize,
     state: InstallState,
-    rx: mpsc::Receiver<(String, i32)>,
+    rx: mpsc::UnboundedReceiver<(String, i32)>,
+    cancel: CancellationToken,
     min_level: i32, // minimum level to display (default 2=info)
 }
 
 impl InstallProgress {
     pub fn start(config: GlobalConfig) -> Self {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::unbounded_channel();
+        let cancel = CancellationToken::new();
 
         let tx_clone = tx.clone();
-        thread::spawn(move || {
+        let cancel_clone = cancel.clone();
+        tokio::spawn(async move {
+            // Set up tracing: dual output to file + channel for TUI
             let channel_layer = ChannelLayer::new(tx_clone.clone());
-            // Capture all levels including trace (command output)
             let filter = tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("trace"));
             let file_appender = tracing_appender::rolling::never("/tmp", "archinstall-zfs.log");
@@ -56,16 +59,20 @@ impl InstallProgress {
                 .with(filter)
                 .with(file_layer)
                 .with(channel_layer);
+            // Use set_default so the subscriber covers this async task
+            // and any spawn_blocking calls it makes
             let _guard = tracing::subscriber::set_default(subscriber);
 
-            let runner = archinstall_zfs_core::system::cmd::RealRunner;
-            let result = crate::app::run_install(&runner, &config);
+            let runner: std::sync::Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
+                std::sync::Arc::new(archinstall_zfs_core::system::cmd::RealRunner);
+            let result = crate::app::run_install(runner, config, cancel_clone).await;
+
             match result {
                 Ok(()) => {
-                    let _ = tx_clone.send(("[INFO ] Installation complete!".to_string(), 2));
+                    let _ = tx.send(("[INFO ] Installation complete!".to_string(), 2));
                 }
                 Err(e) => {
-                    let _ = tx_clone.send((format!("[ERROR] {e}"), 4));
+                    let _ = tx.send((format!("[ERROR] {e}"), 4));
                 }
             }
         });
@@ -78,6 +85,7 @@ impl InstallProgress {
             scroll: 0,
             state: InstallState::Running,
             rx,
+            cancel,
             min_level: 2, // show info+ by default
         }
     }
@@ -114,6 +122,12 @@ impl InstallProgress {
                 (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
                     if self.is_done() {
                         return true;
+                    }
+                }
+                (KeyCode::Esc, _) => {
+                    if !self.is_done() {
+                        tracing::warn!("cancellation requested by user");
+                        self.cancel.cancel();
                     }
                 }
                 (KeyCode::Enter, _) if self.is_done() => return true,
@@ -246,6 +260,8 @@ impl InstallProgress {
             Line::from(vec![
                 Span::styled(" j/k", theme::ACCENT_STYLE),
                 Span::styled(" scroll  ", theme::DIMMED_STYLE),
+                Span::styled("Esc", theme::ACCENT_STYLE),
+                Span::styled(" cancel  ", theme::DIMMED_STYLE),
                 Span::styled("l", theme::ACCENT_STYLE),
                 Span::styled(format!(" log level ({level_name}+) "), theme::DIMMED_STYLE),
             ])

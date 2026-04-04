@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::{Result, bail};
+use tokio_util::sync::CancellationToken;
 
 use archinstall_zfs_core::config::types::{
     GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode,
@@ -9,6 +10,7 @@ use archinstall_zfs_core::system::cmd::CommandRunner;
 
 /// Full installation pipeline. All progress reported via tracing.
 pub fn run_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Result<()> {
+    let cancel = CancellationToken::new();
     let mountpoint = PathBuf::from("/mnt");
     let mode = config.installation_mode.unwrap();
     let pool_name = config.pool_name.as_deref().unwrap();
@@ -38,7 +40,12 @@ pub fn run_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Result<
         tracing::warn!("kernel compatibility: {w}");
     }
 
-    archinstall_zfs_core::zfs::kmod::initialize_zfs(runner, kernel, config.zfs_module_mode)?;
+    archinstall_zfs_core::zfs::kmod::initialize_zfs(
+        runner,
+        kernel,
+        config.zfs_module_mode,
+        &cancel,
+    )?;
     tracing::info!("ZFS initialized on host");
 
     tracing::info!("Phase 1: Disk preparation");
@@ -161,8 +168,12 @@ pub fn run_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Result<
     archinstall_zfs_core::disk::partition::mount_efi(runner, &efi_partition, &mountpoint)?;
 
     tracing::info!("Phase 4-12: Running installer pipeline");
-    let mut installer =
-        archinstall_zfs_core::installer::Installer::new(runner, config, &mountpoint);
+    let mut installer = archinstall_zfs_core::installer::Installer::new(
+        runner,
+        config,
+        &mountpoint,
+        cancel.clone(),
+    );
     if let Some(swap) = swap_partition {
         installer.set_swap_partition(swap);
     }
@@ -185,6 +196,7 @@ pub fn run_install(runner: &dyn CommandRunner, config: &GlobalConfig) -> Result<
         runner,
         &mountpoint,
         config.init_system,
+        &cancel,
     )?;
     archinstall_zfs_core::zfs::bootmenu::create_efi_entries(runner, &efi_partition)?;
 
