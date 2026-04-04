@@ -6,6 +6,7 @@ use archinstall_zfs_core::config::types::{
     AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, SwapMode, UserConfig,
     ZfsEncryptionMode, ZfsModuleMode,
 };
+use archinstall_zfs_core::system::gpu::{GfxDriver, detect_gpus, suggested_driver};
 
 use super::edit::run_edit;
 use super::select::run_select;
@@ -219,6 +220,67 @@ pub async fn pick_kernel(
     match result.selected {
         Some(idx) => Ok(Some(vec![kernel_names[idx].to_string()])),
         None => Ok(None),
+    }
+}
+
+/// Pick a GPU driver.
+///
+/// Detects installed GPUs via `lspci` and highlights the auto-suggested
+/// driver. Returns:
+/// - `None`         — user cancelled (no config change)
+/// - `Some(None)`   — user explicitly chose "None" (clear `gfx_driver`)
+/// - `Some(Some(d))`— user selected a specific driver
+pub fn pick_gpu_driver(
+    terminal: &mut ratatui::DefaultTerminal,
+) -> Result<Option<Option<GfxDriver>>> {
+    let gpus = detect_gpus();
+    let suggestion = suggested_driver(&gpus);
+
+    // Build the title line, embedding detected GPU names for context.
+    let title = if gpus.is_empty() {
+        "GPU Driver  [no GPU detected via lspci]".to_string()
+    } else {
+        let names: Vec<&str> = gpus.iter().map(|g| g.name.as_str()).collect();
+        format!("GPU Driver  [{}]", names.join(", "))
+    };
+
+    // All selectable driver options; None = "skip GPU packages".
+    let drivers: &[Option<GfxDriver>] = &[
+        None,
+        Some(GfxDriver::AllOpenSource),
+        Some(GfxDriver::Amd),
+        Some(GfxDriver::Intel),
+        Some(GfxDriver::NvidiaOpen),
+        Some(GfxDriver::NvidiaNouveau),
+        Some(GfxDriver::Vm),
+    ];
+
+    let options: Vec<String> = drivers
+        .iter()
+        .map(|d| {
+            let label = match d {
+                None => "None — skip GPU driver installation".to_string(),
+                Some(drv) => drv.to_string(),
+            };
+            if *d == suggestion {
+                format!("{label}  ✦ suggested")
+            } else {
+                label
+            }
+        })
+        .collect();
+
+    let opt_refs: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
+
+    // Pre-select the suggested driver, or index 0 ("None") if no suggestion.
+    let current = suggestion
+        .and_then(|s| drivers.iter().position(|d| *d == Some(s)))
+        .unwrap_or(0);
+
+    let result = run_select(terminal, &title, &opt_refs, current)?;
+    match result.selected {
+        None => Ok(None),                    // cancelled
+        Some(idx) => Ok(Some(drivers[idx])), // Some(None) or Some(Some(driver))
     }
 }
 

@@ -15,7 +15,7 @@ Auto-detect GPU and install appropriate drivers. Without this, desktop profiles 
 - [x] Auto-suggest driver from detected hardware (`system::gpu::suggested_driver`)
 - [x] Integrate with profile system — `gfx_driver: Option<GfxDriver>` in config, installed in `install_profile`
 - [x] Handle multi-GPU setups (Intel+NVIDIA → `AllOpenSource`)
-- [ ] TUI selection for driver preference (open vs proprietary for NVIDIA)
+- [x] TUI selection for driver preference (`pick_gpu_driver` in pickers.rs — detects GPUs via lspci, marks suggested driver with ✦)
 
 ### WiFi Configuration During Install
 

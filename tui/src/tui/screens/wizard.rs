@@ -266,6 +266,11 @@ impl Wizard {
                         };
                     }
                 }
+                "gpu_driver" => {
+                    if let Some(driver) = pickers::pick_gpu_driver(terminal)? {
+                        self.config.gfx_driver = driver;
+                    }
+                }
                 "users" => {
                     pickers::manage_users(&mut self.config, terminal)?;
                 }

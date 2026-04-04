@@ -11,6 +11,15 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
             kind: MenuKind::Custom,
         },
         MenuItem {
+            key: "gpu_driver",
+            label: "GPU driver",
+            value: config
+                .gfx_driver
+                .map(|d| d.to_string())
+                .unwrap_or("None".into()),
+            kind: MenuKind::Custom,
+        },
+        MenuItem {
             key: "audio",
             label: "Audio",
             value: config.audio.map(|a| a.to_string()).unwrap_or("None".into()),
