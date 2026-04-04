@@ -58,6 +58,43 @@ pub fn create_user(
     Ok(())
 }
 
+/// Write SSH authorized_keys for a user in the target.
+/// Sets correct ownership (uid/gid from the target's /etc/passwd) and
+/// permissions (700 on .ssh, 600 on authorized_keys) via chroot commands.
+pub fn setup_ssh_keys(
+    runner: &dyn CommandRunner,
+    target: &Path,
+    username: &str,
+    keys: &[String],
+) -> Result<()> {
+    if keys.is_empty() {
+        return Ok(());
+    }
+
+    let ssh_dir = format!("/home/{username}/.ssh");
+    let auth_keys_path = format!("{ssh_dir}/authorized_keys");
+
+    // Create .ssh directory with correct permissions inside the chroot
+    let output = chroot_cmd(runner, target, "install", &["-d", "-m", "700", &ssh_dir])?;
+    check_exit(&output, &format!("create .ssh dir for {username}"))?;
+
+    // Write authorized_keys on the host side (simpler than heredoc in chroot)
+    let auth_keys_file = target.join(format!("home/{username}/.ssh/authorized_keys"));
+    let content = keys.join("\n") + "\n";
+    fs::write(&auth_keys_file, content).wrap_err("failed to write authorized_keys")?;
+
+    // Fix ownership and permissions via chroot
+    let output = chroot_cmd(runner, target, "chmod", &["600", &auth_keys_path])?;
+    check_exit(&output, &format!("chmod authorized_keys for {username}"))?;
+
+    let owner = format!("{username}:{username}");
+    let output = chroot_cmd(runner, target, "chown", &["-R", &owner, &ssh_dir])?;
+    check_exit(&output, &format!("chown .ssh for {username}"))?;
+
+    tracing::info!(username, "set up SSH authorized_keys");
+    Ok(())
+}
+
 fn enable_sudo(target: &Path, username: &str) -> Result<()> {
     let sudoers_dir = target.join("etc/sudoers.d");
     fs::create_dir_all(&sudoers_dir)?;
@@ -109,5 +146,44 @@ mod tests {
 
         let path = dir.path().join("etc/sudoers.d/00_myuser");
         assert!(path.exists());
+    }
+
+    #[test]
+    fn test_setup_ssh_keys_writes_file() {
+        // 3 chroot commands: install -d, chmod, chown
+        let responses: Vec<CannedResponse> = (0..3).map(|_| CannedResponse::default()).collect();
+        let runner = RecordingRunner::new(responses);
+        let dir = tempfile::tempdir().unwrap();
+
+        // Pre-create the home directory so the write succeeds without chroot
+        fs::create_dir_all(dir.path().join("home/alice/.ssh")).unwrap();
+
+        let keys = vec![
+            "ssh-ed25519 AAAAC3NzaC1 user@host".to_string(),
+            "ssh-rsa AAAAB3NzaC1 backup@host".to_string(),
+        ];
+        setup_ssh_keys(&runner, dir.path(), "alice", &keys).unwrap();
+
+        let content =
+            fs::read_to_string(dir.path().join("home/alice/.ssh/authorized_keys")).unwrap();
+        assert!(content.contains("ssh-ed25519 AAAAC3NzaC1 user@host"));
+        assert!(content.contains("ssh-rsa AAAAB3NzaC1 backup@host"));
+
+        let calls = runner.calls();
+        assert_eq!(calls.len(), 3);
+        // First call: install -d .ssh
+        assert!(calls[0].args.iter().any(|a| a.contains("install")));
+        // Second: chmod
+        assert!(calls[1].args.iter().any(|a| a.contains("chmod")));
+        // Third: chown
+        assert!(calls[2].args.iter().any(|a| a.contains("chown")));
+    }
+
+    #[test]
+    fn test_setup_ssh_keys_empty_is_noop() {
+        let runner = RecordingRunner::new(vec![]);
+        let dir = tempfile::tempdir().unwrap();
+        setup_ssh_keys(&runner, dir.path(), "alice", &[]).unwrap();
+        assert!(runner.calls().is_empty());
     }
 }

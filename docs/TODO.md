@@ -48,7 +48,7 @@ Current: GNOME, KDE Plasma, Xfce, Cinnamon, Budgie, MATE, Deepin, LXQt, Hyprland
 Missing WMs:
 - [x] Awesome
 - [x] Bspwm
-- [ ] Enlightenment
+- [x] Enlightenment
 - [x] LabWC
 - [x] Niri
 - [x] Qtile
@@ -56,8 +56,8 @@ Missing WMs:
 - [x] XMonad
 
 Missing servers:
-- [ ] Lighttpd
-- [ ] Tomcat
+- [x] Lighttpd
+- [x] Tomcat
 
 Profile system improvements:
 - [ ] Display manager / greeter selection per profile (GDM, SDDM, LightDM, Ly)
@@ -68,13 +68,13 @@ Profile system improvements:
 
 Basic user creation works. Missing:
 
-- [ ] SSH public key setup (`~user/.ssh/authorized_keys`)
+- [x] SSH public key setup (`~user/.ssh/authorized_keys`) — `ssh_authorized_keys: Vec<String>` in `UserConfig`
 - [ ] Auto-login configuration per display manager
 - [ ] Password strength feedback in TUI
 
 ### Post-Install Customization
 
-- [ ] Custom chroot commands (`post_install_commands` config field)
+- [x] Custom chroot commands (`post_install_commands: Vec<String>` config field, run via `sh -c` in chroot)
 - [x] SSD detection + ZFS-native TRIM: NVMe → `autotrim=on`, SATA SSD → `zfs-trim-weekly@<pool>.timer` (`fstrim.timer` is not used — it silently skips ZFS pools)
 - [ ] Service enable verification (report warnings on failure)
 

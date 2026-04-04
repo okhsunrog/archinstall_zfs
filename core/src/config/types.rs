@@ -190,6 +190,8 @@ pub struct GlobalConfig {
     pub parallel_downloads: u32,
     #[serde(default)]
     pub extra_services: Vec<String>,
+    #[serde(default)]
+    pub post_install_commands: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -199,6 +201,8 @@ pub struct UserConfig {
     pub sudo: bool,
     pub shell: Option<String>,
     pub groups: Option<Vec<String>>,
+    #[serde(default)]
+    pub ssh_authorized_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -280,6 +284,7 @@ impl Default for GlobalConfig {
             bluetooth: false,
             parallel_downloads: default_parallel_downloads(),
             extra_services: Vec::new(),
+            post_install_commands: Vec::new(),
         }
     }
 }

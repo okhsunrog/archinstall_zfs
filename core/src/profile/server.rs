@@ -50,5 +50,17 @@ pub fn server_profiles() -> Vec<Profile> {
             packages: vec!["mariadb"],
             services: vec!["mariadb"],
         },
+        Profile {
+            name: "lighttpd",
+            display_name: "Lighttpd",
+            packages: vec!["lighttpd"],
+            services: vec!["lighttpd"],
+        },
+        Profile {
+            name: "tomcat",
+            display_name: "Tomcat",
+            packages: vec!["tomcat10", "java-runtime"],
+            services: vec!["tomcat10"],
+        },
     ]
 }

@@ -142,6 +142,18 @@ pub fn desktop_profiles() -> Vec<Profile> {
             services: vec!["cosmic-greeter"],
         },
         Profile {
+            name: "enlightenment",
+            display_name: "Enlightenment",
+            packages: vec![
+                "enlightenment",
+                "terminology",
+                "lightdm",
+                "lightdm-gtk-greeter",
+                "xdg-user-dirs",
+            ],
+            services: vec!["lightdm"],
+        },
+        Profile {
             name: "awesome",
             display_name: "Awesome",
             packages: vec![

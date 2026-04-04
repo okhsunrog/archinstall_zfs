@@ -228,6 +228,14 @@ impl Installer {
                     user.shell.as_deref(),
                     user.groups.as_deref(),
                 )?;
+                if !user.ssh_authorized_keys.is_empty() {
+                    users::setup_ssh_keys(
+                        &*self.runner,
+                        &self.target,
+                        &user.username,
+                        &user.ssh_authorized_keys,
+                    )?;
+                }
             }
         }
 
@@ -302,6 +310,24 @@ impl Installer {
         // Enable extra services
         for service in &self.config.extra_services {
             services::enable_service(&*self.runner, &self.target, service)?;
+        }
+
+        // Run user-defined post-install commands inside the chroot.
+        // Each command is passed to `sh -c` so shell syntax works as expected.
+        for cmd in &self.config.post_install_commands {
+            tracing::info!(cmd, "running post-install command");
+            let target_str = self.target.to_string_lossy();
+            let output = self
+                .runner
+                .run("arch-chroot", &[&target_str, "sh", "-c", cmd])?;
+            if !output.success() {
+                tracing::warn!(
+                    cmd,
+                    exit_code = output.exit_code,
+                    stderr = %output.stderr,
+                    "post-install command failed"
+                );
+            }
         }
 
         Ok(())
