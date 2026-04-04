@@ -432,7 +432,7 @@ impl Wizard {
         let total_items = items.len();
         let cursor = self.cursor();
 
-        // Adjust scroll
+        // Derive scroll offset from cursor position each frame
         let mut scroll = self.scroll();
         if cursor >= scroll + visible_height {
             scroll = cursor - visible_height + 1;
@@ -440,8 +440,6 @@ impl Wizard {
         if cursor < scroll {
             scroll = cursor;
         }
-        // Can't mutate self here during render, but we store it for next frame
-        // (scroll is adjusted in handle_event via set_scroll)
 
         for (vi, item) in items.iter().enumerate().skip(scroll).take(visible_height) {
             let y = inner.y + (vi - scroll) as u16;

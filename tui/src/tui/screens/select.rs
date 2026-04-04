@@ -1,6 +1,6 @@
 use crossterm::event::{Event, KeyCode, KeyModifiers};
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Layout, Rect};
+use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
@@ -105,7 +105,7 @@ fn render_multiselect(
 
     let popup_width = (items.iter().map(|s| s.len() + 8).max().unwrap_or(30) + 4).min(72) as u16;
     let popup_height = (items.len() as u16 + 4).min(area.height.saturating_sub(4));
-    let popup = multiselect_centered_rect(popup_width, popup_height, area);
+    let popup = super::centered_rect(popup_width, popup_height, area);
 
     frame.render_widget(Clear, popup);
 
@@ -167,22 +167,6 @@ fn render_multiselect(
     }
 }
 
-fn multiselect_centered_rect(width: u16, height: u16, area: Rect) -> Rect {
-    let [_, v, _] = Layout::vertical([
-        Constraint::Fill(1),
-        Constraint::Length(height),
-        Constraint::Fill(1),
-    ])
-    .areas(area);
-    let [_, h, _] = Layout::horizontal([
-        Constraint::Fill(1),
-        Constraint::Length(width),
-        Constraint::Fill(1),
-    ])
-    .areas(v);
-    h
-}
-
 /// Show a modal select list and block until the user picks an item or cancels.
 pub fn run_select(
     terminal: &mut ratatui::DefaultTerminal,
@@ -237,7 +221,7 @@ fn render_select(frame: &mut Frame, title: &str, items: &[&str], state: &mut Lis
     // Center popup
     let popup_width = (items.iter().map(|s| s.len()).max().unwrap_or(20) + 8).min(70) as u16;
     let popup_height = (items.len() as u16 + 4).min(area.height - 4);
-    let popup = centered_rect(popup_width, popup_height, area);
+    let popup = super::centered_rect(popup_width, popup_height, area);
 
     frame.render_widget(Clear, popup);
 
@@ -274,20 +258,4 @@ fn render_select(frame: &mut Frame, title: &str, items: &[&str], state: &mut Lis
         .alignment(Alignment::Center);
         frame.render_widget(footer, footer_area);
     }
-}
-
-fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
-    let [_, v_center, _] = Layout::vertical([
-        Constraint::Fill(1),
-        Constraint::Length(height),
-        Constraint::Fill(1),
-    ])
-    .areas(area);
-    let [_, h_center, _] = Layout::horizontal([
-        Constraint::Fill(1),
-        Constraint::Length(width),
-        Constraint::Fill(1),
-    ])
-    .areas(v_center);
-    h_center
 }

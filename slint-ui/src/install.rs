@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use color_eyre::eyre::{Result, bail};
+use color_eyre::eyre::{Result, bail, eyre};
 use tokio_util::sync::CancellationToken;
 
 use archinstall_zfs_core::config::types::{
@@ -21,8 +21,13 @@ pub fn run_install(
         .enable_all()
         .build()?;
     let mountpoint = PathBuf::from("/mnt");
-    let mode = config.installation_mode.unwrap();
-    let pool_name = config.pool_name.as_deref().unwrap();
+    let mode = config
+        .installation_mode
+        .ok_or_else(|| eyre!("installation mode not set"))?;
+    let pool_name = config
+        .pool_name
+        .as_deref()
+        .ok_or_else(|| eyre!("pool name not set"))?;
     let prefix = &config.dataset_prefix;
     let compression = config.compression.to_string();
     let encryption = config.zfs_encryption_mode;
@@ -62,7 +67,10 @@ pub fn run_install(
     tracing::info!("Phase 1: Disk preparation");
     let (efi_partition, zfs_partition, swap_partition) = match mode {
         InstallationMode::FullDisk => {
-            let disk = config.disk_by_id.as_ref().unwrap();
+            let disk = config
+                .disk_by_id
+                .as_ref()
+                .ok_or_else(|| eyre!("disk not selected for full disk mode"))?;
             archinstall_zfs_core::disk::partition::zap_disk(&*runner, disk)?;
             let swap_size = match config.swap_mode {
                 SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted => {
@@ -85,13 +93,22 @@ pub fn run_install(
             (efi, zfs, swap)
         }
         InstallationMode::NewPool => {
-            let efi = config.efi_partition_by_id.clone().unwrap();
-            let zfs = config.zfs_partition_by_id.clone().unwrap();
+            let efi = config
+                .efi_partition_by_id
+                .clone()
+                .ok_or_else(|| eyre!("EFI partition not selected"))?;
+            let zfs = config
+                .zfs_partition_by_id
+                .clone()
+                .ok_or_else(|| eyre!("ZFS partition not selected"))?;
             let swap = config.swap_partition_by_id.clone();
             (efi, zfs, swap)
         }
         InstallationMode::ExistingPool => {
-            let efi = config.efi_partition_by_id.clone().unwrap();
+            let efi = config
+                .efi_partition_by_id
+                .clone()
+                .ok_or_else(|| eyre!("EFI partition not selected"))?;
             let zfs = PathBuf::new();
             let swap = config.swap_partition_by_id.clone();
             (efi, zfs, swap)

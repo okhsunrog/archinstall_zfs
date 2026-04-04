@@ -22,7 +22,7 @@ use crate::tui::tracing_layer::ChannelLayer;
 enum InstallState {
     Running,
     Succeeded,
-    Failed(#[allow(dead_code)] String),
+    Failed(String),
 }
 
 struct LogEntry {
@@ -212,11 +212,14 @@ impl InstallProgress {
 
         // Title
         let (title_text, title_style) = match &self.state {
-            InstallState::Running => (" Installing... ", theme::TITLE_STYLE),
-            InstallState::Succeeded => (" \u{2713} Installation Complete ", theme::SUCCESS_STYLE),
-            InstallState::Failed(_) => (" \u{26a0} Installation Failed ", theme::ERROR_STYLE),
+            InstallState::Running => (" Installing... ".to_string(), theme::TITLE_STYLE),
+            InstallState::Succeeded => (
+                " \u{2713} Installation Complete ".to_string(),
+                theme::SUCCESS_STYLE,
+            ),
+            InstallState::Failed(err) => (format!(" \u{26a0} Failed: {err} "), theme::ERROR_STYLE),
         };
-        let title = Paragraph::new(Line::from(vec![Span::styled(title_text, title_style)]))
+        let title = Paragraph::new(Line::from(vec![Span::styled(&title_text, title_style)]))
             .alignment(Alignment::Center)
             .block(
                 Block::default()

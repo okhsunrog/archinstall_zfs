@@ -21,7 +21,8 @@ pub fn run_edit(
     mask: bool,
 ) -> color_eyre::eyre::Result<EditResult> {
     let mut value = initial.to_string();
-    let mut cursor = value.len();
+    // cursor is a *char* index (not byte offset)
+    let mut cursor = value.chars().count();
 
     loop {
         terminal.draw(|frame| {
@@ -39,28 +40,32 @@ pub fn run_edit(
                         return Ok(EditResult { value: Some(value) });
                     }
                     (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
-                        value.insert(cursor, c);
+                        let byte_pos = char_to_byte(&value, cursor);
+                        value.insert(byte_pos, c);
                         cursor += 1;
                     }
                     (KeyCode::Backspace, _) => {
                         if cursor > 0 {
                             cursor -= 1;
-                            value.remove(cursor);
+                            let byte_pos = char_to_byte(&value, cursor);
+                            value.remove(byte_pos);
                         }
                     }
                     (KeyCode::Delete, _) => {
-                        if cursor < value.len() {
-                            value.remove(cursor);
+                        let char_count = value.chars().count();
+                        if cursor < char_count {
+                            let byte_pos = char_to_byte(&value, cursor);
+                            value.remove(byte_pos);
                         }
                     }
                     (KeyCode::Left, _) => {
                         cursor = cursor.saturating_sub(1);
                     }
                     (KeyCode::Right, _) => {
-                        cursor = (cursor + 1).min(value.len());
+                        cursor = (cursor + 1).min(value.chars().count());
                     }
                     (KeyCode::Home, _) => cursor = 0,
-                    (KeyCode::End, _) => cursor = value.len(),
+                    (KeyCode::End, _) => cursor = value.chars().count(),
                     (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
                         value.clear();
                         cursor = 0;
@@ -70,6 +75,14 @@ pub fn run_edit(
             }
         }
     }
+}
+
+/// Convert a char index to a byte offset in `s`.
+fn char_to_byte(s: &str, char_idx: usize) -> usize {
+    s.char_indices()
+        .nth(char_idx)
+        .map(|(byte, _)| byte)
+        .unwrap_or(s.len())
 }
 
 fn render_edit(frame: &mut Frame, title: &str, value: &str, cursor: usize, mask: bool) {
@@ -97,15 +110,17 @@ fn render_edit(frame: &mut Frame, title: &str, value: &str, cursor: usize, mask:
     frame.render_widget(block, popup);
 
     // Input line with cursor
+    // cursor is a char index — convert to byte offset for splitting
     let display: String = if mask {
-        "•".repeat(value.len())
+        "•".repeat(value.chars().count())
     } else {
         value.to_string()
     };
 
-    let (before, after) = display.split_at(cursor.min(display.len()));
+    let byte_cursor = char_to_byte(&display, cursor);
+    let (before, after) = display.split_at(byte_cursor);
     let cursor_char = after.chars().next().unwrap_or(' ');
-    let rest = if after.len() > 1 {
+    let rest = if after.len() > cursor_char.len_utf8() {
         &after[cursor_char.len_utf8()..]
     } else {
         ""
@@ -219,18 +234,4 @@ fn strength_widgets(password: &str, width: usize) -> (Line<'static>, Line<'stati
     (bar_line, feedback_line)
 }
 
-fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
-    let [_, v, _] = Layout::vertical([
-        Constraint::Fill(1),
-        Constraint::Length(height),
-        Constraint::Fill(1),
-    ])
-    .areas(area);
-    let [_, h, _] = Layout::horizontal([
-        Constraint::Fill(1),
-        Constraint::Length(width),
-        Constraint::Fill(1),
-    ])
-    .areas(v);
-    h
-}
+use super::centered_rect;

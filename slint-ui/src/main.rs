@@ -144,7 +144,7 @@ impl WizardState {
 }
 
 fn run_gui(config: GlobalConfig) -> Result<()> {
-    let app = App::new().unwrap();
+    let app = App::new()?;
     let config = Rc::new(RefCell::new(config));
     let wizard = Rc::new(RefCell::new(WizardState::new()));
 
@@ -210,42 +210,25 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 return;
             }
 
-            if key == "disk_select" {
-                if let Ok(disks) = archinstall_zfs_core::disk::by_id::list_disks_by_id()
-                    && let Some(disk) = disks.get(idx as usize)
+            if let Some(field) = partition_select_field(&key) {
+                let paths = if key == "disk_select" {
+                    archinstall_zfs_core::disk::by_id::list_disks_by_id().ok()
+                } else {
+                    archinstall_zfs_core::disk::by_id::list_partitions_by_id().ok()
+                };
+                if let Some(paths) = paths
+                    && let Some(path) = paths.get(idx as usize)
                 {
-                    cfg.borrow_mut().disk_by_id = Some(disk.clone());
-                    refresh_ui(&app, &cfg.borrow(), &wiz.borrow());
-                }
-                return;
-            }
-
-            if key == "efi_partition_select" {
-                if let Ok(parts) = archinstall_zfs_core::disk::by_id::list_partitions_by_id()
-                    && let Some(part) = parts.get(idx as usize)
-                {
-                    cfg.borrow_mut().efi_partition_by_id = Some(part.clone());
-                    refresh_ui(&app, &cfg.borrow(), &wiz.borrow());
-                }
-                return;
-            }
-
-            if key == "zfs_partition_select" {
-                if let Ok(parts) = archinstall_zfs_core::disk::by_id::list_partitions_by_id()
-                    && let Some(part) = parts.get(idx as usize)
-                {
-                    cfg.borrow_mut().zfs_partition_by_id = Some(part.clone());
-                    refresh_ui(&app, &cfg.borrow(), &wiz.borrow());
-                }
-                return;
-            }
-
-            if key == "swap_partition_select" {
-                if let Ok(parts) = archinstall_zfs_core::disk::by_id::list_partitions_by_id()
-                    && let Some(part) = parts.get(idx as usize)
-                {
-                    cfg.borrow_mut().swap_partition_by_id = Some(part.clone());
-                    refresh_ui(&app, &cfg.borrow(), &wiz.borrow());
+                    let path = path.clone();
+                    let mut c = cfg.borrow_mut();
+                    match field {
+                        "disk_by_id" => c.disk_by_id = Some(path),
+                        "efi_partition_by_id" => c.efi_partition_by_id = Some(path),
+                        "zfs_partition_by_id" => c.zfs_partition_by_id = Some(path),
+                        "swap_partition_by_id" => c.swap_partition_by_id = Some(path),
+                        _ => {}
+                    }
+                    refresh_ui(&app, &c, &wiz.borrow());
                 }
                 return;
             }
@@ -361,7 +344,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                         let vec_model = model
                             .as_any()
                             .downcast_ref::<VecModel<LogMessage>>()
-                            .unwrap();
+                            .expect("log_messages model is always VecModel<LogMessage>");
                         vec_model.push(LogMessage { text, level });
                         if vec_model.row_count() > MAX_LOG_LINES {
                             let to_remove =
@@ -510,6 +493,59 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
         });
     }
 
+    // ── Keyboard navigation ────────────────────────
+    {
+        let weak = app.as_weak();
+        let cfg = config.clone();
+        let wiz = wizard.clone();
+        app.on_key_nav_down(move || {
+            let Some(app) = weak.upgrade() else { return };
+            let items = build_step_items(wiz.borrow().current_step, &cfg.borrow());
+            let current = app.get_focused_index();
+            let next = next_selectable_index(&items, current, 1);
+            app.set_focused_index(next);
+        });
+    }
+    {
+        let weak = app.as_weak();
+        let cfg = config.clone();
+        let wiz = wizard.clone();
+        app.on_key_nav_up(move || {
+            let Some(app) = weak.upgrade() else { return };
+            let items = build_step_items(wiz.borrow().current_step, &cfg.borrow());
+            let current = app.get_focused_index();
+            let next = next_selectable_index(&items, current, -1);
+            app.set_focused_index(next);
+        });
+    }
+    {
+        let weak = app.as_weak();
+        let cfg = config.clone();
+        let wiz = wizard.clone();
+        app.on_key_nav_activate(move || {
+            let Some(app) = weak.upgrade() else { return };
+            let idx = app.get_focused_index();
+            let items = build_step_items(wiz.borrow().current_step, &cfg.borrow());
+            if idx < 0 || idx as usize >= items.len() {
+                return;
+            }
+            let item = &items[idx as usize];
+            let item_type = item.item_type;
+            let key = item.key.clone();
+            if item_type == 5 {
+                if key == "install" {
+                    app.invoke_install_requested();
+                } else if key == "quit" {
+                    let _ = app.window().hide();
+                }
+            } else if item_type == 3 {
+                app.invoke_toggle_activated(key);
+            } else if item_type != 4 && item_type != 6 && item_type != 7 {
+                app.invoke_item_activated(key);
+            }
+        });
+    }
+
     // ── Quit ─────────────────────────────────────────
     {
         let weak = app.as_weak();
@@ -520,19 +556,20 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
         });
     }
 
-    app.run().unwrap();
+    app.run()?;
     Ok(())
 }
 
 // ── UI refresh ──────────────────────────────────────
 
 fn refresh_ui(app: &App, config: &GlobalConfig, wizard: &WizardState) {
+    let items = build_step_items(wizard.current_step, config);
     app.set_current_step(wizard.current_step as i32);
     app.set_steps(ModelRc::new(VecModel::from(build_steps(wizard))));
-    app.set_config_items(ModelRc::new(VecModel::from(build_step_items(
-        wizard.current_step,
-        config,
-    ))));
+    // Reset focused index to first selectable item
+    let first = next_selectable_index(&items, -1, 1);
+    app.set_focused_index(first);
+    app.set_config_items(ModelRc::new(VecModel::from(items)));
     app.set_status_text(SharedString::default());
 }
 
@@ -991,10 +1028,12 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, _wizard: &
             },
         ),
         "kernel" => {
-            let rt = tokio::runtime::Builder::new_current_thread()
+            let Ok(rt) = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .expect("tokio runtime");
+            else {
+                return;
+            };
             let results = rt.block_on(archinstall_zfs_core::kernel::scanner::scan_all_kernels());
             let mut options = Vec::new();
             for (info, result) in archinstall_zfs_core::kernel::AVAILABLE_KERNELS
@@ -1056,42 +1095,23 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, _wizard: &
             let locale_strs: Vec<&str> = locales.iter().map(|s| s.as_str()).collect();
             show_select(app, "locale_select", "Locale", &locale_strs, 0);
         }
-        "disk_by_id" => {
-            if let Ok(disks) = archinstall_zfs_core::disk::by_id::list_disks_by_id() {
-                let disk_strs: Vec<String> =
-                    disks.iter().map(|p| p.display().to_string()).collect();
-                let disk_refs: Vec<&str> = disk_strs.iter().map(|s| s.as_str()).collect();
-                show_select(app, "disk_select", "Select disk", &disk_refs, 0);
-            }
-        }
-        "efi_partition" => {
-            if let Ok(parts) = archinstall_zfs_core::disk::by_id::list_partitions_by_id() {
-                let part_strs: Vec<String> =
-                    parts.iter().map(|p| p.display().to_string()).collect();
-                let part_refs: Vec<&str> = part_strs.iter().map(|s| s.as_str()).collect();
-                show_select(app, "efi_partition_select", "EFI partition", &part_refs, 0);
-            }
-        }
-        "zfs_partition" => {
-            if let Ok(parts) = archinstall_zfs_core::disk::by_id::list_partitions_by_id() {
-                let part_strs: Vec<String> =
-                    parts.iter().map(|p| p.display().to_string()).collect();
-                let part_refs: Vec<&str> = part_strs.iter().map(|s| s.as_str()).collect();
-                show_select(app, "zfs_partition_select", "ZFS partition", &part_refs, 0);
-            }
-        }
-        "swap_partition" => {
-            if let Ok(parts) = archinstall_zfs_core::disk::by_id::list_partitions_by_id() {
-                let part_strs: Vec<String> =
-                    parts.iter().map(|p| p.display().to_string()).collect();
-                let part_refs: Vec<&str> = part_strs.iter().map(|s| s.as_str()).collect();
-                show_select(
-                    app,
-                    "swap_partition_select",
-                    "Swap partition",
-                    &part_refs,
-                    0,
-                );
+        "disk_by_id" | "efi_partition" | "zfs_partition" | "swap_partition" => {
+            let (select_key, title, is_disk) = match key {
+                "disk_by_id" => ("disk_select", "Select disk", true),
+                "efi_partition" => ("efi_partition_select", "EFI partition", false),
+                "zfs_partition" => ("zfs_partition_select", "ZFS partition", false),
+                "swap_partition" => ("swap_partition_select", "Swap partition", false),
+                _ => return,
+            };
+            let paths = if is_disk {
+                archinstall_zfs_core::disk::by_id::list_disks_by_id().ok()
+            } else {
+                archinstall_zfs_core::disk::by_id::list_partitions_by_id().ok()
+            };
+            if let Some(paths) = paths {
+                let strs: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
+                let refs: Vec<&str> = strs.iter().map(|s| s.as_str()).collect();
+                show_select(app, select_key, title, &refs, 0);
             }
         }
         "pool_name"
@@ -1153,6 +1173,33 @@ fn show_text_input(app: &App, key: &str, title: &str, current: &str, password: b
     app.set_text_input_value(current.into());
     app.set_text_input_password(password);
     app.set_text_input_visible(true);
+}
+
+/// Find the next selectable item index, skipping separators (4), readonly (6), warnings (7).
+fn next_selectable_index(items: &[ConfigItem], current: i32, dir: i32) -> i32 {
+    let len = items.len() as i32;
+    if len == 0 {
+        return -1;
+    }
+    for offset in 1..=len {
+        let idx = ((current + dir * offset) % len + len) % len;
+        let t = items[idx as usize].item_type;
+        if t != 4 && t != 6 && t != 7 {
+            return idx;
+        }
+    }
+    current
+}
+
+/// Maps a partition select key (from on_select_confirmed) to the config field name.
+fn partition_select_field(key: &str) -> Option<&'static str> {
+    match key {
+        "disk_select" => Some("disk_by_id"),
+        "efi_partition_select" => Some("efi_partition_by_id"),
+        "zfs_partition_select" => Some("zfs_partition_by_id"),
+        "swap_partition_select" => Some("swap_partition_by_id"),
+        _ => None,
+    }
 }
 
 // ── Apply mutations ──────────────────────────────────

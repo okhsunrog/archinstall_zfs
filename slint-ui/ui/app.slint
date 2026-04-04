@@ -354,6 +354,9 @@ export component App inherits Window {
     // Status text
     in property <string> status-text;
 
+    // Keyboard-driven focus index (-1 = none)
+    in-out property <int> focused-index: -1;
+
     // Callbacks to Rust
     callback item-activated(string);
     callback select-confirmed(string, int);
@@ -364,6 +367,47 @@ export component App inherits Window {
     callback step-clicked(int);
     callback next-step();
     callback prev-step();
+    callback key-nav-down();
+    callback key-nav-up();
+    callback key-nav-activate();
+
+    // ── Keyboard navigation ─────────────────────────
+    if install-state == 0 && !select-visible && !text-input-visible: FocusScope {
+        key-pressed(e) => {
+            if e.text == Key.DownArrow || e.text == "j" {
+                key-nav-down();
+                return accept;
+            }
+            if e.text == Key.UpArrow || e.text == "k" {
+                key-nav-up();
+                return accept;
+            }
+            if e.text == Key.Return {
+                key-nav-activate();
+                return accept;
+            }
+            if e.text == Key.Tab {
+                next-step();
+                return accept;
+            }
+            if e.text == Key.Backtab {
+                prev-step();
+                return accept;
+            }
+            if e.text == "q" {
+                quit-requested();
+                return accept;
+            }
+            if e.text == "1" { step-clicked(0); return accept; }
+            if e.text == "2" { step-clicked(1); return accept; }
+            if e.text == "3" { step-clicked(2); return accept; }
+            if e.text == "4" { step-clicked(3); return accept; }
+            if e.text == "5" { step-clicked(4); return accept; }
+            if e.text == "6" { step-clicked(5); return accept; }
+            if e.text == "7" { step-clicked(6); return accept; }
+            return reject;
+        }
+    }
 
     // ── Wizard config screen ─────────────────────────
     if install-state == 0: VerticalLayout {
@@ -466,7 +510,7 @@ export component App inherits Window {
                                   : item.item-type == 7 ? 28px
                                   : 34px;
                             border-radius: 4px;
-                            background: row-ta.has-hover
+                            background: (row-ta.has-hover || index == focused-index)
                                 && item.item-type != 4
                                 && item.item-type != 6
                                 && item.item-type != 7
@@ -496,6 +540,7 @@ export component App inherits Window {
                                 mouse-cursor: item.item-type == 4 || item.item-type == 6 || item.item-type == 7
                                     ? default : pointer;
                                 clicked => {
+                                    focused-index = index;
                                     if item.item-type == 5 {
                                         if item.key == "install" { install-requested(); }
                                         if item.key == "quit" { quit-requested(); }
