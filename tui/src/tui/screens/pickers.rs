@@ -638,6 +638,7 @@ pub fn apply_text(config: &mut GlobalConfig, key: &str, val: &str) {
                 config.keyboard_layout = val.to_string();
             }
         }
+        "x11_variant" => config.x11_variant = val_opt,
         "root_password" => config.root_password = val_opt,
         "encryption_password" => config.zfs_encryption_password = val_opt,
         "swap_partition_size" => config.swap_partition_size = val_opt,

@@ -39,6 +39,12 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
             kind: MenuKind::Text,
         },
         MenuItem {
+            key: "x11_variant",
+            label: "X11 kb variant",
+            value: config.x11_variant.clone().unwrap_or("None".into()),
+            kind: MenuKind::Text,
+        },
+        MenuItem {
             key: "ntp",
             label: "NTP (time sync)",
             value: if config.ntp { "Enabled" } else { "Disabled" }.into(),
