@@ -1,6 +1,5 @@
 use archinstall_zfs_core::config::types::{
     CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, SwapMode, ZfsEncryptionMode,
-    ZfsModuleMode,
 };
 
 use super::{MenuItem, MenuKind, radio_group};
@@ -120,16 +119,6 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
         match config.init_system {
             InitSystem::Dracut => 0,
             InitSystem::Mkinitcpio => 1,
-        },
-    ));
-
-    items.extend(radio_group(
-        "zfs_module_mode",
-        "ZFS module",
-        &["precompiled", "dkms"],
-        match config.zfs_module_mode {
-            ZfsModuleMode::Precompiled => 0,
-            ZfsModuleMode::Dkms => 1,
         },
     ));
 

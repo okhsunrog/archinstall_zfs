@@ -13,7 +13,7 @@ use slint::{Model, ModelRc, SharedString, VecModel};
 
 use archinstall_zfs_core::config::types::{
     AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, SwapMode, UserConfig,
-    ZfsEncryptionMode, ZfsModuleMode,
+    ZfsEncryptionMode,
 };
 
 slint::include_modules!();
@@ -263,6 +263,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
         let weak = app.as_weak();
         let cfg = config.clone();
         let wiz = wizard.clone();
+        let kscan = kernel_scan.clone();
         app.on_select_confirmed(move |key, idx| {
             let Some(app) = weak.upgrade() else { return };
 
@@ -291,8 +292,16 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
             if key == "kernel_select" {
                 let kernels = archinstall_zfs_core::kernel::AVAILABLE_KERNELS;
                 if let Some(info) = kernels.get(idx as usize) {
-                    cfg.borrow_mut().kernels = Some(vec![info.name.to_string()]);
-                    refresh_ui(&app, &cfg.borrow(), &wiz.borrow());
+                    let mut c = cfg.borrow_mut();
+                    c.kernels = Some(vec![info.name.to_string()]);
+                    // Auto-set ZFS module mode from scan results
+                    if let Some(ref cached) = *kscan.lock().unwrap()
+                        && let Some(result) = cached.get(idx as usize)
+                        && let Some(mode) = result.best_mode()
+                    {
+                        c.zfs_module_mode = mode;
+                    }
+                    refresh_ui(&app, &c, &wiz.borrow());
                 }
                 return;
             }
@@ -1176,16 +1185,6 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         },
     ));
 
-    items.extend(radio_group(
-        "zfs_module_mode",
-        "ZFS module",
-        &["precompiled", "dkms"],
-        match c.zfs_module_mode {
-            ZfsModuleMode::Precompiled => 0,
-            ZfsModuleMode::Dkms => 1,
-        },
-    ));
-
     items
 }
 
@@ -1194,10 +1193,14 @@ fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         ci(
             "kernel",
             "Kernel",
-            &c.kernels
-                .as_ref()
-                .map(|k| k.join(", "))
-                .unwrap_or_else(|| c.primary_kernel().to_string()),
+            &format!(
+                "{} [{}]",
+                c.kernels
+                    .as_ref()
+                    .map(|k| k.join(", "))
+                    .unwrap_or_else(|| c.primary_kernel().to_string()),
+                c.zfs_module_mode
+            ),
             1,
         ),
         ci(
@@ -1482,34 +1485,34 @@ fn handle_item_activated(
     match key {
         // Popup selects — only for items with too many options or async scan
         "kernel" => {
-            let zfs_mode = config.zfs_module_mode;
             let cached = kernel_scan.lock().unwrap();
             let results: Vec<archinstall_zfs_core::kernel::scanner::CompatibilityResult>;
             let scan = if let Some(ref cached_results) = *cached {
                 cached_results
             } else {
-                // Fallback: scan now if cache not ready (shouldn't happen normally)
                 drop(cached);
                 let rt = tokio::runtime::Handle::current();
                 results = rt.block_on(archinstall_zfs_core::kernel::scanner::scan_all_kernels());
                 &results
             };
 
+            // Only show compatible kernels (best_mode is Some)
             let mut options = Vec::new();
             for (info, result) in archinstall_zfs_core::kernel::AVAILABLE_KERNELS
                 .iter()
                 .zip(scan.iter())
             {
-                let compatible = match zfs_mode {
-                    ZfsModuleMode::Precompiled => result.precompiled_compatible,
-                    ZfsModuleMode::Dkms => result.dkms_compatible,
-                };
                 let ver = result.kernel_version.as_deref().unwrap_or("?");
-                if compatible {
-                    options.push(format!("\u{2713} {} ({})", info.display_name, ver));
+                if result.best_mode().is_some() {
+                    options.push(format!(
+                        "\u{2713} {} ({}) [{}]",
+                        info.display_name,
+                        ver,
+                        result.mode_label()
+                    ));
                 } else {
                     options.push(format!(
-                        "\u{2717} {} ({}) - incompatible",
+                        "\u{2717} {} ({}) [incompatible]",
                         info.display_name, ver
                     ));
                 }
@@ -1753,12 +1756,6 @@ fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
             config.init_system = match idx {
                 0 => InitSystem::Dracut,
                 _ => InitSystem::Mkinitcpio,
-            }
-        }
-        "zfs_module_mode" => {
-            config.zfs_module_mode = match idx {
-                0 => ZfsModuleMode::Precompiled,
-                _ => ZfsModuleMode::Dkms,
             }
         }
         "profile" => {

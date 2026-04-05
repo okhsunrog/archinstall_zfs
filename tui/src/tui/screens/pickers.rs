@@ -194,49 +194,58 @@ pub fn pick_existing_pool(
     Ok(())
 }
 
+/// Returns (kernel_name, zfs_mode) if user selected a kernel, None if cancelled.
 pub async fn pick_kernel(
     config: &GlobalConfig,
     terminal: &mut ratatui::DefaultTerminal,
-) -> Result<Option<Vec<String>>> {
+) -> Result<Option<(String, ZfsModuleMode)>> {
     use archinstall_zfs_core::kernel::AVAILABLE_KERNELS;
     use archinstall_zfs_core::kernel::scanner::scan_all_kernels;
 
     let results = scan_all_kernels().await;
 
     let mut options = Vec::new();
-    let mut kernel_names = Vec::new();
-    for (info, result) in AVAILABLE_KERNELS.iter().zip(&results) {
-        let compat = match config.zfs_module_mode {
-            ZfsModuleMode::Precompiled => {
-                if result.precompiled_compatible {
-                    "OK"
-                } else {
-                    "INCOMPATIBLE"
-                }
-            }
-            ZfsModuleMode::Dkms => {
-                if result.dkms_compatible {
-                    "OK"
-                } else {
-                    "INCOMPATIBLE"
-                }
-            }
-        };
+    let mut selectable: Vec<(usize, &str, ZfsModuleMode)> = Vec::new();
+    for (i, (info, result)) in AVAILABLE_KERNELS.iter().zip(&results).enumerate() {
         let ver = result.kernel_version.as_deref().unwrap_or("?");
-        options.push(format!("{} ({ver}) [{compat}]", info.display_name));
-        kernel_names.push(info.name);
+        if let Some(mode) = result.best_mode() {
+            options.push(format!(
+                "\u{2713} {} ({ver}) [{}]",
+                info.display_name,
+                result.mode_label()
+            ));
+            selectable.push((i, info.name, mode));
+        } else {
+            options.push(format!(
+                "\u{2717} {} ({ver}) [incompatible]",
+                info.display_name
+            ));
+        }
     }
 
-    let option_refs: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
-    let current_kernel = config.primary_kernel();
-    let current_idx = kernel_names
+    // Only show selectable kernels in the picker
+    let selectable_labels: Vec<&str> = selectable
         .iter()
-        .position(|&n| n == current_kernel)
+        .map(|&(i, _, _)| options[i].as_str())
+        .collect();
+
+    if selectable_labels.is_empty() {
+        let _ = run_select(terminal, "No compatible kernels found", &["OK"], 0);
+        return Ok(None);
+    }
+
+    let current_kernel = config.primary_kernel();
+    let current_idx = selectable
+        .iter()
+        .position(|(_, name, _)| *name == current_kernel)
         .unwrap_or(0);
 
-    let result = run_select(terminal, "Kernel", &option_refs, current_idx)?;
+    let result = run_select(terminal, "Kernel", &selectable_labels, current_idx)?;
     match result.selected {
-        Some(idx) => Ok(Some(vec![kernel_names[idx].to_string()])),
+        Some(idx) => {
+            let (_, name, mode) = selectable[idx];
+            Ok(Some((name.to_string(), mode)))
+        }
         None => Ok(None),
     }
 }
@@ -594,13 +603,6 @@ pub fn apply_select(
             config.init_system = match idx {
                 0 => InitSystem::Dracut,
                 1 => InitSystem::Mkinitcpio,
-                _ => return Ok(()),
-            };
-        }
-        "zfs_module_mode" => {
-            config.zfs_module_mode = match idx {
-                0 => ZfsModuleMode::Precompiled,
-                1 => ZfsModuleMode::Dkms,
                 _ => return Ok(()),
             };
         }

@@ -261,8 +261,11 @@ impl Wizard {
                     }
                 }
                 "kernel" => {
-                    if let Some(kernels) = pickers::pick_kernel(&self.config, terminal).await? {
-                        self.config.kernels = Some(kernels);
+                    if let Some((kernel, mode)) =
+                        pickers::pick_kernel(&self.config, terminal).await?
+                    {
+                        self.config.kernels = Some(vec![kernel]);
+                        self.config.zfs_module_mode = mode;
                     }
                 }
                 "profile" => {
