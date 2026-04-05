@@ -45,7 +45,8 @@ jobs:
     - name: Install system dependencies
       run: |
         pacman -Syu --noconfirm
-        pacman -S --noconfirm archiso base-devel git just pacman-contrib pkgconf rsync sudo
+        pacman -S --noconfirm archiso base-devel git just pacman-contrib pkgconf rsync sudo \
+          clang libxkbcommon libinput libdrm freetype2 fontconfig ttf-dejavu
 
     - name: Install Rust
       run: |
