@@ -736,49 +736,47 @@ component StringListPopup inherits Rectangle {
                 }
 
                 // Existing items
-                ListView {
-                    vertical-stretch: 1;
+                ScrollView {
+                    max-height: 300px;
 
-                    for item[index] in items: Rectangle {
-                        height: 40px;
-                        background: transparent;
+                    VerticalLayout {
+                        spacing: 4px;
 
-                        Rectangle {
-                            y: 2px;
+                        for item[index] in items: Rectangle {
                             height: 36px;
                             background: Theme.c.surface0;
                             border-radius: 4px;
-                        }
 
-                        HorizontalLayout {
-                            padding-left: 12px;
-                            padding-right: 8px;
-                            alignment: space-between;
-
-                            Text {
-                                text: item.text;
-                                color: Theme.c.text;
-                                font-size: 14px;
-                                vertical-alignment: center;
-                                horizontal-stretch: 1;
-                            }
-
-                            Rectangle {
-                                width: 28px;
-                                height: 28px;
-                                background: sl-del-ta.has-hover ? Theme.c.red : transparent;
-                                border-radius: 4px;
-
-                                sl-del-ta := TouchArea {
-                                    clicked => { item-removed(index); }
-                                }
+                            HorizontalLayout {
+                                padding-left: 12px;
+                                padding-right: 8px;
+                                alignment: space-between;
 
                                 Text {
-                                    text: "\u{2715}";
-                                    color: sl-del-ta.has-hover ? Theme.c.base : Theme.c.overlay0;
+                                    text: item.text;
+                                    color: Theme.c.text;
                                     font-size: 14px;
-                                    horizontal-alignment: center;
                                     vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                Rectangle {
+                                    width: 28px;
+                                    height: 28px;
+                                    background: sl-del-ta.has-hover ? Theme.c.red : transparent;
+                                    border-radius: 4px;
+
+                                    sl-del-ta := TouchArea {
+                                        clicked => { item-removed(index); }
+                                    }
+
+                                    Text {
+                                        text: "\u{2715}";
+                                        color: sl-del-ta.has-hover ? Theme.c.base : Theme.c.overlay0;
+                                        font-size: 14px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
                                 }
                             }
                         }
