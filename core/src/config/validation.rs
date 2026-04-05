@@ -13,7 +13,7 @@ fn is_valid_hostname(name: &str) -> bool {
 
 /// Valid Linux username: 1-32 chars, starts with letter or underscore,
 /// rest is alphanumeric + underscore + hyphen.
-fn is_valid_username(name: &str) -> bool {
+pub fn is_valid_username(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 32
         && name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_')

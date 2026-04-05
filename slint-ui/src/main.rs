@@ -12,7 +12,7 @@ use color_eyre::eyre::{Result, bail};
 use slint::{Model, ModelRc, SharedString, VecModel};
 
 use archinstall_zfs_core::config::types::{
-    AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, SwapMode,
+    AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, SwapMode, UserConfig,
     ZfsEncryptionMode, ZfsModuleMode,
 };
 
@@ -321,6 +321,83 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
             let Some(app) = weak.upgrade() else { return };
             let mut c = cfg.borrow_mut();
             apply_text(&mut c, &key, &val);
+            refresh_ui(&app, &c, &wiz.borrow());
+        });
+    }
+
+    // ── User management ─────────────────────────────
+    {
+        let weak = app.as_weak();
+        let cfg = config.clone();
+        let wiz = wizard.clone();
+        app.on_user_added(move |username, password, sudo| {
+            let Some(app) = weak.upgrade() else { return };
+            let username = username.to_string();
+            if !archinstall_zfs_core::config::validation::is_valid_username(&username) {
+                return;
+            }
+            // Prevent duplicate usernames
+            let c = cfg.borrow();
+            if c.users.as_ref().is_some_and(|users| {
+                users.iter().any(|u| u.username == username)
+            }) {
+                return;
+            }
+            drop(c);
+            let password = if password.is_empty() {
+                None
+            } else {
+                Some(password.to_string())
+            };
+            let user = UserConfig {
+                username,
+                password,
+                sudo,
+                shell: None,
+                groups: None,
+                ssh_authorized_keys: Vec::new(),
+                autologin: false,
+            };
+            let mut c = cfg.borrow_mut();
+            c.users.get_or_insert_with(Vec::new).push(user);
+            show_users_popup(&app, &c);
+            refresh_ui(&app, &c, &wiz.borrow());
+        });
+    }
+    {
+        let weak = app.as_weak();
+        let cfg = config.clone();
+        let wiz = wizard.clone();
+        app.on_user_removed(move |index| {
+            let Some(app) = weak.upgrade() else { return };
+            let mut c = cfg.borrow_mut();
+            if let Some(ref mut users) = c.users {
+                let idx = index as usize;
+                if idx < users.len() {
+                    users.remove(idx);
+                    if users.is_empty() {
+                        c.users = None;
+                    }
+                }
+            }
+            show_users_popup(&app, &c);
+            refresh_ui(&app, &c, &wiz.borrow());
+        });
+    }
+    {
+        let weak = app.as_weak();
+        let cfg = config.clone();
+        let wiz = wizard.clone();
+        app.on_user_sudo_toggled(move |index| {
+            let Some(app) = weak.upgrade() else { return };
+            let mut c = cfg.borrow_mut();
+            if let Some(ref mut users) = c.users {
+                let idx = index as usize;
+                if let Some(user) = users.get_mut(idx) {
+                    user.sudo = !user.sudo;
+                }
+            }
+            show_users_popup(&app, &c);
             refresh_ui(&app, &c, &wiz.borrow());
         });
     }
@@ -1117,19 +1194,24 @@ fn build_users_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             },
             2,
         ),
-        // Users are shown as read-only summary (no user management popup in slint yet)
         ci(
             "users",
             "User accounts",
             &match &c.users {
                 Some(users) if !users.is_empty() => users
                     .iter()
-                    .map(|u| u.username.as_str())
+                    .map(|u| {
+                        if u.sudo {
+                            format!("{} [sudo]", u.username)
+                        } else {
+                            u.username.clone()
+                        }
+                    })
                     .collect::<Vec<_>>()
                     .join(", "),
                 _ => "None".into(),
             },
-            0, // text input for now
+            0,
         ),
     ]
 }
@@ -1413,6 +1495,10 @@ fn handle_item_activated(
                 true,
             );
         }
+        // User management popup
+        "users" => {
+            show_users_popup(app, config);
+        }
         // Text input popups
         "pool_name"
         | "dataset_prefix"
@@ -1421,8 +1507,7 @@ fn handle_item_activated(
         | "additional_packages"
         | "aur_packages"
         | "extra_services"
-        | "swap_partition_size"
-        | "users" => {
+        | "swap_partition_size" => {
             let current = match key {
                 "pool_name" => config.pool_name.clone().unwrap_or_default(),
                 "dataset_prefix" => config.dataset_prefix.clone(),
@@ -1432,16 +1517,6 @@ fn handle_item_activated(
                 "aur_packages" => config.aur_packages.join(" "),
                 "extra_services" => config.extra_services.join(" "),
                 "swap_partition_size" => config.swap_partition_size.clone().unwrap_or_default(),
-                "users" => config
-                    .users
-                    .as_ref()
-                    .map(|u| {
-                        u.iter()
-                            .map(|u| u.username.as_str())
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    })
-                    .unwrap_or_default(),
                 _ => String::new(),
             };
             show_text_input(app, key, key, &current, false);
@@ -1486,6 +1561,21 @@ fn show_text_input(app: &App, key: &str, title: &str, current: &str, password: b
     app.set_text_input_password(password);
     app.set_password_strength_score(-1);
     app.set_text_input_visible(true);
+}
+
+fn show_users_popup(app: &App, config: &GlobalConfig) {
+    let entries: Vec<UserEntry> = config
+        .users
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|u| UserEntry {
+            username: SharedString::from(&u.username),
+            has_sudo: u.sudo,
+        })
+        .collect();
+    app.set_users_list(ModelRc::new(VecModel::from(entries)));
+    app.set_users_visible(true);
 }
 
 /// Find the next selectable item index, skipping separators (4), readonly (6), warnings (7).
