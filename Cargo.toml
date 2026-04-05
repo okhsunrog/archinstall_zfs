@@ -1,3 +1,18 @@
 [workspace]
 members = ["core", "tui", "slint-ui", "xtask"]
 resolver = "3"
+
+[workspace.dependencies]
+clap = { version = "4.6.0", features = ["derive"] }
+color-eyre = "0.6.5"
+futures = "0.3.32"
+nix = { version = "0.31.2", features = ["fs"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+sublime_fuzzy = "0.7.0"
+tokio = { version = "1.51.0", features = ["rt", "rt-multi-thread", "macros"] }
+tokio-util = { version = "0.7.18", features = ["rt"] }
+tracing = "0.1.44"
+tracing-appender = "0.2.4"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+zxcvbn = "3.1.0"
