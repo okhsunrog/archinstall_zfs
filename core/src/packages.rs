@@ -45,30 +45,19 @@ fn search_repo_sync(query: &str, limit: usize) -> Result<Vec<PackageInfo>> {
         }
     }
 
-    // Sort: exact name match first, then starts-with, then contains
-    let query_lower = query.to_lowercase();
-    results.sort_by(|a, b| {
-        let a_name = a.name.to_lowercase();
-        let b_name = b.name.to_lowercase();
-        let a_score = if a_name == query_lower {
-            0
-        } else if a_name.starts_with(&query_lower) {
-            1
-        } else {
-            2
-        };
-        let b_score = if b_name == query_lower {
-            0
-        } else if b_name.starts_with(&query_lower) {
-            1
-        } else {
-            2
-        };
-        a_score.cmp(&b_score).then(a_name.cmp(&b_name))
-    });
+    // Sort by fuzzy match score against package name
+    let mut scored: Vec<_> = results
+        .into_iter()
+        .map(|pkg| {
+            let score = sublime_fuzzy::best_match(query, &pkg.name)
+                .map(|m| m.score())
+                .unwrap_or(0);
+            (score, pkg)
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
 
-    results.truncate(limit);
-    Ok(results)
+    Ok(scored.into_iter().map(|(_, pkg)| pkg).take(limit).collect())
 }
 
 /// Search AUR packages via raur. Returns up to `limit` results sorted by popularity.
@@ -81,7 +70,7 @@ pub async fn search_aur(query: &str, limit: usize) -> Result<Vec<PackageInfo>> {
         .await
         .map_err(|e| color_eyre::eyre::eyre!("AUR search failed: {e}"))?;
 
-    let mut packages: Vec<PackageInfo> = results
+    let packages: Vec<PackageInfo> = results
         .into_iter()
         .map(|pkg| PackageInfo {
             name: pkg.name,
@@ -91,7 +80,16 @@ pub async fn search_aur(query: &str, limit: usize) -> Result<Vec<PackageInfo>> {
         })
         .collect();
 
-    // raur results are already sorted by relevance, but let's cap
-    packages.truncate(limit);
-    Ok(packages)
+    let mut scored: Vec<_> = packages
+        .into_iter()
+        .map(|pkg| {
+            let score = sublime_fuzzy::best_match(query, &pkg.name)
+                .map(|m| m.score())
+                .unwrap_or(0);
+            (score, pkg)
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
+
+    Ok(scored.into_iter().map(|(_, pkg)| pkg).take(limit).collect())
 }
