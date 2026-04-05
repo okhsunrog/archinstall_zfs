@@ -142,6 +142,34 @@ pub fn list_locales() -> Vec<String> {
     locales
 }
 
+/// List available console keymaps by scanning /usr/share/kbd/keymaps/.
+pub fn list_keymaps() -> Vec<String> {
+    let base = Path::new("/usr/share/kbd/keymaps");
+    let mut keymaps = Vec::new();
+    fn walk(dir: &Path, keymaps: &mut Vec<String>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                // Skip "include" directories — they contain partial maps
+                if path.file_name().is_some_and(|n| n == "include") {
+                    continue;
+                }
+                walk(&path, keymaps);
+            } else if let Some(name) = path.file_name().and_then(|n| n.to_str())
+                && let Some(stem) = name.strip_suffix(".map.gz") {
+                    keymaps.push(stem.to_string());
+                }
+        }
+    }
+    walk(base, &mut keymaps);
+    keymaps.sort();
+    keymaps.dedup();
+    keymaps
+}
+
 pub fn set_timezone(target: &Path, timezone: &str) -> Result<()> {
     let localtime = target.join("etc/localtime");
     let zoneinfo = format!("/usr/share/zoneinfo/{timezone}");

@@ -298,9 +298,18 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
             }
 
             if key == "locale_select" {
-                let locales = archinstall_zfs_core::installer::locale::list_locales();
-                if let Some(loc) = locales.get(idx as usize) {
-                    cfg.borrow_mut().locale = Some(loc.clone());
+                let selected_text = app.get_select_options().row_data(idx as usize);
+                if let Some(opt) = selected_text {
+                    cfg.borrow_mut().locale = Some(opt.text.to_string());
+                    refresh_ui(&app, &cfg.borrow(), &wiz.borrow());
+                }
+                return;
+            }
+
+            if key == "keyboard_select" {
+                let selected_text = app.get_select_options().row_data(idx as usize);
+                if let Some(opt) = selected_text {
+                    cfg.borrow_mut().keyboard_layout = opt.text.to_string();
                     refresh_ui(&app, &cfg.borrow(), &wiz.borrow());
                 }
                 return;
@@ -744,10 +753,45 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                         })
                         .collect()
                 } else {
-                    all_locales
+                    let mut scored: Vec<_> = all_locales
                         .iter()
-                        .filter(|s| s.to_lowercase().contains(&filter))
+                        .filter_map(|s| {
+                            sublime_fuzzy::best_match(&filter, s)
+                                .map(|m| (m.score(), s))
+                        })
+                        .collect();
+                    scored.sort_by(|a, b| b.0.cmp(&a.0));
+                    scored
+                        .into_iter()
+                        .map(|(_, s)| SelectOption {
+                            text: SharedString::from(s.as_str()),
+                        })
+                        .collect()
+                };
+                app.set_select_options(ModelRc::new(VecModel::from(filtered)));
+                app.set_select_index(-1);
+            }
+
+            if key == "keyboard_select" {
+                let all_keymaps = archinstall_zfs_core::installer::locale::list_keymaps();
+                let filtered: Vec<SelectOption> = if filter.is_empty() {
+                    all_keymaps
+                        .iter()
                         .map(|s| SelectOption {
+                            text: SharedString::from(s.as_str()),
+                        })
+                        .collect()
+                } else {
+                    let mut scored: Vec<_> = all_keymaps
+                        .iter()
+                        .filter_map(|s| {
+                            sublime_fuzzy::best_match(&filter, s).map(|m| (m.score(), s))
+                        })
+                        .collect();
+                    scored.sort_by(|a, b| b.0.cmp(&a.0));
+                    scored
+                        .into_iter()
+                        .map(|(_, s)| SelectOption {
                             text: SharedString::from(s.as_str()),
                         })
                         .collect()
@@ -1161,7 +1205,7 @@ fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             &c.timezone.clone().unwrap_or("Not set".into()),
             1,
         ),
-        ci("keyboard", "Keyboard layout", &c.keyboard_layout, 0),
+        ci("keyboard", "Keyboard layout", &c.keyboard_layout, 1),
         ci(
             "ntp",
             "NTP (time sync)",
@@ -1170,13 +1214,11 @@ fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         ),
     ];
 
-    let dl_options: Vec<String> = (1..=10).map(|n| n.to_string()).collect();
-    let dl_refs: Vec<&str> = dl_options.iter().map(|s| s.as_str()).collect();
-    items.extend(radio_group(
+    items.push(ci(
         "parallel_downloads",
         "Parallel downloads",
-        &dl_refs,
-        (c.parallel_downloads as i32) - 1,
+        &c.parallel_downloads.to_string(),
+        0,
     ));
 
     items
@@ -1499,24 +1541,42 @@ fn handle_item_activated(
         "users" => {
             show_users_popup(app, config);
         }
+        // Keyboard layout (filterable select)
+        "keyboard" => {
+            let keymaps = archinstall_zfs_core::installer::locale::list_keymaps();
+            let keymap_strs: Vec<&str> = keymaps.iter().map(|s| s.as_str()).collect();
+            let current_idx = keymaps
+                .iter()
+                .position(|k| k == &config.keyboard_layout)
+                .map(|i| i as i32)
+                .unwrap_or(0);
+            show_select_with_filter(
+                app,
+                "keyboard_select",
+                "Keyboard layout (type to filter)",
+                &keymap_strs,
+                current_idx,
+                true,
+            );
+        }
         // Text input popups
         "pool_name"
         | "dataset_prefix"
         | "hostname"
-        | "keyboard"
         | "additional_packages"
         | "aur_packages"
         | "extra_services"
-        | "swap_partition_size" => {
+        | "swap_partition_size"
+        | "parallel_downloads" => {
             let current = match key {
                 "pool_name" => config.pool_name.clone().unwrap_or_default(),
                 "dataset_prefix" => config.dataset_prefix.clone(),
                 "hostname" => config.hostname.clone().unwrap_or_default(),
-                "keyboard" => config.keyboard_layout.clone(),
                 "additional_packages" => config.additional_packages.join(" "),
                 "aur_packages" => config.aur_packages.join(" "),
                 "extra_services" => config.extra_services.join(" "),
                 "swap_partition_size" => config.swap_partition_size.clone().unwrap_or_default(),
+                "parallel_downloads" => config.parallel_downloads.to_string(),
                 _ => String::new(),
             };
             show_text_input(app, key, key, &current, false);
@@ -1702,9 +1762,6 @@ fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
                 _ => Some(AudioServer::Pulseaudio),
             }
         }
-        "parallel_downloads" => {
-            config.parallel_downloads = (idx + 1) as u32;
-        }
         _ => {}
     }
 }
@@ -1725,14 +1782,14 @@ fn apply_text(config: &mut GlobalConfig, key: &str, val: &str) {
         "hostname" => config.hostname = opt,
         "locale" => config.locale = opt,
         "timezone" => config.timezone = opt,
-        "keyboard" => {
-            if !val.is_empty() {
-                config.keyboard_layout = val.to_string();
-            }
-        }
         "root_password" => config.root_password = opt,
         "encryption_password" => config.zfs_encryption_password = opt,
         "swap_partition_size" => config.swap_partition_size = opt,
+        "parallel_downloads" => {
+            if let Ok(n) = val.parse::<u32>() {
+                config.parallel_downloads = n.clamp(1, 20);
+            }
+        }
         "additional_packages" => {
             config.additional_packages = val
                 .split_whitespace()
