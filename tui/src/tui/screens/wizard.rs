@@ -293,6 +293,18 @@ impl Wizard {
                 "users" => {
                     pickers::manage_users(&mut self.config, terminal)?;
                 }
+                "packages" => {
+                    if let Some(result) = super::package_picker::run_package_picker(
+                        terminal,
+                        &self.config.additional_packages,
+                        &self.config.aur_packages,
+                    )
+                    .await?
+                    {
+                        self.config.additional_packages = result.repo_packages;
+                        self.config.aur_packages = result.aur_packages;
+                    }
+                }
                 "pool_name" => {
                     pickers::pick_existing_pool(&mut self.config, terminal)?;
                 }

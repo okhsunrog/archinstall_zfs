@@ -75,24 +75,23 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
             kind: MenuKind::Toggle,
         },
         MenuItem {
-            key: "additional_packages",
-            label: "Additional packages",
-            value: if config.additional_packages.is_empty() {
-                "None".into()
-            } else {
-                config.additional_packages.join(", ")
+            key: "packages",
+            label: "Extra packages",
+            value: {
+                let total = config.additional_packages.len() + config.aur_packages.len();
+                if total == 0 {
+                    "None".into()
+                } else {
+                    let mut parts: Vec<&str> = config
+                        .additional_packages
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect();
+                    parts.extend(config.aur_packages.iter().map(|s| s.as_str()));
+                    parts.join(", ")
+                }
             },
-            kind: MenuKind::Text,
-        },
-        MenuItem {
-            key: "aur_packages",
-            label: "AUR packages",
-            value: if config.aur_packages.is_empty() {
-                "None".into()
-            } else {
-                config.aur_packages.join(", ")
-            },
-            kind: MenuKind::Text,
+            kind: MenuKind::Custom,
         },
         MenuItem {
             key: "extra_services",

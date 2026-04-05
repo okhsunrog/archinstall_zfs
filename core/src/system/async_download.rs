@@ -18,7 +18,6 @@ pub struct DownloadTask {
     pub servers: Vec<String>,
     pub sha256: Option<String>,
     pub size: i64,
-    pub sig_required: bool,
 }
 
 /// Configuration for the download manager.
@@ -357,13 +356,9 @@ async fn download_single(
     shared: &SharedProgress,
 ) -> Result<()> {
     let dest = cache_dir.join(&task.filename);
-    let dest_sig = cache_dir.join(format!("{}.sig", &task.filename));
 
     // Skip if already cached and valid
-    if dest.exists()
-        && verify_sha256_sync(&dest, task.sha256.as_deref())
-        && (!task.sig_required || dest_sig.exists())
-    {
+    if dest.exists() && verify_sha256_sync(&dest, task.sha256.as_deref()) {
         tracing::debug!(file = %task.filename, "already cached, skipping");
         shared.update_package(
             index,
@@ -416,21 +411,8 @@ async fn download_single(
             .await
             {
                 Ok(()) => {
-                    // Download signature if required
-                    if task.sig_required {
-                        let sig_url = format!("{}.sig", url);
-                        if let Err(e) =
-                            download_file_simple(client, &sig_url, &dest_sig, cancel).await
-                        {
-                            tracing::warn!(
-                                file = %task.filename,
-                                server,
-                                "failed to download signature: {e}"
-                            );
-                            last_error = Some(e);
-                            continue;
-                        }
-                    }
+                    // Signatures (.sig) are not downloaded here — libalpm
+                    // fetches and verifies them during trans_commit().
 
                     shared.update_package(
                         index,
@@ -639,36 +621,6 @@ async fn download_file_with_progress(
     tokio::fs::rename(&part_path, dest)
         .await
         .wrap_err_with(|| format!("failed to rename to {}", dest.display()))?;
-
-    Ok(())
-}
-
-/// Simple download without progress tracking (for .sig files).
-async fn download_file_simple(
-    client: &reqwest::Client,
-    url: &str,
-    dest: &Path,
-    cancel: &CancellationToken,
-) -> Result<()> {
-    let resp = client
-        .get(url)
-        .send()
-        .await
-        .wrap_err_with(|| format!("HTTP request failed: {url}"))?;
-
-    if !resp.status().is_success() {
-        bail!("HTTP {} for {url}", resp.status());
-    }
-
-    let bytes = tokio::select! {
-        biased;
-        _ = cancel.cancelled() => bail!("download cancelled"),
-        result = resp.bytes() => result.wrap_err("failed to read response body")?,
-    };
-
-    tokio::fs::write(dest, &bytes)
-        .await
-        .wrap_err_with(|| format!("failed to write {}", dest.display()))?;
 
     Ok(())
 }
