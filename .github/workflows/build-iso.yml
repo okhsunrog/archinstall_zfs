@@ -131,7 +131,7 @@ jobs:
         name: ${{ github.event_name == 'push' && format('Release {0}', github.ref_name) || (github.event_name == 'schedule' && format('Monthly Release - {0}', env.RELEASE_DATE) || format('Manual Release - {0}', env.RELEASE_DATE)) }}
         generate_release_notes: ${{ github.event_name == 'push' }}
         body: ${{ github.event_name != 'push' && 'Automated build with latest packages and ZFS modules.' || '' }}
-        draft: ${{ github.event_name == 'workflow_dispatch' }}
+        draft: true
         prerelease: ${{ github.event_name == 'workflow_dispatch' }}
         files: |
           gen_iso/out/*.iso
