@@ -9,6 +9,10 @@
 > [!NOTE]
 > This is a complete rewrite in Rust. The previous Python version is preserved on the [`old_python`](https://github.com/okhsunrog/archinstall_zfs/tree/old_python) branch.
 
+<p align="center">
+  <img src="assets/welcome-screen.png" alt="Welcome screen" width="700">
+</p>
+
 ---
 
 ## Overview
@@ -24,6 +28,16 @@ Key improvements over the Python version:
 - **Proper AUR dependency resolution** via `raur` + `aur-depends` crates
 - **Cancellable installation** with graceful cleanup
 - **Trace-level file logging** (`/tmp/archinstall-zfs.log`) for post-mortem analysis
+
+### Screenshots
+
+| Disk selection | ZFS configuration | Download progress |
+|:-:|:-:|:-:|
+| <img src="assets/disk-step.png" width="280"> | <img src="assets/zfs-step.png" width="280"> | <img src="assets/install-progress.png" width="280"> |
+
+| Package installation | ZFS on target | Installation complete |
+|:-:|:-:|:-:|
+| <img src="assets/install-packages.png" width="280"> | <img src="assets/install-zfs.png" width="280"> | <img src="assets/install-complete.png" width="280"> |
 
 ---
 
