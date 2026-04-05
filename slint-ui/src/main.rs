@@ -148,15 +148,79 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     let app = App::new()?;
     let config = Rc::new(RefCell::new(config));
     let wizard = Rc::new(RefCell::new(WizardState::new()));
+    let kernel_scan: Arc<
+        std::sync::Mutex<Option<Vec<archinstall_zfs_core::kernel::scanner::CompatibilityResult>>>,
+    > = Arc::new(std::sync::Mutex::new(None));
 
     app.set_total_steps(TOTAL_STEPS as i32);
     refresh_ui(&app, &config.borrow(), &wizard.borrow());
+
+    // ── Welcome screen: run initial checks ──────────
+    {
+        let net = archinstall_zfs_core::system::net::check_internet();
+        let uefi = archinstall_zfs_core::system::sysinfo::has_uefi();
+        let zfs_mod = archinstall_zfs_core::zfs::kmod::check_zfs_module(
+            &archinstall_zfs_core::system::cmd::RealRunner,
+        )
+        .unwrap_or(false);
+        let zfs_utils = archinstall_zfs_core::zfs::kmod::check_zfs_utils(
+            &archinstall_zfs_core::system::cmd::RealRunner,
+        )
+        .unwrap_or(false);
+
+        app.set_net_ok(net);
+        app.set_uefi_ok(uefi);
+        app.set_zfs_ok(zfs_mod && zfs_utils);
+
+        if net {
+            // Start ZFS init if needed
+            if !(zfs_mod && zfs_utils) {
+                start_zfs_init(&app, &config.borrow());
+            }
+            // Start kernel compatibility scan in background
+            start_kernel_scan(&kernel_scan);
+        }
+    }
+
+    // ── Welcome: check internet ─────────────────────
+    {
+        let weak = app.as_weak();
+        let cfg = config.clone();
+        let kscan = kernel_scan.clone();
+        app.on_check_internet(move || {
+            let Some(app) = weak.upgrade() else { return };
+            let net = archinstall_zfs_core::system::net::check_internet();
+            app.set_net_ok(net);
+            if net {
+                if !app.get_zfs_ok() && !app.get_zfs_installing() {
+                    start_zfs_init(&app, &cfg.borrow());
+                }
+                if kscan.lock().unwrap().is_none() {
+                    start_kernel_scan(&kscan);
+                }
+            }
+        });
+    }
+
+    // ── Welcome: start wizard ───────────────────────
+    {
+        let weak = app.as_weak();
+        let cfg = config.clone();
+        let wiz = wizard.clone();
+        app.on_start_wizard(move || {
+            let Some(app) = weak.upgrade() else { return };
+            let mut w = wiz.borrow_mut();
+            w.go_to(1); // Skip welcome, go to Disk step
+            refresh_ui(&app, &cfg.borrow(), &w);
+        });
+    }
 
     // ── Item activated ───────────────────────────────
     {
         let weak = app.as_weak();
         let cfg = config.clone();
         let wiz = wizard.clone();
+        let kscan = kernel_scan.clone();
         app.on_item_activated(move |key| {
             let Some(app) = weak.upgrade() else { return };
 
@@ -172,7 +236,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 return;
             }
 
-            handle_item_activated(&app, &key, &cfg.borrow(), &wiz.borrow());
+            handle_item_activated(&app, &key, &cfg.borrow(), &wiz.borrow(), &kscan);
         });
     }
 
@@ -665,6 +729,86 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     Ok(())
 }
 
+// ── ZFS initialization on welcome screen ────────────
+
+fn start_zfs_init(app: &App, config: &GlobalConfig) {
+    app.set_zfs_installing(true);
+    app.set_zfs_install_status(SharedString::from("Initializing..."));
+
+    let weak = app.as_weak();
+    let kernel = config.primary_kernel().to_string();
+    let zfs_mode = config.zfs_module_mode;
+
+    tokio::task::spawn_blocking(move || {
+        let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
+            Arc::new(archinstall_zfs_core::system::cmd::RealRunner);
+        let cancel = tokio_util::sync::CancellationToken::new();
+
+        // Update status
+        let w = weak.clone();
+        let _ = w.upgrade_in_event_loop(|app| {
+            app.set_zfs_install_status(SharedString::from("Checking reflector..."));
+        });
+
+        archinstall_zfs_core::zfs::kmod::ensure_reflector_finished_and_stopped(&*runner).ok();
+        archinstall_zfs_core::zfs::kmod::refresh_mirrors_if_stale(&*runner).ok();
+
+        let w = weak.clone();
+        let _ = w.upgrade_in_event_loop(|app| {
+            app.set_zfs_install_status(SharedString::from("Installing ZFS packages..."));
+            app.set_zfs_install_pct(30);
+        });
+
+        let result =
+            archinstall_zfs_core::zfs::kmod::initialize_zfs(&*runner, &kernel, zfs_mode, &cancel);
+
+        let _ = weak.upgrade_in_event_loop(move |app| {
+            app.set_zfs_installing(false);
+            match result {
+                Ok(()) => {
+                    app.set_zfs_ok(true);
+                    app.set_zfs_install_pct(100);
+                }
+                Err(e) => {
+                    app.set_zfs_install_status(SharedString::from(format!("Failed: {e}")));
+                }
+            }
+        });
+    });
+}
+
+/// Start kernel compatibility scan in background, store results in shared state.
+fn start_kernel_scan(
+    scan_cache: &Arc<
+        std::sync::Mutex<Option<Vec<archinstall_zfs_core::kernel::scanner::CompatibilityResult>>>,
+    >,
+) {
+    let cache = scan_cache.clone();
+    tokio::task::spawn(async move {
+        tracing::info!("scanning kernel compatibility...");
+        let results = archinstall_zfs_core::kernel::scanner::scan_all_kernels().await;
+        for (info, result) in archinstall_zfs_core::kernel::AVAILABLE_KERNELS
+            .iter()
+            .zip(&results)
+        {
+            let pre = if result.precompiled_compatible {
+                "OK"
+            } else {
+                "NO"
+            };
+            let dkms = if result.dkms_compatible { "OK" } else { "NO" };
+            tracing::info!(
+                kernel = info.name,
+                precompiled = pre,
+                dkms = dkms,
+                "kernel scan result"
+            );
+        }
+        *cache.lock().unwrap() = Some(results);
+        tracing::info!("kernel compatibility scan complete");
+    });
+}
+
 // ── UI refresh ──────────────────────────────────────
 
 fn refresh_ui(app: &App, config: &GlobalConfig, wizard: &WizardState) {
@@ -713,23 +857,26 @@ fn build_step_items(step: usize, c: &GlobalConfig) -> Vec<ConfigItem> {
     }
 }
 
-fn build_welcome_items(c: &GlobalConfig) -> Vec<ConfigItem> {
-    radio_group(
+fn build_welcome_items(_c: &GlobalConfig) -> Vec<ConfigItem> {
+    // Welcome screen is handled by dedicated UI, no config items
+    vec![]
+}
+
+fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
+    let mode = c.installation_mode;
+
+    // Installation mode selector
+    let mut items = radio_group(
         "installation_mode",
         "Installation mode",
         &["Full Disk", "New Pool", "Existing Pool"],
-        match c.installation_mode {
+        match mode {
             Some(InstallationMode::FullDisk) => 0,
             Some(InstallationMode::NewPool) => 1,
             Some(InstallationMode::ExistingPool) => 2,
             None => -1,
         },
-    )
-}
-
-fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
-    let mode = c.installation_mode;
-    let mut items = Vec::new();
+    );
 
     if matches!(mode, Some(InstallationMode::FullDisk) | None) {
         let disks = archinstall_zfs_core::disk::by_id::list_disks_by_id().unwrap_or_default();
@@ -1186,29 +1333,49 @@ fn radio_group(key: &str, label: &str, options: &[&str], selected: i32) -> Vec<C
 
 // ── Item activation (open popup) ─────────────────────
 
-fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, _wizard: &WizardState) {
+fn handle_item_activated(
+    app: &App,
+    key: &str,
+    config: &GlobalConfig,
+    _wizard: &WizardState,
+    kernel_scan: &Arc<
+        std::sync::Mutex<Option<Vec<archinstall_zfs_core::kernel::scanner::CompatibilityResult>>>,
+    >,
+) {
     match key {
         // Popup selects — only for items with too many options or async scan
         "kernel" => {
-            let Ok(rt) = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            else {
-                return;
+            let zfs_mode = config.zfs_module_mode;
+            let cached = kernel_scan.lock().unwrap();
+            let results: Vec<archinstall_zfs_core::kernel::scanner::CompatibilityResult>;
+            let scan = if let Some(ref cached_results) = *cached {
+                cached_results
+            } else {
+                // Fallback: scan now if cache not ready (shouldn't happen normally)
+                drop(cached);
+                let rt = tokio::runtime::Handle::current();
+                results = rt.block_on(archinstall_zfs_core::kernel::scanner::scan_all_kernels());
+                &results
             };
-            let results = rt.block_on(archinstall_zfs_core::kernel::scanner::scan_all_kernels());
+
             let mut options = Vec::new();
             for (info, result) in archinstall_zfs_core::kernel::AVAILABLE_KERNELS
                 .iter()
-                .zip(&results)
+                .zip(scan.iter())
             {
-                let compat = if result.precompiled_compatible || result.dkms_compatible {
-                    "OK"
-                } else {
-                    "INCOMPATIBLE"
+                let compatible = match zfs_mode {
+                    ZfsModuleMode::Precompiled => result.precompiled_compatible,
+                    ZfsModuleMode::Dkms => result.dkms_compatible,
                 };
                 let ver = result.kernel_version.as_deref().unwrap_or("?");
-                options.push(format!("{} ({ver}) [{compat}]", info.display_name));
+                if compatible {
+                    options.push(format!("\u{2713} {} ({})", info.display_name, ver));
+                } else {
+                    options.push(format!(
+                        "\u{2717} {} ({}) - incompatible",
+                        info.display_name, ver
+                    ));
+                }
             }
             let opt_refs: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
             let current_kernel = config.primary_kernel();

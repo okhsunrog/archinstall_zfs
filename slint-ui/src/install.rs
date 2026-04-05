@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use color_eyre::eyre::{Result, bail, eyre};
+use color_eyre::eyre::{Result, eyre};
 use tokio_util::sync::CancellationToken;
 
 use archinstall_zfs_core::config::types::{
@@ -30,38 +30,8 @@ pub fn run_install(
     let prefix = &config.dataset_prefix;
     let compression = config.compression.to_string();
     let encryption = config.zfs_encryption_mode;
-    let kernel = config.primary_kernel();
 
-    tracing::info!("Phase 0: Pre-installation checks");
-
-    if !archinstall_zfs_core::system::net::check_internet() {
-        bail!("No internet connectivity");
-    }
-    tracing::info!("Internet connectivity OK");
-
-    if !archinstall_zfs_core::system::sysinfo::has_uefi() {
-        bail!("UEFI boot required");
-    }
-    tracing::info!("UEFI boot detected");
-
-    // Validate kernel/ZFS compatibility before proceeding
-    let warnings = rt.block_on(
-        archinstall_zfs_core::kernel::scanner::validate_kernel_zfs_plan(
-            kernel,
-            config.zfs_module_mode,
-        ),
-    );
-    for w in &warnings {
-        tracing::warn!("kernel compatibility: {w}");
-    }
-
-    archinstall_zfs_core::zfs::kmod::initialize_zfs(
-        &*runner,
-        kernel,
-        config.zfs_module_mode,
-        &cancel,
-    )?;
-    tracing::info!("ZFS initialized on host");
+    // Phase 0 checks (internet, UEFI, ZFS) are done on the welcome screen.
 
     tracing::info!("Phase 1: Disk preparation");
     let (efi_partition, zfs_partition, swap_partition) = match mode {

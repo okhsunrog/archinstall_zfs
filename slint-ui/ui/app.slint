@@ -424,6 +424,17 @@ export component App inherits Window {
     in property <int> current-step: 0;
     in property <int> total-steps: 7;
 
+    // Welcome screen status
+    in property <bool> net-ok: false;
+    in property <bool> uefi-ok: false;
+    in property <bool> zfs-ok: false;
+    in property <bool> zfs-installing: false;
+    in property <int> zfs-install-pct: 0;
+    in property <string> zfs-install-status: "";
+
+    callback check-internet();
+    callback start-wizard();
+
     // Config items model (per-step)
     // item-type: 0=text, 1=select(popup), 2=password, 3=toggle, 4=separator,
     //            5=action, 6=readonly, 7=warning, 8=radio-header, 9=radio-option
@@ -527,8 +538,256 @@ export component App inherits Window {
         }
     }
 
-    // ── Wizard config screen ─────────────────────────
-    if install-state == 0: VerticalLayout {
+    // ── Welcome screen (step 0, no sidebar) ───────────
+    if install-state == 0 && current-step == 0: Rectangle {
+        background: Theme.c.base;
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 0px;
+
+            // Centered content block
+            HorizontalLayout {
+                alignment: center;
+
+                VerticalLayout {
+                    width: min(500px, root.width - 60px);
+                    spacing: 24px;
+                    alignment: center;
+
+                    // Title
+                    VerticalLayout {
+                        spacing: 8px;
+
+                        Text {
+                            text: "archinstall-zfs";
+                            color: Theme.c.blue;
+                            font-size: 36px;
+                            font-weight: FontWeight.bold;
+                            horizontal-alignment: center;
+                        }
+
+                        Text {
+                            text: "Arch Linux installer with ZFS root";
+                            color: Theme.c.subtext0;
+                            font-size: 16px;
+                            horizontal-alignment: center;
+                        }
+                    }
+
+                    // Status cards
+                    VerticalLayout {
+                        spacing: 8px;
+
+                        // Network status
+                        Rectangle {
+                            height: 48px;
+                            background: Theme.c.surface0;
+                            border-radius: 10px;
+
+                            HorizontalLayout {
+                                padding-left: 16px;
+                                padding-right: 12px;
+                                spacing: 12px;
+
+                                Text {
+                                    text: net-ok ? "\u{2713}" : "\u{2717}";
+                                    color: net-ok ? Theme.c.green : Theme.c.red;
+                                    font-size: 18px;
+                                    vertical-alignment: center;
+                                    width: 24px;
+                                }
+
+                                Text {
+                                    text: "Internet connection";
+                                    color: Theme.c.text;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                Text {
+                                    text: net-ok ? "Connected" : "Not connected";
+                                    color: net-ok ? Theme.c.green : Theme.c.overlay0;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                }
+
+                                if !net-ok: Rectangle {
+                                    width: 90px;
+                                    height: 30px;
+                                    background: check-net-ta.has-hover ? Theme.c.surface1 : Theme.c.mantle;
+                                    border-radius: 6px;
+
+                                    check-net-ta := TouchArea {
+                                        clicked => { check-internet(); }
+                                    }
+
+                                    Text {
+                                        text: "Check again";
+                                        color: Theme.c.blue;
+                                        font-size: 12px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+
+                        // UEFI status
+                        Rectangle {
+                            height: 48px;
+                            background: Theme.c.surface0;
+                            border-radius: 10px;
+
+                            HorizontalLayout {
+                                padding-left: 16px;
+                                padding-right: 16px;
+                                spacing: 12px;
+
+                                Text {
+                                    text: uefi-ok ? "\u{2713}" : "\u{2717}";
+                                    color: uefi-ok ? Theme.c.green : Theme.c.red;
+                                    font-size: 18px;
+                                    vertical-alignment: center;
+                                    width: 24px;
+                                }
+
+                                Text {
+                                    text: "UEFI boot mode";
+                                    color: Theme.c.text;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                Text {
+                                    text: uefi-ok ? "Detected" : "Not detected (required)";
+                                    color: uefi-ok ? Theme.c.green : Theme.c.red;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        // ZFS status
+                        Rectangle {
+                            height: zfs-installing ? 72px : 48px;
+                            background: Theme.c.surface0;
+                            border-radius: 10px;
+
+                            VerticalLayout {
+                                padding: 0px;
+                                spacing: 0px;
+
+                                HorizontalLayout {
+                                    height: 48px;
+                                    padding-left: 16px;
+                                    padding-right: 16px;
+                                    spacing: 12px;
+
+                                    Text {
+                                        text: zfs-ok ? "\u{2713}"
+                                            : zfs-installing ? "\u{21bb}"
+                                            : "\u{2717}";
+                                        color: zfs-ok ? Theme.c.green
+                                            : zfs-installing ? Theme.c.blue
+                                            : Theme.c.overlay0;
+                                        font-size: 18px;
+                                        vertical-alignment: center;
+                                        width: 24px;
+                                    }
+
+                                    Text {
+                                        text: "ZFS support";
+                                        color: Theme.c.text;
+                                        font-size: 14px;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                    }
+
+                                    Text {
+                                        text: zfs-ok ? "Ready"
+                                            : zfs-installing ? zfs-install-status
+                                            : "Waiting for network...";
+                                        color: zfs-ok ? Theme.c.green
+                                            : zfs-installing ? Theme.c.blue
+                                            : Theme.c.overlay0;
+                                        font-size: 13px;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                // ZFS install progress bar
+                                if zfs-installing: Rectangle {
+                                    height: 6px;
+                                    x: 16px;
+                                    width: parent.width - 32px;
+                                    background: Theme.c.mantle;
+                                    border-radius: 3px;
+                                    clip: true;
+
+                                    Rectangle {
+                                        x: 0; y: 0;
+                                        height: parent.height;
+                                        width: parent.width * zfs-install-pct / 100;
+                                        background: Theme.c.blue;
+                                        border-radius: 3px;
+                                    }
+                                }
+
+                                // spacer at bottom when installing
+                                if zfs-installing: Rectangle {
+                                    height: 12px;
+                                }
+                            }
+                        }
+                    }
+
+                    // Start button
+                    HorizontalLayout {
+                        alignment: center;
+
+                        Rectangle {
+                            width: 160px;
+                            height: 44px;
+                            background: net-ok && uefi-ok && zfs-ok
+                                ? (start-ta.has-hover ? Theme.c.sky : Theme.c.blue)
+                                : Theme.c.surface1;
+                            border-radius: 10px;
+
+                            start-ta := TouchArea {
+                                enabled: net-ok && uefi-ok && zfs-ok;
+                                mouse-cursor: self.enabled ? pointer : default;
+                                clicked => { start-wizard(); }
+                            }
+
+                            Text {
+                                text: "Get Started \u{2192}";
+                                color: net-ok && uefi-ok && zfs-ok
+                                    ? Theme.c.base : Theme.c.overlay0;
+                                font-size: 15px;
+                                font-weight: FontWeight.semi-bold;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    // Version
+                    Text {
+                        text: "v0.1.0";
+                        color: Theme.c.overlay0;
+                        font-size: 11px;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Wizard config screen (steps 1+, with sidebar) ──
+    if install-state == 0 && current-step > 0: VerticalLayout {
         padding: 0px;
         spacing: 0px;
 
@@ -551,7 +810,7 @@ export component App inherits Window {
                 }
 
                 Text {
-                    text: (current-step + 1) + " / " + total-steps;
+                    text: current-step + " / " + (total-steps - 1);
                     color: Theme.c.overlay0;
                     font-size: 14px;
                     vertical-alignment: center;
@@ -563,7 +822,7 @@ export component App inherits Window {
         HorizontalLayout {
             spacing: 0px;
 
-            // Sidebar
+            // Sidebar (skip Welcome in sidebar, show steps 1-6)
             Rectangle {
                 width: 140px;
                 background: Theme.c.mantle;
@@ -574,6 +833,7 @@ export component App inherits Window {
                     alignment: start;
 
                     for step[index] in steps: SidebarItem {
+                        visible: index > 0;
                         label: step.label;
                         state: step.state;
                         step-index: index;
@@ -595,39 +855,8 @@ export component App inherits Window {
             VerticalLayout {
                 spacing: 0px;
 
-                // Welcome header (step 0) or step title
-                if current-step == 0: Rectangle {
-                    height: 120px;
-                    background: transparent;
-
-                    VerticalLayout {
-                        padding-left: 20px;
-                        padding-top: 16px;
-                        spacing: 6px;
-                        alignment: start;
-
-                        Text {
-                            text: "archinstall-zfs";
-                            color: Theme.c.blue;
-                            font-size: 28px;
-                            font-weight: FontWeight.bold;
-                        }
-
-                        Text {
-                            text: "Arch Linux installer with ZFS root";
-                            color: Theme.c.subtext0;
-                            font-size: 15px;
-                        }
-
-                        Text {
-                            text: "Choose an installation mode to get started.";
-                            color: Theme.c.overlay0;
-                            font-size: 13px;
-                        }
-                    }
-                }
-
-                if current-step > 0: Rectangle {
+                // Step title
+                Rectangle {
                     height: 40px;
                     background: transparent;
 
@@ -865,8 +1094,8 @@ export component App inherits Window {
                         spacing: 8px;
                         alignment: center;
 
-                        // Back button
-                        if current-step > 0: Rectangle {
+                        // Back button (not on first wizard step)
+                        if current-step > 1: Rectangle {
                             width: 80px;
                             height: 32px;
                             background: back-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
