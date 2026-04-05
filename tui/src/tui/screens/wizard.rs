@@ -234,7 +234,8 @@ impl Wizard {
                     }
                 }
                 "keyboard" => {
-                    if let Some(km) = pickers::pick_keyboard(terminal, &self.config.keyboard_layout)?
+                    if let Some(km) =
+                        pickers::pick_keyboard(terminal, &self.config.keyboard_layout)?
                     {
                         self.config.keyboard_layout = km;
                     }

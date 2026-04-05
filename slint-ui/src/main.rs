@@ -347,9 +347,10 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
             }
             // Prevent duplicate usernames
             let c = cfg.borrow();
-            if c.users.as_ref().is_some_and(|users| {
-                users.iter().any(|u| u.username == username)
-            }) {
+            if c.users
+                .as_ref()
+                .is_some_and(|users| users.iter().any(|u| u.username == username))
+            {
                 return;
             }
             drop(c);
@@ -756,8 +757,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                     let mut scored: Vec<_> = all_locales
                         .iter()
                         .filter_map(|s| {
-                            sublime_fuzzy::best_match(&filter, s)
-                                .map(|m| (m.score(), s))
+                            sublime_fuzzy::best_match(&filter, s).map(|m| (m.score(), s))
                         })
                         .collect();
                     scored.sort_by(|a, b| b.0.cmp(&a.0));

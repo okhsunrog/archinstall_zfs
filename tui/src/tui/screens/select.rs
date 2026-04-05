@@ -293,12 +293,11 @@ pub fn run_select_fuzzy(
                     }
                     (KeyCode::Enter, _) => {
                         if let Some(sel) = state.selected()
-                            && let Some(text) = filtered.get(sel) {
-                                let orig_idx = items.iter().position(|s| s == text);
-                                return Ok(SelectResult {
-                                    selected: orig_idx,
-                                });
-                            }
+                            && let Some(text) = filtered.get(sel)
+                        {
+                            let orig_idx = items.iter().position(|s| s == text);
+                            return Ok(SelectResult { selected: orig_idx });
+                        }
                         return Ok(SelectResult { selected: None });
                     }
                     (KeyCode::Up, _) => {

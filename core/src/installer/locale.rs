@@ -153,9 +153,10 @@ pub fn list_keymaps() -> Vec<String> {
                 }
                 walk(&path, keymaps);
             } else if let Some(name) = path.file_name().and_then(|n| n.to_str())
-                && let Some(stem) = name.strip_suffix(".map.gz") {
-                    keymaps.push(stem.to_string());
-                }
+                && let Some(stem) = name.strip_suffix(".map.gz")
+            {
+                keymaps.push(stem.to_string());
+            }
         }
     }
     walk(base, &mut keymaps);
