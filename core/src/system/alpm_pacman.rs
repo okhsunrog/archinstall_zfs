@@ -176,7 +176,6 @@ impl AlpmContext {
                     servers: db.servers().iter().map(|s| s.to_string()).collect(),
                     sha256: pkg.sha256sum().map(|s| s.to_string()),
                     size: pkg.size(),
-                    sig_required: db.siglevel().contains(SigLevel::PACKAGE),
                 })
             })
             .collect();
@@ -366,8 +365,10 @@ impl AlpmContext {
             match event.event() {
                 Event::TransactionStart => tracing::info!("transaction starting"),
                 Event::TransactionDone => tracing::info!("transaction complete"),
-                Event::PkgRetrieveStart(_) => tracing::info!("downloading packages..."),
-                Event::PkgRetrieveDone(_) => tracing::info!("all packages downloaded"),
+                Event::PkgRetrieveStart(_) => {
+                    tracing::info!("retrieving package signatures...")
+                }
+                Event::PkgRetrieveDone(_) => tracing::info!("package signatures verified"),
                 Event::IntegrityStart => tracing::info!("checking package integrity..."),
                 Event::IntegrityDone => tracing::info!("integrity check complete"),
                 Event::KeyringStart => tracing::info!("checking keyring..."),
