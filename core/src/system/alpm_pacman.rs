@@ -337,13 +337,6 @@ impl AlpmContext {
                         total = p.total,
                     );
                 }
-                DownloadEvent::Init(_) => {
-                    tracing::info!(
-                        target: "pacman.download",
-                        file = filename,
-                        "alpm downloading file (not from cache)"
-                    );
-                }
                 DownloadEvent::Completed(c) => {
                     tracing::debug!(
                         target: "pacman.download",
@@ -373,8 +366,8 @@ impl AlpmContext {
             match event.event() {
                 Event::TransactionStart => tracing::info!("transaction starting"),
                 Event::TransactionDone => tracing::info!("transaction complete"),
-                Event::PkgRetrieveStart(_) => tracing::info!("verifying cached packages..."),
-                Event::PkgRetrieveDone(_) => tracing::info!("package verification complete"),
+                Event::PkgRetrieveStart(_) => tracing::info!("downloading packages..."),
+                Event::PkgRetrieveDone(_) => tracing::info!("all packages downloaded"),
                 Event::IntegrityStart => tracing::info!("checking package integrity..."),
                 Event::IntegrityDone => tracing::info!("integrity check complete"),
                 Event::KeyringStart => tracing::info!("checking keyring..."),
