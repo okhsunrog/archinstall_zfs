@@ -471,6 +471,13 @@ pub fn manage_users(
             if let Some(username) = result.value
                 && !username.is_empty()
             {
+                if !archinstall_zfs_core::config::validation::is_valid_username(&username) {
+                    continue;
+                }
+                if users.iter().any(|u| u.username == username) {
+                    continue;
+                }
+
                 let pw_result = run_edit(terminal, "Password (empty=no password)", "", true)?;
                 let password = pw_result.value.filter(|p| !p.is_empty());
 
