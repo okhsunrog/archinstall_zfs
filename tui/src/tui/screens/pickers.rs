@@ -9,7 +9,7 @@ use archinstall_zfs_core::config::types::{
 use archinstall_zfs_core::system::gpu::{GfxDriver, detect_gpus, suggested_driver};
 
 use super::edit::run_edit;
-use super::select::{run_multiselect, run_select};
+use super::select::{run_multiselect, run_select, run_select_fuzzy};
 
 // ── Pickers ─────────────────────────────────────────
 
@@ -34,14 +34,32 @@ pub fn pick_timezone(terminal: &mut ratatui::DefaultTerminal) -> Result<Option<S
     Ok(Some(format!("{region}/{}", cities[city_idx])))
 }
 
-pub fn pick_locale(terminal: &mut ratatui::DefaultTerminal) -> Result<Option<String>> {
+pub fn pick_locale(
+    terminal: &mut ratatui::DefaultTerminal,
+    current: &str,
+) -> Result<Option<String>> {
     use archinstall_zfs_core::installer::locale;
 
     let locales = locale::list_locales();
     let locale_strs: Vec<&str> = locales.iter().map(|s| s.as_str()).collect();
-    let result = run_select(terminal, "Locale", &locale_strs, 0)?;
+    let result = run_select_fuzzy(terminal, "Locale", &locale_strs, current)?;
     match result.selected {
         Some(idx) => Ok(Some(locales[idx].clone())),
+        None => Ok(None),
+    }
+}
+
+pub fn pick_keyboard(
+    terminal: &mut ratatui::DefaultTerminal,
+    current: &str,
+) -> Result<Option<String>> {
+    use archinstall_zfs_core::installer::locale;
+
+    let keymaps = locale::list_keymaps();
+    let keymap_strs: Vec<&str> = keymaps.iter().map(|s| s.as_str()).collect();
+    let result = run_select_fuzzy(terminal, "Keyboard layout", &keymap_strs, current)?;
+    match result.selected {
+        Some(idx) => Ok(Some(keymaps[idx].clone())),
         None => Ok(None),
     }
 }
@@ -421,20 +439,6 @@ pub fn pick_seat_access(terminal: &mut ratatui::DefaultTerminal) -> Result<Optio
     }
 }
 
-pub fn pick_parallel_downloads(
-    config: &GlobalConfig,
-    terminal: &mut ratatui::DefaultTerminal,
-) -> Result<Option<u32>> {
-    let options: Vec<String> = (1..=10).map(|n| n.to_string()).collect();
-    let opt_refs: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
-    let current = (config.parallel_downloads as usize).saturating_sub(1);
-    let result = run_select(terminal, "Parallel downloads", &opt_refs, current)?;
-    match result.selected {
-        Some(idx) => Ok(Some((idx + 1) as u32)),
-        None => Ok(None),
-    }
-}
-
 pub fn manage_users(
     config: &mut GlobalConfig,
     terminal: &mut ratatui::DefaultTerminal,
@@ -640,15 +644,14 @@ pub fn apply_text(config: &mut GlobalConfig, key: &str, val: &str) {
         "hostname" => config.hostname = val_opt,
         "locale" => config.locale = val_opt,
         "timezone" => config.timezone = val_opt,
-        "keyboard" => {
-            if !val.is_empty() {
-                config.keyboard_layout = val.to_string();
-            }
-        }
-        "x11_variant" => config.x11_variant = val_opt,
         "root_password" => config.root_password = val_opt,
         "encryption_password" => config.zfs_encryption_password = val_opt,
         "swap_partition_size" => config.swap_partition_size = val_opt,
+        "parallel_downloads" => {
+            if let Ok(n) = val.parse::<u32>() {
+                config.parallel_downloads = n.clamp(1, 20);
+            }
+        }
         "additional_packages" => {
             config.additional_packages = val
                 .split_whitespace()

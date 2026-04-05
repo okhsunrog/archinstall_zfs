@@ -1,4 +1,4 @@
-use crossterm::event::{Event, KeyCode, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Modifier, Style};
@@ -251,6 +251,176 @@ fn render_select(frame: &mut Frame, title: &str, items: &[&str], state: &mut Lis
     frame.render_stateful_widget(list, popup, state);
 
     // Footer
+    let footer_area = Rect::new(popup.x, popup.y + popup.height, popup.width, 1);
+    if footer_area.y < area.height {
+        let footer = Paragraph::new(Line::from(vec![
+            Span::styled(" Enter", theme::ACCENT_STYLE),
+            Span::styled(" select  ", theme::DIMMED_STYLE),
+            Span::styled("Esc", theme::ACCENT_STYLE),
+            Span::styled(" cancel ", theme::DIMMED_STYLE),
+        ]))
+        .alignment(Alignment::Center);
+        frame.render_widget(footer, footer_area);
+    }
+}
+
+/// Show a modal select with a fuzzy filter input. Returns the selected item's original index.
+pub fn run_select_fuzzy(
+    terminal: &mut ratatui::DefaultTerminal,
+    title: &str,
+    items: &[&str],
+    initial: &str,
+) -> color_eyre::eyre::Result<SelectResult> {
+    let mut filter = String::new();
+    let mut filtered: Vec<&str> = items.to_vec();
+    let initial_idx = items.iter().position(|s| *s == initial).unwrap_or(0);
+    let mut state = ListState::default().with_selected(Some(initial_idx));
+
+    loop {
+        terminal.draw(|frame| {
+            render_select_fuzzy(frame, title, &filtered, &mut state, &filter);
+        })?;
+
+        if crossterm::event::poll(std::time::Duration::from_millis(50))? {
+            let ev = crossterm::event::read()?;
+            if let Event::Key(key) = ev {
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
+                match (key.code, key.modifiers) {
+                    (KeyCode::Esc, _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                        return Ok(SelectResult { selected: None });
+                    }
+                    (KeyCode::Enter, _) => {
+                        if let Some(sel) = state.selected()
+                            && let Some(text) = filtered.get(sel) {
+                                let orig_idx = items.iter().position(|s| s == text);
+                                return Ok(SelectResult {
+                                    selected: orig_idx,
+                                });
+                            }
+                        return Ok(SelectResult { selected: None });
+                    }
+                    (KeyCode::Up, _) => {
+                        let i = state.selected().unwrap_or(0);
+                        state.select(Some(if i == 0 {
+                            filtered.len().saturating_sub(1)
+                        } else {
+                            i - 1
+                        }));
+                    }
+                    (KeyCode::Down, _) => {
+                        let i = state.selected().unwrap_or(0);
+                        state.select(Some(if i >= filtered.len().saturating_sub(1) {
+                            0
+                        } else {
+                            i + 1
+                        }));
+                    }
+                    (KeyCode::Backspace, _) => {
+                        filter.pop();
+                        update_fuzzy_filter(items, &filter, &mut filtered, &mut state);
+                    }
+                    (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+                        filter.push(c);
+                        update_fuzzy_filter(items, &filter, &mut filtered, &mut state);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+fn update_fuzzy_filter<'a>(
+    items: &[&'a str],
+    filter: &str,
+    filtered: &mut Vec<&'a str>,
+    state: &mut ListState,
+) {
+    if filter.is_empty() {
+        *filtered = items.to_vec();
+    } else {
+        let mut scored: Vec<_> = items
+            .iter()
+            .filter_map(|s| sublime_fuzzy::best_match(filter, s).map(|m| (m.score(), *s)))
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        *filtered = scored.into_iter().map(|(_, s)| s).collect();
+    }
+    state.select(if filtered.is_empty() { None } else { Some(0) });
+}
+
+fn render_select_fuzzy(
+    frame: &mut Frame,
+    title: &str,
+    items: &[&str],
+    state: &mut ListState,
+    filter: &str,
+) {
+    let area = frame.area();
+    let bg = Paragraph::new("").style(Style::default().add_modifier(Modifier::DIM));
+    frame.render_widget(bg, area);
+
+    let content_width = items.iter().map(|s| s.len()).max().unwrap_or(20) + 8;
+    let title_width = title.len() + 4;
+    let popup_width = content_width.max(title_width).clamp(30, 70) as u16;
+    let popup_height = (items.len() as u16 + 6).min(area.height.saturating_sub(4));
+    let popup = super::centered_rect(popup_width, popup_height, area);
+
+    frame.render_widget(Clear, popup);
+
+    let chunks = ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            ratatui::layout::Constraint::Length(3),
+            ratatui::layout::Constraint::Min(1),
+        ])
+        .split(popup);
+
+    // Filter input
+    let filter_block = Block::default()
+        .title(format!(" {title} "))
+        .title_style(theme::HEADER_STYLE)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(theme::BORDER_STYLE)
+        .style(theme::BG_STYLE);
+    let filter_text = Paragraph::new(Line::from(vec![Span::styled(
+        if filter.is_empty() {
+            " type to filter...".to_string()
+        } else {
+            format!(" {filter}\u{258f}")
+        },
+        if filter.is_empty() {
+            theme::DIMMED_STYLE
+        } else {
+            theme::ACCENT_STYLE
+        },
+    )]))
+    .block(filter_block);
+    frame.render_widget(filter_text, chunks[0]);
+
+    // List
+    let list_block = Block::default()
+        .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+        .border_type(BorderType::Rounded)
+        .border_style(theme::BORDER_STYLE)
+        .style(theme::BG_STYLE);
+
+    let list_items: Vec<ListItem> = items
+        .iter()
+        .map(|s| ListItem::new(Line::from(format!("  {s}"))))
+        .collect();
+
+    let list = List::new(list_items)
+        .block(list_block)
+        .highlight_style(theme::SELECTED_STYLE)
+        .highlight_symbol(" \u{25b8} ")
+        .highlight_spacing(HighlightSpacing::Always);
+
+    frame.render_stateful_widget(list, chunks[1], state);
+
     let footer_area = Rect::new(popup.x, popup.y + popup.height, popup.width, 1);
     if footer_area.y < area.height {
         let footer = Paragraph::new(Line::from(vec![

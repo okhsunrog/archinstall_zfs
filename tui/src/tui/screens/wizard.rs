@@ -228,8 +228,15 @@ impl Wizard {
                     }
                 }
                 "locale" => {
-                    if let Some(loc) = pickers::pick_locale(terminal)? {
+                    let current = self.config.locale.as_deref().unwrap_or("");
+                    if let Some(loc) = pickers::pick_locale(terminal, current)? {
                         self.config.locale = Some(loc);
+                    }
+                }
+                "keyboard" => {
+                    if let Some(km) = pickers::pick_keyboard(terminal, &self.config.keyboard_layout)?
+                    {
+                        self.config.keyboard_layout = km;
                     }
                 }
                 "disk_by_id" => {
@@ -281,11 +288,6 @@ impl Wizard {
                 }
                 "users" => {
                     pickers::manage_users(&mut self.config, terminal)?;
-                }
-                "parallel_downloads" => {
-                    if let Some(n) = pickers::pick_parallel_downloads(&self.config, terminal)? {
-                        self.config.parallel_downloads = n;
-                    }
                 }
                 "pool_name" => {
                     pickers::pick_existing_pool(&mut self.config, terminal)?;
