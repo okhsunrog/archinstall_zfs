@@ -455,7 +455,12 @@ export component App inherits Window {
     // Log messages
     in property <[LogMessage]> log-messages;
 
-    // Download progress
+    // Global install progress
+    in property <string> install-phase-label: "Starting...";
+    in property <int> install-phase: 0;
+    in property <int> install-total-phases: 14;
+
+    // Package download/install progress
     in property <[DownloadInfo]> download-items;
     in property <int> download-pct: 0;
     in property <string> download-status: "";
@@ -590,8 +595,39 @@ export component App inherits Window {
             VerticalLayout {
                 spacing: 0px;
 
-                // Step title
-                Rectangle {
+                // Welcome header (step 0) or step title
+                if current-step == 0: Rectangle {
+                    height: 120px;
+                    background: transparent;
+
+                    VerticalLayout {
+                        padding-left: 20px;
+                        padding-top: 16px;
+                        spacing: 6px;
+                        alignment: start;
+
+                        Text {
+                            text: "archinstall-zfs";
+                            color: Theme.c.blue;
+                            font-size: 28px;
+                            font-weight: FontWeight.bold;
+                        }
+
+                        Text {
+                            text: "Arch Linux installer with ZFS root";
+                            color: Theme.c.subtext0;
+                            font-size: 15px;
+                        }
+
+                        Text {
+                            text: "Choose an installation mode to get started.";
+                            color: Theme.c.overlay0;
+                            font-size: 13px;
+                        }
+                    }
+                }
+
+                if current-step > 0: Rectangle {
                     height: 40px;
                     background: transparent;
 
@@ -887,28 +923,10 @@ export component App inherits Window {
 
     // ── Install progress screen ──────────────────────
     if install-state >= 1: VerticalLayout {
-        padding: 16px;
+        padding: 12px;
         spacing: 8px;
 
-        Rectangle {
-            height: 48px;
-            background: Theme.c.mantle;
-            border-radius: 4px;
-
-            Text {
-                text: install-state == 1 ? "Installing..."
-                    : install-state == 2 ? "Installation Complete"
-                    : "Installation Failed";
-                color: install-state == 1 ? Theme.c.blue
-                    : install-state == 2 ? Theme.c.green
-                    : Theme.c.red;
-                font-size: 20px;
-                font-weight: FontWeight.bold;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-        }
-
+        // ── Log area (fills available space) ────────
         log-view := ListView {
             for msg[index] in log-messages: Rectangle {
                 height: msg-text.preferred-height + 4px;
@@ -935,105 +953,151 @@ export component App inherits Window {
             log-view.viewport-y = -100000px;
         }
 
-        // ── Download progress panel ─────────────────
-        if download-active: Rectangle {
-            height: 120px;
-            background: Theme.c.mantle;
-            border-radius: 4px;
-            border-color: Theme.c.surface1;
-            border-width: 1px;
+        // ── Progress card (always visible during install) ──
+        Rectangle {
+            height: download-active ? 180px : 80px;
+            background: Theme.c.surface0;
+            border-radius: 10px;
 
             VerticalLayout {
-                padding: 12px;
-                spacing: 6px;
+                padding: 14px;
+                spacing: 8px;
 
-                // Header: status text
-                Text {
-                    text: download-status;
-                    color: Theme.c.teal;
-                    font-size: 13px;
-                    font-weight: FontWeight.semi-bold;
-                }
+                // Global phase status
+                HorizontalLayout {
+                    spacing: 10px;
 
-                // Overall progress bar
-                Rectangle {
-                    height: 16px;
-                    background: Theme.c.surface0;
-                    border-radius: 3px;
-                    clip: true;
-
-                    Rectangle {
-                        x: 0;
-                        y: 0;
-                        height: parent.height;
-                        width: parent.width * download-pct / 100;
-                        background: Theme.c.teal;
-                        border-radius: 3px;
+                    Text {
+                        text: install-state == 2 ? "\u{2713} Complete"
+                            : install-state == 3 ? "\u{2717} Failed"
+                            : install-phase-label;
+                        color: install-state == 2 ? Theme.c.green
+                            : install-state == 3 ? Theme.c.red
+                            : Theme.c.text;
+                        font-size: 14px;
+                        font-weight: FontWeight.semi-bold;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
                     }
 
                     Text {
-                        text: download-pct + "%";
-                        color: Theme.c.text;
-                        font-size: 11px;
-                        horizontal-alignment: center;
+                        text: install-state >= 2 ? ""
+                            : install-phase + " / " + install-total-phases;
+                        color: Theme.c.overlay0;
+                        font-size: 13px;
                         vertical-alignment: center;
                     }
                 }
 
-                // Per-package download lines
-                ListView {
-                    for dl[index] in download-items: Rectangle {
-                        height: 20px;
+                // Global progress bar
+                if install-state == 1: Rectangle {
+                    height: 8px;
+                    background: Theme.c.mantle;
+                    border-radius: 4px;
+                    clip: true;
 
-                        HorizontalLayout {
-                            padding-left: 4px;
-                            padding-right: 4px;
-                            spacing: 8px;
+                    Rectangle {
+                        x: 0; y: 0;
+                        height: parent.height;
+                        width: parent.width * install-phase / install-total-phases;
+                        background: Theme.c.blue;
+                        border-radius: 4px;
+                    }
+                }
 
-                            Text {
-                                text: dl.filename;
-                                color: dl.state == 1 ? Theme.c.overlay0
-                                     : dl.state == 2 ? Theme.c.green
-                                     : Theme.c.text;
-                                font-size: 11px;
-                                font-family: "monospace";
-                                overflow: elide;
-                                horizontal-stretch: 1;
-                                vertical-alignment: center;
-                            }
+                // Package progress (download or install)
+                if download-active: VerticalLayout {
+                    spacing: 6px;
 
-                            Text {
-                                text: dl.state == 1 ? "verifying..."
-                                     : dl.state == 2 ? "done"
-                                     : dl.pct + "% " + dl.speed;
-                                color: dl.state == 2 ? Theme.c.green : Theme.c.overlay0;
-                                font-size: 11px;
-                                font-family: "monospace";
-                                vertical-alignment: center;
+                    // Download/install status line
+                    HorizontalLayout {
+                        Text {
+                            text: download-status;
+                            color: Theme.c.teal;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+
+                        Text {
+                            text: download-pct + "%";
+                            color: Theme.c.teal;
+                            font-size: 12px;
+                            font-weight: FontWeight.semi-bold;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    // Package progress bar
+                    Rectangle {
+                        height: 6px;
+                        background: Theme.c.mantle;
+                        border-radius: 3px;
+                        clip: true;
+
+                        Rectangle {
+                            x: 0; y: 0;
+                            height: parent.height;
+                            width: parent.width * download-pct / 100;
+                            background: Theme.c.teal;
+                            border-radius: 3px;
+                        }
+                    }
+
+                    // Per-package lines
+                    ListView {
+                        for dl[index] in download-items: Rectangle {
+                            height: 18px;
+
+                            HorizontalLayout {
+                                padding-left: 4px;
+                                padding-right: 4px;
+                                spacing: 8px;
+
+                                Text {
+                                    text: dl.filename;
+                                    color: dl.state == 1 ? Theme.c.overlay0
+                                         : dl.state == 2 ? Theme.c.green
+                                         : Theme.c.text;
+                                    font-size: 11px;
+                                    font-family: "monospace";
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                }
+
+                                Text {
+                                    text: dl.state == 1 ? "verifying..."
+                                         : dl.state == 2 ? "done"
+                                         : dl.pct + "% " + dl.speed;
+                                    color: dl.state == 2 ? Theme.c.green : Theme.c.overlay0;
+                                    font-size: 11px;
+                                    font-family: "monospace";
+                                    vertical-alignment: center;
+                                }
                             }
                         }
                     }
                 }
-            }
-        }
 
-        if install-state >= 2: Rectangle {
-            height: 36px;
+                // Exit button
+                if install-state >= 2: Rectangle {
+                    height: 36px;
+                    background: exit-ta.has-hover ? Theme.c.blue : Theme.c.surface1;
+                    border-radius: 8px;
 
-            Rectangle {
-                background: exit-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
-                border-radius: 4px;
+                    exit-ta := TouchArea {
+                        clicked => { quit-requested(); }
+                    }
 
-                exit-ta := TouchArea {
-                    clicked => { quit-requested(); }
-                }
-
-                Text {
-                    text: "Click to exit";
-                    color: Theme.c.subtext0;
-                    font-size: 14px;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+                    Text {
+                        text: install-state == 2 ? "Reboot" : "Exit";
+                        color: exit-ta.has-hover ? Theme.c.base : Theme.c.text;
+                        font-size: 14px;
+                        font-weight: FontWeight.semi-bold;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
                 }
             }
         }

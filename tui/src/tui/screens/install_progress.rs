@@ -55,32 +55,27 @@ impl InstallProgress {
         let tx_clone = tx.clone();
         let cancel_clone = cancel.clone();
         let download_tx_clone = download_tx.clone();
-        tokio::spawn(async move {
+        tokio::task::spawn_blocking(move || {
             use tracing_subscriber::Layer as _;
             use tracing_subscriber::layer::SubscriberExt as _;
 
             let channel_layer = ChannelLayer::new(tx_clone.clone());
             let ui_filter = tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-            let file_appender = tracing_appender::rolling::never("/tmp", "archinstall-zfs.log");
-            let file_filter = tracing_subscriber::EnvFilter::new(
-                "trace,h2=warn,hyper=warn,reqwest=warn,rustls=warn,pacman=info",
-            );
-            let file_layer = tracing_subscriber::fmt::layer()
-                .with_writer(file_appender)
-                .with_ansi(false)
-                .with_target(true)
-                .with_filter(file_filter);
-            let subscriber = tracing_subscriber::registry()
-                .with(channel_layer.with_filter(ui_filter))
-                .with(file_layer);
+            let subscriber =
+                tracing_subscriber::registry().with(channel_layer.with_filter(ui_filter));
+            // set_default works reliably on spawn_blocking's dedicated thread
             let _guard = tracing::subscriber::set_default(subscriber);
 
+            let rt = tokio::runtime::Handle::current();
             let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
                 Arc::new(archinstall_zfs_core::system::cmd::RealRunner);
-            let result =
-                crate::app::run_install(runner, config, cancel_clone, Some(download_tx_clone))
-                    .await;
+            let result = rt.block_on(crate::app::run_install(
+                runner,
+                config,
+                cancel_clone,
+                Some(download_tx_clone),
+            ));
 
             match result {
                 Ok(()) => {

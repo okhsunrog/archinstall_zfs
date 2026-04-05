@@ -61,7 +61,8 @@ enum Commands {
     },
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     color_eyre::install()?;
     let cli = Cli::parse();
 
@@ -317,8 +318,38 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
             let weak_log = app.as_weak();
             thread::spawn(move || {
                 while let Ok((text, level)) = log_rx.recv() {
+                    // Extract phase info from log messages like "[INFO ] Phase 4: Installing..."
+                    let phase_update = if text.contains("Phase ") {
+                        // Parse "Phase N:" or "Phase N-M:"
+                        let after_phase = text.split("Phase ").nth(1).unwrap_or("");
+                        let num_str: String = after_phase
+                            .chars()
+                            .take_while(|c| c.is_ascii_digit())
+                            .collect();
+                        let phase_num = num_str.parse::<i32>().unwrap_or(-1);
+                        let label: String = after_phase
+                            .split(": ")
+                            .nth(1)
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
+                        if phase_num >= 0 && !label.is_empty() {
+                            Some((phase_num, label))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
                     let text = SharedString::from(&text);
                     let _ = weak_log.upgrade_in_event_loop(move |app| {
+                        // Update phase if detected
+                        if let Some((phase_num, label)) = phase_update {
+                            app.set_install_phase(phase_num);
+                            app.set_install_phase_label(SharedString::from(&label));
+                        }
+
                         let model = app.get_log_messages();
                         let vec_model = model
                             .as_any()
@@ -467,7 +498,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
             });
 
             let weak_install = app.as_weak();
-            thread::spawn(move || {
+            tokio::task::spawn_blocking(move || {
                 use tracing_subscriber::Layer as _;
                 use tracing_subscriber::layer::SubscriberExt as _;
 
@@ -619,7 +650,13 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
         let weak = app.as_weak();
         app.on_quit_requested(move || {
             if let Some(app) = weak.upgrade() {
+                let should_reboot = app.get_install_state() == 2;
                 let _ = app.window().hide();
+                if should_reboot {
+                    let _ = std::process::Command::new("systemctl")
+                        .arg("reboot")
+                        .spawn();
+                }
             }
         });
     }

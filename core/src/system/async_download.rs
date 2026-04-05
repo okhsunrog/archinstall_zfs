@@ -207,13 +207,23 @@ pub async fn download_packages(
         return Ok(());
     }
 
+    tracing::debug!(
+        task_count = tasks.len(),
+        concurrency,
+        has_progress_tx = progress_tx.is_some(),
+        "download_packages: starting"
+    );
+
     let config = DownloadConfig {
         concurrency,
         ..Default::default()
     };
 
     let (_rx, handle) = start_downloads(tasks, cache_dir, config, cancel, progress_tx);
-    handle.await?
+    tracing::debug!("download_packages: awaiting handle");
+    let result = handle.await?;
+    tracing::debug!("download_packages: done");
+    result
 }
 
 // ── Internal implementation ───────────────────────────

@@ -63,15 +63,8 @@ fn setup_logging() -> Result<()> {
     use tracing_subscriber::fmt;
     use tracing_subscriber::prelude::*;
 
-    // Console: info+ by default (overridable via RUST_LOG)
-    let console_filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let console_layer = fmt::layer()
-        .with_writer(std::io::stderr)
-        .with_target(false)
-        .with_filter(console_filter);
-
-    // File: trace for our code, warn for noisy deps (h2, hyper, reqwest, rustls)
+    // File only — no console output (ratatui owns the terminal).
+    // The install screen sets up its own ChannelLayer for UI log display.
     let file_appender = tracing_appender::rolling::never("/tmp", "archinstall-zfs.log");
     let file_filter =
         EnvFilter::new("trace,h2=warn,hyper=warn,reqwest=warn,rustls=warn,pacman=info");
@@ -81,10 +74,7 @@ fn setup_logging() -> Result<()> {
         .with_target(true)
         .with_filter(file_filter);
 
-    tracing_subscriber::registry()
-        .with(console_layer)
-        .with(file_layer)
-        .init();
+    tracing_subscriber::registry().with(file_layer).init();
 
     Ok(())
 }

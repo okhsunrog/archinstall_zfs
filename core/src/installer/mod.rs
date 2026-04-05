@@ -69,8 +69,13 @@ impl Installer {
 
         // Phase 4: install base system via libalpm
         tracing::info!("Phase 4: Installing base system...");
-        let target_mounts =
-            base::install_base(&*self.runner, &self.target, &self.config, &self.cancel)?;
+        let target_mounts = base::install_base(
+            &*self.runner,
+            &self.target,
+            &self.config,
+            &self.cancel,
+            self.download_progress_tx.clone(),
+        )?;
         self._target_mounts = Some(target_mounts);
 
         // Create a reusable AlpmContext for all subsequent package installs.

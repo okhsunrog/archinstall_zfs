@@ -11,15 +11,14 @@ use archinstall_zfs_core::system::async_download::DownloadProgress;
 use archinstall_zfs_core::system::cmd::CommandRunner;
 
 /// Full installation pipeline. All progress reported via tracing.
+/// Must be called from a thread with tokio runtime context (Handle::current() must work).
 pub fn run_install(
     runner: Arc<dyn CommandRunner>,
     config: &GlobalConfig,
     download_progress_tx: Option<Arc<tokio::sync::watch::Sender<DownloadProgress>>>,
 ) -> Result<()> {
     let cancel = CancellationToken::new();
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
+    let rt = tokio::runtime::Handle::current();
     let mountpoint = PathBuf::from("/mnt");
     let mode = config
         .installation_mode

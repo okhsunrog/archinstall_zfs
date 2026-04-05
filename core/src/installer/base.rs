@@ -16,6 +16,9 @@ pub fn install_base(
     target: &Path,
     config: &GlobalConfig,
     cancel: &CancellationToken,
+    progress_tx: Option<
+        std::sync::Arc<tokio::sync::watch::Sender<crate::system::async_download::DownloadProgress>>,
+    >,
 ) -> Result<TargetMounts> {
     let mut packages: Vec<&str> = vec![
         "base",
@@ -49,7 +52,7 @@ pub fn install_base(
     let pacman_conf = Path::new("/etc/pacman.conf");
     let mut ctx = AlpmContext::for_target(target, pacman_conf)?;
     ctx.sync_databases(false)?;
-    ctx.install_packages(&packages, cancel, None)?;
+    ctx.install_packages(&packages, cancel, progress_tx)?;
     ctx.finalize_target()?;
     // ctx (AlpmContext) drops here — that's fine, just releases the alpm handle.
     // target_mounts stays alive via the return value.

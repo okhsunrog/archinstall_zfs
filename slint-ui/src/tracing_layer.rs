@@ -39,7 +39,11 @@ impl<S: Subscriber> Layer<S> for UiLogLayer {
         };
 
         let msg = visitor.message.unwrap_or_default();
-        let line = format!("[{prefix}] {msg}");
+        let line = if visitor.fields.is_empty() {
+            format!("[{prefix}] {msg}")
+        } else {
+            format!("[{prefix}] {msg} {}", visitor.fields.join(" "))
+        };
 
         let _ = self.tx.try_send((line, level));
     }
@@ -48,18 +52,23 @@ impl<S: Subscriber> Layer<S> for UiLogLayer {
 #[derive(Default)]
 struct MessageVisitor {
     message: Option<String>,
+    fields: Vec<String>,
 }
 
 impl Visit for MessageVisitor {
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
         if field.name() == "message" {
             self.message = Some(format!("{value:?}"));
+        } else {
+            self.fields.push(format!("{}={:?}", field.name(), value));
         }
     }
 
     fn record_str(&mut self, field: &Field, value: &str) {
         if field.name() == "message" {
             self.message = Some(value.to_string());
+        } else {
+            self.fields.push(format!("{}={}", field.name(), value));
         }
     }
 }

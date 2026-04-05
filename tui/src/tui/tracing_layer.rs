@@ -32,10 +32,10 @@ impl<S: Subscriber> Layer<S> for ChannelLayer {
         let mut visitor = MessageVisitor::default();
         event.record(&mut visitor);
 
-        let msg = if let Some(message) = visitor.message {
-            message
-        } else {
-            format!("{}: {}", metadata.target(), visitor.fields.join(", "))
+        let msg = match (visitor.message, visitor.fields.is_empty()) {
+            (Some(message), true) => message,
+            (Some(message), false) => format!("{message} {}", visitor.fields.join(" ")),
+            (None, _) => format!("{}: {}", metadata.target(), visitor.fields.join(", ")),
         };
 
         let prefix = match level {
