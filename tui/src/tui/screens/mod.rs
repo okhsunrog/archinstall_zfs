@@ -1,5 +1,6 @@
 pub mod edit;
 pub mod install_progress;
+pub mod package_picker;
 pub mod pickers;
 pub mod select;
 pub mod steps;

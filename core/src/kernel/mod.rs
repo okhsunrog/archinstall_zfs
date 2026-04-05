@@ -80,7 +80,7 @@ pub async fn query_package_version(package: &str) -> Result<Option<String>> {
 }
 
 /// Initialize an alpm handle from the system pacman.conf.
-fn init_alpm() -> Result<alpm::Alpm> {
+pub(crate) fn init_alpm() -> Result<alpm::Alpm> {
     let pacman_conf = pacmanconf::Config::from_file("/etc/pacman.conf")
         .wrap_err("failed to parse pacman.conf")?;
 
