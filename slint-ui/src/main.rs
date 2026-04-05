@@ -1395,18 +1395,12 @@ fn build_users_items(c: &GlobalConfig) -> Vec<ConfigItem> {
 }
 
 fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
-    let profiles = archinstall_zfs_core::profile::all_profiles();
-    let mut profile_names: Vec<String> = vec!["None".to_string()];
-    profile_names.extend(profiles.iter().map(|p| p.name.to_string()));
-    let profile_refs: Vec<&str> = profile_names.iter().map(|s| s.as_str()).collect();
-    let profile_selected = c
-        .profile
-        .as_ref()
-        .and_then(|sel| profiles.iter().position(|p| p.name == *sel))
-        .map(|i| (i + 1) as i32) // +1 because "None" is at index 0
-        .unwrap_or(0);
-
-    let mut items = radio_group("profile", "Profile", &profile_refs, profile_selected);
+    let mut items = vec![ci(
+        "profile",
+        "Profile",
+        c.profile.as_deref().unwrap_or("None"),
+        1,
+    )];
 
     items.extend(radio_group(
         "audio",
@@ -1646,6 +1640,19 @@ fn handle_item_activated(
                 &opt_refs,
                 current_idx as i32,
             );
+        }
+        "profile" => {
+            let profiles = archinstall_zfs_core::profile::all_profiles();
+            let mut names: Vec<String> = vec!["None".to_string()];
+            names.extend(profiles.iter().map(|p| p.name.to_string()));
+            let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+            let current = config
+                .profile
+                .as_ref()
+                .and_then(|sel| profiles.iter().position(|p| p.name == *sel))
+                .map(|i| (i + 1) as i32)
+                .unwrap_or(0);
+            show_select(app, "profile", "Profile", &refs, current);
         }
         "timezone" => {
             let regions = archinstall_zfs_core::installer::locale::list_timezone_regions();

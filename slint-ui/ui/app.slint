@@ -727,83 +727,88 @@ component PackageSearchPopup inherits Rectangle {
             accessible-role: groupbox;
             accessible-label: "Package search";
 
-            FocusScope {
-                key-pressed(e) => {
-                    if e.text == Key.Tab {
-                        search-aur(pkg-search-input.text);
-                        return accept;
-                    }
-                    if e.text == Key.Escape {
-                        closed();
-                        return accept;
-                    }
-                    return reject;
-                }
-            }
-
             VerticalLayout {
                 padding: 16px;
                 spacing: 10px;
 
                 // Title
-                HorizontalLayout {
-                    alignment: space-between;
-
-                    Text {
-                        text: searching-aur ? "AUR search" : "Package search";
-                        color: Theme.c.blue;
-                        font-size: 16px;
-                        font-weight: FontWeight.semi-bold;
-                    }
-
-                    Text {
-                        text: "Tab: AUR";
-                        color: Theme.c.overlay0;
-                        font-size: 12px;
-                        vertical-alignment: center;
-                    }
+                Text {
+                    text: searching-aur ? "AUR search" : "Package search";
+                    color: Theme.c.blue;
+                    font-size: 16px;
+                    font-weight: FontWeight.semi-bold;
                 }
 
-                // Search input
-                Rectangle {
-                    height: 36px;
-                    background: Theme.c.surface0;
-                    border-radius: 4px;
-                    border-color: pkg-search-input.has-focus ? Theme.c.blue : Theme.c.surface1;
-                    border-width: 1px;
-                    clip: true;
+                // Search input + AUR button
+                HorizontalLayout {
+                    spacing: 8px;
 
-                    pkg-search-input := TextInput {
-                        width: max(parent.width - 16px, self.preferred-width);
-                        x: 8px;
-                        vertical-alignment: center;
-                        color: Theme.c.text;
-                        font-size: 14px;
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 36px;
+                        background: Theme.c.surface0;
+                        border-radius: 4px;
+                        border-color: pkg-search-input.has-focus ? Theme.c.blue : Theme.c.surface1;
+                        border-width: 1px;
+                        clip: true;
 
-                        private property <length> margin: 8px;
-                        cursor-position-changed(cursor-position) => {
-                            if cursor-position.x + self.x < margin {
-                                self.x = - cursor-position.x + margin;
-                            } else if cursor-position.x + self.x > parent.width - margin - self.text-cursor-width {
-                                self.x = parent.width - cursor-position.x - margin - self.text-cursor-width;
+                        pkg-search-input := TextInput {
+                            width: max(parent.width - 16px, self.preferred-width);
+                            x: 8px;
+                            vertical-alignment: center;
+                            color: Theme.c.text;
+                            font-size: 14px;
+
+                            private property <length> margin: 8px;
+                            cursor-position-changed(cursor-position) => {
+                                if cursor-position.x + self.x < margin {
+                                    self.x = - cursor-position.x + margin;
+                                } else if cursor-position.x + self.x > parent.width - margin - self.text-cursor-width {
+                                    self.x = parent.width - cursor-position.x - margin - self.text-cursor-width;
+                                }
+                            }
+
+                            edited => {
+                                search-changed(self.text);
                             }
                         }
 
-                        edited => {
-                            search-changed(self.text);
+                        // Placeholder
+                        if pkg-search-input.text == "": Text {
+                            x: 8px;
+                            text: "type to search packages...";
+                            color: Theme.c.overlay0;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                        }
+
+                        init => { pkg-search-input.focus(); }
+                    }
+
+                    // AUR search button
+                    Rectangle {
+                        width: 60px;
+                        height: 36px;
+                        background: aur-btn-ta.has-hover ? Theme.c.mauve : Theme.c.surface0;
+                        border-radius: 4px;
+                        border-color: searching-aur ? Theme.c.mauve : Theme.c.surface1;
+                        border-width: 1px;
+
+                        aur-btn-ta := TouchArea {
+                            clicked => {
+                                search-aur(pkg-search-input.text);
+                            }
+                        }
+
+                        Text {
+                            text: "AUR";
+                            color: aur-btn-ta.has-hover ? Theme.c.base : (searching-aur ? Theme.c.mauve : Theme.c.subtext0);
+                            font-size: 13px;
+                            font-weight: FontWeight.semi-bold;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
                         }
                     }
-
-                    // Placeholder
-                    if pkg-search-input.text == "": Text {
-                        x: 8px;
-                        text: "type to search packages...";
-                        color: Theme.c.overlay0;
-                        font-size: 14px;
-                        vertical-alignment: center;
-                    }
-
-                    init => { pkg-search-input.focus(); }
                 }
 
                 // Status / hint
