@@ -103,7 +103,9 @@ fn render_multiselect(
     let bg = Paragraph::new("").style(Style::default().add_modifier(Modifier::DIM));
     frame.render_widget(bg, area);
 
-    let popup_width = (items.iter().map(|s| s.len() + 8).max().unwrap_or(30) + 4).min(72) as u16;
+    let content_width = items.iter().map(|s| s.len() + 8).max().unwrap_or(30) + 4;
+    let title_width = title.len() + 4;
+    let popup_width = content_width.max(title_width).clamp(24, 72) as u16;
     let popup_height = (items.len() as u16 + 4).min(area.height.saturating_sub(4));
     let popup = super::centered_rect(popup_width, popup_height, area);
 
@@ -219,7 +221,9 @@ fn render_select(frame: &mut Frame, title: &str, items: &[&str], state: &mut Lis
     frame.render_widget(bg, area);
 
     // Center popup
-    let popup_width = (items.iter().map(|s| s.len()).max().unwrap_or(20) + 8).min(70) as u16;
+    let content_width = items.iter().map(|s| s.len()).max().unwrap_or(20) + 8;
+    let title_width = title.len() + 4;
+    let popup_width = content_width.max(title_width).clamp(24, 70) as u16;
     let popup_height = (items.len() as u16 + 4).min(area.height - 4);
     let popup = super::centered_rect(popup_width, popup_height, area);
 
