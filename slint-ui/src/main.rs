@@ -818,13 +818,26 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 let theme = app.global::<Theme>().get_c();
                 let (label, color) = match score {
                     0 => ("Very weak", theme.red),
-                    1 => ("Weak", theme.red),
+                    1 => ("Weak", theme.peach),
                     2 => ("Fair", theme.yellow),
                     3 => ("Strong", theme.green),
                     _ => ("Very strong", theme.teal),
                 };
+
+                let hint = entropy
+                    .feedback()
+                    .and_then(|f| f.suggestions().first().map(|s| s.to_string()))
+                    .unwrap_or_else(|| {
+                        let crack_time = entropy
+                            .crack_times()
+                            .online_no_throttling_10_per_second()
+                            .to_string();
+                        format!("~{crack_time} to crack")
+                    });
+
                 app.set_password_strength_score(score as i32);
                 app.set_password_strength_label(SharedString::from(label));
+                app.set_password_strength_hint(SharedString::from(hint));
                 app.set_password_strength_color(color);
             }
         });
@@ -1620,6 +1633,7 @@ fn show_text_input(app: &App, key: &str, title: &str, current: &str, password: b
     app.set_text_input_value(current.into());
     app.set_text_input_password(password);
     app.set_password_strength_score(-1);
+    app.set_password_strength_hint(SharedString::default());
     app.set_text_input_visible(true);
 }
 

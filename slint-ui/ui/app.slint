@@ -85,6 +85,7 @@ component TextInputPopup inherits Rectangle {
     // Password strength (set from Rust)
     in property <int> strength-score: -1; // -1=hidden, 0..4=zxcvbn score
     in property <string> strength-label;
+    in property <string> strength-hint; // crack time or suggestion
     in property <color> strength-color: Theme.c.overlay0;
 
     callback confirmed(string);
@@ -101,7 +102,7 @@ component TextInputPopup inherits Rectangle {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             width: min(500px, parent.width - 40px);
-            height: is-password ? 190px : 140px;
+            height: self.preferred-height;
             background: Theme.c.mantle;
             border-radius: 8px;
             border-color: Theme.c.surface1;
@@ -178,11 +179,22 @@ component TextInputPopup inherits Rectangle {
                         }
                     }
 
-                    Text {
-                        text: strength-label;
-                        color: strength-color;
-                        font-size: 12px;
-                        horizontal-alignment: center;
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 12px;
+
+                        Text {
+                            text: strength-label;
+                            color: strength-color;
+                            font-size: 12px;
+                            font-weight: FontWeight.semi-bold;
+                        }
+
+                        if strength-hint != "": Text {
+                            text: strength-hint;
+                            color: Theme.c.overlay0;
+                            font-size: 12px;
+                        }
                     }
                 }
 
@@ -775,6 +787,7 @@ export component App inherits Window {
     // Password strength (driven from Rust)
     in-out property <int> password-strength-score: -1;
     in-out property <string> password-strength-label;
+    in-out property <string> password-strength-hint;
     in-out property <color> password-strength-color: Theme.c.overlay0;
 
     // User management popup state
@@ -1418,6 +1431,26 @@ export component App inherits Window {
                         spacing: 8px;
                         alignment: center;
 
+                        // Quit button
+                        Rectangle {
+                            width: 60px;
+                            height: 32px;
+                            background: quit-nav-ta.has-hover ? Theme.c.surface1 : transparent;
+                            border-radius: 4px;
+
+                            quit-nav-ta := TouchArea {
+                                clicked => { quit-requested(); }
+                            }
+
+                            Text {
+                                text: "Quit";
+                                color: Theme.c.overlay0;
+                                font-size: 13px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
                         // Back button (not on first wizard step)
                         if current-step > 1: Rectangle {
                             width: 80px;
@@ -1684,6 +1717,7 @@ export component App inherits Window {
         popup-visible: text-input-visible;
         strength-score: password-strength-score;
         strength-label: password-strength-label;
+        strength-hint: password-strength-hint;
         strength-color: password-strength-color;
 
         confirmed(val) => {
