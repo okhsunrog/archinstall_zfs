@@ -11,6 +11,11 @@ on:
   # Allow manual triggering
   workflow_dispatch:
     inputs:
+      build_iso:
+        description: 'Build ISO images'
+        required: false
+        default: false
+        type: boolean
       create_release:
         description: 'Create GitHub release'
         required: false
@@ -63,7 +68,7 @@ jobs:
 
   iso-linux:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (github.event.inputs.build_iso == 'true' || github.event.inputs.create_release == 'true'))
     runs-on: ubuntu-latest
     container:
       image: archlinux:latest
@@ -104,7 +109,7 @@ jobs:
 
   iso-linux-lts:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (github.event.inputs.build_iso == 'true' || github.event.inputs.create_release == 'true'))
     runs-on: ubuntu-latest
     container:
       image: archlinux:latest

@@ -3,6 +3,8 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
+use crate::config::types::ZfsModuleMode;
+
 /// Result of compatibility check for a single kernel.
 #[derive(Debug, Clone)]
 pub struct CompatibilityResult {
@@ -13,6 +15,29 @@ pub struct CompatibilityResult {
     pub precompiled_compatible: bool,
     pub precompiled_version: Option<String>,
     pub precompiled_warnings: Vec<String>,
+}
+
+impl CompatibilityResult {
+    /// Returns the best ZFS module mode for this kernel, or None if incompatible.
+    /// Prefers precompiled (faster install, no compilation) over DKMS.
+    pub fn best_mode(&self) -> Option<ZfsModuleMode> {
+        if self.precompiled_compatible {
+            Some(ZfsModuleMode::Precompiled)
+        } else if self.dkms_compatible {
+            Some(ZfsModuleMode::Dkms)
+        } else {
+            None
+        }
+    }
+
+    /// Human-readable label for the best available mode.
+    pub fn mode_label(&self) -> &'static str {
+        match self.best_mode() {
+            Some(ZfsModuleMode::Precompiled) => "precompiled",
+            Some(ZfsModuleMode::Dkms) => "DKMS",
+            None => "incompatible",
+        }
+    }
 }
 
 /// Scan all known kernels for ZFS compatibility using libalpm.

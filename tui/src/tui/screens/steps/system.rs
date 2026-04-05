@@ -7,11 +7,15 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
         MenuItem {
             key: "kernel",
             label: "Kernel",
-            value: config
-                .kernels
-                .as_ref()
-                .map(|k| k.join(", "))
-                .unwrap_or_else(|| config.primary_kernel().to_string()),
+            value: format!(
+                "{} [{}]",
+                config
+                    .kernels
+                    .as_ref()
+                    .map(|k| k.join(", "))
+                    .unwrap_or_else(|| config.primary_kernel().to_string()),
+                config.zfs_module_mode
+            ),
             kind: MenuKind::Custom,
         },
         MenuItem {
