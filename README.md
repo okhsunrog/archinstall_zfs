@@ -17,7 +17,7 @@
 
 ## Overview
 
-Setting up ZFS on Arch involves kernel selection, ZFS module installation, bootloader configuration, and optional encryption. Archinstall-ZFS automates these steps with a wizard-style TUI and an experimental Slint GUI. It uses direct libalpm bindings for package management (no `pacman`/`pacstrap` shell calls), resolves AUR dependency chains via `raur`/`aur-depends`, and validates kernel/ZFS compatibility against OpenZFS release data.
+Setting up ZFS on Arch involves kernel selection, ZFS module installation, bootloader configuration, and optional encryption. Archinstall-ZFS automates these steps with two UI options: a graphical installer (Slint, renders directly via Linux KMS) and a terminal UI (ratatui). It uses direct libalpm bindings for package management (no `pacman`/`pacstrap` shell calls), resolves AUR dependency chains via `raur`/`aur-depends`, and validates kernel/ZFS compatibility against OpenZFS release data.
 
 Key improvements over the Python version:
 
@@ -50,10 +50,14 @@ Key improvements over the Python version:
 3. Run:
 
 ```bash
+# Graphical UI (Slint, renders directly via Linux KMS — no X11/Wayland needed)
+archinstall-zfs-slint
+
+# or Terminal UI (ratatui)
 archinstall-zfs
 ```
 
-> Why recommended: the ISO already contains ZFS components and the installer, so startup is faster and avoids on-the-fly package installation.
+> Why recommended: the ISO already contains ZFS components and both installers, so startup is faster and avoids on-the-fly package installation.
 
 ### Option B: Official Arch ISO
 ```bash
@@ -62,8 +66,8 @@ archinstall-zfs
 pacman -Sy git base-devel
 git clone --depth 1 https://github.com/okhsunrog/archinstall_zfs
 cd archinstall_zfs
-cargo build --release -p archinstall-zfs-tui
-./target/release/archinstall-zfs-tui
+cargo build --release -p archinstall-zfs-slint  # GUI
+cargo build --release -p archinstall-zfs-tui    # TUI
 ```
 
 > Note: This path installs ZFS components during the run, so it usually takes longer than Option A.
