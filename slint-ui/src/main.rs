@@ -421,6 +421,57 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
         });
     }
 
+    // ── String list (extra_services etc.) ─────────────
+    {
+        let weak = app.as_weak();
+        let cfg = config.clone();
+        let wiz = wizard.clone();
+        app.on_strlist_added(move |key, val| {
+            let Some(app) = weak.upgrade() else { return };
+            let val = val.to_string();
+            if val.is_empty() {
+                return;
+            }
+            let mut c = cfg.borrow_mut();
+            if key.as_str() == "extra_services" && !c.extra_services.contains(&val) {
+                c.extra_services.push(val);
+            }
+            show_string_list(
+                &app,
+                &key,
+                &app.get_strlist_title(),
+                match key.as_str() {
+                    "extra_services" => &c.extra_services,
+                    _ => return,
+                },
+            );
+            refresh_ui(&app, &c, &wiz.borrow());
+        });
+    }
+    {
+        let weak = app.as_weak();
+        let cfg = config.clone();
+        let wiz = wizard.clone();
+        app.on_strlist_removed(move |key, index| {
+            let Some(app) = weak.upgrade() else { return };
+            let mut c = cfg.borrow_mut();
+            let idx = index as usize;
+            if key.as_str() == "extra_services" && idx < c.extra_services.len() {
+                c.extra_services.remove(idx);
+            }
+            show_string_list(
+                &app,
+                &key,
+                &app.get_strlist_title(),
+                match key.as_str() {
+                    "extra_services" => &c.extra_services,
+                    _ => return,
+                },
+            );
+            refresh_ui(&app, &c, &wiz.borrow());
+        });
+    }
+
     // ── Package search ───────────────────────────────
     {
         let weak = app.as_weak();
@@ -1703,26 +1754,36 @@ fn handle_item_activated(
         "packages" => {
             show_package_search(app, config);
         }
+        // String list popup
+        "extra_services" => {
+            show_string_list(app, key, "Extra systemd services", &config.extra_services);
+        }
         // Text input popups
         "pool_name"
         | "dataset_prefix"
         | "hostname"
-        | "extra_services"
         | "swap_partition_size"
         | "parallel_downloads" => {
-            let current = match key {
-                "pool_name" => config.pool_name.clone().unwrap_or_default(),
-                "dataset_prefix" => config.dataset_prefix.clone(),
-                "hostname" => config.hostname.clone().unwrap_or_default(),
-                "extra_services" => config.extra_services.join(" "),
-                "swap_partition_size" => config.swap_partition_size.clone().unwrap_or_default(),
-                "parallel_downloads" => config.parallel_downloads.to_string(),
-                _ => String::new(),
+            let (title, current) = match key {
+                "pool_name" => ("Pool name", config.pool_name.clone().unwrap_or_default()),
+                "dataset_prefix" => ("Dataset prefix", config.dataset_prefix.clone()),
+                "hostname" => ("Hostname", config.hostname.clone().unwrap_or_default()),
+                "swap_partition_size" => (
+                    "Swap partition size",
+                    config.swap_partition_size.clone().unwrap_or_default(),
+                ),
+                "parallel_downloads" => {
+                    ("Parallel downloads", config.parallel_downloads.to_string())
+                }
+                _ => ("", String::new()),
             };
-            show_text_input(app, key, key, &current, false);
+            show_text_input(app, key, title, &current, false);
         }
-        "root_password" | "encryption_password" => {
-            show_text_input(app, key, key, "", true);
+        "root_password" => {
+            show_text_input(app, key, "Root password", "", true);
+        }
+        "encryption_password" => {
+            show_text_input(app, key, "Encryption password", "", true);
         }
         _ => {}
     }
@@ -1777,6 +1838,19 @@ fn show_users_popup(app: &App, config: &GlobalConfig) {
         .collect();
     app.set_users_list(ModelRc::new(VecModel::from(entries)));
     app.set_users_visible(true);
+}
+
+fn show_string_list(app: &App, key: &str, title: &str, items: &[String]) {
+    let opts: Vec<SelectOption> = items
+        .iter()
+        .map(|s| SelectOption {
+            text: SharedString::from(s.as_str()),
+        })
+        .collect();
+    app.set_strlist_key(key.into());
+    app.set_strlist_title(title.into());
+    app.set_strlist_items(ModelRc::new(VecModel::from(opts)));
+    app.set_strlist_visible(true);
 }
 
 fn show_package_search(app: &App, config: &GlobalConfig) {
@@ -1962,13 +2036,6 @@ fn apply_text(config: &mut GlobalConfig, key: &str, val: &str) {
             if let Ok(n) = val.parse::<u32>() {
                 config.parallel_downloads = n.clamp(1, 20);
             }
-        }
-        "extra_services" => {
-            config.extra_services = val
-                .split_whitespace()
-                .map(|s| s.trim_matches(',').to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
         }
         _ => {}
     }

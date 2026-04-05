@@ -693,6 +693,189 @@ component UserManagePopup inherits Rectangle {
     }
 }
 
+// ── String list popup (for extra_services, etc.) ────
+
+component StringListPopup inherits Rectangle {
+    in property <string> title;
+    in property <[SelectOption]> items;
+    in property <bool> popup-visible;
+
+    callback item-added(string);
+    callback item-removed(int);
+    callback closed();
+
+    if popup-visible: Rectangle {
+        background: #00000080;
+        width: 100%; height: 100%;
+
+        TouchArea { clicked => { closed(); } }
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(460px, parent.width - 40px);
+            height: min(self.preferred-height, parent.height - 80px);
+            background: Theme.c.mantle;
+            border-radius: 8px;
+            border-color: Theme.c.surface1;
+            border-width: 1px;
+            clip: true;
+            accessible-role: groupbox;
+            accessible-label: title;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 10px;
+
+                Text {
+                    text: title;
+                    color: Theme.c.blue;
+                    font-size: 16px;
+                    font-weight: FontWeight.semi-bold;
+                    height: 24px;
+                }
+
+                // Existing items
+                if items.length > 0: ListView {
+                    vertical-stretch: 1;
+                    min-height: 40px;
+                    max-height: 200px;
+
+                    for item[index] in items: Rectangle {
+                        height: 36px;
+                        background: Theme.c.surface0;
+                        border-radius: 4px;
+
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 8px;
+                            alignment: space-between;
+
+                            Text {
+                                text: item.text;
+                                color: Theme.c.text;
+                                font-size: 14px;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+
+                            Rectangle {
+                                width: 28px;
+                                height: 28px;
+                                background: sl-del-ta.has-hover ? Theme.c.red : transparent;
+                                border-radius: 4px;
+
+                                sl-del-ta := TouchArea {
+                                    clicked => { item-removed(index); }
+                                }
+
+                                Text {
+                                    text: "\u{2715}";
+                                    color: sl-del-ta.has-hover ? Theme.c.base : Theme.c.overlay0;
+                                    font-size: 14px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Add new item
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 34px;
+                        background: Theme.c.surface0;
+                        border-radius: 4px;
+                        border-color: sl-add-input.has-focus ? Theme.c.blue : Theme.c.surface1;
+                        border-width: 1px;
+                        clip: true;
+
+                        sl-add-input := TextInput {
+                            width: max(parent.width - 16px, self.preferred-width);
+                            x: 8px;
+                            vertical-alignment: center;
+                            color: Theme.c.text;
+                            font-size: 13px;
+
+                            accepted => {
+                                if self.text != "" {
+                                    item-added(self.text);
+                                    self.text = "";
+                                }
+                            }
+                        }
+
+                        if sl-add-input.text == "": Text {
+                            x: 8px;
+                            text: "add new entry...";
+                            color: Theme.c.overlay0;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+
+                        init => { sl-add-input.focus(); }
+                    }
+
+                    Rectangle {
+                        width: 60px;
+                        height: 34px;
+                        background: sl-add-ta.has-hover ? Theme.c.sky : Theme.c.blue;
+                        border-radius: 4px;
+
+                        sl-add-ta := TouchArea {
+                            clicked => {
+                                if sl-add-input.text != "" {
+                                    item-added(sl-add-input.text);
+                                    sl-add-input.text = "";
+                                    sl-add-input.focus();
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: "Add";
+                            color: Theme.c.base;
+                            font-size: 13px;
+                            font-weight: FontWeight.semi-bold;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                // Done button
+                HorizontalLayout {
+                    alignment: end;
+
+                    Rectangle {
+                        width: 80px;
+                        height: 30px;
+                        background: sl-done-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
+                        border-radius: 4px;
+
+                        sl-done-ta := TouchArea {
+                            clicked => { closed(); }
+                        }
+
+                        Text {
+                            text: "Done";
+                            color: Theme.c.subtext0;
+                            font-size: 13px;
+                            font-weight: FontWeight.semi-bold;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 // ── Package search popup ─────────────────────────────
 
 component PackageSearchPopup inherits Rectangle {
@@ -1076,6 +1259,15 @@ export component App inherits Window {
     in-out property <bool> users-visible: false;
     in property <[UserEntry]> users-list;
 
+    // String list popup state
+    in-out property <bool> strlist-visible: false;
+    in-out property <string> strlist-title;
+    in-out property <string> strlist-key;
+    in property <[SelectOption]> strlist-items;
+
+    callback strlist-added(string, string); // key, value
+    callback strlist-removed(string, int);  // key, index
+
     // Package search popup state
     in-out property <bool> pkg-search-visible: false;
     in property <[PackageSearchResult]> pkg-search-results;
@@ -1132,7 +1324,7 @@ export component App inherits Window {
 
     // ── Keyboard navigation ─────────────────────────
     main-focus-scope := FocusScope {
-        enabled: install-state == 0 && !select-visible && !text-input-visible && !users-visible && !pkg-search-visible;
+        enabled: install-state == 0 && !select-visible && !text-input-visible && !users-visible && !pkg-search-visible && !strlist-visible;
         key-pressed(e) => {
             if e.text == Key.DownArrow || e.text == "j" {
                 key-nav-down();
@@ -2041,6 +2233,22 @@ export component App inherits Window {
         }
         closed() => {
             users-visible = false;
+        }
+    }
+
+    StringListPopup {
+        title: strlist-title;
+        items: strlist-items;
+        popup-visible: strlist-visible;
+
+        item-added(val) => {
+            strlist-added(strlist-key, val);
+        }
+        item-removed(index) => {
+            strlist-removed(strlist-key, index);
+        }
+        closed() => {
+            strlist-visible = false;
         }
     }
 
