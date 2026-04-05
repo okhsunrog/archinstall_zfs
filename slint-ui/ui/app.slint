@@ -714,7 +714,8 @@ component StringListPopup inherits Rectangle {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             width: min(460px, parent.width - 40px);
-            height: self.preferred-height;
+            // 130px base (title + input + buttons + padding) + 40px per item, max 400px
+            height: min(130px + items.length * 40px, min(400px, parent.height - 80px));
             background: Theme.c.mantle;
             border-radius: 8px;
             border-color: Theme.c.surface1;
