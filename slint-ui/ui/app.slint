@@ -714,7 +714,8 @@ component StringListPopup inherits Rectangle {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             width: min(460px, parent.width - 40px);
-            height: min(360px, parent.height - 80px);
+            // Adaptive: ~160px base + 40px per item, capped
+            height: min(160px + items.length * 40px, parent.height - 80px);
             background: Theme.c.mantle;
             border-radius: 8px;
             border-color: Theme.c.surface1;
@@ -740,9 +741,15 @@ component StringListPopup inherits Rectangle {
                     vertical-stretch: 1;
 
                     for item[index] in items: Rectangle {
-                        height: 36px;
-                        background: Theme.c.surface0;
-                        border-radius: 4px;
+                        height: 40px;
+                        background: transparent;
+
+                        Rectangle {
+                            y: 2px;
+                            height: 36px;
+                            background: Theme.c.surface0;
+                            border-radius: 4px;
+                        }
 
                         HorizontalLayout {
                             padding-left: 12px;
