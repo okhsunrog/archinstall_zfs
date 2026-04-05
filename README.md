@@ -4,7 +4,8 @@
 
 [![GitHub](https://img.shields.io/github/license/okhsunrog/archinstall_zfs)](https://github.com/okhsunrog/archinstall_zfs/blob/main/LICENSE)
 [![GitHub Release](https://img.shields.io/github/v/release/okhsunrog/archinstall_zfs)](https://github.com/okhsunrog/archinstall_zfs/releases)
-[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/okhsunrog/archinstall_zfs/ci.yml)](https://github.com/okhsunrog/archinstall_zfs/actions)
+[![Check](https://img.shields.io/github/actions/workflow/status/okhsunrog/archinstall_zfs/check.yml?label=check)](https://github.com/okhsunrog/archinstall_zfs/actions/workflows/check.yml)
+[![Build](https://img.shields.io/github/actions/workflow/status/okhsunrog/archinstall_zfs/build.yml?label=build)](https://github.com/okhsunrog/archinstall_zfs/actions/workflows/build.yml)
 
 > [!NOTE]
 > This is a complete rewrite in Rust. The previous Python version is preserved on the [`old_python`](https://github.com/okhsunrog/archinstall_zfs/tree/old_python) branch.
