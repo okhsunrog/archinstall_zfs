@@ -11,7 +11,10 @@ use archinstall_zfs_core::system::cmd::{CommandRunner, RealRunner};
 
 use crate::Cli;
 
-pub async fn run(cli: Cli) -> Result<()> {
+pub async fn run(
+    cli: Cli,
+    ui_log_rx: tokio::sync::mpsc::UnboundedReceiver<(String, i32)>,
+) -> Result<()> {
     let config = if let Some(ref path) = cli.config {
         tracing::info!(path = %path.display(), "loading config from file");
         GlobalConfig::load_from_file(path)?
@@ -34,7 +37,7 @@ pub async fn run(cli: Cli) -> Result<()> {
     }
 
     // Interactive TUI mode
-    crate::tui::run_tui(config, cli.dry_run).await
+    crate::tui::run_tui(config, cli.dry_run, ui_log_rx).await
 }
 
 /// Full installation pipeline — async orchestrator.
@@ -363,7 +366,6 @@ pub async fn run_install(
             let _ = runner.run("zpool", &["export", "-f", &pool_name]);
         }
 
-        tracing::info!("Installation complete!");
         Ok(())
     })
     .await??;

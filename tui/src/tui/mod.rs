@@ -20,9 +20,13 @@ use archinstall_zfs_core::config::types::GlobalConfig;
 use self::screens::install_progress::InstallProgress;
 use self::screens::wizard::Wizard;
 
-pub async fn run_tui(config: GlobalConfig, _dry_run: bool) -> Result<()> {
+pub async fn run_tui(
+    config: GlobalConfig,
+    _dry_run: bool,
+    ui_log_rx: tokio::sync::mpsc::UnboundedReceiver<(String, i32)>,
+) -> Result<()> {
     let mut terminal = setup_terminal()?;
-    let result = run_app(&mut terminal, config).await;
+    let result = run_app(&mut terminal, config, ui_log_rx).await;
     restore_terminal()?;
     result
 }
@@ -50,7 +54,11 @@ pub enum Action {
     Quit,
 }
 
-async fn run_app(terminal: &mut DefaultTerminal, mut config: GlobalConfig) -> Result<()> {
+async fn run_app(
+    terminal: &mut DefaultTerminal,
+    mut config: GlobalConfig,
+    ui_log_rx: tokio::sync::mpsc::UnboundedReceiver<(String, i32)>,
+) -> Result<()> {
     // Check connectivity before the wizard. If the user connects via WiFi,
     // automatically enable network_copy_iso so the iwd profile is copied to
     // the installed system (saved at /var/lib/iwd/<ssid>.psk by iwd).
@@ -70,7 +78,7 @@ async fn run_app(terminal: &mut DefaultTerminal, mut config: GlobalConfig) -> Re
                 Action::Continue => {}
                 Action::Install => {
                     let config = wizard.into_config();
-                    run_install_screen(terminal, config).await?;
+                    run_install_screen(terminal, config, ui_log_rx).await?;
                     return Ok(());
                 }
                 Action::Quit => return Ok(()),
@@ -82,8 +90,12 @@ async fn run_app(terminal: &mut DefaultTerminal, mut config: GlobalConfig) -> Re
     }
 }
 
-async fn run_install_screen(terminal: &mut DefaultTerminal, config: GlobalConfig) -> Result<()> {
-    let mut progress = InstallProgress::start(config);
+async fn run_install_screen(
+    terminal: &mut DefaultTerminal,
+    config: GlobalConfig,
+    ui_log_rx: tokio::sync::mpsc::UnboundedReceiver<(String, i32)>,
+) -> Result<()> {
+    let mut progress = InstallProgress::start(config, ui_log_rx);
     let mut events = EventStream::new();
 
     loop {

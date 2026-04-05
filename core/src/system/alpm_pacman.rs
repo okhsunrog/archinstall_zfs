@@ -354,8 +354,9 @@ impl AlpmContext {
                 return;
             }
             match level {
-                LogLevel::ERROR => tracing::error!(target: "pacman", "{msg}"),
-                LogLevel::WARNING => tracing::warn!(target: "pacman", "{msg}"),
+                LogLevel::ERROR | LogLevel::WARNING => {
+                    tracing::warn!(target: "pacman", "{msg}");
+                }
                 _ => tracing::trace!(target: "pacman", "{msg}"),
             }
         });

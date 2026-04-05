@@ -17,7 +17,6 @@ use archinstall_zfs_core::system::async_download::{
 };
 
 use crate::tui::theme;
-use crate::tui::tracing_layer::ChannelLayer;
 
 enum InstallState {
     Running,
@@ -44,46 +43,25 @@ pub struct InstallProgress {
 }
 
 impl InstallProgress {
-    pub fn start(config: GlobalConfig) -> Self {
-        let (tx, rx) = mpsc::unbounded_channel();
+    pub fn start(config: GlobalConfig, rx: mpsc::UnboundedReceiver<(String, i32)>) -> Self {
         let cancel = CancellationToken::new();
 
-        // Create download progress channel — sender goes to download engine, receiver stays here
         let (download_tx, download_rx) = watch::channel(DownloadProgress::default());
         let download_tx = Arc::new(download_tx);
 
-        let tx_clone = tx.clone();
         let cancel_clone = cancel.clone();
         let download_tx_clone = download_tx.clone();
-        tokio::task::spawn_blocking(move || {
-            use tracing_subscriber::Layer as _;
-            use tracing_subscriber::layer::SubscriberExt as _;
-
-            let channel_layer = ChannelLayer::new(tx_clone.clone());
-            let ui_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-            let subscriber =
-                tracing_subscriber::registry().with(channel_layer.with_filter(ui_filter));
-            // set_default works reliably on spawn_blocking's dedicated thread
-            let _guard = tracing::subscriber::set_default(subscriber);
-
-            let rt = tokio::runtime::Handle::current();
+        // Channel layer is in the global subscriber — all threads see it.
+        // Just spawn the install task.
+        tokio::spawn(async move {
             let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
                 Arc::new(archinstall_zfs_core::system::cmd::RealRunner);
-            let result = rt.block_on(crate::app::run_install(
-                runner,
-                config,
-                cancel_clone,
-                Some(download_tx_clone),
-            ));
+            let result =
+                crate::app::run_install(runner, config, cancel_clone, Some(download_tx_clone))
+                    .await;
 
-            match result {
-                Ok(()) => {
-                    let _ = tx.send(("[INFO ] Installation complete!".to_string(), 2));
-                }
-                Err(e) => {
-                    let _ = tx.send((format!("[ERROR] {e}"), 4));
-                }
+            if let Err(e) = result {
+                tracing::error!("{e}");
             }
         });
 
@@ -104,7 +82,7 @@ impl InstallProgress {
 
     pub fn tick(&mut self) {
         while let Ok((text, level)) = self.rx.try_recv() {
-            if text.contains("[INFO ] Installation complete!") {
+            if text.contains("Installation complete") {
                 self.state = InstallState::Succeeded;
             } else if text.starts_with("[ERROR]") {
                 let err = text.strip_prefix("[ERROR] ").unwrap_or(&text).to_string();
@@ -312,14 +290,16 @@ impl InstallProgress {
         let footer_chunk = if has_progress { chunks[3] } else { chunks[2] };
         let footer = if self.is_done() {
             Line::from(vec![
-                Span::styled(" Enter/q", theme::ACCENT_STYLE),
+                Span::styled(" \u{2191}\u{2193}/j/k", theme::ACCENT_STYLE),
+                Span::styled(" scroll  ", theme::DIMMED_STYLE),
+                Span::styled("Enter/q", theme::ACCENT_STYLE),
                 Span::styled(" exit  ", theme::DIMMED_STYLE),
                 Span::styled("l", theme::ACCENT_STYLE),
                 Span::styled(format!(" log level ({level_name}+) "), theme::DIMMED_STYLE),
             ])
         } else {
             Line::from(vec![
-                Span::styled(" j/k", theme::ACCENT_STYLE),
+                Span::styled(" \u{2191}\u{2193}/j/k", theme::ACCENT_STYLE),
                 Span::styled(" scroll  ", theme::DIMMED_STYLE),
                 Span::styled("Esc", theme::ACCENT_STYLE),
                 Span::styled(" cancel  ", theme::DIMMED_STYLE),

@@ -58,13 +58,17 @@ pub enum Commands {
     },
 }
 
-fn setup_logging() -> Result<()> {
+fn setup_logging(ui_log_tx: tokio::sync::mpsc::UnboundedSender<(String, i32)>) -> Result<()> {
     use tracing_subscriber::EnvFilter;
+    use tracing_subscriber::Layer as _;
     use tracing_subscriber::fmt;
     use tracing_subscriber::prelude::*;
 
-    // File only — no console output (ratatui owns the terminal).
-    // The install screen sets up its own ChannelLayer for UI log display.
+    // Channel layer for UI log display — included globally so all threads see it
+    let channel_layer = tui::tracing_layer::ChannelLayer::new(ui_log_tx);
+    let ui_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+
+    // File layer — trace for our code, warn for noisy deps
     let file_appender = tracing_appender::rolling::never("/tmp", "archinstall-zfs.log");
     let file_filter =
         EnvFilter::new("trace,h2=warn,hyper=warn,reqwest=warn,rustls=warn,pacman=info");
@@ -74,7 +78,10 @@ fn setup_logging() -> Result<()> {
         .with_target(true)
         .with_filter(file_filter);
 
-    tracing_subscriber::registry().with(file_layer).init();
+    tracing_subscriber::registry()
+        .with(channel_layer.with_filter(ui_filter))
+        .with(file_layer)
+        .init();
 
     Ok(())
 }
@@ -82,7 +89,8 @@ fn setup_logging() -> Result<()> {
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
-    setup_logging()?;
+    let (ui_log_tx, ui_log_rx) = tokio::sync::mpsc::unbounded_channel();
+    setup_logging(ui_log_tx)?;
 
     let cli = Cli::parse();
     tracing::info!(?cli, "starting archinstall-zfs");
@@ -103,6 +111,6 @@ async fn main() -> Result<()> {
             headers,
             *fast,
         ),
-        None => app::run(cli).await,
+        None => app::run(cli, ui_log_rx).await,
     }
 }
