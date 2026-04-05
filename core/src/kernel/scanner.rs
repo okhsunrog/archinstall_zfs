@@ -16,16 +16,81 @@ pub struct CompatibilityResult {
 }
 
 /// Scan all known kernels for ZFS compatibility using libalpm.
-/// Scans run concurrently since each one may do HTTP requests.
+/// Queries all packages in a single alpm session to avoid DB lock contention,
+/// then runs DKMS range checks concurrently (HTTP requests).
 pub async fn scan_all_kernels() -> Vec<CompatibilityResult> {
+    // Collect all packages we need to query across all kernels
+    let mut all_pkg_names: Vec<&str> = vec!["zfs-dkms", "zfs-utils"];
+    for info in super::AVAILABLE_KERNELS {
+        all_pkg_names.push(info.name);
+        if let Some(pre) = info.precompiled_package {
+            all_pkg_names.push(pre);
+        }
+    }
+    all_pkg_names.sort_unstable();
+    all_pkg_names.dedup();
+
+    // Single alpm query for all packages
+    let versions = match super::query_packages(&all_pkg_names).await {
+        Ok(v) => {
+            tracing::debug!(
+                found = v.len(),
+                queried = all_pkg_names.len(),
+                "package query complete"
+            );
+            v
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "alpm query failed, returning fail-open results");
+            return super::AVAILABLE_KERNELS
+                .iter()
+                .map(|info| CompatibilityResult {
+                    kernel_name: info.name.to_string(),
+                    kernel_version: None,
+                    dkms_compatible: true,
+                    dkms_warnings: vec![format!("Could not query packages: {e}")],
+                    precompiled_compatible: info.precompiled_package.is_some(),
+                    precompiled_version: None,
+                    precompiled_warnings: vec![format!("Could not query packages: {e}")],
+                })
+                .collect();
+        }
+    };
+
+    // Run DKMS range checks concurrently (they do HTTP requests)
     let futures: Vec<_> = super::AVAILABLE_KERNELS
         .iter()
-        .map(|k| scan_kernel(k.name))
+        .map(|info| scan_kernel_with_versions(info, &versions))
         .collect();
     futures::future::join_all(futures).await
 }
 
-/// Scan a single kernel for ZFS compatibility.
+/// Scan a single kernel using pre-queried package versions.
+async fn scan_kernel_with_versions(
+    info: &super::KernelInfo,
+    versions: &HashMap<String, String>,
+) -> CompatibilityResult {
+    let kernel = info.name;
+    let kernel_version = versions.get(kernel).cloned();
+
+    // DKMS check: zfs-dkms must be available AND kernel must be in supported range
+    let (dkms_ok, dkms_warn) = check_dkms_compat(versions, kernel).await;
+
+    // Precompiled check: kernel version must match the version embedded in the ZFS package
+    let (pre_ok, pre_ver, pre_warn) = check_precompiled_compat(info, versions);
+
+    CompatibilityResult {
+        kernel_name: kernel.to_string(),
+        kernel_version,
+        dkms_compatible: dkms_ok,
+        dkms_warnings: dkms_warn,
+        precompiled_compatible: pre_ok,
+        precompiled_version: pre_ver,
+        precompiled_warnings: pre_warn,
+    }
+}
+
+/// Scan a single kernel (public API for validate_kernel_zfs_plan).
 pub async fn scan_kernel(kernel: &str) -> CompatibilityResult {
     let info = match super::get_kernel_info(kernel) {
         Some(i) => i,
@@ -42,13 +107,12 @@ pub async fn scan_kernel(kernel: &str) -> CompatibilityResult {
         }
     };
 
-    // Gather all packages we need to query
+    // Single-kernel query
     let mut pkg_names: Vec<&str> = vec![kernel, "zfs-dkms", "zfs-utils"];
     if let Some(pre) = info.precompiled_package {
         pkg_names.push(pre);
     }
 
-    // Query all at once via alpm
     let versions = match super::query_packages(&pkg_names).await {
         Ok(v) => v,
         Err(e) => {
@@ -69,23 +133,7 @@ pub async fn scan_kernel(kernel: &str) -> CompatibilityResult {
         }
     };
 
-    let kernel_version = versions.get(kernel).cloned();
-
-    // DKMS check: zfs-dkms must be available AND kernel must be in supported range
-    let (dkms_ok, dkms_warn) = check_dkms_compat(&versions, kernel).await;
-
-    // Precompiled check: kernel version must match the version embedded in the ZFS package
-    let (pre_ok, pre_ver, pre_warn) = check_precompiled_compat(info, &versions);
-
-    CompatibilityResult {
-        kernel_name: kernel.to_string(),
-        kernel_version,
-        dkms_compatible: dkms_ok,
-        dkms_warnings: dkms_warn,
-        precompiled_compatible: pre_ok,
-        precompiled_version: pre_ver,
-        precompiled_warnings: pre_warn,
-    }
+    scan_kernel_with_versions(info, &versions).await
 }
 
 /// Validate a kernel/ZFS plan before installation.
