@@ -148,10 +148,10 @@ ssh:
 # Upload latest binaries to running QEMU VM
 upload:
     scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P 2222 \
-        {{BINARY}} root@localhost:/root/archinstall-zfs-tui
+        {{BINARY}} root@localhost:/usr/local/bin/archinstall-zfs-tui
     @if [ -f {{BINARY_SLINT}} ]; then \
         scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P 2222 \
-            {{BINARY_SLINT}} root@localhost:/root/archinstall-zfs-slint; \
+            {{BINARY_SLINT}} root@localhost:/usr/local/bin/archinstall-zfs-slint; \
     fi
     @echo "Uploaded to QEMU VM"
 
