@@ -12,7 +12,7 @@ use color_eyre::eyre::{Result, bail};
 use slint::{Model, ModelRc, SharedString, VecModel};
 
 use archinstall_zfs_core::config::types::{
-    AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, SwapMode,
+    AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, SwapMode, UserConfig,
     ZfsEncryptionMode, ZfsModuleMode,
 };
 
@@ -298,9 +298,18 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
             }
 
             if key == "locale_select" {
-                let locales = archinstall_zfs_core::installer::locale::list_locales();
-                if let Some(loc) = locales.get(idx as usize) {
-                    cfg.borrow_mut().locale = Some(loc.clone());
+                let selected_text = app.get_select_options().row_data(idx as usize);
+                if let Some(opt) = selected_text {
+                    cfg.borrow_mut().locale = Some(opt.text.to_string());
+                    refresh_ui(&app, &cfg.borrow(), &wiz.borrow());
+                }
+                return;
+            }
+
+            if key == "keyboard_select" {
+                let selected_text = app.get_select_options().row_data(idx as usize);
+                if let Some(opt) = selected_text {
+                    cfg.borrow_mut().keyboard_layout = opt.text.to_string();
                     refresh_ui(&app, &cfg.borrow(), &wiz.borrow());
                 }
                 return;
@@ -321,6 +330,84 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
             let Some(app) = weak.upgrade() else { return };
             let mut c = cfg.borrow_mut();
             apply_text(&mut c, &key, &val);
+            refresh_ui(&app, &c, &wiz.borrow());
+        });
+    }
+
+    // ── User management ─────────────────────────────
+    {
+        let weak = app.as_weak();
+        let cfg = config.clone();
+        let wiz = wizard.clone();
+        app.on_user_added(move |username, password, sudo| {
+            let Some(app) = weak.upgrade() else { return };
+            let username = username.to_string();
+            if !archinstall_zfs_core::config::validation::is_valid_username(&username) {
+                return;
+            }
+            // Prevent duplicate usernames
+            let c = cfg.borrow();
+            if c.users
+                .as_ref()
+                .is_some_and(|users| users.iter().any(|u| u.username == username))
+            {
+                return;
+            }
+            drop(c);
+            let password = if password.is_empty() {
+                None
+            } else {
+                Some(password.to_string())
+            };
+            let user = UserConfig {
+                username,
+                password,
+                sudo,
+                shell: None,
+                groups: None,
+                ssh_authorized_keys: Vec::new(),
+                autologin: false,
+            };
+            let mut c = cfg.borrow_mut();
+            c.users.get_or_insert_with(Vec::new).push(user);
+            show_users_popup(&app, &c);
+            refresh_ui(&app, &c, &wiz.borrow());
+        });
+    }
+    {
+        let weak = app.as_weak();
+        let cfg = config.clone();
+        let wiz = wizard.clone();
+        app.on_user_removed(move |index| {
+            let Some(app) = weak.upgrade() else { return };
+            let mut c = cfg.borrow_mut();
+            if let Some(ref mut users) = c.users {
+                let idx = index as usize;
+                if idx < users.len() {
+                    users.remove(idx);
+                    if users.is_empty() {
+                        c.users = None;
+                    }
+                }
+            }
+            show_users_popup(&app, &c);
+            refresh_ui(&app, &c, &wiz.borrow());
+        });
+    }
+    {
+        let weak = app.as_weak();
+        let cfg = config.clone();
+        let wiz = wizard.clone();
+        app.on_user_sudo_toggled(move |index| {
+            let Some(app) = weak.upgrade() else { return };
+            let mut c = cfg.borrow_mut();
+            if let Some(ref mut users) = c.users {
+                let idx = index as usize;
+                if let Some(user) = users.get_mut(idx) {
+                    user.sudo = !user.sudo;
+                }
+            }
+            show_users_popup(&app, &c);
             refresh_ui(&app, &c, &wiz.borrow());
         });
     }
@@ -667,10 +754,44 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                         })
                         .collect()
                 } else {
-                    all_locales
+                    let mut scored: Vec<_> = all_locales
                         .iter()
-                        .filter(|s| s.to_lowercase().contains(&filter))
+                        .filter_map(|s| {
+                            sublime_fuzzy::best_match(&filter, s).map(|m| (m.score(), s))
+                        })
+                        .collect();
+                    scored.sort_by(|a, b| b.0.cmp(&a.0));
+                    scored
+                        .into_iter()
+                        .map(|(_, s)| SelectOption {
+                            text: SharedString::from(s.as_str()),
+                        })
+                        .collect()
+                };
+                app.set_select_options(ModelRc::new(VecModel::from(filtered)));
+                app.set_select_index(-1);
+            }
+
+            if key == "keyboard_select" {
+                let all_keymaps = archinstall_zfs_core::installer::locale::list_keymaps();
+                let filtered: Vec<SelectOption> = if filter.is_empty() {
+                    all_keymaps
+                        .iter()
                         .map(|s| SelectOption {
+                            text: SharedString::from(s.as_str()),
+                        })
+                        .collect()
+                } else {
+                    let mut scored: Vec<_> = all_keymaps
+                        .iter()
+                        .filter_map(|s| {
+                            sublime_fuzzy::best_match(&filter, s).map(|m| (m.score(), s))
+                        })
+                        .collect();
+                    scored.sort_by(|a, b| b.0.cmp(&a.0));
+                    scored
+                        .into_iter()
+                        .map(|(_, s)| SelectOption {
                             text: SharedString::from(s.as_str()),
                         })
                         .collect()
@@ -697,13 +818,26 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 let theme = app.global::<Theme>().get_c();
                 let (label, color) = match score {
                     0 => ("Very weak", theme.red),
-                    1 => ("Weak", theme.red),
+                    1 => ("Weak", theme.peach),
                     2 => ("Fair", theme.yellow),
                     3 => ("Strong", theme.green),
                     _ => ("Very strong", theme.teal),
                 };
+
+                let hint = entropy
+                    .feedback()
+                    .and_then(|f| f.suggestions().first().map(|s| s.to_string()))
+                    .unwrap_or_else(|| {
+                        let crack_time = entropy
+                            .crack_times()
+                            .online_no_throttling_10_per_second()
+                            .to_string();
+                        format!("~{crack_time} to crack")
+                    });
+
                 app.set_password_strength_score(score as i32);
                 app.set_password_strength_label(SharedString::from(label));
+                app.set_password_strength_hint(SharedString::from(hint));
                 app.set_password_strength_color(color);
             }
         });
@@ -1084,7 +1218,7 @@ fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             &c.timezone.clone().unwrap_or("Not set".into()),
             1,
         ),
-        ci("keyboard", "Keyboard layout", &c.keyboard_layout, 0),
+        ci("keyboard", "Keyboard layout", &c.keyboard_layout, 1),
         ci(
             "ntp",
             "NTP (time sync)",
@@ -1093,13 +1227,11 @@ fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         ),
     ];
 
-    let dl_options: Vec<String> = (1..=10).map(|n| n.to_string()).collect();
-    let dl_refs: Vec<&str> = dl_options.iter().map(|s| s.as_str()).collect();
-    items.extend(radio_group(
+    items.push(ci(
         "parallel_downloads",
         "Parallel downloads",
-        &dl_refs,
-        (c.parallel_downloads as i32) - 1,
+        &c.parallel_downloads.to_string(),
+        0,
     ));
 
     items
@@ -1117,19 +1249,24 @@ fn build_users_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             },
             2,
         ),
-        // Users are shown as read-only summary (no user management popup in slint yet)
         ci(
             "users",
             "User accounts",
             &match &c.users {
                 Some(users) if !users.is_empty() => users
                     .iter()
-                    .map(|u| u.username.as_str())
+                    .map(|u| {
+                        if u.sudo {
+                            format!("{} [sudo]", u.username)
+                        } else {
+                            u.username.clone()
+                        }
+                    })
                     .collect::<Vec<_>>()
                     .join(", "),
                 _ => "None".into(),
             },
-            0, // text input for now
+            0,
         ),
     ]
 }
@@ -1413,35 +1550,46 @@ fn handle_item_activated(
                 true,
             );
         }
+        // User management popup
+        "users" => {
+            show_users_popup(app, config);
+        }
+        // Keyboard layout (filterable select)
+        "keyboard" => {
+            let keymaps = archinstall_zfs_core::installer::locale::list_keymaps();
+            let keymap_strs: Vec<&str> = keymaps.iter().map(|s| s.as_str()).collect();
+            let current_idx = keymaps
+                .iter()
+                .position(|k| k == &config.keyboard_layout)
+                .map(|i| i as i32)
+                .unwrap_or(0);
+            show_select_with_filter(
+                app,
+                "keyboard_select",
+                "Keyboard layout (type to filter)",
+                &keymap_strs,
+                current_idx,
+                true,
+            );
+        }
         // Text input popups
         "pool_name"
         | "dataset_prefix"
         | "hostname"
-        | "keyboard"
         | "additional_packages"
         | "aur_packages"
         | "extra_services"
         | "swap_partition_size"
-        | "users" => {
+        | "parallel_downloads" => {
             let current = match key {
                 "pool_name" => config.pool_name.clone().unwrap_or_default(),
                 "dataset_prefix" => config.dataset_prefix.clone(),
                 "hostname" => config.hostname.clone().unwrap_or_default(),
-                "keyboard" => config.keyboard_layout.clone(),
                 "additional_packages" => config.additional_packages.join(" "),
                 "aur_packages" => config.aur_packages.join(" "),
                 "extra_services" => config.extra_services.join(" "),
                 "swap_partition_size" => config.swap_partition_size.clone().unwrap_or_default(),
-                "users" => config
-                    .users
-                    .as_ref()
-                    .map(|u| {
-                        u.iter()
-                            .map(|u| u.username.as_str())
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    })
-                    .unwrap_or_default(),
+                "parallel_downloads" => config.parallel_downloads.to_string(),
                 _ => String::new(),
             };
             show_text_input(app, key, key, &current, false);
@@ -1485,7 +1633,23 @@ fn show_text_input(app: &App, key: &str, title: &str, current: &str, password: b
     app.set_text_input_value(current.into());
     app.set_text_input_password(password);
     app.set_password_strength_score(-1);
+    app.set_password_strength_hint(SharedString::default());
     app.set_text_input_visible(true);
+}
+
+fn show_users_popup(app: &App, config: &GlobalConfig) {
+    let entries: Vec<UserEntry> = config
+        .users
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|u| UserEntry {
+            username: SharedString::from(&u.username),
+            has_sudo: u.sudo,
+        })
+        .collect();
+    app.set_users_list(ModelRc::new(VecModel::from(entries)));
+    app.set_users_visible(true);
 }
 
 /// Find the next selectable item index, skipping separators (4), readonly (6), warnings (7).
@@ -1612,9 +1776,6 @@ fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
                 _ => Some(AudioServer::Pulseaudio),
             }
         }
-        "parallel_downloads" => {
-            config.parallel_downloads = (idx + 1) as u32;
-        }
         _ => {}
     }
 }
@@ -1635,14 +1796,14 @@ fn apply_text(config: &mut GlobalConfig, key: &str, val: &str) {
         "hostname" => config.hostname = opt,
         "locale" => config.locale = opt,
         "timezone" => config.timezone = opt,
-        "keyboard" => {
-            if !val.is_empty() {
-                config.keyboard_layout = val.to_string();
-            }
-        }
         "root_password" => config.root_password = opt,
         "encryption_password" => config.zfs_encryption_password = opt,
         "swap_partition_size" => config.swap_partition_size = opt,
+        "parallel_downloads" => {
+            if let Ok(n) = val.parse::<u32>() {
+                config.parallel_downloads = n.clamp(1, 20);
+            }
+        }
         "additional_packages" => {
             config.additional_packages = val
                 .split_whitespace()

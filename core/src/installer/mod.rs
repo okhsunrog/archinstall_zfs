@@ -141,11 +141,7 @@ impl Installer {
         }
 
         locale::set_keyboard(&*self.runner, &self.target, &self.config.keyboard_layout)?;
-        locale::set_x11_keyboard(
-            &self.target,
-            &self.config.keyboard_layout,
-            self.config.x11_variant.as_deref(),
-        )?;
+        locale::set_x11_keyboard(&self.target, &self.config.keyboard_layout)?;
 
         if let Some(ref tz) = self.config.timezone {
             locale::set_timezone(&self.target, tz)?;

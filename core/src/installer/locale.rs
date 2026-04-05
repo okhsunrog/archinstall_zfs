@@ -48,23 +48,17 @@ pub fn set_keyboard(_runner: &dyn CommandRunner, target: &Path, layout: &str) ->
 }
 
 /// Write /etc/X11/xorg.conf.d/00-keyboard.conf for graphical sessions.
-/// Uses `layout` (same as vconsole by default) with an optional variant.
-pub fn set_x11_keyboard(target: &Path, layout: &str, variant: Option<&str>) -> Result<()> {
+pub fn set_x11_keyboard(target: &Path, layout: &str) -> Result<()> {
     let conf_dir = target.join("etc/X11/xorg.conf.d");
     fs::create_dir_all(&conf_dir).wrap_err("failed to create xorg.conf.d")?;
 
-    let variant_line = match variant {
-        Some(v) => format!("    Option \"XkbVariant\" \"{v}\"\n"),
-        None => String::new(),
-    };
-
     let content = format!(
-        "Section \"InputClass\"\n    Identifier \"system-keyboard\"\n    MatchIsKeyboard \"on\"\n    Option \"XkbLayout\" \"{layout}\"\n{variant_line}EndSection\n"
+        "Section \"InputClass\"\n    Identifier \"system-keyboard\"\n    MatchIsKeyboard \"on\"\n    Option \"XkbLayout\" \"{layout}\"\nEndSection\n"
     );
 
     let conf_path = conf_dir.join("00-keyboard.conf");
     fs::write(&conf_path, content).wrap_err("failed to write 00-keyboard.conf")?;
-    tracing::info!(layout, variant, "set X11 keyboard layout");
+    tracing::info!(layout, "set X11 keyboard layout");
     Ok(())
 }
 
@@ -142,6 +136,35 @@ pub fn list_locales() -> Vec<String> {
     locales
 }
 
+/// List available console keymaps by scanning /usr/share/kbd/keymaps/.
+pub fn list_keymaps() -> Vec<String> {
+    let base = Path::new("/usr/share/kbd/keymaps");
+    let mut keymaps = Vec::new();
+    fn walk(dir: &Path, keymaps: &mut Vec<String>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                // Skip "include" directories — they contain partial maps
+                if path.file_name().is_some_and(|n| n == "include") {
+                    continue;
+                }
+                walk(&path, keymaps);
+            } else if let Some(name) = path.file_name().and_then(|n| n.to_str())
+                && let Some(stem) = name.strip_suffix(".map.gz")
+            {
+                keymaps.push(stem.to_string());
+            }
+        }
+    }
+    walk(base, &mut keymaps);
+    keymaps.sort();
+    keymaps.dedup();
+    keymaps
+}
+
 pub fn set_timezone(target: &Path, timezone: &str) -> Result<()> {
     let localtime = target.join("etc/localtime");
     let zoneinfo = format!("/usr/share/zoneinfo/{timezone}");
@@ -192,25 +215,13 @@ mod tests {
     }
 
     #[test]
-    fn test_set_x11_keyboard_no_variant() {
+    fn test_set_x11_keyboard() {
         let dir = tempfile::tempdir().unwrap();
-        set_x11_keyboard(dir.path(), "us", None).unwrap();
+        set_x11_keyboard(dir.path(), "us").unwrap();
 
         let content =
             fs::read_to_string(dir.path().join("etc/X11/xorg.conf.d/00-keyboard.conf")).unwrap();
         assert!(content.contains("XkbLayout\" \"us\""));
-        assert!(!content.contains("XkbVariant"));
-    }
-
-    #[test]
-    fn test_set_x11_keyboard_with_variant() {
-        let dir = tempfile::tempdir().unwrap();
-        set_x11_keyboard(dir.path(), "us", Some("intl")).unwrap();
-
-        let content =
-            fs::read_to_string(dir.path().join("etc/X11/xorg.conf.d/00-keyboard.conf")).unwrap();
-        assert!(content.contains("XkbLayout\" \"us\""));
-        assert!(content.contains("XkbVariant\" \"intl\""));
     }
 
     #[test]

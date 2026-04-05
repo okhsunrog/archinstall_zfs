@@ -36,13 +36,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
             key: "keyboard",
             label: "Keyboard layout",
             value: config.keyboard_layout.clone(),
-            kind: MenuKind::Text,
-        },
-        MenuItem {
-            key: "x11_variant",
-            label: "X11 kb variant",
-            value: config.x11_variant.clone().unwrap_or("None".into()),
-            kind: MenuKind::Text,
+            kind: MenuKind::Custom,
         },
         MenuItem {
             key: "ntp",
@@ -63,7 +57,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
         key: "parallel_downloads",
         label: "Parallel downloads",
         value: config.parallel_downloads.to_string(),
-        kind: MenuKind::Custom,
+        kind: MenuKind::Text,
     });
 
     items

@@ -186,7 +186,6 @@ pub struct GlobalConfig {
     pub locale: Option<String>,
     #[serde(default = "default_keyboard_layout")]
     pub keyboard_layout: String,
-    pub x11_variant: Option<String>,
     pub timezone: Option<String>,
     #[serde(default = "default_ntp")]
     pub ntp: bool,
@@ -295,7 +294,6 @@ impl Default for GlobalConfig {
             hostname: Some("archzfs".to_string()),
             locale: Some("en_US.UTF-8 UTF-8".to_string()),
             keyboard_layout: default_keyboard_layout(),
-            x11_variant: None,
             timezone: None,
             ntp: true,
             root_password: None,
