@@ -48,10 +48,10 @@ _render-profile MODE="precompiled" KERNEL="linux-lts" FAST="":
 
 # Internal: copy installer binaries into rendered profile
 _prepare-binary:
-    @mkdir -p {{PROFILE_OUT}}/airootfs/root/
-    install -m 0755 {{BINARY}} {{PROFILE_OUT}}/airootfs/root/archinstall-zfs-tui
+    @mkdir -p {{PROFILE_OUT}}/airootfs/usr/local/bin/
+    install -m 0755 {{BINARY}} {{PROFILE_OUT}}/airootfs/usr/local/bin/archinstall-zfs-tui
     @if [ -f {{BINARY_SLINT}} ]; then \
-        install -m 0755 {{BINARY_SLINT}} {{PROFILE_OUT}}/airootfs/root/archinstall-zfs-slint; \
+        install -m 0755 {{BINARY_SLINT}} {{PROFILE_OUT}}/airootfs/usr/local/bin/archinstall-zfs-slint; \
     fi
 
 # Build production ISO
