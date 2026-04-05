@@ -421,6 +421,126 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
         });
     }
 
+    // ── Package search ───────────────────────────────
+    {
+        let weak = app.as_weak();
+        let _cfg = config.clone();
+        let _wiz = wizard.clone();
+        app.on_pkg_search_changed(move |text| {
+            let Some(app) = weak.upgrade() else { return };
+            if text.is_empty() {
+                app.set_pkg_search_results(ModelRc::new(VecModel::from(
+                    Vec::<PackageSearchResult>::new(),
+                )));
+                app.set_pkg_status_text(SharedString::default());
+                return;
+            }
+            app.set_pkg_searching_aur(false);
+            let query = text.to_string();
+            let weak2 = app.as_weak();
+            // Repo search is blocking (alpm) — run async
+            tokio::spawn(async move {
+                let results = archinstall_zfs_core::packages::search_repo(&query, 20)
+                    .await
+                    .unwrap_or_default();
+                let items: Vec<PackageSearchResult> = results
+                    .into_iter()
+                    .map(|p| PackageSearchResult {
+                        name: SharedString::from(&p.name),
+                        description: SharedString::from(&p.description),
+                        repo: SharedString::from(&p.repo),
+                    })
+                    .collect();
+                let _ = weak2.upgrade_in_event_loop(move |app| {
+                    app.set_pkg_search_results(ModelRc::new(VecModel::from(items)));
+                    app.set_pkg_status_text(SharedString::default());
+                });
+            });
+        });
+    }
+    {
+        let weak = app.as_weak();
+        app.on_pkg_search_aur(move |text| {
+            let Some(app) = weak.upgrade() else { return };
+            if text.is_empty() {
+                return;
+            }
+            app.set_pkg_searching_aur(true);
+            app.set_pkg_status_text(SharedString::from("Searching AUR..."));
+            let query = text.to_string();
+            let weak2 = app.as_weak();
+            tokio::spawn(async move {
+                match archinstall_zfs_core::packages::search_aur(&query, 20).await {
+                    Ok(results) => {
+                        let items: Vec<PackageSearchResult> = results
+                            .into_iter()
+                            .map(|p| PackageSearchResult {
+                                name: SharedString::from(&p.name),
+                                description: SharedString::from(&p.description),
+                                repo: SharedString::from(&p.repo),
+                            })
+                            .collect();
+                        let _ = weak2.upgrade_in_event_loop(move |app| {
+                            app.set_pkg_search_results(ModelRc::new(VecModel::from(items)));
+                            app.set_pkg_status_text(SharedString::default());
+                        });
+                    }
+                    Err(e) => {
+                        let msg = format!("AUR error: {e}");
+                        let _ = weak2.upgrade_in_event_loop(move |app| {
+                            app.set_pkg_status_text(SharedString::from(&msg));
+                        });
+                    }
+                }
+            });
+        });
+    }
+    {
+        let weak = app.as_weak();
+        let cfg = config.clone();
+        let wiz = wizard.clone();
+        app.on_pkg_added(move |index| {
+            let Some(app) = weak.upgrade() else { return };
+            let result = app.get_pkg_search_results().row_data(index as usize);
+            if let Some(pkg) = result {
+                let name = pkg.name.to_string();
+                let mut c = cfg.borrow_mut();
+                // Check duplicates
+                if c.additional_packages.contains(&name) || c.aur_packages.contains(&name) {
+                    return;
+                }
+                if pkg.repo == "aur" {
+                    c.aur_packages.push(name);
+                } else {
+                    c.additional_packages.push(name);
+                }
+                refresh_pkg_selected(&app, &c);
+                refresh_ui(&app, &c, &wiz.borrow());
+            }
+        });
+    }
+    {
+        let weak = app.as_weak();
+        let cfg = config.clone();
+        let wiz = wizard.clone();
+        app.on_pkg_removed(move |index| {
+            let Some(app) = weak.upgrade() else { return };
+            let mut c = cfg.borrow_mut();
+            let idx = index as usize;
+            let repo_len = c.additional_packages.len();
+            if idx < repo_len {
+                c.additional_packages.remove(idx);
+            } else {
+                let aur_idx = idx - repo_len;
+                if aur_idx < c.aur_packages.len() {
+                    c.aur_packages.remove(aur_idx);
+                }
+            }
+            refresh_pkg_selected(&app, &c);
+            refresh_ui(&app, &c, &wiz.borrow());
+        });
+    }
+
     // ── Step navigation ──────────────────────────────
     {
         let weak = app.as_weak();
@@ -1307,22 +1427,18 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             3,
         ),
         ci(
-            "additional_packages",
-            "Additional packages",
-            &if c.additional_packages.is_empty() {
-                "None".to_string()
-            } else {
-                c.additional_packages.join(", ")
-            },
-            0,
-        ),
-        ci(
-            "aur_packages",
-            "AUR packages",
-            &if c.aur_packages.is_empty() {
-                "None".to_string()
-            } else {
-                c.aur_packages.join(", ")
+            "packages",
+            "Extra packages",
+            &{
+                let total = c.additional_packages.len() + c.aur_packages.len();
+                if total == 0 {
+                    "None".to_string()
+                } else {
+                    let mut parts: Vec<&str> =
+                        c.additional_packages.iter().map(|s| s.as_str()).collect();
+                    parts.extend(c.aur_packages.iter().map(|s| s.as_str()));
+                    parts.join(", ")
+                }
             },
             0,
         ),
@@ -1576,11 +1692,14 @@ fn handle_item_activated(
             );
         }
         // Text input popups
+        // Package search popup
+        "packages" => {
+            show_package_search(app, config);
+        }
+        // Text input popups
         "pool_name"
         | "dataset_prefix"
         | "hostname"
-        | "additional_packages"
-        | "aur_packages"
         | "extra_services"
         | "swap_partition_size"
         | "parallel_downloads" => {
@@ -1588,8 +1707,6 @@ fn handle_item_activated(
                 "pool_name" => config.pool_name.clone().unwrap_or_default(),
                 "dataset_prefix" => config.dataset_prefix.clone(),
                 "hostname" => config.hostname.clone().unwrap_or_default(),
-                "additional_packages" => config.additional_packages.join(" "),
-                "aur_packages" => config.aur_packages.join(" "),
                 "extra_services" => config.extra_services.join(" "),
                 "swap_partition_size" => config.swap_partition_size.clone().unwrap_or_default(),
                 "parallel_downloads" => config.parallel_downloads.to_string(),
@@ -1653,6 +1770,44 @@ fn show_users_popup(app: &App, config: &GlobalConfig) {
         .collect();
     app.set_users_list(ModelRc::new(VecModel::from(entries)));
     app.set_users_visible(true);
+}
+
+fn show_package_search(app: &App, config: &GlobalConfig) {
+    let selected: Vec<PackageEntry> = config
+        .additional_packages
+        .iter()
+        .map(|s| PackageEntry {
+            name: SharedString::from(s.as_str()),
+            repo: SharedString::from("repo"),
+        })
+        .chain(config.aur_packages.iter().map(|s| PackageEntry {
+            name: SharedString::from(s.as_str()),
+            repo: SharedString::from("aur"),
+        }))
+        .collect();
+    app.set_pkg_selected(ModelRc::new(VecModel::from(selected)));
+    app.set_pkg_search_results(ModelRc::new(VecModel::from(
+        Vec::<PackageSearchResult>::new(),
+    )));
+    app.set_pkg_searching_aur(false);
+    app.set_pkg_status_text(SharedString::default());
+    app.set_pkg_search_visible(true);
+}
+
+fn refresh_pkg_selected(app: &App, config: &GlobalConfig) {
+    let selected: Vec<PackageEntry> = config
+        .additional_packages
+        .iter()
+        .map(|s| PackageEntry {
+            name: SharedString::from(s.as_str()),
+            repo: SharedString::from("repo"),
+        })
+        .chain(config.aur_packages.iter().map(|s| PackageEntry {
+            name: SharedString::from(s.as_str()),
+            repo: SharedString::from("aur"),
+        }))
+        .collect();
+    app.set_pkg_selected(ModelRc::new(VecModel::from(selected)));
 }
 
 /// Find the next selectable item index, skipping separators (4), readonly (6), warnings (7).
@@ -1800,20 +1955,6 @@ fn apply_text(config: &mut GlobalConfig, key: &str, val: &str) {
             if let Ok(n) = val.parse::<u32>() {
                 config.parallel_downloads = n.clamp(1, 20);
             }
-        }
-        "additional_packages" => {
-            config.additional_packages = val
-                .split_whitespace()
-                .map(|s| s.trim_matches(',').to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-        }
-        "aur_packages" => {
-            config.aur_packages = val
-                .split_whitespace()
-                .map(|s| s.trim_matches(',').to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
         }
         "extra_services" => {
             config.extra_services = val
