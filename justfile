@@ -49,7 +49,7 @@ _render-profile MODE="precompiled" KERNEL="linux-lts" FAST="":
 # Internal: copy installer binaries into rendered profile
 _prepare-binary:
     @mkdir -p {{PROFILE_OUT}}/airootfs/root/
-    install -m 0755 {{BINARY}} {{PROFILE_OUT}}/airootfs/root/archinstall-zfs
+    install -m 0755 {{BINARY}} {{PROFILE_OUT}}/airootfs/root/archinstall-zfs-tui
     @if [ -f {{BINARY_SLINT}} ]; then \
         install -m 0755 {{BINARY_SLINT}} {{PROFILE_OUT}}/airootfs/root/archinstall-zfs-slint; \
     fi
@@ -148,7 +148,7 @@ ssh:
 # Upload latest binaries to running QEMU VM
 upload:
     scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P 2222 \
-        {{BINARY}} root@localhost:/root/archinstall-zfs
+        {{BINARY}} root@localhost:/root/archinstall-zfs-tui
     @if [ -f {{BINARY_SLINT}} ]; then \
         scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P 2222 \
             {{BINARY_SLINT}} root@localhost:/root/archinstall-zfs-slint; \

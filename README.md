@@ -54,7 +54,7 @@ Key improvements over the Python version:
 archinstall-zfs-slint
 
 # or Terminal UI (ratatui)
-archinstall-zfs
+archinstall-zfs-tui
 ```
 
 > Why recommended: the ISO already contains ZFS components and both installers, so startup is faster and avoids on-the-fly package installation.
@@ -62,24 +62,24 @@ archinstall-zfs
 ### Option B: Official Arch ISO
 ```bash
 # Boot the official Arch ISO and connect to the network
-# Download the binary from releases, or build from source:
-pacman -Sy git base-devel
-git clone --depth 1 https://github.com/okhsunrog/archinstall_zfs
-cd archinstall_zfs
-cargo build --release -p archinstall-zfs-tui    # TUI (no extra deps)
-cargo build --release -p archinstall-zfs-slint  # GUI (requires deps below)
-```
 
-> The GUI requires a few runtime dependencies not present on the official Arch ISO (already included in the prebuilt ISO):
-> ```bash
-> pacman -S libxkbcommon libinput freetype2 fontconfig ttf-dejavu
-> ```
+# Download binaries from the latest release
+curl -LO https://github.com/okhsunrog/archinstall_zfs/releases/latest/download/archinstall-zfs-tui
+curl -LO https://github.com/okhsunrog/archinstall_zfs/releases/latest/download/archinstall-zfs-slint
+chmod +x archinstall-zfs-tui archinstall-zfs-slint
+
+# For the GUI, install runtime dependencies first:
+pacman -Sy libxkbcommon libinput freetype2 fontconfig ttf-dejavu
+
+# Run
+./archinstall-zfs-slint  # or ./archinstall-zfs-tui
+```
 
 > Note: This path installs ZFS components during the run, so it usually takes longer than Option A.
 
 ### Silent mode (for automation)
 ```bash
-archinstall-zfs --config config.json --silent
+archinstall-zfs-tui --config config.json --silent
 ```
 
 ---
