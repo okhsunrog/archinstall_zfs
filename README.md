@@ -66,9 +66,14 @@ archinstall-zfs
 pacman -Sy git base-devel
 git clone --depth 1 https://github.com/okhsunrog/archinstall_zfs
 cd archinstall_zfs
-cargo build --release -p archinstall-zfs-slint  # GUI
-cargo build --release -p archinstall-zfs-tui    # TUI
+cargo build --release -p archinstall-zfs-tui    # TUI (no extra deps)
+cargo build --release -p archinstall-zfs-slint  # GUI (requires deps below)
 ```
+
+> The GUI requires a few runtime dependencies not present on the official Arch ISO (already included in the prebuilt ISO):
+> ```bash
+> pacman -S libxkbcommon libinput freetype2 fontconfig ttf-dejavu
+> ```
 
 > Note: This path installs ZFS components during the run, so it usually takes longer than Option A.
 
