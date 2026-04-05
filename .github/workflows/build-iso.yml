@@ -137,6 +137,8 @@ jobs:
         files: |
           gen_iso/out/*.iso
           gen_iso/out/*.sha256
+          target/release/archinstall-zfs-tui
+          target/release/archinstall-zfs-slint
         fail_on_unmatched_files: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
