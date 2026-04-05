@@ -98,7 +98,15 @@ jobs:
           --profile-dir gen_iso/profile --out-dir gen_iso/profile_rendered \
           --kernel linux --zfs precompiled
         just _prepare-binary
-        sudo mkarchiso -v -w "gen_iso/workdir" -o gen_iso/out gen_iso/profile_rendered
+        if ! sudo mkarchiso -v -w "gen_iso/workdir" -o gen_iso/out gen_iso/profile_rendered; then
+          echo "Precompiled failed, retrying with DKMS..."
+          rm -rf gen_iso/profile_rendered gen_iso/workdir
+          target/release/archinstall-zfs-tui render-profile \
+            --profile-dir gen_iso/profile --out-dir gen_iso/profile_rendered \
+            --kernel linux --zfs dkms
+          just _prepare-binary
+          sudo mkarchiso -v -w "gen_iso/workdir" -o gen_iso/out gen_iso/profile_rendered
+        fi
 
     - name: Upload ISO
       uses: actions/upload-artifact@v4
@@ -138,7 +146,15 @@ jobs:
           --profile-dir gen_iso/profile --out-dir gen_iso/profile_rendered \
           --kernel linux-lts --zfs precompiled
         just _prepare-binary
-        sudo mkarchiso -v -w "gen_iso/workdir" -o gen_iso/out gen_iso/profile_rendered
+        if ! sudo mkarchiso -v -w "gen_iso/workdir" -o gen_iso/out gen_iso/profile_rendered; then
+          echo "Precompiled failed, retrying with DKMS..."
+          rm -rf gen_iso/profile_rendered gen_iso/workdir
+          target/release/archinstall-zfs-tui render-profile \
+            --profile-dir gen_iso/profile --out-dir gen_iso/profile_rendered \
+            --kernel linux-lts --zfs dkms
+          just _prepare-binary
+          sudo mkarchiso -v -w "gen_iso/workdir" -o gen_iso/out gen_iso/profile_rendered
+        fi
 
     - name: Upload ISO
       uses: actions/upload-artifact@v4
