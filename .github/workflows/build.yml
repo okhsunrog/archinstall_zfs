@@ -1,0 +1,205 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+
+  # Monthly automated builds (4th of each month at 4:30 AM UTC)
+  schedule:
+    - cron: '30 4 4 * *'
+
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create GitHub release'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install system dependencies
+      run: |
+        pacman -Syu --noconfirm
+        pacman -S --noconfirm base-devel git pkgconf clang \
+          libxkbcommon libinput libdrm freetype2 fontconfig ttf-dejavu
+
+    - name: Install Rust
+      run: |
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+    - name: Cache cargo
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: cargo-build-${{ hashFiles('Cargo.lock') }}
+        restore-keys: cargo-build-
+
+    - name: Build release binaries
+      run: cargo build --release --workspace
+
+    - name: Upload binaries
+      uses: actions/upload-artifact@v4
+      with:
+        name: binaries
+        path: |
+          target/release/archinstall-zfs-tui
+          target/release/archinstall-zfs-slint
+
+  iso-linux:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+      options: --privileged
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install system dependencies
+      run: |
+        pacman -Syu --noconfirm
+        pacman -S --noconfirm archiso just pacman-contrib rsync sudo
+
+    - name: Download binaries
+      uses: actions/download-artifact@v4
+      with:
+        name: binaries
+        path: target/release/
+
+    - name: Fix binary permissions
+      run: chmod +x target/release/archinstall-zfs-tui target/release/archinstall-zfs-slint
+
+    - name: Build ISO with linux kernel
+      continue-on-error: true
+      run: |
+        target/release/archinstall-zfs-tui render-profile \
+          --profile-dir gen_iso/profile --out-dir gen_iso/profile_rendered \
+          --kernel linux --zfs precompiled
+        just _prepare-binary
+        sudo mkarchiso -v -w "gen_iso/workdir" -o gen_iso/out gen_iso/profile_rendered
+
+    - name: Upload ISO
+      uses: actions/upload-artifact@v4
+      with:
+        name: iso-linux
+        path: gen_iso/out/*.iso
+        if-no-files-found: warn
+
+  iso-linux-lts:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+      options: --privileged
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install system dependencies
+      run: |
+        pacman -Syu --noconfirm
+        pacman -S --noconfirm archiso just pacman-contrib rsync sudo
+
+    - name: Download binaries
+      uses: actions/download-artifact@v4
+      with:
+        name: binaries
+        path: target/release/
+
+    - name: Fix binary permissions
+      run: chmod +x target/release/archinstall-zfs-tui target/release/archinstall-zfs-slint
+
+    - name: Build ISO with linux-lts kernel
+      run: |
+        target/release/archinstall-zfs-tui render-profile \
+          --profile-dir gen_iso/profile --out-dir gen_iso/profile_rendered \
+          --kernel linux-lts --zfs precompiled
+        just _prepare-binary
+        sudo mkarchiso -v -w "gen_iso/workdir" -o gen_iso/out gen_iso/profile_rendered
+
+    - name: Upload ISO
+      uses: actions/upload-artifact@v4
+      with:
+        name: iso-linux-lts
+        path: gen_iso/out/*.iso
+
+  release:
+    needs: [build, iso-linux, iso-linux-lts]
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Download binaries
+      uses: actions/download-artifact@v4
+      with:
+        name: binaries
+        path: binaries/
+
+    - name: Download linux ISO
+      uses: actions/download-artifact@v4
+      with:
+        name: iso-linux
+        path: isos/
+      continue-on-error: true
+
+    - name: Download linux-lts ISO
+      uses: actions/download-artifact@v4
+      with:
+        name: iso-linux-lts
+        path: isos/
+
+    - name: Generate checksums
+      run: |
+        cd isos
+        for f in *.iso; do
+          [ -f "$f" ] && sha256sum "$f" > "${f}.sha256"
+        done
+
+    - name: Set release info
+      run: |
+        if [ "${{ github.event_name }}" = "schedule" ]; then
+          echo "TAG_NAME=$(date +'%Y.%m.%d')" >> $GITHUB_ENV
+          echo "RELEASE_NAME=Monthly Release - $(date +'%Y.%m.%d')" >> $GITHUB_ENV
+          echo "BODY=Automated build with latest packages and ZFS modules." >> $GITHUB_ENV
+        elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "TAG_NAME=manual-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
+          echo "RELEASE_NAME=Manual Release - $(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
+          echo "BODY=Manual build." >> $GITHUB_ENV
+        else
+          echo "TAG_NAME=${{ github.ref_name }}" >> $GITHUB_ENV
+          echo "RELEASE_NAME=Release ${{ github.ref_name }}" >> $GITHUB_ENV
+        fi
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ env.TAG_NAME }}
+        name: ${{ env.RELEASE_NAME }}
+        body: ${{ env.BODY || '' }}
+        generate_release_notes: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        draft: true
+        files: |
+          binaries/*
+          isos/*.iso
+          isos/*.sha256
+        fail_on_unmatched_files: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

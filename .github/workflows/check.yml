@@ -1,11 +1,11 @@
-name: CI
+name: Check
 
 on:
   push:
   pull_request:
 
 jobs:
-  test:
+  check:
     runs-on: ubuntu-latest
     container:
       image: archlinux:latest
@@ -16,7 +16,8 @@ jobs:
     - name: Install system dependencies
       run: |
         pacman -Syu --noconfirm
-        pacman -S --noconfirm base-devel git pkgconf pacman-contrib
+        pacman -S --noconfirm base-devel git pkgconf clang \
+          libxkbcommon libinput libdrm freetype2 fontconfig ttf-dejavu
 
     - name: Install Rust
       run: |
@@ -30,16 +31,15 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-cargo-check-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-cargo-
+          ${{ runner.os }}-cargo-check-
 
     - name: Check formatting
       run: cargo fmt --all -- --check
 
-    # Exclude slint-ui: depends on custom Slint fork and KMS system libraries
     - name: Run clippy
-      run: cargo clippy --workspace --exclude archinstall-zfs-slint -- -D warnings
+      run: cargo clippy --workspace -- -D warnings
 
     - name: Run tests
-      run: cargo test --workspace --exclude archinstall-zfs-slint
+      run: cargo test --workspace
