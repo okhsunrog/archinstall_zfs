@@ -99,6 +99,12 @@ fn init_alpm() -> Result<alpm::Alpm> {
         }
     }
 
+    // Sync databases so package queries return current data
+    handle
+        .syncdbs_mut()
+        .update(false)
+        .map_err(|e| color_eyre::eyre::eyre!("failed to sync databases: {e}"))?;
+
     Ok(handle)
 }
 

@@ -117,7 +117,6 @@ impl Installer {
         tracing::info!("Phase 12: Finalizing ZFS configuration...");
         self.finalize_zfs()?;
 
-        tracing::info!("Installation complete.");
         Ok(())
     }
 

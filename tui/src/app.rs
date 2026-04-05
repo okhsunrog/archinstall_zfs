@@ -366,6 +366,7 @@ pub async fn run_install(
             let _ = runner.run("zpool", &["export", "-f", &pool_name]);
         }
 
+        tracing::info!("Installation complete!");
         Ok(())
     })
     .await??;
