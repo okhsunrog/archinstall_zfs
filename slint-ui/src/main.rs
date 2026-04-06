@@ -123,53 +123,14 @@ async fn main() -> Result<()> {
     }
 }
 
-// ── Wizard state ────────────────────────────────────
-
-struct WizardState {
-    current_step: usize,
-    max_visited: usize,
-}
-
-impl WizardState {
-    fn new() -> Self {
-        Self {
-            current_step: 0,
-            max_visited: 0,
-        }
-    }
-
-    fn go_to(&mut self, step: usize) {
-        if step < TOTAL_STEPS {
-            self.current_step = step;
-            if step > self.max_visited {
-                self.max_visited = step;
-            }
-        }
-    }
-
-    fn next(&mut self) {
-        if self.current_step < TOTAL_STEPS - 1 {
-            self.go_to(self.current_step + 1);
-        }
-    }
-
-    fn prev(&mut self) {
-        if self.current_step > 0 {
-            self.current_step -= 1;
-        }
-    }
-}
-
 fn run_gui(config: GlobalConfig) -> Result<()> {
     let app = App::new()?;
     let config = Rc::new(RefCell::new(config));
-    let wizard = Rc::new(RefCell::new(WizardState::new()));
     let kernel_scan: Arc<
         std::sync::Mutex<Option<Vec<archinstall_zfs_core::kernel::scanner::CompatibilityResult>>>,
     > = Arc::new(std::sync::Mutex::new(None));
 
-    app.set_total_steps(TOTAL_STEPS as i32);
-    refresh_ui(&app, &config.borrow(), &wizard.borrow());
+    refresh_items(&app, &config.borrow());
 
     // ── Welcome screen: run initial checks ──────────
     {
@@ -218,16 +179,13 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
         });
     }
 
-    // ── Welcome: start wizard ───────────────────────
+    // ── Wizard step changed (rebuild items) ─────────
     {
         let weak = app.as_weak();
         let cfg = config.clone();
-        let wiz = wizard.clone();
-        app.on_start_wizard(move || {
+        app.global::<WizardState>().on_step_changed(move |_step| {
             let Some(app) = weak.upgrade() else { return };
-            let mut w = wiz.borrow_mut();
-            w.go_to(1); // Skip welcome, go to Disk step
-            refresh_ui(&app, &cfg.borrow(), &w);
+            refresh_items(&app, &cfg.borrow());
         });
     }
 
@@ -235,7 +193,6 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     {
         let weak = app.as_weak();
         let cfg = config.clone();
-        let wiz = wizard.clone();
         let kscan = kernel_scan.clone();
         app.on_item_activated(move |key| {
             let Some(app) = weak.upgrade() else { return };
@@ -247,12 +204,12 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 {
                     let mut c = cfg.borrow_mut();
                     apply_radio(&mut c, group_key, idx);
-                    refresh_ui(&app, &c, &wiz.borrow());
+                    refresh_items(&app, &c);
                 }
                 return;
             }
 
-            handle_item_activated(&app, &key, &cfg.borrow(), &wiz.borrow(), &kscan);
+            handle_item_activated(&app, &key, &cfg.borrow(), &kscan);
         });
     }
 
@@ -260,7 +217,6 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     {
         let weak = app.as_weak();
         let cfg = config.clone();
-        let wiz = wizard.clone();
         app.on_toggle_activated(move |key| {
             let Some(app) = weak.upgrade() else { return };
             let mut c = cfg.borrow_mut();
@@ -270,7 +226,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 "zrepl" => c.zrepl_enabled = !c.zrepl_enabled,
                 _ => return,
             }
-            refresh_ui(&app, &c, &wiz.borrow());
+            refresh_items(&app, &c);
         });
     }
 
@@ -278,7 +234,6 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     {
         let weak = app.as_weak();
         let cfg = config.clone();
-        let wiz = wizard.clone();
         let kscan = kernel_scan.clone();
         app.on_select_confirmed(move |key, idx| {
             let Some(app) = weak.upgrade() else { return };
@@ -300,7 +255,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 let cities = archinstall_zfs_core::installer::locale::list_timezone_cities(region);
                 if let Some(city) = cities.get(idx as usize) {
                     cfg.borrow_mut().timezone = Some(format!("{region}/{city}"));
-                    refresh_ui(&app, &cfg.borrow(), &wiz.borrow());
+                    refresh_items(&app, &cfg.borrow());
                 }
                 return;
             }
@@ -317,7 +272,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                     {
                         c.zfs_module_mode = mode;
                     }
-                    refresh_ui(&app, &c, &wiz.borrow());
+                    refresh_items(&app, &c);
                 }
                 return;
             }
@@ -326,7 +281,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 let selected_text = app.get_select_options().row_data(idx as usize);
                 if let Some(opt) = selected_text {
                     cfg.borrow_mut().locale = Some(opt.text.to_string());
-                    refresh_ui(&app, &cfg.borrow(), &wiz.borrow());
+                    refresh_items(&app, &cfg.borrow());
                 }
                 return;
             }
@@ -335,14 +290,14 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 let selected_text = app.get_select_options().row_data(idx as usize);
                 if let Some(opt) = selected_text {
                     cfg.borrow_mut().keyboard_layout = opt.text.to_string();
-                    refresh_ui(&app, &cfg.borrow(), &wiz.borrow());
+                    refresh_items(&app, &cfg.borrow());
                 }
                 return;
             }
 
             let mut c = cfg.borrow_mut();
             apply_select(&mut c, &key, idx);
-            refresh_ui(&app, &c, &wiz.borrow());
+            refresh_items(&app, &c);
         });
     }
 
@@ -350,12 +305,11 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     {
         let weak = app.as_weak();
         let cfg = config.clone();
-        let wiz = wizard.clone();
         app.on_text_confirmed(move |key, val| {
             let Some(app) = weak.upgrade() else { return };
             let mut c = cfg.borrow_mut();
             apply_text(&mut c, &key, &val);
-            refresh_ui(&app, &c, &wiz.borrow());
+            refresh_items(&app, &c);
         });
     }
 
@@ -363,7 +317,6 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     {
         let weak = app.as_weak();
         let cfg = config.clone();
-        let wiz = wizard.clone();
         app.on_user_added(move |username, password, sudo| {
             let Some(app) = weak.upgrade() else { return };
             let username = username.to_string();
@@ -396,13 +349,12 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
             let mut c = cfg.borrow_mut();
             c.users.get_or_insert_with(Vec::new).push(user);
             show_users_popup(&app, &c);
-            refresh_ui(&app, &c, &wiz.borrow());
+            refresh_items(&app, &c);
         });
     }
     {
         let weak = app.as_weak();
         let cfg = config.clone();
-        let wiz = wizard.clone();
         app.on_user_removed(move |index| {
             let Some(app) = weak.upgrade() else { return };
             let mut c = cfg.borrow_mut();
@@ -416,13 +368,12 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 }
             }
             show_users_popup(&app, &c);
-            refresh_ui(&app, &c, &wiz.borrow());
+            refresh_items(&app, &c);
         });
     }
     {
         let weak = app.as_weak();
         let cfg = config.clone();
-        let wiz = wizard.clone();
         app.on_user_sudo_toggled(move |index| {
             let Some(app) = weak.upgrade() else { return };
             let mut c = cfg.borrow_mut();
@@ -433,7 +384,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 }
             }
             show_users_popup(&app, &c);
-            refresh_ui(&app, &c, &wiz.borrow());
+            refresh_items(&app, &c);
         });
     }
 
@@ -441,7 +392,6 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     {
         let weak = app.as_weak();
         let cfg = config.clone();
-        let wiz = wizard.clone();
         app.on_strlist_added(move |key, val| {
             let Some(app) = weak.upgrade() else { return };
             let val = val.to_string();
@@ -461,13 +411,12 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                     _ => return,
                 },
             );
-            refresh_ui(&app, &c, &wiz.borrow());
+            refresh_items(&app, &c);
         });
     }
     {
         let weak = app.as_weak();
         let cfg = config.clone();
-        let wiz = wizard.clone();
         app.on_strlist_removed(move |key, index| {
             let Some(app) = weak.upgrade() else { return };
             let mut c = cfg.borrow_mut();
@@ -484,7 +433,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                     _ => return,
                 },
             );
-            refresh_ui(&app, &c, &wiz.borrow());
+            refresh_items(&app, &c);
         });
     }
 
@@ -492,7 +441,6 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     {
         let weak = app.as_weak();
         let _cfg = config.clone();
-        let _wiz = wizard.clone();
         app.on_pkg_search_changed(move |text| {
             let Some(app) = weak.upgrade() else { return };
             if text.is_empty() {
@@ -565,7 +513,6 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     {
         let weak = app.as_weak();
         let cfg = config.clone();
-        let wiz = wizard.clone();
         app.on_pkg_added(move |index| {
             let Some(app) = weak.upgrade() else { return };
             let result = app.get_pkg_search_results().row_data(index as usize);
@@ -582,14 +529,13 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                     c.additional_packages.push(name);
                 }
                 refresh_pkg_selected(&app, &c);
-                refresh_ui(&app, &c, &wiz.borrow());
+                refresh_items(&app, &c);
             }
         });
     }
     {
         let weak = app.as_weak();
         let cfg = config.clone();
-        let wiz = wizard.clone();
         app.on_pkg_removed(move |index| {
             let Some(app) = weak.upgrade() else { return };
             let mut c = cfg.borrow_mut();
@@ -604,42 +550,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 }
             }
             refresh_pkg_selected(&app, &c);
-            refresh_ui(&app, &c, &wiz.borrow());
-        });
-    }
-
-    // ── Step navigation ──────────────────────────────
-    {
-        let weak = app.as_weak();
-        let cfg = config.clone();
-        let wiz = wizard.clone();
-        app.on_next_step(move || {
-            let Some(app) = weak.upgrade() else { return };
-            wiz.borrow_mut().next();
-            refresh_ui(&app, &cfg.borrow(), &wiz.borrow());
-        });
-    }
-    {
-        let weak = app.as_weak();
-        let cfg = config.clone();
-        let wiz = wizard.clone();
-        app.on_prev_step(move || {
-            let Some(app) = weak.upgrade() else { return };
-            wiz.borrow_mut().prev();
-            refresh_ui(&app, &cfg.borrow(), &wiz.borrow());
-        });
-    }
-    {
-        let weak = app.as_weak();
-        let cfg = config.clone();
-        let wiz = wizard.clone();
-        app.on_step_clicked(move |idx| {
-            let Some(app) = weak.upgrade() else { return };
-            let mut w = wiz.borrow_mut();
-            if (idx as usize) <= w.max_visited {
-                w.go_to(idx as usize);
-                refresh_ui(&app, &cfg.borrow(), &w);
-            }
+            refresh_items(&app, &c);
         });
     }
 
@@ -884,10 +795,12 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     {
         let weak = app.as_weak();
         let cfg = config.clone();
-        let wiz = wizard.clone();
         app.on_key_nav_down(move || {
             let Some(app) = weak.upgrade() else { return };
-            let items = build_step_items(wiz.borrow().current_step, &cfg.borrow());
+            let items = build_step_items(
+                app.global::<WizardState>().get_current_step() as usize,
+                &cfg.borrow(),
+            );
             let current = app.get_focused_index();
             let next = next_selectable_index(&items, current, 1);
             app.set_focused_index(next);
@@ -896,10 +809,12 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     {
         let weak = app.as_weak();
         let cfg = config.clone();
-        let wiz = wizard.clone();
         app.on_key_nav_up(move || {
             let Some(app) = weak.upgrade() else { return };
-            let items = build_step_items(wiz.borrow().current_step, &cfg.borrow());
+            let items = build_step_items(
+                app.global::<WizardState>().get_current_step() as usize,
+                &cfg.borrow(),
+            );
             let current = app.get_focused_index();
             let next = next_selectable_index(&items, current, -1);
             app.set_focused_index(next);
@@ -908,11 +823,13 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     {
         let weak = app.as_weak();
         let cfg = config.clone();
-        let wiz = wizard.clone();
         app.on_key_nav_activate(move || {
             let Some(app) = weak.upgrade() else { return };
             let idx = app.get_focused_index();
-            let items = build_step_items(wiz.borrow().current_step, &cfg.borrow());
+            let items = build_step_items(
+                app.global::<WizardState>().get_current_step() as usize,
+                &cfg.borrow(),
+            );
             if idx < 0 || idx as usize >= items.len() {
                 return;
             }
@@ -1145,35 +1062,13 @@ fn start_kernel_scan(
 
 // ── UI refresh ──────────────────────────────────────
 
-fn refresh_ui(app: &App, config: &GlobalConfig, wizard: &WizardState) {
-    let items = build_step_items(wizard.current_step, config);
-    app.set_current_step(wizard.current_step as i32);
-    app.set_steps(ModelRc::new(VecModel::from(build_steps(wizard))));
-    // Reset focused index to first selectable item
+fn refresh_items(app: &App, config: &GlobalConfig) {
+    let step = app.global::<WizardState>().get_current_step() as usize;
+    let items = build_step_items(step, config);
     let first = next_selectable_index(&items, -1, 1);
     app.set_focused_index(first);
     app.set_config_items(ModelRc::new(VecModel::from(items)));
     app.set_status_text(SharedString::default());
-}
-
-fn build_steps(wizard: &WizardState) -> Vec<StepInfo> {
-    STEP_LABELS
-        .iter()
-        .enumerate()
-        .map(|(i, label)| {
-            let state = if i == wizard.current_step {
-                1 // current
-            } else if i <= wizard.max_visited {
-                2 // done/visited
-            } else {
-                0 // pending
-            };
-            StepInfo {
-                label: SharedString::from(*label),
-                state,
-            }
-        })
-        .collect()
 }
 
 // ── Per-step item building ──────────────────────────
@@ -1668,7 +1563,6 @@ fn handle_item_activated(
     app: &App,
     key: &str,
     config: &GlobalConfig,
-    _wizard: &WizardState,
     kernel_scan: &Arc<
         std::sync::Mutex<Option<Vec<archinstall_zfs_core::kernel::scanner::CompatibilityResult>>>,
     >,

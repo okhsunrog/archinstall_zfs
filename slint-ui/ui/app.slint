@@ -3,8 +3,11 @@ import { ListView, ScrollView } from "std-widgets.slint";
 import { Catppuccin, Theme } from "styling.slint";
 export { Catppuccin, Theme }
 
-import { ItemType, ConfigItem, SelectOption, UserEntry, PackageEntry, PackageSearchResult, LogMessage, DownloadInfo, StepInfo } from "types.slint";
-export { ItemType, ConfigItem, SelectOption, UserEntry, PackageEntry, PackageSearchResult, LogMessage, DownloadInfo, StepInfo }
+import { WizardState } from "state/wizard-state.slint";
+export { WizardState }
+
+import { ItemType, ConfigItem, SelectOption, UserEntry, PackageEntry, PackageSearchResult, LogMessage, DownloadInfo } from "types.slint";
+export { ItemType, ConfigItem, SelectOption, UserEntry, PackageEntry, PackageSearchResult, LogMessage, DownloadInfo }
 
 import { StyledButton } from "components/styled-button.slint";
 import { StyledTextInput } from "components/styled-text-input.slint";
@@ -27,11 +30,6 @@ export component App inherits Window {
     title: "archinstall-zfs";
     forward-focus: main-focus-scope;
 
-    // Wizard state
-    in property <[StepInfo]> steps;
-    in property <int> current-step: 0;
-    in property <int> total-steps: 7;
-
     // Welcome screen status
     in property <bool> net-ok: false;
     in property <bool> uefi-ok: false;
@@ -41,7 +39,6 @@ export component App inherits Window {
     in property <string> zfs-install-status: "";
 
     callback check-internet();
-    callback start-wizard();
 
     in property <[ConfigItem]> config-items;
 
@@ -123,12 +120,9 @@ export component App inherits Window {
     callback toggle-activated(string);
     callback install-requested();
     callback quit-requested();
-    callback step-clicked(int);
     callback user-added(string, string, bool); // username, password, sudo
     callback user-removed(int);
     callback user-sudo-toggled(int);
-    callback next-step();
-    callback prev-step();
     callback key-nav-down();
     callback key-nav-up();
     callback key-nav-activate();
@@ -150,30 +144,30 @@ export component App inherits Window {
                 return accept;
             }
             if e.text == Key.Tab {
-                next-step();
+                WizardState.next();
                 return accept;
             }
             if e.text == Key.Backtab {
-                prev-step();
+                WizardState.back();
                 return accept;
             }
             if e.text == "q" {
                 quit-requested();
                 return accept;
             }
-            if e.text == "1" { step-clicked(0); return accept; }
-            if e.text == "2" { step-clicked(1); return accept; }
-            if e.text == "3" { step-clicked(2); return accept; }
-            if e.text == "4" { step-clicked(3); return accept; }
-            if e.text == "5" { step-clicked(4); return accept; }
-            if e.text == "6" { step-clicked(5); return accept; }
-            if e.text == "7" { step-clicked(6); return accept; }
+            if e.text == "1" { WizardState.go-to(0); return accept; }
+            if e.text == "2" { WizardState.go-to(1); return accept; }
+            if e.text == "3" { WizardState.go-to(2); return accept; }
+            if e.text == "4" { WizardState.go-to(3); return accept; }
+            if e.text == "5" { WizardState.go-to(4); return accept; }
+            if e.text == "6" { WizardState.go-to(5); return accept; }
+            if e.text == "7" { WizardState.go-to(6); return accept; }
             return reject;
         }
     }
 
     // ── Welcome screen (step 0, no sidebar) ───────────
-    if install-state == 0 && current-step == 0: Rectangle {
+    if install-state == 0 && WizardState.current-step == 0: Rectangle {
         background: Theme.c.base;
 
         VerticalLayout {
@@ -393,7 +387,7 @@ export component App inherits Window {
                             start-ta := TouchArea {
                                 enabled: net-ok && uefi-ok && zfs-ok;
                                 mouse-cursor: self.enabled ? pointer : default;
-                                clicked => { start-wizard(); }
+                                clicked => { WizardState.go-to(1); }
                             }
 
                             Text {
@@ -421,7 +415,7 @@ export component App inherits Window {
     }
 
     // ── Wizard config screen (steps 1+, with sidebar) ──
-    if install-state == 0 && current-step > 0: VerticalLayout {
+    if install-state == 0 && WizardState.current-step > 0: VerticalLayout {
         padding: 0px;
         spacing: 0px;
 
@@ -444,7 +438,7 @@ export component App inherits Window {
                 }
 
                 Text {
-                    text: current-step + " / " + (total-steps - 1);
+                    text: WizardState.current-step + " / " + (WizardState.total-steps - 1);
                     color: Theme.c.overlay0;
                     font-size: 14px;
                     vertical-alignment: center;
@@ -466,14 +460,16 @@ export component App inherits Window {
                     spacing: 2px;
                     alignment: start;
 
-                    for step[index] in steps: SidebarItem {
+                    for label[index] in WizardState.step-labels: SidebarItem {
                         visible: index > 0;
-                        label: step.label;
-                        state: step.state;
+                        label: label;
+                        state: WizardState.step-state-at(index);
                         step-index: index;
 
                         clicked => {
-                            step-clicked(index);
+                            if index <= WizardState.max-visited {
+                                WizardState.go-to(index);
+                            }
                         }
                     }
                 }
@@ -499,8 +495,8 @@ export component App inherits Window {
                         alignment: start;
 
                         Text {
-                            text: steps.length > 0 && current-step < steps.length
-                                ? steps[current-step].label : "";
+                            text: WizardState.current-step < WizardState.step-labels.length
+                                ? WizardState.step-labels[WizardState.current-step] : "";
                             color: Theme.c.mauve;
                             font-size: 18px;
                             font-weight: FontWeight.semi-bold;
@@ -749,14 +745,14 @@ export component App inherits Window {
                         }
 
                         // Back button (not on first wizard step)
-                        if current-step > 1: Rectangle {
+                        if WizardState.current-step > 1: Rectangle {
                             width: 80px;
                             height: 32px;
                             background: back-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
                             border-radius: 4px;
 
                             back-ta := TouchArea {
-                                clicked => { prev-step(); }
+                                clicked => { WizardState.back(); }
                             }
 
                             Text {
@@ -779,14 +775,14 @@ export component App inherits Window {
                         }
 
                         // Next button
-                        if current-step < total-steps - 1: Rectangle {
+                        if WizardState.current-step < WizardState.total-steps - 1: Rectangle {
                             width: 80px;
                             height: 32px;
                             background: next-ta.has-hover ? Theme.c.sky : Theme.c.blue;
                             border-radius: 4px;
 
                             next-ta := TouchArea {
-                                clicked => { next-step(); }
+                                clicked => { WizardState.next(); }
                             }
 
                             Text {
