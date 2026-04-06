@@ -1,4 +1,5 @@
 import { Theme, ButtonStyle } from "../styling.slint";
+import { AnimationSettings } from "../styling.slint";
 import { StateLayer, FocusTouchArea } from "internal/state-layer.slint";
 
 export component StyledButton {
@@ -29,7 +30,6 @@ export component StyledButton {
         pressed: touch-area.pressed;
         has-hover: touch-area.has-hover;
         has-focus: touch-area.has-focus;
-        state-brush: root.style.state-brush;
     }
 
     content-layout := HorizontalLayout {

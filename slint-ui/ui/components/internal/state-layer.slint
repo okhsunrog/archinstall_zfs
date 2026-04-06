@@ -1,23 +1,55 @@
 // Canonical hover/pressed/focus visual overlay and input handler.
-// Adapted from Slint's internal-components.slint.
+// Adapted from Slint's internal-components.slint and vivi-ui.
+
+import { Palette, AnimationSettings } from "../../styling.slint";
 
 export component StateLayer inherits Rectangle {
     in property <bool> pressed;
     in property <bool> has-hover;
     in property <bool> has-focus;
-    in property <bool> enabled;
-    in property <brush> state-brush;
+    in property <bool> enabled: true;
+    in property <bool> has-error: false;
+    in property <length> focus-padding: 0px;
+
+    focus-border := Rectangle {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        width: root.width + 2 * root.focus-padding + self.border-width;
+        height: root.height + 2 * root.focus-padding + self.border-width;
+        border-radius: root.border-radius + root.focus-padding;
+        border-width: 2px;
+        border-color: Palette.focus-border;
+        opacity: 0;
+
+        states [
+            error when root.has-error: {
+                opacity: 1;
+                border-color: Palette.destructive-background;
+            }
+            focused when root.has-focus && root.enabled: {
+                opacity: 1;
+            }
+        ]
+
+        animate opacity { duration: AnimationSettings.color-duration; }
+    }
+
+    overlay := Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: root.border-radius;
+
+        animate background { duration: AnimationSettings.color-duration; }
+    }
 
     states [
-        highlighted when root.enabled && (root.pressed || root.has-focus): {
-            root.background: root.state-brush.with-alpha(0.16);
+        pressed when root.enabled && root.pressed: {
+            overlay.background: Palette.state-pressed;
         }
         hovered when root.enabled && root.has-hover: {
-            root.background: root.state-brush.with-alpha(0.10);
+            overlay.background: Palette.state-hovered;
         }
     ]
-
-    animate background { duration: 100ms; easing: ease-out; }
 }
 
 export component FocusTouchArea {
@@ -25,8 +57,10 @@ export component FocusTouchArea {
     out property <bool> pressed <=> touch-area.pressed;
     out property <bool> has-hover <=> touch-area.has-hover;
     out property <bool> has-focus <=> focus-scope.has-focus;
+    out property <bool> enter-pressed;
 
     callback clicked <=> touch-area.clicked;
+    callback key-pressed(event: KeyEvent) -> EventResult;
 
     forward-focus: focus-scope;
 
@@ -41,8 +75,23 @@ export component FocusTouchArea {
         enabled: root.enabled;
 
         key-pressed(event) => {
-            if event.text == " " || event.text == "\n" {
+            if !root.enabled {
+                return reject;
+            }
+            if (event.text == " " || event.text == "\n") && !root.enter-pressed {
+                root.enter-pressed = true;
                 touch-area.clicked();
+                return accept;
+            }
+            return root.key-pressed(event);
+        }
+
+        key-released(event) => {
+            if !root.enabled {
+                return reject;
+            }
+            if (event.text == " " || event.text == "\n") && root.enter-pressed {
+                root.enter-pressed = false;
                 return accept;
             }
             return reject;

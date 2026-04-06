@@ -1,4 +1,4 @@
-import { Theme } from "../styling.slint";
+import { Theme, AnimationSettings } from "../styling.slint";
 import { FocusTouchArea } from "internal/state-layer.slint";
 
 export component DeleteButton inherits Rectangle {
@@ -33,5 +33,5 @@ export component DeleteButton inherits Rectangle {
         }
     ]
 
-    animate background { duration: 100ms; easing: ease-out; }
+    animate background { duration: AnimationSettings.color-duration; easing: ease-out; }
 }

@@ -1,4 +1,4 @@
-import { Theme } from "../styling.slint";
+import { Theme, AnimationSettings } from "../styling.slint";
 
 export component StyledTextInput inherits Rectangle {
     in property <string> placeholder: "";
@@ -80,5 +80,5 @@ export component StyledTextInput inherits Rectangle {
         }
     ]
 
-    animate border-color, border-width { duration: 100ms; easing: ease-out; }
+    animate border-color, border-width { duration: AnimationSettings.color-duration; easing: ease-out; }
 }
