@@ -71,6 +71,7 @@ export struct SemanticPalette {
     state_pressed: color,
     state_hovered: color,
     selection_background: color,
+    selection_foreground: color,
 }
 
 export global Catppuccin {
@@ -152,7 +153,11 @@ export global Palette {
         focus_border: Catppuccin.current.lavender,
         state_pressed: Catppuccin.is-dark ? #000000.with-alpha(0.4) : #000000.with-alpha(0.3),
         state_hovered: Catppuccin.is-dark ? #ffffff.with-alpha(0.16) : #000000.with-alpha(0.16),
-        selection_background: Catppuccin.current.surface_0,
+        // Selection: alpha-tinted accent (matches Material's `#xxxxxx4D` pattern).
+        // Original text color shows through, no separate selection_foreground
+        // is strictly required, but we set one for extra contrast.
+        selection_background: Catppuccin.current.blue.with-alpha(0.35),
+        selection_foreground: Catppuccin.current.text,
     };
 
     // Convenience direct accessors for the current semantic palette.
@@ -174,6 +179,7 @@ export global Palette {
     out property <color> state-pressed: root.current.state_pressed;
     out property <color> state-hovered: root.current.state_hovered;
     out property <color> selection-background: root.current.selection_background;
+    out property <color> selection-foreground: root.current.selection_foreground;
 }
 
 export global AnimationSettings {

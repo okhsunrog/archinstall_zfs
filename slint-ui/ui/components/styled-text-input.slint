@@ -1,4 +1,4 @@
-import { Theme, AnimationSettings } from "../styling.slint";
+import { Theme, Palette, AnimationSettings } from "../styling.slint";
 
 export component StyledTextInput inherits Rectangle {
     in property <string> placeholder: "";
@@ -66,6 +66,8 @@ export component StyledTextInput inherits Rectangle {
         height: 100%;
         vertical-alignment: center;
         color: Theme.c.text;
+        selection-background-color: Palette.selection-background;
+        selection-foreground-color: Palette.selection-foreground;
         font-size: root.font-size;
         input-type: root.is-password ? InputType.password : InputType.text;
         single-line: true;
