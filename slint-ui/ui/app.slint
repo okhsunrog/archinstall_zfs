@@ -9,6 +9,9 @@ export { WizardState }
 import { EditingState } from "state/editing-state.slint";
 export { EditingState }
 
+import { PopupState } from "state/popup-state.slint";
+export { PopupState }
+
 import { ItemType, ConfigItem, SelectOption, UserEntry, PackageEntry, PackageSearchResult, LogMessage, DownloadInfo } from "types.slint";
 export { ItemType, ConfigItem, SelectOption, UserEntry, PackageEntry, PackageSearchResult, LogMessage, DownloadInfo }
 
@@ -46,27 +49,6 @@ export component App inherits Window {
     callback check-internet();
 
     in property <[ConfigItem]> config-items;
-
-    // Select popup state
-    in-out property <bool> select-visible: false;
-    in-out property <string> select-title;
-    in-out property <[SelectOption]> select-options;
-    in-out property <int> select-index;
-    in-out property <string> select-key;
-    in-out property <bool> select-show-filter: false;
-
-    // Text input popup state
-    in-out property <bool> text-input-visible: false;
-    in-out property <string> text-input-title;
-    in-out property <string> text-input-value;
-    in-out property <bool> text-input-password: false;
-    in-out property <string> text-input-key;
-
-    // Password strength (driven from Rust)
-    in-out property <int> password-strength-score: -1;
-    in-out property <string> password-strength-label;
-    in-out property <string> password-strength-hint;
-    in-out property <color> password-strength-color: Theme.c.overlay0;
 
     // User management popup state
     in-out property <bool> users-visible: false;
@@ -128,7 +110,7 @@ export component App inherits Window {
 
     // ── Keyboard navigation ─────────────────────────
     main-focus-scope := FocusScope {
-        enabled: install-state == 0 && !select-visible && !text-input-visible && !users-visible && !pkg-search-visible && !strlist-visible;
+        enabled: install-state == 0 && !PopupState.select-visible && !PopupState.text-input-visible && !users-visible && !pkg-search-visible && !strlist-visible;
         key-pressed(e) => {
             if e.text == Key.DownArrow || e.text == "j" {
                 key-nav-down();
@@ -983,43 +965,43 @@ export component App inherits Window {
     // ── Popup overlays ──────────────────────────────────
 
     SelectPopup {
-        title: select-title;
-        options: select-options;
-        selected-index: select-index;
-        popup-visible: select-visible;
-        show-filter: select-show-filter;
+        title: PopupState.select-title;
+        options: PopupState.select-options;
+        selected-index: PopupState.select-index;
+        popup-visible: PopupState.select-visible;
+        show-filter: PopupState.select-show-filter;
 
         accepted(idx) => {
-            select-visible = false;
-            select-confirmed(select-key, idx);
+            PopupState.select-visible = false;
+            select-confirmed(PopupState.select-key, idx);
         }
         cancelled() => {
-            select-visible = false;
+            PopupState.select-visible = false;
         }
         filter-changed(text) => {
-            select-filter-changed(select-key, text);
+            select-filter-changed(PopupState.select-key, text);
         }
     }
 
     TextInputPopup {
-        title: text-input-title;
-        input-text: text-input-value;
-        is-password: text-input-password;
-        popup-visible: text-input-visible;
-        strength-score: password-strength-score;
-        strength-label: password-strength-label;
-        strength-hint: password-strength-hint;
-        strength-color: password-strength-color;
+        title: PopupState.text-input-title;
+        input-text: PopupState.text-input-value;
+        is-password: PopupState.text-input-password;
+        popup-visible: PopupState.text-input-visible;
+        strength-score: PopupState.password-strength-score;
+        strength-label: PopupState.password-strength-label;
+        strength-hint: PopupState.password-strength-hint;
+        strength-color: PopupState.password-strength-color;
 
         confirmed(val) => {
-            text-input-visible = false;
-            text-confirmed(text-input-key, val);
+            PopupState.text-input-visible = false;
+            text-confirmed(PopupState.text-input-key, val);
         }
         cancelled() => {
-            text-input-visible = false;
+            PopupState.text-input-visible = false;
         }
         text-edited(val) => {
-            text-input-edited(text-input-key, val);
+            text-input-edited(PopupState.text-input-key, val);
         }
     }
 

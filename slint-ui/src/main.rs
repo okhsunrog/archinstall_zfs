@@ -299,7 +299,10 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
             }
 
             if key == "locale_select" {
-                let selected_text = app.get_select_options().row_data(idx as usize);
+                let selected_text = app
+                    .global::<PopupState>()
+                    .get_select_options()
+                    .row_data(idx as usize);
                 if let Some(opt) = selected_text {
                     cfg.borrow_mut().locale = Some(opt.text.to_string());
                     refresh_items(&app, &cfg.borrow());
@@ -308,7 +311,10 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
             }
 
             if key == "keyboard_select" {
-                let selected_text = app.get_select_options().row_data(idx as usize);
+                let selected_text = app
+                    .global::<PopupState>()
+                    .get_select_options()
+                    .row_data(idx as usize);
                 if let Some(opt) = selected_text {
                     cfg.borrow_mut().keyboard_layout = opt.text.to_string();
                     refresh_items(&app, &cfg.borrow());
@@ -919,8 +925,9 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                         })
                         .collect()
                 };
-                app.set_select_options(ModelRc::new(VecModel::from(filtered)));
-                app.set_select_index(-1);
+                app.global::<PopupState>()
+                    .set_select_options(ModelRc::new(VecModel::from(filtered)));
+                app.global::<PopupState>().set_select_index(-1);
             }
 
             if key == "keyboard_select" {
@@ -947,8 +954,9 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                         })
                         .collect()
                 };
-                app.set_select_options(ModelRc::new(VecModel::from(filtered)));
-                app.set_select_index(-1);
+                app.global::<PopupState>()
+                    .set_select_options(ModelRc::new(VecModel::from(filtered)));
+                app.global::<PopupState>().set_select_index(-1);
             }
         });
     }
@@ -961,7 +969,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
 
             if key == "root_password" || key == "encryption_password" {
                 if value.is_empty() {
-                    app.set_password_strength_score(-1);
+                    app.global::<PopupState>().set_password_strength_score(-1);
                     return;
                 }
                 let entropy = zxcvbn::zxcvbn(value.as_str(), &[]);
@@ -986,10 +994,14 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                         format!("~{crack_time} to crack")
                     });
 
-                app.set_password_strength_score(score as i32);
-                app.set_password_strength_label(SharedString::from(label));
-                app.set_password_strength_hint(SharedString::from(hint));
-                app.set_password_strength_color(color);
+                app.global::<PopupState>()
+                    .set_password_strength_score(score as i32);
+                app.global::<PopupState>()
+                    .set_password_strength_label(SharedString::from(label));
+                app.global::<PopupState>()
+                    .set_password_strength_hint(SharedString::from(hint));
+                app.global::<PopupState>()
+                    .set_password_strength_color(color);
             }
         });
     }
@@ -1765,22 +1777,24 @@ fn show_select_with_filter(
             text: SharedString::from(*s),
         })
         .collect();
-    app.set_select_key(key.into());
-    app.set_select_title(title.into());
-    app.set_select_options(ModelRc::new(VecModel::from(opts)));
-    app.set_select_index(current);
-    app.set_select_show_filter(filterable);
-    app.set_select_visible(true);
+    let popup = app.global::<PopupState>();
+    popup.set_select_key(key.into());
+    popup.set_select_title(title.into());
+    popup.set_select_options(ModelRc::new(VecModel::from(opts)));
+    popup.set_select_index(current);
+    popup.set_select_show_filter(filterable);
+    popup.set_select_visible(true);
 }
 
 fn show_text_input(app: &App, key: &str, title: &str, current: &str, password: bool) {
-    app.set_text_input_key(key.into());
-    app.set_text_input_title(title.into());
-    app.set_text_input_value(current.into());
-    app.set_text_input_password(password);
-    app.set_password_strength_score(-1);
-    app.set_password_strength_hint(SharedString::default());
-    app.set_text_input_visible(true);
+    let popup = app.global::<PopupState>();
+    popup.set_text_input_key(key.into());
+    popup.set_text_input_title(title.into());
+    popup.set_text_input_value(current.into());
+    popup.set_text_input_password(password);
+    popup.set_password_strength_score(-1);
+    popup.set_password_strength_hint(SharedString::default());
+    popup.set_text_input_visible(true);
 }
 
 fn show_users_popup(app: &App) {
