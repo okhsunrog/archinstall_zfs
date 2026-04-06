@@ -1,4 +1,5 @@
 mod config_items;
+mod controllers;
 mod format;
 mod install;
 mod tracing_layer;
@@ -124,9 +125,7 @@ async fn main() -> Result<()> {
 fn run_gui(config: GlobalConfig) -> Result<()> {
     let app = App::new()?;
     let config = Rc::new(RefCell::new(config));
-    let kernel_scan: Arc<
-        std::sync::Mutex<Option<Vec<archinstall_zfs_core::kernel::scanner::CompatibilityResult>>>,
-    > = Arc::new(std::sync::Mutex::new(None));
+    let kernel_scan: controllers::welcome::KernelScan = Arc::new(std::sync::Mutex::new(None));
 
     // ── Editable list models (long-lived, mutated incrementally) ──
     let users_model: Rc<VecModel<UserEntry>> = Rc::new(VecModel::default());
@@ -151,55 +150,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
 
     refresh_items(&app, &config.borrow());
 
-    // ── Welcome screen: run initial checks ──────────
-    {
-        let net = archinstall_zfs_core::system::net::check_internet();
-        let uefi = archinstall_zfs_core::system::sysinfo::has_uefi();
-        let zfs_mod = archinstall_zfs_core::zfs::kmod::check_zfs_module(
-            &archinstall_zfs_core::system::cmd::RealRunner,
-        )
-        .unwrap_or(false);
-        let zfs_utils = archinstall_zfs_core::zfs::kmod::check_zfs_utils(
-            &archinstall_zfs_core::system::cmd::RealRunner,
-        )
-        .unwrap_or(false);
-
-        app.global::<WelcomeState>().set_net_ok(net);
-        app.global::<WelcomeState>().set_uefi_ok(uefi);
-        app.global::<WelcomeState>()
-            .set_zfs_ok(zfs_mod && zfs_utils);
-
-        if net {
-            // Start ZFS init if needed
-            if !(zfs_mod && zfs_utils) {
-                start_zfs_init(&app, &config.borrow());
-            }
-            // Start kernel compatibility scan in background
-            start_kernel_scan(&kernel_scan);
-        }
-    }
-
-    // ── Welcome: check internet ─────────────────────
-    {
-        let weak = app.as_weak();
-        let cfg = config.clone();
-        let kscan = kernel_scan.clone();
-        app.global::<WelcomeState>().on_check_internet(move || {
-            let Some(app) = weak.upgrade() else { return };
-            let net = archinstall_zfs_core::system::net::check_internet();
-            app.global::<WelcomeState>().set_net_ok(net);
-            if net {
-                if !app.global::<WelcomeState>().get_zfs_ok()
-                    && !app.global::<WelcomeState>().get_zfs_installing()
-                {
-                    start_zfs_init(&app, &cfg.borrow());
-                }
-                if kscan.lock().unwrap().is_none() {
-                    start_kernel_scan(&kscan);
-                }
-            }
-        });
-    }
+    controllers::welcome::setup(&app, &config, &kernel_scan);
 
     // ── Wizard step changed (rebuild items) ─────────
     {
@@ -1032,90 +983,6 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
 
     app.run()?;
     Ok(())
-}
-
-// ── ZFS initialization on welcome screen ────────────
-
-fn start_zfs_init(app: &App, config: &GlobalConfig) {
-    app.global::<WelcomeState>().set_zfs_installing(true);
-    app.global::<WelcomeState>()
-        .set_zfs_install_status(SharedString::from("Initializing..."));
-
-    let weak = app.as_weak();
-    let kernel = config.primary_kernel().to_string();
-    let zfs_mode = config.zfs_module_mode;
-
-    tokio::task::spawn_blocking(move || {
-        let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
-            Arc::new(archinstall_zfs_core::system::cmd::RealRunner);
-        let cancel = tokio_util::sync::CancellationToken::new();
-
-        // Update status
-        let w = weak.clone();
-        let _ = w.upgrade_in_event_loop(|app| {
-            app.global::<WelcomeState>()
-                .set_zfs_install_status(SharedString::from("Checking reflector..."));
-        });
-
-        archinstall_zfs_core::zfs::kmod::ensure_reflector_finished_and_stopped(&*runner).ok();
-        archinstall_zfs_core::zfs::kmod::refresh_mirrors_if_stale(&*runner).ok();
-
-        let w = weak.clone();
-        let _ = w.upgrade_in_event_loop(|app| {
-            app.global::<WelcomeState>()
-                .set_zfs_install_status(SharedString::from("Installing ZFS packages..."));
-            app.global::<WelcomeState>().set_zfs_install_pct(30);
-        });
-
-        let result =
-            archinstall_zfs_core::zfs::kmod::initialize_zfs(&*runner, &kernel, zfs_mode, &cancel);
-
-        let _ = weak.upgrade_in_event_loop(move |app| {
-            app.global::<WelcomeState>().set_zfs_installing(false);
-            match result {
-                Ok(()) => {
-                    app.global::<WelcomeState>().set_zfs_ok(true);
-                    app.global::<WelcomeState>().set_zfs_install_pct(100);
-                }
-                Err(e) => {
-                    app.global::<WelcomeState>()
-                        .set_zfs_install_status(SharedString::from(format!("Failed: {e}")));
-                }
-            }
-        });
-    });
-}
-
-/// Start kernel compatibility scan in background, store results in shared state.
-fn start_kernel_scan(
-    scan_cache: &Arc<
-        std::sync::Mutex<Option<Vec<archinstall_zfs_core::kernel::scanner::CompatibilityResult>>>,
-    >,
-) {
-    let cache = scan_cache.clone();
-    tokio::task::spawn(async move {
-        tracing::info!("scanning kernel compatibility...");
-        let results = archinstall_zfs_core::kernel::scanner::scan_all_kernels().await;
-        for (info, result) in archinstall_zfs_core::kernel::AVAILABLE_KERNELS
-            .iter()
-            .zip(&results)
-        {
-            let pre = if result.precompiled_compatible {
-                "OK"
-            } else {
-                "NO"
-            };
-            let dkms = if result.dkms_compatible { "OK" } else { "NO" };
-            tracing::info!(
-                kernel = info.name,
-                precompiled = pre,
-                dkms = dkms,
-                "kernel scan result"
-            );
-        }
-        *cache.lock().unwrap() = Some(results);
-        tracing::info!("kernel compatibility scan complete");
-    });
 }
 
 // ── UI refresh ──────────────────────────────────────
