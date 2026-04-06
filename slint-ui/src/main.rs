@@ -41,6 +41,12 @@ struct Cli {
 
     #[arg(long, global = true)]
     silent: bool,
+
+    /// UI scale factor for the GUI (e.g. 1.5, 2.0). On linuxkms this maps to
+    /// the SLINT_SCALE_FACTOR env var since the backend cannot auto-detect
+    /// physical DPI; on desktop builds the OS value is used unless overridden.
+    #[arg(long, global = true)]
+    ui_scale: Option<f32>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -65,6 +71,16 @@ enum Commands {
 async fn main() -> Result<()> {
     color_eyre::install()?;
     let cli = Cli::parse();
+
+    if let Some(scale) = cli.ui_scale
+        && scale > 0.0
+    {
+        // Must be set before any Slint window is created.
+        // SAFETY: single-threaded at this point in startup.
+        unsafe {
+            std::env::set_var("SLINT_SCALE_FACTOR", scale.to_string());
+        }
+    }
 
     match &cli.command {
         Some(Commands::RenderProfile {
