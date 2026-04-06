@@ -1,9 +1,20 @@
-import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../styling.slint";
 import { SelectOption } from "../types.slint";
 import { StyledButton } from "../components/styled-button.slint";
 import { StyledTextInput } from "../components/styled-text-input.slint";
 import { DeleteButton } from "../components/delete-button.slint";
+
+// String-list editor popup. Used for `extra_services`.
+//
+// We deliberately do NOT use ScrollView/ListView for the rows: in Slint both
+// take a parent-assigned height and do not propagate their content's
+// preferred-height upward, which means the popup card would never grow when
+// items are added (the bug this file used to have). Instead, the rows live
+// in a plain VerticalLayout and the popup card sizes itself via the standard
+// preferred-height computation, clamped to `parent.height - 80px` so it
+// doesn't overflow the window. For an installer with ~10 entries this is
+// fine; if someone adds 100, the bottom would clip — acceptable trade-off
+// for not needing manual height math.
 
 export component StringListPopup inherits Rectangle {
     in property <string> title;
@@ -45,33 +56,32 @@ export component StringListPopup inherits Rectangle {
                     height: Theme.spacing-xl;
                 }
 
-                ScrollView {
-                    max-height: 300px;
+                // Items list — plain VerticalLayout, grows naturally with the
+                // model. See file header for the rationale on not using
+                // ScrollView here.
+                VerticalLayout {
+                    spacing: Theme.spacing-xs;
 
-                    VerticalLayout {
-                        spacing: Theme.spacing-xs;
+                    for item[index] in root.items: Rectangle {
+                        height: Theme.control-height;
+                        background: Theme.c.surface0;
+                        border-radius: Theme.radius-sm;
 
-                        for item[index] in root.items: Rectangle {
-                            height: Theme.control-height;
-                            background: Theme.c.surface0;
-                            border-radius: Theme.radius-sm;
+                        HorizontalLayout {
+                            padding-left: Theme.spacing-md;
+                            padding-right: Theme.spacing-sm;
+                            alignment: space-between;
 
-                            HorizontalLayout {
-                                padding-left: Theme.spacing-md;
-                                padding-right: Theme.spacing-sm;
-                                alignment: space-between;
+                            Text {
+                                text: item.text;
+                                color: Theme.c.text;
+                                font-size: Theme.font-base;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
 
-                                Text {
-                                    text: item.text;
-                                    color: Theme.c.text;
-                                    font-size: Theme.font-base;
-                                    vertical-alignment: center;
-                                    horizontal-stretch: 1;
-                                }
-
-                                DeleteButton {
-                                    clicked => { root.item-removed(index); }
-                                }
+                            DeleteButton {
+                                clicked => { root.item-removed(index); }
                             }
                         }
                     }
@@ -90,8 +100,6 @@ export component StringListPopup inherits Rectangle {
                             }
                         }
                     }
-
-                    init => { add-input.focus-input(); }
 
                     StyledButton {
                         label: "Add";
@@ -113,6 +121,11 @@ export component StringListPopup inherits Rectangle {
                     }
                 }
             }
+
+            // Focus the input on first show. Placed at the popup-card level
+            // so it runs once when the `if popup-visible:` subtree is
+            // instantiated, not on every layout init pass.
+            init => { add-input.focus-input(); }
         }
     }
 }
