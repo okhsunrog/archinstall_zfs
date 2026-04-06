@@ -1,4 +1,5 @@
 mod config_items;
+mod format;
 mod install;
 mod tracing_layer;
 
@@ -20,6 +21,7 @@ pub mod ui {
 use ui::*;
 
 use config_items::{apply_radio, apply_text, build_step_items, next_selectable_index};
+use format::{format_duration, format_speed, truncate_str};
 
 const MAX_LOG_LINES: usize = 2000;
 
@@ -1394,40 +1396,4 @@ fn seed_editing_state(
         }))
         .collect();
     packages_selected_model.set_vec(packages);
-}
-
-// ── Download progress helpers ───────────────────────
-
-fn format_speed(bps: u64) -> String {
-    if bps >= 1_000_000 {
-        format!("{:.1} MB/s", bps as f64 / 1_000_000.0)
-    } else if bps >= 1_000 {
-        format!("{:.0} KB/s", bps as f64 / 1_000.0)
-    } else if bps > 0 {
-        format!("{bps} B/s")
-    } else {
-        "-- B/s".to_string()
-    }
-}
-
-fn format_duration(d: std::time::Duration) -> String {
-    let secs = d.as_secs();
-    if secs >= 3600 {
-        format!("{}h{:02}m", secs / 3600, (secs % 3600) / 60)
-    } else if secs >= 60 {
-        format!("{}m{:02}s", secs / 60, secs % 60)
-    } else {
-        format!("{secs}s")
-    }
-}
-
-fn truncate_str(s: &str, max: usize) -> &str {
-    if s.len() <= max {
-        s
-    } else {
-        match s.char_indices().nth(max) {
-            Some((idx, _)) => &s[..idx],
-            None => s,
-        }
-    }
 }
