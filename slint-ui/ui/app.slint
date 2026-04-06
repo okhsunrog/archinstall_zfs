@@ -6,6 +6,9 @@ export { Catppuccin, Theme }
 import { WizardState } from "state/wizard-state.slint";
 export { WizardState }
 
+import { EditingState } from "state/editing-state.slint";
+export { EditingState }
+
 import { ItemType, ConfigItem, SelectOption, UserEntry, PackageEntry, PackageSearchResult, LogMessage, DownloadInfo } from "types.slint";
 export { ItemType, ConfigItem, SelectOption, UserEntry, PackageEntry, PackageSearchResult, LogMessage, DownloadInfo }
 
@@ -67,23 +70,17 @@ export component App inherits Window {
 
     // User management popup state
     in-out property <bool> users-visible: false;
-    in property <[UserEntry]> users-list;
 
     // String list popup state
     in-out property <bool> strlist-visible: false;
     in-out property <string> strlist-title;
     in-out property <string> strlist-key;
-    in property <[SelectOption]> strlist-items;
 
     callback strlist-added(string, string); // key, value
     callback strlist-removed(string, int);  // key, index
 
     // Package search popup state
     in-out property <bool> pkg-search-visible: false;
-    in property <[PackageSearchResult]> pkg-search-results;
-    in property <[PackageEntry]> pkg-selected;
-    in-out property <bool> pkg-searching-aur: false;
-    in-out property <string> pkg-status-text;
 
     callback pkg-search-changed(string);
     callback pkg-search-aur(string);
@@ -1027,7 +1024,7 @@ export component App inherits Window {
     }
 
     UserManagePopup {
-        users: users-list;
+        users: EditingState.users;
         popup-visible: users-visible;
 
         user-added(username, password, sudo) => {
@@ -1046,7 +1043,7 @@ export component App inherits Window {
 
     StringListPopup {
         title: strlist-title;
-        items: strlist-items;
+        items: EditingState.extra-services;
         popup-visible: strlist-visible;
 
         item-added(val) => {
@@ -1061,11 +1058,11 @@ export component App inherits Window {
     }
 
     PackageSearchPopup {
-        search-results: pkg-search-results;
-        selected-packages: pkg-selected;
+        search-results: EditingState.package-search-results;
+        selected-packages: EditingState.packages-selected;
         popup-visible: pkg-search-visible;
-        searching-aur: pkg-searching-aur;
-        status-text: pkg-status-text;
+        searching-aur: EditingState.package-searching-aur;
+        status-text: EditingState.package-status-text;
 
         search-changed(text) => {
             root.pkg-search-changed(text);

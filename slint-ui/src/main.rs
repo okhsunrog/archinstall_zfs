@@ -130,6 +130,27 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
         std::sync::Mutex<Option<Vec<archinstall_zfs_core::kernel::scanner::CompatibilityResult>>>,
     > = Arc::new(std::sync::Mutex::new(None));
 
+    // ── Editable list models (long-lived, mutated incrementally) ──
+    let users_model: Rc<VecModel<UserEntry>> = Rc::new(VecModel::default());
+    let extra_services_model: Rc<VecModel<SelectOption>> = Rc::new(VecModel::default());
+    let packages_selected_model: Rc<VecModel<PackageEntry>> = Rc::new(VecModel::default());
+    let package_search_model: Rc<VecModel<PackageSearchResult>> = Rc::new(VecModel::default());
+
+    {
+        let editing = app.global::<EditingState>();
+        editing.set_users(users_model.clone().into());
+        editing.set_extra_services(extra_services_model.clone().into());
+        editing.set_packages_selected(packages_selected_model.clone().into());
+        editing.set_package_search_results(package_search_model.clone().into());
+    }
+
+    seed_editing_state(
+        &config.borrow(),
+        &users_model,
+        &extra_services_model,
+        &packages_selected_model,
+    );
+
     refresh_items(&app, &config.borrow());
 
     // ── Welcome screen: run initial checks ──────────
@@ -317,28 +338,28 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     {
         let weak = app.as_weak();
         let cfg = config.clone();
+        let model = users_model.clone();
         app.on_user_added(move |username, password, sudo| {
             let Some(app) = weak.upgrade() else { return };
             let username = username.to_string();
             if !archinstall_zfs_core::config::validation::is_valid_username(&username) {
                 return;
             }
+            let mut c = cfg.borrow_mut();
             // Prevent duplicate usernames
-            let c = cfg.borrow();
             if c.users
                 .as_ref()
                 .is_some_and(|users| users.iter().any(|u| u.username == username))
             {
                 return;
             }
-            drop(c);
             let password = if password.is_empty() {
                 None
             } else {
                 Some(password.to_string())
             };
             let user = UserConfig {
-                username,
+                username: username.clone(),
                 password,
                 sudo,
                 shell: None,
@@ -346,44 +367,51 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 ssh_authorized_keys: Vec::new(),
                 autologin: false,
             };
-            let mut c = cfg.borrow_mut();
             c.users.get_or_insert_with(Vec::new).push(user);
-            show_users_popup(&app, &c);
+            model.push(UserEntry {
+                username: SharedString::from(&username),
+                has_sudo: sudo,
+            });
             refresh_items(&app, &c);
         });
     }
     {
         let weak = app.as_weak();
         let cfg = config.clone();
+        let model = users_model.clone();
         app.on_user_removed(move |index| {
             let Some(app) = weak.upgrade() else { return };
             let mut c = cfg.borrow_mut();
-            if let Some(ref mut users) = c.users {
-                let idx = index as usize;
-                if idx < users.len() {
-                    users.remove(idx);
-                    if users.is_empty() {
-                        c.users = None;
-                    }
+            let idx = index as usize;
+            if let Some(ref mut users) = c.users
+                && idx < users.len()
+            {
+                users.remove(idx);
+                if users.is_empty() {
+                    c.users = None;
                 }
+                model.remove(idx);
             }
-            show_users_popup(&app, &c);
             refresh_items(&app, &c);
         });
     }
     {
         let weak = app.as_weak();
         let cfg = config.clone();
+        let model = users_model.clone();
         app.on_user_sudo_toggled(move |index| {
             let Some(app) = weak.upgrade() else { return };
             let mut c = cfg.borrow_mut();
-            if let Some(ref mut users) = c.users {
-                let idx = index as usize;
-                if let Some(user) = users.get_mut(idx) {
-                    user.sudo = !user.sudo;
+            let idx = index as usize;
+            if let Some(ref mut users) = c.users
+                && let Some(user) = users.get_mut(idx)
+            {
+                user.sudo = !user.sudo;
+                if let Some(mut entry) = model.row_data(idx) {
+                    entry.has_sudo = user.sudo;
+                    model.set_row_data(idx, entry);
                 }
             }
-            show_users_popup(&app, &c);
             refresh_items(&app, &c);
         });
     }
@@ -392,47 +420,38 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     {
         let weak = app.as_weak();
         let cfg = config.clone();
+        let model = extra_services_model.clone();
         app.on_strlist_added(move |key, val| {
             let Some(app) = weak.upgrade() else { return };
             let val = val.to_string();
-            if val.is_empty() {
+            if val.is_empty() || key.as_str() != "extra_services" {
                 return;
             }
             let mut c = cfg.borrow_mut();
-            if key.as_str() == "extra_services" && !c.extra_services.contains(&val) {
-                c.extra_services.push(val);
+            if !c.extra_services.contains(&val) {
+                c.extra_services.push(val.clone());
+                model.push(SelectOption {
+                    text: SharedString::from(&val),
+                });
             }
-            show_string_list(
-                &app,
-                &key,
-                &app.get_strlist_title(),
-                match key.as_str() {
-                    "extra_services" => &c.extra_services,
-                    _ => return,
-                },
-            );
             refresh_items(&app, &c);
         });
     }
     {
         let weak = app.as_weak();
         let cfg = config.clone();
+        let model = extra_services_model.clone();
         app.on_strlist_removed(move |key, index| {
             let Some(app) = weak.upgrade() else { return };
+            if key.as_str() != "extra_services" {
+                return;
+            }
             let mut c = cfg.borrow_mut();
             let idx = index as usize;
-            if key.as_str() == "extra_services" && idx < c.extra_services.len() {
+            if idx < c.extra_services.len() {
                 c.extra_services.remove(idx);
+                model.remove(idx);
             }
-            show_string_list(
-                &app,
-                &key,
-                &app.get_strlist_title(),
-                match key.as_str() {
-                    "extra_services" => &c.extra_services,
-                    _ => return,
-                },
-            );
             refresh_items(&app, &c);
         });
     }
@@ -440,17 +459,16 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     // ── Package search ───────────────────────────────
     {
         let weak = app.as_weak();
-        let _cfg = config.clone();
+        let search_model = package_search_model.clone();
         app.on_pkg_search_changed(move |text| {
             let Some(app) = weak.upgrade() else { return };
+            let editing = app.global::<EditingState>();
             if text.is_empty() {
-                app.set_pkg_search_results(ModelRc::new(VecModel::from(
-                    Vec::<PackageSearchResult>::new(),
-                )));
-                app.set_pkg_status_text(SharedString::default());
+                search_model.set_vec(Vec::<PackageSearchResult>::new());
+                editing.set_package_status_text(SharedString::default());
                 return;
             }
-            app.set_pkg_searching_aur(false);
+            editing.set_package_searching_aur(false);
             let query = text.to_string();
             let weak2 = app.as_weak();
             // Repo search is blocking (alpm) — run async
@@ -467,8 +485,9 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                     })
                     .collect();
                 let _ = weak2.upgrade_in_event_loop(move |app| {
-                    app.set_pkg_search_results(ModelRc::new(VecModel::from(items)));
-                    app.set_pkg_status_text(SharedString::default());
+                    set_search_results(&app, items);
+                    app.global::<EditingState>()
+                        .set_package_status_text(SharedString::default());
                 });
             });
         });
@@ -480,8 +499,9 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
             if text.is_empty() {
                 return;
             }
-            app.set_pkg_searching_aur(true);
-            app.set_pkg_status_text(SharedString::from("Searching AUR..."));
+            let editing = app.global::<EditingState>();
+            editing.set_package_searching_aur(true);
+            editing.set_package_status_text(SharedString::from("Searching AUR..."));
             let query = text.to_string();
             let weak2 = app.as_weak();
             tokio::spawn(async move {
@@ -496,14 +516,16 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                             })
                             .collect();
                         let _ = weak2.upgrade_in_event_loop(move |app| {
-                            app.set_pkg_search_results(ModelRc::new(VecModel::from(items)));
-                            app.set_pkg_status_text(SharedString::default());
+                            set_search_results(&app, items);
+                            app.global::<EditingState>()
+                                .set_package_status_text(SharedString::default());
                         });
                     }
                     Err(e) => {
                         let msg = format!("AUR error: {e}");
                         let _ = weak2.upgrade_in_event_loop(move |app| {
-                            app.set_pkg_status_text(SharedString::from(&msg));
+                            app.global::<EditingState>()
+                                .set_package_status_text(SharedString::from(&msg));
                         });
                     }
                 }
@@ -513,29 +535,40 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     {
         let weak = app.as_weak();
         let cfg = config.clone();
+        let search_model = package_search_model.clone();
+        let selected_model = packages_selected_model.clone();
         app.on_pkg_added(move |index| {
             let Some(app) = weak.upgrade() else { return };
-            let result = app.get_pkg_search_results().row_data(index as usize);
-            if let Some(pkg) = result {
-                let name = pkg.name.to_string();
-                let mut c = cfg.borrow_mut();
-                // Check duplicates
-                if c.additional_packages.contains(&name) || c.aur_packages.contains(&name) {
-                    return;
-                }
-                if pkg.repo == "aur" {
-                    c.aur_packages.push(name);
-                } else {
-                    c.additional_packages.push(name);
-                }
-                refresh_pkg_selected(&app, &c);
-                refresh_items(&app, &c);
+            let Some(pkg) = search_model.row_data(index as usize) else {
+                return;
+            };
+            let name = pkg.name.to_string();
+            let mut c = cfg.borrow_mut();
+            // Check duplicates
+            if c.additional_packages.contains(&name) || c.aur_packages.contains(&name) {
+                return;
             }
+            let entry = PackageEntry {
+                name: SharedString::from(&name),
+                repo: pkg.repo.clone(),
+            };
+            // Selected list is rendered repo-first, then AUR — insert at the
+            // boundary for repo additions, append for AUR.
+            if pkg.repo == "aur" {
+                c.aur_packages.push(name);
+                selected_model.push(entry);
+            } else {
+                let insert_at = c.additional_packages.len();
+                c.additional_packages.push(name);
+                selected_model.insert(insert_at, entry);
+            }
+            refresh_items(&app, &c);
         });
     }
     {
         let weak = app.as_weak();
         let cfg = config.clone();
+        let selected_model = packages_selected_model.clone();
         app.on_pkg_removed(move |index| {
             let Some(app) = weak.upgrade() else { return };
             let mut c = cfg.borrow_mut();
@@ -543,13 +576,14 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
             let repo_len = c.additional_packages.len();
             if idx < repo_len {
                 c.additional_packages.remove(idx);
+                selected_model.remove(idx);
             } else {
                 let aur_idx = idx - repo_len;
                 if aur_idx < c.aur_packages.len() {
                     c.aur_packages.remove(aur_idx);
+                    selected_model.remove(idx);
                 }
             }
-            refresh_pkg_selected(&app, &c);
             refresh_items(&app, &c);
         });
     }
@@ -1653,7 +1687,7 @@ fn handle_item_activated(
         }
         // User management popup
         "users" => {
-            show_users_popup(app, config);
+            show_users_popup(app);
         }
         // Keyboard layout (filterable select)
         "keyboard" => {
@@ -1676,11 +1710,11 @@ fn handle_item_activated(
         // Text input popups
         // Package search popup
         "packages" => {
-            show_package_search(app, config);
+            show_package_search(app);
         }
         // String list popup
         "extra_services" => {
-            show_string_list(app, key, "Extra systemd services", &config.extra_services);
+            show_string_list(app, key, "Extra systemd services");
         }
         // Text input popups
         "pool_name"
@@ -1749,8 +1783,44 @@ fn show_text_input(app: &App, key: &str, title: &str, current: &str, password: b
     app.set_text_input_visible(true);
 }
 
-fn show_users_popup(app: &App, config: &GlobalConfig) {
-    let entries: Vec<UserEntry> = config
+fn show_users_popup(app: &App) {
+    app.set_users_visible(true);
+}
+
+/// Replace the contents of the package-search-results VecModel held inside
+/// EditingState. We pull the model out of the global rather than capturing it,
+/// so async tasks don't need to hold a non-Send `Rc<VecModel<_>>`.
+fn set_search_results(app: &App, items: Vec<PackageSearchResult>) {
+    let model = app.global::<EditingState>().get_package_search_results();
+    let vec_model = model
+        .as_any()
+        .downcast_ref::<VecModel<PackageSearchResult>>()
+        .expect("package_search_results is always a VecModel");
+    vec_model.set_vec(items);
+}
+
+fn show_string_list(app: &App, key: &str, title: &str) {
+    app.set_strlist_key(key.into());
+    app.set_strlist_title(title.into());
+    app.set_strlist_visible(true);
+}
+
+fn show_package_search(app: &App) {
+    let editing = app.global::<EditingState>();
+    editing.set_package_searching_aur(false);
+    editing.set_package_status_text(SharedString::default());
+    app.set_pkg_search_visible(true);
+}
+
+/// Mirror the canonical config lists into the long-lived Slint VecModels.
+/// Called once at startup.
+fn seed_editing_state(
+    config: &GlobalConfig,
+    users_model: &Rc<VecModel<UserEntry>>,
+    extra_services_model: &Rc<VecModel<SelectOption>>,
+    packages_selected_model: &Rc<VecModel<PackageEntry>>,
+) {
+    let users: Vec<UserEntry> = config
         .users
         .as_deref()
         .unwrap_or_default()
@@ -1760,25 +1830,18 @@ fn show_users_popup(app: &App, config: &GlobalConfig) {
             has_sudo: u.sudo,
         })
         .collect();
-    app.set_users_list(ModelRc::new(VecModel::from(entries)));
-    app.set_users_visible(true);
-}
+    users_model.set_vec(users);
 
-fn show_string_list(app: &App, key: &str, title: &str, items: &[String]) {
-    let opts: Vec<SelectOption> = items
+    let services: Vec<SelectOption> = config
+        .extra_services
         .iter()
         .map(|s| SelectOption {
             text: SharedString::from(s.as_str()),
         })
         .collect();
-    app.set_strlist_key(key.into());
-    app.set_strlist_title(title.into());
-    app.set_strlist_items(ModelRc::new(VecModel::from(opts)));
-    app.set_strlist_visible(true);
-}
+    extra_services_model.set_vec(services);
 
-fn show_package_search(app: &App, config: &GlobalConfig) {
-    let selected: Vec<PackageEntry> = config
+    let packages: Vec<PackageEntry> = config
         .additional_packages
         .iter()
         .map(|s| PackageEntry {
@@ -1790,29 +1853,7 @@ fn show_package_search(app: &App, config: &GlobalConfig) {
             repo: SharedString::from("aur"),
         }))
         .collect();
-    app.set_pkg_selected(ModelRc::new(VecModel::from(selected)));
-    app.set_pkg_search_results(ModelRc::new(VecModel::from(
-        Vec::<PackageSearchResult>::new(),
-    )));
-    app.set_pkg_searching_aur(false);
-    app.set_pkg_status_text(SharedString::default());
-    app.set_pkg_search_visible(true);
-}
-
-fn refresh_pkg_selected(app: &App, config: &GlobalConfig) {
-    let selected: Vec<PackageEntry> = config
-        .additional_packages
-        .iter()
-        .map(|s| PackageEntry {
-            name: SharedString::from(s.as_str()),
-            repo: SharedString::from("repo"),
-        })
-        .chain(config.aur_packages.iter().map(|s| PackageEntry {
-            name: SharedString::from(s.as_str()),
-            repo: SharedString::from("aur"),
-        }))
-        .collect();
-    app.set_pkg_selected(ModelRc::new(VecModel::from(selected)));
+    packages_selected_model.set_vec(packages);
 }
 
 /// Find the next selectable item index, skipping separators (4), readonly (6), warnings (7).
