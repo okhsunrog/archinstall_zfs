@@ -4,6 +4,8 @@ export component StyledTextInput inherits Rectangle {
     in property <string> placeholder: "";
     in-out property <string> text <=> input.text;
     in property <bool> is-password: false;
+    in property <bool> enabled: true;
+    in property <bool> read-only: false;
     in property <length> font-size: Theme.font-md;
     out property <bool> has-focus: input.has-focus;
 
@@ -11,22 +13,35 @@ export component StyledTextInput inherits Rectangle {
     callback accepted(string);
 
     public function focus-input() { input.focus(); }
+    public function select-all() { input.select-all(); }
+    public function clear-selection() { input.clear-selection(); }
 
     height: Theme.control-height;
     background: Theme.c.surface0;
     border-radius: Theme.radius-sm;
-    border-color: input.has-focus ? Theme.c.blue : Theme.c.surface1;
+    border-color: Theme.c.surface1;
     border-width: 1px;
     clip: true;
     forward-focus: input;
 
-    if input.text == "" && input.preedit-text == "": Text {
+    accessible-role: text-input;
+    accessible-enabled: root.enabled;
+    accessible-read-only: root.read-only;
+    accessible-value <=> root.text;
+    accessible-placeholder-text: root.placeholder;
+    accessible-action-set-value(v) => {
+        input.text = v;
+        root.edited(v);
+    }
+
+    placeholder := Text {
         x: 8px;
         width: parent.width - 16px;
-        text: root.placeholder;
+        text: (input.text == "" && input.preedit-text == "") ? root.placeholder : "";
         color: Theme.c.overlay0;
         font-size: root.font-size;
         vertical-alignment: center;
+        accessible-role: none;
     }
 
     input := TextInput {
@@ -39,6 +54,9 @@ export component StyledTextInput inherits Rectangle {
         font-size: root.font-size;
         input-type: root.is-password ? InputType.password : InputType.text;
         single-line: true;
+        enabled: root.enabled;
+        read-only: root.read-only;
+        accessible-role: none;
 
         cursor-position-changed(cursor-position) => {
             if cursor-position.x + self.computed-x < 8px {
@@ -51,4 +69,16 @@ export component StyledTextInput inherits Rectangle {
         accepted => { root.accepted(self.text); }
         edited => { root.edited(self.text); }
     }
+
+    states [
+        disabled when !root.enabled: {
+            root.opacity: 0.5;
+        }
+        focused when input.has-focus: {
+            root.border-color: Theme.c.blue;
+            root.border-width: 2px;
+        }
+    ]
+
+    animate border-color, border-width { duration: 100ms; easing: ease-out; }
 }
