@@ -1,7 +1,9 @@
 mod config_items;
 mod controllers;
+mod editing_models;
 mod format;
 mod install;
+mod refresh;
 mod tracing_layer;
 
 use std::cell::RefCell;
@@ -13,7 +15,7 @@ use clap::{Parser, Subcommand};
 use color_eyre::eyre::{Result, bail};
 use slint::{Model, ModelRc, SharedString, VecModel};
 
-use archinstall_zfs_core::config::types::{GlobalConfig, UserConfig};
+use archinstall_zfs_core::config::types::GlobalConfig;
 
 pub mod ui {
     slint::include_modules!();
@@ -21,6 +23,7 @@ pub mod ui {
 use ui::*;
 
 use config_items::{apply_radio, apply_text, build_step_items, next_selectable_index};
+use refresh::refresh_items;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -123,30 +126,14 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     let config = Rc::new(RefCell::new(config));
     let kernel_scan: controllers::welcome::KernelScan = Arc::new(std::sync::Mutex::new(None));
 
-    // ── Editable list models (long-lived, mutated incrementally) ──
-    let users_model: Rc<VecModel<UserEntry>> = Rc::new(VecModel::default());
-    let extra_services_model: Rc<VecModel<SelectOption>> = Rc::new(VecModel::default());
-    let packages_selected_model: Rc<VecModel<PackageEntry>> = Rc::new(VecModel::default());
-    let package_search_model: Rc<VecModel<PackageSearchResult>> = Rc::new(VecModel::default());
-
-    {
-        let editing = app.global::<EditingState>();
-        editing.set_users(users_model.clone().into());
-        editing.set_extra_services(extra_services_model.clone().into());
-        editing.set_packages_selected(packages_selected_model.clone().into());
-        editing.set_package_search_results(package_search_model.clone().into());
-    }
-
-    seed_editing_state(
-        &config.borrow(),
-        &users_model,
-        &extra_services_model,
-        &packages_selected_model,
-    );
+    let models = editing_models::EditingModels::new();
+    models.attach(&app);
+    models.seed(&config.borrow());
 
     refresh_items(&app, &config.borrow());
 
     controllers::welcome::setup(&app, &config, &kernel_scan);
+    controllers::lists::setup(&app, &config, &models);
 
     // ── Wizard step changed (rebuild items) ─────────
     {
@@ -284,260 +271,6 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
             let Some(app) = weak.upgrade() else { return };
             let mut c = cfg.borrow_mut();
             apply_text(&mut c, &key, &val);
-            refresh_items(&app, &c);
-        });
-    }
-
-    // ── User management ─────────────────────────────
-    {
-        let weak = app.as_weak();
-        let cfg = config.clone();
-        let model = users_model.clone();
-        app.on_user_added(move |username, password, sudo| {
-            let Some(app) = weak.upgrade() else { return };
-            let username = username.to_string();
-            if !archinstall_zfs_core::config::validation::is_valid_username(&username) {
-                return;
-            }
-            let mut c = cfg.borrow_mut();
-            // Prevent duplicate usernames
-            if c.users
-                .as_ref()
-                .is_some_and(|users| users.iter().any(|u| u.username == username))
-            {
-                return;
-            }
-            let password = if password.is_empty() {
-                None
-            } else {
-                Some(password.to_string())
-            };
-            let user = UserConfig {
-                username: username.clone(),
-                password,
-                sudo,
-                shell: None,
-                groups: None,
-                ssh_authorized_keys: Vec::new(),
-                autologin: false,
-            };
-            c.users.get_or_insert_with(Vec::new).push(user);
-            model.push(UserEntry {
-                username: SharedString::from(&username),
-                has_sudo: sudo,
-            });
-            refresh_items(&app, &c);
-        });
-    }
-    {
-        let weak = app.as_weak();
-        let cfg = config.clone();
-        let model = users_model.clone();
-        app.on_user_removed(move |index| {
-            let Some(app) = weak.upgrade() else { return };
-            let mut c = cfg.borrow_mut();
-            let idx = index as usize;
-            if let Some(ref mut users) = c.users
-                && idx < users.len()
-            {
-                users.remove(idx);
-                if users.is_empty() {
-                    c.users = None;
-                }
-                model.remove(idx);
-            }
-            refresh_items(&app, &c);
-        });
-    }
-    {
-        let weak = app.as_weak();
-        let cfg = config.clone();
-        let model = users_model.clone();
-        app.on_user_sudo_toggled(move |index| {
-            let Some(app) = weak.upgrade() else { return };
-            let mut c = cfg.borrow_mut();
-            let idx = index as usize;
-            if let Some(ref mut users) = c.users
-                && let Some(user) = users.get_mut(idx)
-            {
-                user.sudo = !user.sudo;
-                if let Some(mut entry) = model.row_data(idx) {
-                    entry.has_sudo = user.sudo;
-                    model.set_row_data(idx, entry);
-                }
-            }
-            refresh_items(&app, &c);
-        });
-    }
-
-    // ── String list (extra_services etc.) ─────────────
-    {
-        let weak = app.as_weak();
-        let cfg = config.clone();
-        let model = extra_services_model.clone();
-        app.on_strlist_added(move |key, val| {
-            let Some(app) = weak.upgrade() else { return };
-            let val = val.to_string();
-            if val.is_empty() || key.as_str() != "extra_services" {
-                return;
-            }
-            let mut c = cfg.borrow_mut();
-            if !c.extra_services.contains(&val) {
-                c.extra_services.push(val.clone());
-                model.push(SelectOption {
-                    text: SharedString::from(&val),
-                });
-            }
-            refresh_items(&app, &c);
-        });
-    }
-    {
-        let weak = app.as_weak();
-        let cfg = config.clone();
-        let model = extra_services_model.clone();
-        app.on_strlist_removed(move |key, index| {
-            let Some(app) = weak.upgrade() else { return };
-            if key.as_str() != "extra_services" {
-                return;
-            }
-            let mut c = cfg.borrow_mut();
-            let idx = index as usize;
-            if idx < c.extra_services.len() {
-                c.extra_services.remove(idx);
-                model.remove(idx);
-            }
-            refresh_items(&app, &c);
-        });
-    }
-
-    // ── Package search ───────────────────────────────
-    {
-        let weak = app.as_weak();
-        let search_model = package_search_model.clone();
-        app.on_pkg_search_changed(move |text| {
-            let Some(app) = weak.upgrade() else { return };
-            let editing = app.global::<EditingState>();
-            if text.is_empty() {
-                search_model.set_vec(Vec::<PackageSearchResult>::new());
-                editing.set_package_status_text(SharedString::default());
-                return;
-            }
-            editing.set_package_searching_aur(false);
-            let query = text.to_string();
-            let weak2 = app.as_weak();
-            // Repo search is blocking (alpm) — run async
-            tokio::spawn(async move {
-                let results = archinstall_zfs_core::packages::search_repo(&query, 20)
-                    .await
-                    .unwrap_or_default();
-                let items: Vec<PackageSearchResult> = results
-                    .into_iter()
-                    .map(|p| PackageSearchResult {
-                        name: SharedString::from(&p.name),
-                        description: SharedString::from(&p.description),
-                        repo: SharedString::from(&p.repo),
-                    })
-                    .collect();
-                let _ = weak2.upgrade_in_event_loop(move |app| {
-                    set_search_results(&app, items);
-                    app.global::<EditingState>()
-                        .set_package_status_text(SharedString::default());
-                });
-            });
-        });
-    }
-    {
-        let weak = app.as_weak();
-        app.on_pkg_search_aur(move |text| {
-            let Some(app) = weak.upgrade() else { return };
-            if text.is_empty() {
-                return;
-            }
-            let editing = app.global::<EditingState>();
-            editing.set_package_searching_aur(true);
-            editing.set_package_status_text(SharedString::from("Searching AUR..."));
-            let query = text.to_string();
-            let weak2 = app.as_weak();
-            tokio::spawn(async move {
-                match archinstall_zfs_core::packages::search_aur(&query, 20).await {
-                    Ok(results) => {
-                        let items: Vec<PackageSearchResult> = results
-                            .into_iter()
-                            .map(|p| PackageSearchResult {
-                                name: SharedString::from(&p.name),
-                                description: SharedString::from(&p.description),
-                                repo: SharedString::from(&p.repo),
-                            })
-                            .collect();
-                        let _ = weak2.upgrade_in_event_loop(move |app| {
-                            set_search_results(&app, items);
-                            app.global::<EditingState>()
-                                .set_package_status_text(SharedString::default());
-                        });
-                    }
-                    Err(e) => {
-                        let msg = format!("AUR error: {e}");
-                        let _ = weak2.upgrade_in_event_loop(move |app| {
-                            app.global::<EditingState>()
-                                .set_package_status_text(SharedString::from(&msg));
-                        });
-                    }
-                }
-            });
-        });
-    }
-    {
-        let weak = app.as_weak();
-        let cfg = config.clone();
-        let search_model = package_search_model.clone();
-        let selected_model = packages_selected_model.clone();
-        app.on_pkg_added(move |index| {
-            let Some(app) = weak.upgrade() else { return };
-            let Some(pkg) = search_model.row_data(index as usize) else {
-                return;
-            };
-            let name = pkg.name.to_string();
-            let mut c = cfg.borrow_mut();
-            // Check duplicates
-            if c.additional_packages.contains(&name) || c.aur_packages.contains(&name) {
-                return;
-            }
-            let entry = PackageEntry {
-                name: SharedString::from(&name),
-                repo: pkg.repo.clone(),
-            };
-            // Selected list is rendered repo-first, then AUR — insert at the
-            // boundary for repo additions, append for AUR.
-            if pkg.repo == "aur" {
-                c.aur_packages.push(name);
-                selected_model.push(entry);
-            } else {
-                let insert_at = c.additional_packages.len();
-                c.additional_packages.push(name);
-                selected_model.insert(insert_at, entry);
-            }
-            refresh_items(&app, &c);
-        });
-    }
-    {
-        let weak = app.as_weak();
-        let cfg = config.clone();
-        let selected_model = packages_selected_model.clone();
-        app.on_pkg_removed(move |index| {
-            let Some(app) = weak.upgrade() else { return };
-            let mut c = cfg.borrow_mut();
-            let idx = index as usize;
-            let repo_len = c.additional_packages.len();
-            if idx < repo_len {
-                c.additional_packages.remove(idx);
-                selected_model.remove(idx);
-            } else {
-                let aur_idx = idx - repo_len;
-                if aur_idx < c.aur_packages.len() {
-                    c.aur_packages.remove(aur_idx);
-                    selected_model.remove(idx);
-                }
-            }
             refresh_items(&app, &c);
         });
     }
@@ -739,19 +472,6 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     Ok(())
 }
 
-// ── UI refresh ──────────────────────────────────────
-
-fn refresh_items(app: &App, config: &GlobalConfig) {
-    let step = app.global::<WizardState>().get_current_step() as usize;
-    let items = build_step_items(step, config);
-    let first = next_selectable_index(&items, -1, 1);
-    app.global::<WizardState>().set_focused_index(first);
-    app.global::<WizardState>()
-        .set_config_items(ModelRc::new(VecModel::from(items)));
-    app.global::<WizardState>()
-        .set_status_text(SharedString::default());
-}
-
 // ── Item activation (open popup) ─────────────────────
 
 fn handle_item_activated(
@@ -950,18 +670,6 @@ fn show_users_popup(app: &App) {
     app.set_users_visible(true);
 }
 
-/// Replace the contents of the package-search-results VecModel held inside
-/// EditingState. We pull the model out of the global rather than capturing it,
-/// so async tasks don't need to hold a non-Send `Rc<VecModel<_>>`.
-fn set_search_results(app: &App, items: Vec<PackageSearchResult>) {
-    let model = app.global::<EditingState>().get_package_search_results();
-    let vec_model = model
-        .as_any()
-        .downcast_ref::<VecModel<PackageSearchResult>>()
-        .expect("package_search_results is always a VecModel");
-    vec_model.set_vec(items);
-}
-
 fn show_string_list(app: &App, key: &str, title: &str) {
     app.set_strlist_key(key.into());
     app.set_strlist_title(title.into());
@@ -973,48 +681,4 @@ fn show_package_search(app: &App) {
     editing.set_package_searching_aur(false);
     editing.set_package_status_text(SharedString::default());
     app.set_pkg_search_visible(true);
-}
-
-/// Mirror the canonical config lists into the long-lived Slint VecModels.
-/// Called once at startup.
-fn seed_editing_state(
-    config: &GlobalConfig,
-    users_model: &Rc<VecModel<UserEntry>>,
-    extra_services_model: &Rc<VecModel<SelectOption>>,
-    packages_selected_model: &Rc<VecModel<PackageEntry>>,
-) {
-    let users: Vec<UserEntry> = config
-        .users
-        .as_deref()
-        .unwrap_or_default()
-        .iter()
-        .map(|u| UserEntry {
-            username: SharedString::from(&u.username),
-            has_sudo: u.sudo,
-        })
-        .collect();
-    users_model.set_vec(users);
-
-    let services: Vec<SelectOption> = config
-        .extra_services
-        .iter()
-        .map(|s| SelectOption {
-            text: SharedString::from(s.as_str()),
-        })
-        .collect();
-    extra_services_model.set_vec(services);
-
-    let packages: Vec<PackageEntry> = config
-        .additional_packages
-        .iter()
-        .map(|s| PackageEntry {
-            name: SharedString::from(s.as_str()),
-            repo: SharedString::from("repo"),
-        })
-        .chain(config.aur_packages.iter().map(|s| PackageEntry {
-            name: SharedString::from(s.as_str()),
-            repo: SharedString::from("aur"),
-        }))
-        .collect();
-    packages_selected_model.set_vec(packages);
 }
