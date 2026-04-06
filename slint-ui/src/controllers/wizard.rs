@@ -107,10 +107,12 @@ fn setup_select_confirmed(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_
             if let Some(info) = kernels.get(idx as usize) {
                 let mut c = cfg.borrow_mut();
                 c.kernels = Some(vec![info.name.to_string()]);
-                if let Some(ref cached) = *kscan.lock().unwrap()
-                    && let Some(result) = cached.get(idx as usize)
-                    && let Some(mode) = result.best_mode()
-                {
+                let auto_mode = kscan.with(|cached| {
+                    cached
+                        .and_then(|results| results.get(idx as usize))
+                        .and_then(|r| r.best_mode())
+                });
+                if let Some(mode) = auto_mode {
                     c.zfs_module_mode = mode;
                 }
                 refresh_items(&app, &c);
@@ -307,43 +309,45 @@ fn setup_password_strength(app: &App) {
     });
 }
 
+/// Format the cached/fresh kernel scan results as user-facing strings.
+fn build_kernel_options(
+    results: &[archinstall_zfs_core::kernel::scanner::CompatibilityResult],
+) -> Vec<String> {
+    archinstall_zfs_core::kernel::AVAILABLE_KERNELS
+        .iter()
+        .zip(results.iter())
+        .map(|(info, result)| {
+            let ver = result.kernel_version.as_deref().unwrap_or("?");
+            if result.best_mode().is_some() {
+                format!(
+                    "\u{2713} {} ({}) [{}]",
+                    info.display_name,
+                    ver,
+                    result.mode_label()
+                )
+            } else {
+                format!("\u{2717} {} ({}) [incompatible]", info.display_name, ver)
+            }
+        })
+        .collect()
+}
+
 // ── Item activation (open the right popup for the clicked row) ──────
 
 fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_scan: &KernelScan) {
     match key {
         "kernel" => {
-            let cached = kernel_scan.lock().unwrap();
-            let results: Vec<archinstall_zfs_core::kernel::scanner::CompatibilityResult>;
-            let scan = if let Some(ref cached_results) = *cached {
-                cached_results
-            } else {
-                drop(cached);
-                let rt = tokio::runtime::Handle::current();
-                results = rt.block_on(archinstall_zfs_core::kernel::scanner::scan_all_kernels());
-                &results
-            };
-
-            // Only show compatible kernels (best_mode is Some)
-            let mut options = Vec::new();
-            for (info, result) in archinstall_zfs_core::kernel::AVAILABLE_KERNELS
-                .iter()
-                .zip(scan.iter())
-            {
-                let ver = result.kernel_version.as_deref().unwrap_or("?");
-                if result.best_mode().is_some() {
-                    options.push(format!(
-                        "\u{2713} {} ({}) [{}]",
-                        info.display_name,
-                        ver,
-                        result.mode_label()
-                    ));
+            // Use the cached scan results if available; otherwise block-scan now.
+            let fresh: Vec<archinstall_zfs_core::kernel::scanner::CompatibilityResult>;
+            let options =
+                if let Some(opts) = kernel_scan.with(|cached| cached.map(build_kernel_options)) {
+                    opts
                 } else {
-                    options.push(format!(
-                        "\u{2717} {} ({}) [incompatible]",
-                        info.display_name, ver
-                    ));
-                }
-            }
+                    let rt = tokio::runtime::Handle::current();
+                    fresh = rt.block_on(archinstall_zfs_core::kernel::scanner::scan_all_kernels());
+                    build_kernel_options(&fresh)
+                };
+
             let opt_refs: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
             let current_kernel = config.primary_kernel();
             let current_idx = archinstall_zfs_core::kernel::AVAILABLE_KERNELS
@@ -417,7 +421,7 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
             show_package_search(app);
         }
         "extra_services" => {
-            show_string_list(app, key, "Extra systemd services");
+            show_string_list(app, "Extra systemd services");
         }
         "pool_name"
         | "dataset_prefix"
@@ -490,18 +494,18 @@ fn show_text_input(app: &App, key: &str, title: &str, current: &str, password: b
 }
 
 fn show_users_popup(app: &App) {
-    app.set_users_visible(true);
+    app.global::<PopupState>().set_users_visible(true);
 }
 
-fn show_string_list(app: &App, key: &str, title: &str) {
-    app.set_strlist_key(key.into());
-    app.set_strlist_title(title.into());
-    app.set_strlist_visible(true);
+fn show_string_list(app: &App, title: &str) {
+    let popup = app.global::<PopupState>();
+    popup.set_strlist_title(title.into());
+    popup.set_strlist_visible(true);
 }
 
 fn show_package_search(app: &App) {
     let editing = app.global::<EditingState>();
     editing.set_package_searching_aur(false);
     editing.set_package_status_text(SharedString::default());
-    app.set_pkg_search_visible(true);
+    app.global::<PopupState>().set_pkg_search_visible(true);
 }

@@ -12,8 +12,34 @@ use slint::{ComponentHandle, SharedString};
 
 use crate::ui::{App, WelcomeState};
 
-/// Background kernel compatibility scan results, populated by `start_kernel_scan`.
-pub type KernelScan = Arc<Mutex<Option<Vec<CompatibilityResult>>>>;
+/// Cached results of the background kernel compatibility scan. The wizard's
+/// "Kernel" item activation reads this to populate the kernel select popup
+/// without re-scanning every time.
+#[derive(Clone, Default)]
+pub struct KernelScan {
+    inner: Arc<Mutex<Option<Vec<CompatibilityResult>>>>,
+}
+
+impl KernelScan {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn is_some(&self) -> bool {
+        self.inner.lock().unwrap().is_some()
+    }
+
+    /// Borrow the cached results for the duration of `f`. `None` if the scan
+    /// hasn't completed yet.
+    pub fn with<R>(&self, f: impl FnOnce(Option<&[CompatibilityResult]>) -> R) -> R {
+        let guard = self.inner.lock().unwrap();
+        f(guard.as_deref())
+    }
+
+    pub(super) fn store(&self, results: Vec<CompatibilityResult>) {
+        *self.inner.lock().unwrap() = Some(results);
+    }
+}
 
 pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_scan: &KernelScan) {
     run_initial_checks(app, config, kernel_scan);
@@ -31,7 +57,7 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_scan: &Kernel
             {
                 start_zfs_init(&app, &cfg.borrow());
             }
-            if kscan.lock().unwrap().is_none() {
+            if !kscan.is_some() {
                 start_kernel_scan(&kscan);
             }
         }
@@ -135,7 +161,7 @@ fn start_kernel_scan(scan_cache: &KernelScan) {
                 "kernel scan result"
             );
         }
-        *cache.lock().unwrap() = Some(results);
+        cache.store(results);
         tracing::info!("kernel compatibility scan complete");
     });
 }

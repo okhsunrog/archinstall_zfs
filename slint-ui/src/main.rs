@@ -123,7 +123,7 @@ async fn main() -> Result<()> {
 fn run_gui(config: GlobalConfig) -> Result<()> {
     let app = App::new()?;
     let config = Rc::new(RefCell::new(config));
-    let kernel_scan: controllers::welcome::KernelScan = Arc::new(std::sync::Mutex::new(None));
+    let kernel_scan = controllers::welcome::KernelScan::new();
 
     let models = editing_models::EditingModels::new();
     models.attach(&app);
@@ -135,22 +135,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     controllers::lists::setup(&app, &config, &models);
     controllers::wizard::setup(&app, &config, &kernel_scan);
     controllers::install::setup(&app, &config);
-
-    // ── Quit ─────────────────────────────────────────
-    {
-        let weak = app.as_weak();
-        app.on_quit_requested(move || {
-            if let Some(app) = weak.upgrade() {
-                let should_reboot = app.global::<InstallState>().get_state() == 2;
-                let _ = app.window().hide();
-                if should_reboot {
-                    let _ = std::process::Command::new("systemctl")
-                        .arg("reboot")
-                        .spawn();
-                }
-            }
-        });
-    }
+    controllers::quit::setup(&app);
 
     app.run()?;
     Ok(())

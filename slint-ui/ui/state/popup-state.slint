@@ -28,4 +28,14 @@ export global PopupState {
     in-out property <string> password-strength-label;
     in-out property <string> password-strength-hint;
     in-out property <color> password-strength-color;
+
+    // ── User management popup ──
+    in-out property <bool> users-visible: false;
+
+    // ── String list popup ──
+    in-out property <bool> strlist-visible: false;
+    in-out property <string> strlist-title;
+
+    // ── Package search popup ──
+    in-out property <bool> pkg-search-visible: false;
 }

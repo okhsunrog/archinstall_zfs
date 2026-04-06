@@ -102,10 +102,10 @@ fn setup_extra_services(app: &App, config: &Rc<RefCell<GlobalConfig>>, models: &
     let weak = app.as_weak();
     let cfg = config.clone();
     let model = models.extra_services.clone();
-    app.on_strlist_added(move |key, val| {
+    app.on_strlist_added(move |val| {
         let Some(app) = weak.upgrade() else { return };
         let val = val.to_string();
-        if val.is_empty() || key.as_str() != "extra_services" {
+        if val.is_empty() {
             return;
         }
         let mut c = cfg.borrow_mut();
@@ -121,11 +121,8 @@ fn setup_extra_services(app: &App, config: &Rc<RefCell<GlobalConfig>>, models: &
     let weak = app.as_weak();
     let cfg = config.clone();
     let model = models.extra_services.clone();
-    app.on_strlist_removed(move |key, index| {
+    app.on_strlist_removed(move |index| {
         let Some(app) = weak.upgrade() else { return };
-        if key.as_str() != "extra_services" {
-            return;
-        }
         let mut c = cfg.borrow_mut();
         let idx = index as usize;
         if idx < c.extra_services.len() {

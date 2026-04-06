@@ -40,20 +40,11 @@ export component App inherits Window {
     title: "archinstall-zfs";
     forward-focus: main-focus-scope;
 
-    // User management popup state
-    in-out property <bool> users-visible: false;
+    // String list popup callbacks (only extra_services uses this for now)
+    callback strlist-added(string);
+    callback strlist-removed(int);
 
-    // String list popup state
-    in-out property <bool> strlist-visible: false;
-    in-out property <string> strlist-title;
-    in-out property <string> strlist-key;
-
-    callback strlist-added(string, string); // key, value
-    callback strlist-removed(string, int);  // key, index
-
-    // Package search popup state
-    in-out property <bool> pkg-search-visible: false;
-
+    // Package search popup callbacks
     callback pkg-search-changed(string);
     callback pkg-search-aur(string);
     callback pkg-added(int);
@@ -77,7 +68,7 @@ export component App inherits Window {
 
     // ── Keyboard navigation ─────────────────────────
     main-focus-scope := FocusScope {
-        enabled: InstallState.state == 0 && !PopupState.select-visible && !PopupState.text-input-visible && !users-visible && !pkg-search-visible && !strlist-visible;
+        enabled: InstallState.state == 0 && !PopupState.select-visible && !PopupState.text-input-visible && !PopupState.users-visible && !PopupState.pkg-search-visible && !PopupState.strlist-visible;
         key-pressed(e) => {
             if e.text == Key.DownArrow || e.text == "j" {
                 key-nav-down();
@@ -175,59 +166,37 @@ export component App inherits Window {
 
     UserManagePopup {
         users: EditingState.users;
-        popup-visible: users-visible;
+        popup-visible: PopupState.users-visible;
 
         user-added(username, password, sudo) => {
             root.user-added(username, password, sudo);
         }
-        user-removed(index) => {
-            root.user-removed(index);
-        }
-        user-sudo-toggled(index) => {
-            root.user-sudo-toggled(index);
-        }
-        closed() => {
-            users-visible = false;
-        }
+        user-removed(index) => { root.user-removed(index); }
+        user-sudo-toggled(index) => { root.user-sudo-toggled(index); }
+        closed() => { PopupState.users-visible = false; }
     }
 
     StringListPopup {
-        title: strlist-title;
+        title: PopupState.strlist-title;
         items: EditingState.extra-services;
-        popup-visible: strlist-visible;
+        popup-visible: PopupState.strlist-visible;
 
-        item-added(val) => {
-            strlist-added(strlist-key, val);
-        }
-        item-removed(index) => {
-            strlist-removed(strlist-key, index);
-        }
-        closed() => {
-            strlist-visible = false;
-        }
+        item-added(val) => { strlist-added(val); }
+        item-removed(index) => { strlist-removed(index); }
+        closed() => { PopupState.strlist-visible = false; }
     }
 
     PackageSearchPopup {
         search-results: EditingState.package-search-results;
         selected-packages: EditingState.packages-selected;
-        popup-visible: pkg-search-visible;
+        popup-visible: PopupState.pkg-search-visible;
         searching-aur: EditingState.package-searching-aur;
         status-text: EditingState.package-status-text;
 
-        search-changed(text) => {
-            root.pkg-search-changed(text);
-        }
-        search-aur(text) => {
-            root.pkg-search-aur(text);
-        }
-        package-added(index) => {
-            root.pkg-added(index);
-        }
-        package-removed(index) => {
-            root.pkg-removed(index);
-        }
-        closed() => {
-            pkg-search-visible = false;
-        }
+        search-changed(text) => { root.pkg-search-changed(text); }
+        search-aur(text) => { root.pkg-search-aur(text); }
+        package-added(index) => { root.pkg-added(index); }
+        package-removed(index) => { root.pkg-removed(index); }
+        closed() => { PopupState.pkg-search-visible = false; }
     }
 }
