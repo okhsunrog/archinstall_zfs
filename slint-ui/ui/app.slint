@@ -21,6 +21,7 @@ import { Badge } from "components/badge.slint";
 import { ProgressBar } from "components/progress-bar.slint";
 import { DeleteButton } from "components/delete-button.slint";
 import { SidebarItem } from "components/sidebar-item.slint";
+import { ConfigItemRow } from "components/config-item.slint";
 import { TextInputPopup } from "popups/text-input-popup.slint";
 import { SelectPopup } from "popups/select-popup.slint";
 import { UserManagePopup } from "popups/user-manage-popup.slint";
@@ -493,201 +494,17 @@ export component App inherits Window {
                         padding-left: 12px;
                         padding-right: 12px;
 
-                        for item[index] in config-items: Rectangle {
-                            // Heights
-                            height: item.item-type == ItemType.separator ? 12px      // separator gap
-                                  : item.item-type == ItemType.warning ? 32px      // warning
-                                  : item.item-type == ItemType.radio-header ? 36px      // radio card header
-                                  : item.item-type == ItemType.radio-option ? 36px      // radio option
-                                  : item.item-type == ItemType.action ? 40px      // action button
-                                  : 44px;                           // normal items
+                        for item[index] in config-items: ConfigItemRow {
+                            item: item;
+                            index: index;
+                            focused-index: focused-index;
 
-                            // Card backgrounds
-                            border-radius: item.item-type == ItemType.radio-header ? 8px    // radio header: top corners only visually
-                                         : item.item-type == ItemType.separator ? 0px
-                                         : item.item-type == ItemType.warning ? 6px
-                                         : 8px;
-
-                            background: item.item-type == ItemType.separator ? transparent
-                                      : item.item-type == ItemType.radio-header ? Theme.c.surface0  // radio header = card top
-                                      : item.item-type == ItemType.radio-option ? Theme.c.surface0  // radio body = card body
-                                      : item.item-type == ItemType.warning ? transparent
-                                      : item.item-type == ItemType.action ? transparent       // actions = no card bg
-                                      : item.item-type == ItemType.readonly ? Theme.c.surface0  // readonly = card
-                                      : Theme.c.surface0;                       // normal items = card
-
-                            // Hover highlight
-                            Rectangle {
-                                visible: (row-ta.has-hover || index == focused-index)
-                                    && item.item-type != ItemType.separator
-                                    && item.item-type != ItemType.readonly
-                                    && item.item-type != ItemType.warning
-                                    && item.item-type != ItemType.radio-header;
-                                background: #ffffff10;
-                                border-radius: parent.border-radius;
-                            }
-
-                            // ── Separator ──
-                            if item.item-type == ItemType.separator: Rectangle { }
-
-                            // ── Warning ──
-                            if item.item-type == ItemType.warning: HorizontalLayout {
-                                padding-left: 12px;
-                                spacing: 8px;
-                                alignment: start;
-
-                                Text {
-                                    text: "\u{26a0}";
-                                    color: Theme.c.yellow;
-                                    font-size: 14px;
-                                    vertical-alignment: center;
-                                }
-                                Text {
-                                    text: item.value;
-                                    color: Theme.c.yellow;
-                                    font-size: 13px;
-                                    vertical-alignment: center;
-                                }
-                            }
-
-                            // ── Radio group header (card title bar) ──
-                            if item.item-type == ItemType.radio-header: HorizontalLayout {
-                                padding-left: 14px;
-                                alignment: start;
-
-                                Text {
-                                    text: item.label;
-                                    color: Theme.c.blue;
-                                    font-size: 13px;
-                                    font-weight: FontWeight.semi-bold;
-                                    vertical-alignment: center;
-                                }
-                            }
-
-                            // ── Radio option (card body row) ──
-                            if item.item-type == ItemType.radio-option: HorizontalLayout {
-                                padding-left: 14px;
-                                padding-right: 14px;
-                                spacing: 10px;
-                                alignment: start;
-
-                                Text {
-                                    text: item.value == "selected" ? "\u{25cf}" : "\u{25cb}";
-                                    color: item.value == "selected" ? Theme.c.green : Theme.c.overlay0;
-                                    font-size: 16px;
-                                    vertical-alignment: center;
-                                    width: 18px;
-                                }
-
-                                Text {
-                                    text: item.label;
-                                    color: item.value == "selected" ? Theme.c.text : Theme.c.subtext0;
-                                    font-size: 14px;
-                                    vertical-alignment: center;
-                                }
-                            }
-
-                            // ── Action button ──
-                            if item.item-type == ItemType.action: Rectangle {
-                                background: item.key == "install" ? Theme.c.blue : Theme.c.surface0;
-                                border-radius: 8px;
-
-                                Rectangle {
-                                    visible: row-ta.has-hover || index == focused-index;
-                                    background: #ffffff18;
-                                    border-radius: parent.border-radius;
-                                }
-
-                                Text {
-                                    text: item.label;
-                                    color: item.key == "install" ? Theme.c.base : Theme.c.text;
-                                    font-size: 14px;
-                                    font-weight: FontWeight.semi-bold;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                            }
-
-                            // ── Read-only summary (review step) ──
-                            if item.item-type == ItemType.readonly: HorizontalLayout {
-                                padding-left: 14px;
-                                padding-right: 14px;
-
-                                Text {
-                                    text: item.label;
-                                    color: Theme.c.subtext0;
-                                    font-size: 13px;
-                                    vertical-alignment: center;
-                                    horizontal-stretch: 1;
-                                }
-
-                                Text {
-                                    text: item.value;
-                                    color: item.value == "Not set" || item.value == "None" || item.value == "Disabled"
-                                        ? Theme.c.overlay0
-                                        : Theme.c.green;
-                                    font-size: 13px;
-                                    vertical-alignment: center;
-                                }
-                            }
-
-                            // ── Normal config items (text, select, password, toggle) ──
-                            if item.item-type == ItemType.text || item.item-type == ItemType.select
-                                || item.item-type == ItemType.password || item.item-type == ItemType.toggle: HorizontalLayout {
-                                padding-left: 14px;
-                                padding-right: 14px;
-
-                                Text {
-                                    text: item.label;
-                                    color: Theme.c.subtext1;
-                                    font-size: 14px;
-                                    vertical-alignment: center;
-                                    horizontal-stretch: 1;
-                                }
-
-                                // Type indicator + value
-                                HorizontalLayout {
-                                    spacing: 6px;
-                                    alignment: end;
-
-                                    // Toggle indicator
-                                    if item.item-type == ItemType.toggle: Text {
-                                        text: item.value == "Enabled" ? "\u{25cf}" : "\u{25cb}";
-                                        color: item.value == "Enabled" ? Theme.c.green : Theme.c.overlay0;
-                                        font-size: 14px;
-                                        vertical-alignment: center;
-                                    }
-
-                                    Text {
-                                        text: item.value;
-                                        color: item.value == "Not set" || item.value == "None" || item.value == "Disabled"
-                                            ? Theme.c.overlay0
-                                            : Theme.c.green;
-                                        font-size: 14px;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                            }
-
-                            // ── Touch area (for all item types) ──
-                            row-ta := TouchArea {
-                                mouse-cursor: item.item-type == ItemType.separator || item.item-type == ItemType.readonly
-                                    || item.item-type == ItemType.warning || item.item-type == ItemType.radio-header
-                                    ? default : pointer;
-                                clicked => {
-                                    focused-index = index;
-                                    if item.item-type == ItemType.action {
-                                        if item.key == "install" { install-requested(); }
-                                        if item.key == "quit" { quit-requested(); }
-                                    } else if item.item-type == ItemType.toggle {
-                                        toggle-activated(item.key);
-                                    } else if item.item-type != ItemType.separator
-                                           && item.item-type != ItemType.readonly
-                                           && item.item-type != ItemType.warning
-                                           && item.item-type != ItemType.radio-header {
-                                        item-activated(item.key);
-                                    }
-                                }
+                            focus-requested(i) => { focused-index = i; }
+                            activated(key) => { item-activated(key); }
+                            toggled(key) => { toggle-activated(key); }
+                            action-clicked(key) => {
+                                if key == "install" { install-requested(); }
+                                if key == "quit" { quit-requested(); }
                             }
                         }
                     }

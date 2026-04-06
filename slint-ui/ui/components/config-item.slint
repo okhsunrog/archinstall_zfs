@@ -1,0 +1,203 @@
+// Renders one row of the wizard's config-items list. The visual appearance
+// depends on the row's ItemType (text/select/password/toggle, radio-header,
+// radio-option, separator, warning, action, readonly).
+
+import { Theme } from "../styling.slint";
+import { ConfigItem, ItemType } from "../types.slint";
+
+export component ConfigItemRow inherits Rectangle {
+    in property <ConfigItem> item;
+    in property <int> index;
+    in property <int> focused-index;
+
+    callback activated(string);          // generic items (text/select/password)
+    callback toggled(string);            // toggle items
+    callback action-clicked(string);     // action items ("install" / "quit")
+    callback focus-requested(int);       // pointer hover/click → set focus
+
+    height: item.item-type == ItemType.separator ? 12px
+          : item.item-type == ItemType.warning ? 32px
+          : item.item-type == ItemType.radio-header ? 36px
+          : item.item-type == ItemType.radio-option ? 36px
+          : item.item-type == ItemType.action ? 40px
+          : 44px;
+
+    border-radius: item.item-type == ItemType.separator ? 0px
+                 : item.item-type == ItemType.warning ? 6px
+                 : 8px;
+
+    background: item.item-type == ItemType.separator ? #00000000
+              : item.item-type == ItemType.warning ? #00000000
+              : item.item-type == ItemType.action ? #00000000
+              : Theme.c.surface0;
+
+    // Hover / focus highlight
+    Rectangle {
+        visible: (row-ta.has-hover || index == focused-index)
+            && item.item-type != ItemType.separator
+            && item.item-type != ItemType.readonly
+            && item.item-type != ItemType.warning
+            && item.item-type != ItemType.radio-header;
+        background: #ffffff10;
+        border-radius: parent.border-radius;
+    }
+
+    // ── Separator ──
+    if item.item-type == ItemType.separator: Rectangle { }
+
+    // ── Warning ──
+    if item.item-type == ItemType.warning: HorizontalLayout {
+        padding-left: 12px;
+        spacing: 8px;
+        alignment: start;
+
+        Text {
+            text: "\u{26a0}";
+            color: Theme.c.yellow;
+            font-size: 14px;
+            vertical-alignment: center;
+        }
+        Text {
+            text: item.value;
+            color: Theme.c.yellow;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+    }
+
+    // ── Radio group header (card title bar) ──
+    if item.item-type == ItemType.radio-header: HorizontalLayout {
+        padding-left: 14px;
+        alignment: start;
+
+        Text {
+            text: item.label;
+            color: Theme.c.blue;
+            font-size: 13px;
+            font-weight: FontWeight.semi-bold;
+            vertical-alignment: center;
+        }
+    }
+
+    // ── Radio option (card body row) ──
+    if item.item-type == ItemType.radio-option: HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 10px;
+        alignment: start;
+
+        Text {
+            text: item.value == "selected" ? "\u{25cf}" : "\u{25cb}";
+            color: item.value == "selected" ? Theme.c.green : Theme.c.overlay0;
+            font-size: 16px;
+            vertical-alignment: center;
+            width: 18px;
+        }
+
+        Text {
+            text: item.label;
+            color: item.value == "selected" ? Theme.c.text : Theme.c.subtext0;
+            font-size: 14px;
+            vertical-alignment: center;
+        }
+    }
+
+    // ── Action button ──
+    if item.item-type == ItemType.action: Rectangle {
+        background: item.key == "install" ? Theme.c.blue : Theme.c.surface0;
+        border-radius: 8px;
+
+        Rectangle {
+            visible: row-ta.has-hover || index == focused-index;
+            background: #ffffff18;
+            border-radius: parent.border-radius;
+        }
+
+        Text {
+            text: item.label;
+            color: item.key == "install" ? Theme.c.base : Theme.c.text;
+            font-size: 14px;
+            font-weight: FontWeight.semi-bold;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    // ── Read-only summary (review step) ──
+    if item.item-type == ItemType.readonly: HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+
+        Text {
+            text: item.label;
+            color: Theme.c.subtext0;
+            font-size: 13px;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+
+        Text {
+            text: item.value;
+            color: item.value == "Not set" || item.value == "None" || item.value == "Disabled"
+                ? Theme.c.overlay0
+                : Theme.c.green;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+    }
+
+    // ── Normal config items (text, select, password, toggle) ──
+    if item.item-type == ItemType.text || item.item-type == ItemType.select
+        || item.item-type == ItemType.password || item.item-type == ItemType.toggle: HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+
+        Text {
+            text: item.label;
+            color: Theme.c.subtext1;
+            font-size: 14px;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: end;
+
+            if item.item-type == ItemType.toggle: Text {
+                text: item.value == "Enabled" ? "\u{25cf}" : "\u{25cb}";
+                color: item.value == "Enabled" ? Theme.c.green : Theme.c.overlay0;
+                font-size: 14px;
+                vertical-alignment: center;
+            }
+
+            Text {
+                text: item.value;
+                color: item.value == "Not set" || item.value == "None" || item.value == "Disabled"
+                    ? Theme.c.overlay0
+                    : Theme.c.green;
+                font-size: 14px;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    row-ta := TouchArea {
+        mouse-cursor: item.item-type == ItemType.separator || item.item-type == ItemType.readonly
+            || item.item-type == ItemType.warning || item.item-type == ItemType.radio-header
+            ? default : pointer;
+        clicked => {
+            root.focus-requested(index);
+            if item.item-type == ItemType.action {
+                root.action-clicked(item.key);
+            } else if item.item-type == ItemType.toggle {
+                root.toggled(item.key);
+            } else if item.item-type != ItemType.separator
+                   && item.item-type != ItemType.readonly
+                   && item.item-type != ItemType.warning
+                   && item.item-type != ItemType.radio-header {
+                root.activated(item.key);
+            }
+        }
+    }
+}
