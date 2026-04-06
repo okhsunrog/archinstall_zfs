@@ -1,6 +1,22 @@
 // Renders one row of the wizard's config-items list. The visual appearance
-// depends on the row's ItemType (text/select/password/toggle, radio-header,
-// radio-option, separator, warning, action, readonly).
+// depends on the row's ItemType. Field types (text/select/password/toggle/
+// radio-option/readonly) are rendered as connected section cards: every
+// row in a section shares the same surface0 background and the corners
+// are rounded only on the first/last row of the section, with a 1px
+// hairline divider drawn between adjacent rows.
+//
+// Visual hierarchy:
+//   SECTION HEADER             ← small uppercase gray label, no card
+//   ╭─────────────────────╮
+//   │ Field 1     value   │   ← top corners rounded (is-first-in-section)
+//   │ ─────────────────── │   ← hairline divider
+//   │ Field 2     value   │
+//   │ ─────────────────── │
+//   │ ● Radio option      │   ← bottom corners rounded (is-last-in-section)
+//   ╰─────────────────────╯
+//
+// is-first-in-section / is-last-in-section flags come from
+// `mark_section_boundaries` in Rust's config_items.rs.
 
 import { Theme } from "../styling.slint";
 import { ConfigItem, ItemType } from "../types.slint";
@@ -16,38 +32,85 @@ export component ConfigItemRow inherits Rectangle {
     callback action-clicked(string);     // action items ("install" / "quit")
     callback focus-requested(int);       // pointer hover/click → set focus
 
-    height: item.item-type == ItemType.separator ? 12px
-          : item.item-type == ItemType.warning ? 32px
-          : item.item-type == ItemType.radio-header ? 36px
-          : item.item-type == ItemType.radio-option ? 36px
-          : item.item-type == ItemType.action ? 40px
+    // Pre-computed predicates so the rest of the component reads cleanly.
+    property <bool> is-section-header: item.item-type == ItemType.section-header;
+    property <bool> is-separator: item.item-type == ItemType.separator;
+    property <bool> is-warning: item.item-type == ItemType.warning;
+    property <bool> is-action: item.item-type == ItemType.action;
+    property <bool> is-radio-option: item.item-type == ItemType.radio-option;
+    property <bool> is-readonly: item.item-type == ItemType.readonly;
+    property <bool> is-toggle: item.item-type == ItemType.toggle;
+    property <bool> is-field: item.item-type == ItemType.text
+        || item.item-type == ItemType.select
+        || item.item-type == ItemType.password
+        || is-toggle
+        || is-radio-option
+        || is-readonly;
+    property <bool> is-non-interactive: is-separator || is-warning || is-section-header || is-readonly;
+
+    height: is-separator ? 8px
+          : is-warning ? 32px
+          : is-section-header ? 36px
+          : is-radio-option ? 36px
+          : is-action ? 40px
           : 44px;
 
-    border-radius: item.item-type == ItemType.separator ? 0px
-                 : item.item-type == ItemType.warning ? 6px
-                 : 8px;
-
-    background: item.item-type == ItemType.separator ? #00000000
-              : item.item-type == ItemType.warning ? #00000000
-              : item.item-type == ItemType.action ? #00000000
-              : Theme.c.surface0;
-
-    // Hover / focus highlight
-    Rectangle {
-        visible: (row-ta.has-hover || index == focused-index)
-            && item.item-type != ItemType.separator
-            && item.item-type != ItemType.readonly
-            && item.item-type != ItemType.warning
-            && item.item-type != ItemType.radio-header;
-        background: #ffffff10;
-        border-radius: parent.border-radius;
+    // Section card background — only field rows draw it. Corner radius is
+    // applied conditionally per-corner so adjacent rows in the same section
+    // stitch into one rounded card. (Slint border-radius applies to all four
+    // corners; using border-top-{left,right}-radius and the matching bottom
+    // properties lets us round only the relevant corners.)
+    if is-field: Rectangle {
+        background: Theme.c.surface0;
+        border-top-left-radius: item.is-first-in-section ? 8px : 0px;
+        border-top-right-radius: item.is-first-in-section ? 8px : 0px;
+        border-bottom-left-radius: item.is-last-in-section ? 8px : 0px;
+        border-bottom-right-radius: item.is-last-in-section ? 8px : 0px;
     }
 
-    // ── Separator ──
-    if item.item-type == ItemType.separator: Rectangle { }
+    // Hairline divider at the bottom of each non-last field row.
+    // 1px tall, inset 14px from each edge so it doesn't touch the rounded
+    // corners of adjacent sections.
+    if is-field && !item.is-last-in-section: Rectangle {
+        x: 14px;
+        y: parent.height - self.height;
+        width: parent.width - 28px;
+        height: 1px;
+        background: Theme.c.surface1;
+    }
+
+    // Hover / focus highlight overlay (interactive rows only).
+    if is-field && !is-readonly: Rectangle {
+        visible: row-ta.has-hover || index == focused-index;
+        background: #ffffff10;
+        border-top-left-radius: item.is-first-in-section ? 8px : 0px;
+        border-top-right-radius: item.is-first-in-section ? 8px : 0px;
+        border-bottom-left-radius: item.is-last-in-section ? 8px : 0px;
+        border-bottom-right-radius: item.is-last-in-section ? 8px : 0px;
+    }
+
+    // ── Separator (just empty vertical space between sections) ──
+    if is-separator: Rectangle { }
+
+    // ── Section header (small uppercase label above the connected card) ──
+    if is-section-header: HorizontalLayout {
+        padding-left: 4px;
+        padding-top: 14px;
+        padding-bottom: 6px;
+        alignment: start;
+
+        Text {
+            text: item.label.to-uppercase();
+            color: Theme.c.overlay0;
+            font-size: 11px;
+            font-weight: FontWeight.semi-bold;
+            letter-spacing: 0.6px;
+            vertical-alignment: bottom;
+        }
+    }
 
     // ── Warning ──
-    if item.item-type == ItemType.warning: HorizontalLayout {
+    if is-warning: HorizontalLayout {
         padding-left: 12px;
         spacing: 8px;
         alignment: start;
@@ -66,22 +129,8 @@ export component ConfigItemRow inherits Rectangle {
         }
     }
 
-    // ── Radio group header (card title bar) ──
-    if item.item-type == ItemType.radio-header: HorizontalLayout {
-        padding-left: 14px;
-        alignment: start;
-
-        Text {
-            text: item.label;
-            color: Theme.c.blue;
-            font-size: 13px;
-            font-weight: FontWeight.semi-bold;
-            vertical-alignment: center;
-        }
-    }
-
-    // ── Radio option (card body row) ──
-    if item.item-type == ItemType.radio-option: HorizontalLayout {
+    // ── Radio option (sits on the section card) ──
+    if is-radio-option: HorizontalLayout {
         padding-left: 14px;
         padding-right: 14px;
         spacing: 10px;
@@ -100,8 +149,8 @@ export component ConfigItemRow inherits Rectangle {
         }
     }
 
-    // ── Action button ──
-    if item.item-type == ItemType.action: Rectangle {
+    // ── Action button (standalone, keeps its own pill style) ──
+    if is-action: Rectangle {
         background: item.key == "install" ? Theme.c.blue : Theme.c.surface0;
         border-radius: 8px;
 
@@ -121,8 +170,8 @@ export component ConfigItemRow inherits Rectangle {
         }
     }
 
-    // ── Read-only summary (review step) ──
-    if item.item-type == ItemType.readonly: HorizontalLayout {
+    // ── Read-only summary (review step) — sits on the section card ──
+    if is-readonly: HorizontalLayout {
         padding-left: 14px;
         padding-right: 14px;
         spacing: 12px;
@@ -153,9 +202,9 @@ export component ConfigItemRow inherits Rectangle {
     // Layout: label on the left at its natural width, value column on the
     // right with stretch + elide. When the value is long ("one, two, three,
     // ...") it truncates with `…` instead of overflowing the row past the
-    // right padding. Label stays anchored, value shrinks to fit.
+    // right padding.
     if item.item-type == ItemType.text || item.item-type == ItemType.select
-        || item.item-type == ItemType.password || item.item-type == ItemType.toggle: HorizontalLayout {
+        || item.item-type == ItemType.password || is-toggle: HorizontalLayout {
         padding-left: 14px;
         padding-right: 14px;
         spacing: 12px;
@@ -172,7 +221,7 @@ export component ConfigItemRow inherits Rectangle {
             spacing: 6px;
             horizontal-stretch: 1;
 
-            if item.item-type == ItemType.toggle: RadioDot {
+            if is-toggle: RadioDot {
                 width: 14px;
                 dot-size: 10px;
                 filled: item.value == "Enabled";
@@ -195,19 +244,14 @@ export component ConfigItemRow inherits Rectangle {
     }
 
     row-ta := TouchArea {
-        mouse-cursor: item.item-type == ItemType.separator || item.item-type == ItemType.readonly
-            || item.item-type == ItemType.warning || item.item-type == ItemType.radio-header
-            ? default : pointer;
+        mouse-cursor: is-non-interactive ? default : pointer;
         clicked => {
             root.focus-requested(index);
-            if item.item-type == ItemType.action {
+            if is-action {
                 root.action-clicked(item.key);
-            } else if item.item-type == ItemType.toggle {
+            } else if is-toggle {
                 root.toggled(item.key);
-            } else if item.item-type != ItemType.separator
-                   && item.item-type != ItemType.readonly
-                   && item.item-type != ItemType.warning
-                   && item.item-type != ItemType.radio-header {
+            } else if !is-non-interactive {
                 root.activated(item.key);
             }
         }

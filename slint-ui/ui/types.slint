@@ -9,7 +9,7 @@ export enum ItemType {
     action,
     readonly,
     warning,
-    radio-header,
+    section-header,
     radio-option,
 }
 
@@ -18,6 +18,14 @@ export struct ConfigItem {
     label: string,
     value: string,
     item-type: ItemType,
+    // True if this row is the first field row inside its section (i.e. the
+    // previous item in the list is a SectionHeader). Used by ConfigItemRow
+    // to round only the top corners of the connected section card.
+    is-first-in-section: bool,
+    // True if this row is the last field row inside its section (i.e. the
+    // next item in the list is a SectionHeader, Separator, or end of list).
+    // Used to round bottom corners and skip the trailing hairline divider.
+    is-last-in-section: bool,
 }
 
 export struct SelectOption {

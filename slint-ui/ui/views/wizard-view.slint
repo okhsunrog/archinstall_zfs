@@ -138,10 +138,13 @@ export component WizardView inherits Rectangle {
                         height: 32px;
                     }
 
-                    // Config items list
+                    // Config items list. Spacing is 0 so adjacent field
+                    // rows in the same section touch and stitch into one
+                    // connected card; section breaks come from the
+                    // SectionHeader rows themselves having top padding.
                     ScrollView {
                         VerticalLayout {
-                            spacing: 2px;
+                            spacing: 0px;
                             padding-left: 4px;
                             padding-right: 4px;
 

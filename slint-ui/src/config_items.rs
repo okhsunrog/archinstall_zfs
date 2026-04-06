@@ -19,7 +19,7 @@ pub const STEP_LABELS: [&str; TOTAL_STEPS] = [
 // ── Per-step item building ──────────────────────────
 
 pub fn build_step_items(step: usize, c: &GlobalConfig) -> Vec<ConfigItem> {
-    match step {
+    let mut items = match step {
         0 => build_welcome_items(c),
         1 => build_disk_items(c),
         2 => build_zfs_items(c),
@@ -28,7 +28,9 @@ pub fn build_step_items(step: usize, c: &GlobalConfig) -> Vec<ConfigItem> {
         5 => build_desktop_items(c),
         6 => build_review_items(c),
         _ => vec![],
-    }
+    };
+    mark_section_boundaries(&mut items);
+    items
 }
 
 fn build_welcome_items(_c: &GlobalConfig) -> Vec<ConfigItem> {
@@ -112,6 +114,7 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     );
 
     let mut items = vec![
+        section_header("Pool"),
         ci(
             "pool_name",
             "Pool name",
@@ -224,7 +227,8 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
 }
 
 fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
-    let mut items = vec![
+    vec![
+        section_header("System"),
         ci(
             "kernel",
             "Kernel",
@@ -245,6 +249,19 @@ fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             ItemType::Text,
         ),
         ci(
+            "ntp",
+            "NTP (time sync)",
+            if c.ntp { "Enabled" } else { "Disabled" },
+            ItemType::Toggle,
+        ),
+        ci(
+            "parallel_downloads",
+            "Parallel downloads",
+            &c.parallel_downloads.to_string(),
+            ItemType::Text,
+        ),
+        section_header("Locale"),
+        ci(
             "locale",
             "Locale",
             &c.locale.clone().unwrap_or("Not set".into()),
@@ -262,26 +279,12 @@ fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             &c.keyboard_layout,
             ItemType::Select,
         ),
-        ci(
-            "ntp",
-            "NTP (time sync)",
-            if c.ntp { "Enabled" } else { "Disabled" },
-            ItemType::Toggle,
-        ),
-    ];
-
-    items.push(ci(
-        "parallel_downloads",
-        "Parallel downloads",
-        &c.parallel_downloads.to_string(),
-        ItemType::Text,
-    ));
-
-    items
+    ]
 }
 
 fn build_users_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     vec![
+        section_header("Authentication"),
         ci(
             "root_password",
             "Root password",
@@ -292,6 +295,7 @@ fn build_users_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             },
             ItemType::Password,
         ),
+        section_header("Accounts"),
         ci(
             "users",
             "User accounts",
@@ -315,12 +319,15 @@ fn build_users_items(c: &GlobalConfig) -> Vec<ConfigItem> {
 }
 
 fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
-    let mut items = vec![ci(
-        "profile",
-        "Profile",
-        c.profile.as_deref().unwrap_or("None"),
-        ItemType::Select,
-    )];
+    let mut items = vec![
+        section_header("Desktop"),
+        ci(
+            "profile",
+            "Profile",
+            c.profile.as_deref().unwrap_or("None"),
+            ItemType::Select,
+        ),
+    ];
 
     items.extend(radio_group(
         "audio",
@@ -333,13 +340,16 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         },
     ));
 
+    items.push(section_header("Hardware"));
+    items.push(ci(
+        "bluetooth",
+        "Bluetooth",
+        if c.bluetooth { "Enabled" } else { "Disabled" },
+        ItemType::Toggle,
+    ));
+
+    items.push(section_header("Software"));
     items.extend([
-        ci(
-            "bluetooth",
-            "Bluetooth",
-            if c.bluetooth { "Enabled" } else { "Disabled" },
-            ItemType::Toggle,
-        ),
         ci(
             "packages",
             "Extra packages",
@@ -385,18 +395,16 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     let mut items = Vec::new();
 
     for (step, &label) in STEP_LABELS.iter().enumerate().take(TOTAL_STEPS - 1) {
-        items.push(ConfigItem {
-            key: SharedString::default(),
-            label: label.into(),
-            value: SharedString::default(),
-            item_type: ItemType::Separator,
-        });
+        // Each step becomes a section in the review screen.
+        items.push(section_header(label));
 
         let step_items = build_step_items(step, c);
         let mut i = 0;
         while i < step_items.len() {
             let item = &step_items[i];
-            if item.item_type == ItemType::RadioHeader {
+            if item.item_type == ItemType::SectionHeader {
+                // Collapse `header + N radio options` into a single readonly
+                // row showing "Group: Selected option".
                 let header_label = item.label.clone();
                 let mut selected_label: SharedString = "Not set".into();
                 i += 1;
@@ -407,10 +415,10 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                     i += 1;
                 }
                 items.push(ConfigItem {
-                    key: SharedString::default(),
                     label: header_label,
                     value: selected_label,
                     item_type: ItemType::Readonly,
+                    ..Default::default()
                 });
             } else {
                 items.push(ConfigItem {
@@ -418,6 +426,7 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                     label: item.label.clone(),
                     value: item.value.clone(),
                     item_type: ItemType::Readonly,
+                    ..Default::default()
                 });
                 i += 1;
             }
@@ -426,13 +435,12 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
 
     let errors = c.validate_for_install();
     if !errors.is_empty() {
-        items.push(sep());
+        items.push(section_header("Validation"));
         for error in &errors {
             items.push(ConfigItem {
-                key: SharedString::default(),
-                label: SharedString::default(),
                 value: error.as_str().into(),
                 item_type: ItemType::Warning,
+                ..Default::default()
             });
         }
     }
@@ -441,14 +449,14 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     items.push(ConfigItem {
         key: "install".into(),
         label: "Install".into(),
-        value: SharedString::default(),
         item_type: ItemType::Action,
+        ..Default::default()
     });
     items.push(ConfigItem {
         key: "quit".into(),
         label: "Quit".into(),
-        value: SharedString::default(),
         item_type: ItemType::Action,
+        ..Default::default()
     });
 
     items
@@ -460,26 +468,28 @@ fn ci(key: &str, label: &str, value: &str, item_type: ItemType) -> ConfigItem {
         label: label.into(),
         value: value.into(),
         item_type,
+        ..Default::default()
     }
 }
 
 fn sep() -> ConfigItem {
     ConfigItem {
-        key: SharedString::default(),
-        label: SharedString::default(),
-        value: SharedString::default(),
         item_type: ItemType::Separator,
+        ..Default::default()
     }
 }
 
-/// Emit a radio group: a header followed by clickable options.
-fn radio_group(key: &str, label: &str, options: &[&str], selected: i32) -> Vec<ConfigItem> {
-    let mut items = vec![ConfigItem {
-        key: SharedString::default(),
+fn section_header(label: &str) -> ConfigItem {
+    ConfigItem {
         label: label.into(),
-        value: SharedString::default(),
-        item_type: ItemType::RadioHeader,
-    }];
+        item_type: ItemType::SectionHeader,
+        ..Default::default()
+    }
+}
+
+/// Emit a radio group: a section header followed by clickable options.
+fn radio_group(key: &str, label: &str, options: &[&str], selected: i32) -> Vec<ConfigItem> {
+    let mut items = vec![section_header(label)];
     for (i, opt) in options.iter().enumerate() {
         items.push(ConfigItem {
             key: format!("radio:{key}:{i}").into(),
@@ -490,9 +500,43 @@ fn radio_group(key: &str, label: &str, options: &[&str], selected: i32) -> Vec<C
                 SharedString::default()
             },
             item_type: ItemType::RadioOption,
+            ..Default::default()
         });
     }
     items
+}
+
+// ── Section boundary marking ────────────────────────
+
+/// Walk a list of items after it's built and set `is_first_in_section` /
+/// `is_last_in_section` on each field row, based on adjacent SectionHeaders
+/// and Separators. Field types (text/select/password/toggle/radio-option/
+/// readonly) are part of section cards; everything else is a standalone
+/// element and gets neither flag set.
+fn mark_section_boundaries(items: &mut [ConfigItem]) {
+    fn is_field(t: ItemType) -> bool {
+        matches!(
+            t,
+            ItemType::Text
+                | ItemType::Select
+                | ItemType::Password
+                | ItemType::Toggle
+                | ItemType::RadioOption
+                | ItemType::Readonly
+        )
+    }
+
+    let n = items.len();
+    for i in 0..n {
+        let t = items[i].item_type;
+        if !is_field(t) {
+            continue;
+        }
+        let prev_breaks = i == 0 || !is_field(items[i - 1].item_type);
+        let next_breaks = i + 1 == n || !is_field(items[i + 1].item_type);
+        items[i].is_first_in_section = prev_breaks;
+        items[i].is_last_in_section = next_breaks;
+    }
 }
 
 // ── Keyboard navigation helper ──────────────────────
@@ -509,7 +553,7 @@ pub fn next_selectable_index(items: &[ConfigItem], current: i32, dir: i32) -> i3
         if t != ItemType::Separator
             && t != ItemType::Readonly
             && t != ItemType::Warning
-            && t != ItemType::RadioHeader
+            && t != ItemType::SectionHeader
         {
             return idx;
         }
@@ -887,33 +931,22 @@ mod tests {
 
     // ── next_selectable_index ───────────────────────────
 
+    fn typed(label: &str, item_type: ItemType) -> ConfigItem {
+        ConfigItem {
+            key: label.into(),
+            label: label.into(),
+            item_type,
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn next_selectable_skips_non_interactive_types() {
         let items = vec![
-            ConfigItem {
-                key: "a".into(),
-                label: "A".into(),
-                value: "".into(),
-                item_type: ItemType::RadioHeader,
-            },
-            ConfigItem {
-                key: "b".into(),
-                label: "B".into(),
-                value: "".into(),
-                item_type: ItemType::RadioOption,
-            },
-            ConfigItem {
-                key: "c".into(),
-                label: "C".into(),
-                value: "".into(),
-                item_type: ItemType::Separator,
-            },
-            ConfigItem {
-                key: "d".into(),
-                label: "D".into(),
-                value: "".into(),
-                item_type: ItemType::Text,
-            },
+            typed("A", ItemType::SectionHeader),
+            typed("B", ItemType::RadioOption),
+            typed("C", ItemType::Separator),
+            typed("D", ItemType::Text),
         ];
 
         // From -1, going forward, the first selectable is index 1 (RadioOption)
@@ -926,20 +959,7 @@ mod tests {
 
     #[test]
     fn next_selectable_wraps_around() {
-        let items = vec![
-            ConfigItem {
-                key: "a".into(),
-                label: "A".into(),
-                value: "".into(),
-                item_type: ItemType::Text,
-            },
-            ConfigItem {
-                key: "b".into(),
-                label: "B".into(),
-                value: "".into(),
-                item_type: ItemType::Toggle,
-            },
-        ];
+        let items = vec![typed("a", ItemType::Text), typed("b", ItemType::Toggle)];
         // From last item, forward → wraps to first
         assert_eq!(next_selectable_index(&items, 1, 1), 0);
         // From first item, backward → wraps to last
@@ -956,19 +976,115 @@ mod tests {
     #[test]
     fn next_selectable_returns_current_when_no_interactive_items() {
         let items = vec![
-            ConfigItem {
-                key: "".into(),
-                label: "".into(),
-                value: "".into(),
-                item_type: ItemType::Separator,
-            },
-            ConfigItem {
-                key: "".into(),
-                label: "".into(),
-                value: "".into(),
-                item_type: ItemType::Readonly,
-            },
+            typed("", ItemType::Separator),
+            typed("", ItemType::Readonly),
         ];
         assert_eq!(next_selectable_index(&items, 0, 1), 0);
+    }
+
+    // ── mark_section_boundaries ─────────────────────────
+
+    #[test]
+    fn mark_boundaries_simple_section() {
+        let mut items = vec![
+            section_header("Pool"),
+            ci("a", "A", "", ItemType::Text),
+            ci("b", "B", "", ItemType::Text),
+            ci("c", "C", "", ItemType::Text),
+        ];
+        mark_section_boundaries(&mut items);
+
+        // Header itself stays unmarked.
+        assert!(!items[0].is_first_in_section);
+        assert!(!items[0].is_last_in_section);
+        // First field after header.
+        assert!(items[1].is_first_in_section);
+        assert!(!items[1].is_last_in_section);
+        // Middle field.
+        assert!(!items[2].is_first_in_section);
+        assert!(!items[2].is_last_in_section);
+        // Last field (end of list).
+        assert!(!items[3].is_first_in_section);
+        assert!(items[3].is_last_in_section);
+    }
+
+    #[test]
+    fn mark_boundaries_two_adjacent_sections() {
+        let mut items = vec![
+            section_header("Pool"),
+            ci("a", "A", "", ItemType::Text),
+            section_header("Compression"),
+            ci("b", "B", "", ItemType::RadioOption),
+            ci("c", "C", "", ItemType::RadioOption),
+        ];
+        mark_section_boundaries(&mut items);
+
+        // Pool's only field: first AND last in section.
+        assert!(items[1].is_first_in_section);
+        assert!(items[1].is_last_in_section);
+        // First Compression option.
+        assert!(items[3].is_first_in_section);
+        assert!(!items[3].is_last_in_section);
+        // Last Compression option.
+        assert!(!items[4].is_first_in_section);
+        assert!(items[4].is_last_in_section);
+    }
+
+    #[test]
+    fn mark_boundaries_radio_followed_by_text_in_same_section() {
+        // Encryption: 3 radio options followed by an optional password text.
+        // All four belong to the same section card.
+        let mut items = vec![
+            section_header("Encryption"),
+            ci("none", "None", "selected", ItemType::RadioOption),
+            ci("pool", "Pool", "", ItemType::RadioOption),
+            ci("dataset", "Dataset", "", ItemType::RadioOption),
+            ci("password", "Password", "Set", ItemType::Password),
+        ];
+        mark_section_boundaries(&mut items);
+
+        assert!(items[1].is_first_in_section);
+        assert!(!items[1].is_last_in_section);
+        assert!(!items[2].is_first_in_section);
+        assert!(!items[2].is_last_in_section);
+        assert!(!items[3].is_first_in_section);
+        assert!(!items[3].is_last_in_section);
+        assert!(!items[4].is_first_in_section);
+        assert!(items[4].is_last_in_section);
+    }
+
+    #[test]
+    fn mark_boundaries_separator_breaks_section() {
+        let mut items = vec![
+            ci("a", "A", "", ItemType::Text),
+            sep(),
+            ci("b", "B", "", ItemType::Text),
+        ];
+        mark_section_boundaries(&mut items);
+
+        // First Text: is_first (no prev) and is_last (Separator after).
+        assert!(items[0].is_first_in_section);
+        assert!(items[0].is_last_in_section);
+        // Second Text: is_first (Separator before) and is_last (end of list).
+        assert!(items[2].is_first_in_section);
+        assert!(items[2].is_last_in_section);
+    }
+
+    #[test]
+    fn mark_boundaries_action_does_not_join_section() {
+        // Actions are standalone, not part of a section card. A field
+        // followed by an Action terminates the section.
+        let mut items = vec![
+            ci("a", "A", "", ItemType::Text),
+            ConfigItem {
+                key: "install".into(),
+                label: "Install".into(),
+                item_type: ItemType::Action,
+                ..Default::default()
+            },
+        ];
+        mark_section_boundaries(&mut items);
+        assert!(items[0].is_first_in_section);
+        assert!(items[0].is_last_in_section);
     }
 }
