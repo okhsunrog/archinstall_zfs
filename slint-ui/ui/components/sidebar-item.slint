@@ -1,5 +1,6 @@
 import { Theme } from "../styling.slint";
 import { StateLayer, FocusTouchArea } from "internal/state-layer.slint";
+import { RadioDot } from "radio-dot.slint";
 
 export component SidebarItem inherits Rectangle {
     in property <string> label;
@@ -32,16 +33,22 @@ export component SidebarItem inherits Rectangle {
         spacing: Theme.spacing-sm;
         alignment: start;
 
-        Text {
-            text: state == 1 ? "\u{25b8}"
-                : state == 2 ? "\u{25cf}"
-                : "\u{25cb}";
-            color: state == 1 ? Theme.c.blue
-                 : state == 2 ? Theme.c.green
-                 : Theme.c.overlay0;
+        // Current step uses the triangle glyph (it's directional, hard to
+        // draw with shapes); pending and done use real circles via RadioDot
+        // for clean baseline alignment with the label text.
+        if state == 1: Text {
+            text: "\u{25b8}";
+            color: Theme.c.blue;
             font-size: Theme.font-base;
             vertical-alignment: center;
+            horizontal-alignment: center;
             width: 16px;
+        }
+        if state != 1: RadioDot {
+            width: 16px;
+            dot-size: 10px;
+            filled: state == 2;
+            dot-color: state == 2 ? Theme.c.green : Theme.c.overlay0;
         }
 
         Text {

@@ -5,6 +5,7 @@ import { StyledButton } from "../components/styled-button.slint";
 import { StyledTextInput } from "../components/styled-text-input.slint";
 import { Badge } from "../components/badge.slint";
 import { DeleteButton } from "../components/delete-button.slint";
+import { RadioDot } from "../components/radio-dot.slint";
 
 export component UserManagePopup inherits Rectangle {
     in property <[UserEntry]> users;
@@ -144,11 +145,11 @@ export component UserManagePopup inherits Rectangle {
                             spacing: Theme.spacing-xs + 2px;
                             alignment: center;
 
-                            Text {
-                                text: sudo-toggle.sudo-checked ? "\u{25cf}" : "\u{25cb}";
-                                color: sudo-toggle.sudo-checked ? Theme.c.green : Theme.c.overlay0;
-                                font-size: Theme.font-base;
-                                vertical-alignment: center;
+                            RadioDot {
+                                width: 14px;
+                                dot-size: 10px;
+                                filled: sudo-toggle.sudo-checked;
+                                dot-color: sudo-toggle.sudo-checked ? Theme.c.green : Theme.c.overlay0;
                             }
 
                             sudo-check-text := Text {

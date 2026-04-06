@@ -1,0 +1,33 @@
+// A circular indicator for radio options, toggles, and similar binary states.
+//
+// Drawn as a Rectangle with border-radius rather than the Unicode glyphs
+// `\u{25cf}` (●) / `\u{25cb}` (○), which were previously used inline as Text
+// elements. Those glyphs sit at the font's typographic center, which is
+// slightly above the visual center of letters in most fonts — even with
+// `vertical-alignment: center` the dots look ever-so-slightly high next to
+// labels like "None" or "Enabled". A Rectangle is positioned in real
+// coordinates and centers cleanly against any font baseline.
+//
+// The outer Rectangle is the column slot (so the dot reserves consistent
+// horizontal width in a row layout); the inner Rectangle is the actual
+// drawn circle, centered both axes inside the slot.
+
+export component RadioDot inherits Rectangle {
+    in property <bool> filled;
+    in property <color> dot-color;
+    in property <length> dot-size: 12px;
+
+    width: 18px;
+    // height defaults to whatever the parent layout assigns (the row height)
+
+    Rectangle {
+        width: root.dot-size;
+        height: root.dot-size;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: self.width / 2;
+        background: root.filled ? root.dot-color : #00000000;
+        border-width: root.filled ? 0px : 1.5px;
+        border-color: root.dot-color;
+    }
+}

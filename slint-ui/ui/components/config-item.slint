@@ -4,6 +4,7 @@
 
 import { Theme } from "../styling.slint";
 import { ConfigItem, ItemType } from "../types.slint";
+import { RadioDot } from "radio-dot.slint";
 
 export component ConfigItemRow inherits Rectangle {
     in property <ConfigItem> item;
@@ -86,12 +87,9 @@ export component ConfigItemRow inherits Rectangle {
         spacing: 10px;
         alignment: start;
 
-        Text {
-            text: item.value == "selected" ? "\u{25cf}" : "\u{25cb}";
-            color: item.value == "selected" ? Theme.c.green : Theme.c.overlay0;
-            font-size: 16px;
-            vertical-alignment: center;
-            width: 18px;
+        RadioDot {
+            filled: item.value == "selected";
+            dot-color: item.value == "selected" ? Theme.c.green : Theme.c.overlay0;
         }
 
         Text {
@@ -174,11 +172,11 @@ export component ConfigItemRow inherits Rectangle {
             spacing: 6px;
             horizontal-stretch: 1;
 
-            if item.item-type == ItemType.toggle: Text {
-                text: item.value == "Enabled" ? "\u{25cf}" : "\u{25cb}";
-                color: item.value == "Enabled" ? Theme.c.green : Theme.c.overlay0;
-                font-size: 14px;
-                vertical-alignment: center;
+            if item.item-type == ItemType.toggle: RadioDot {
+                width: 14px;
+                dot-size: 10px;
+                filled: item.value == "Enabled";
+                dot-color: item.value == "Enabled" ? Theme.c.green : Theme.c.overlay0;
                 horizontal-stretch: 0;
             }
 
