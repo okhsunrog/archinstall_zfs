@@ -66,22 +66,19 @@ export component App inherits Window {
     callback key-nav-up();
     callback key-nav-activate();
 
-    // ── Keyboard navigation ─────────────────────────
+    // ── Global keyboard shortcuts ──────────────────
+    // Wizard-local keys (j/k/arrows/Enter) live inside WizardView's own
+    // FocusScope; this scope only handles globally-meaningful shortcuts
+    // and is unconditionally active outside of popups and the install
+    // screen.
     main-focus-scope := FocusScope {
-        enabled: InstallState.state == 0 && !PopupState.select-visible && !PopupState.text-input-visible && !PopupState.users-visible && !PopupState.pkg-search-visible && !PopupState.strlist-visible;
+        enabled: InstallState.state == 0
+            && !PopupState.select-visible
+            && !PopupState.text-input-visible
+            && !PopupState.users-visible
+            && !PopupState.pkg-search-visible
+            && !PopupState.strlist-visible;
         key-pressed(e) => {
-            if e.text == Key.DownArrow || e.text == "j" {
-                key-nav-down();
-                return accept;
-            }
-            if e.text == Key.UpArrow || e.text == "k" {
-                key-nav-up();
-                return accept;
-            }
-            if e.text == Key.Return {
-                key-nav-activate();
-                return accept;
-            }
             if e.text == Key.Tab {
                 WizardState.next();
                 return accept;
@@ -114,6 +111,9 @@ export component App inherits Window {
         toggle-activated(key) => { toggle-activated(key); }
         install-requested() => { install-requested(); }
         quit-requested() => { quit-requested(); }
+        key-nav-down() => { key-nav-down(); }
+        key-nav-up() => { key-nav-up(); }
+        key-nav-activate() => { key-nav-activate(); }
     }
 
     // ── Install progress screen ──────────────────────

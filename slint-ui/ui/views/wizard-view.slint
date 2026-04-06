@@ -4,6 +4,7 @@
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../styling.slint";
 import { WizardState } from "../state/wizard-state.slint";
+import { PopupState } from "../state/popup-state.slint";
 import { SidebarItem } from "../components/sidebar-item.slint";
 import { ConfigItemRow } from "../components/config-item.slint";
 
@@ -13,8 +14,46 @@ export component WizardView inherits VerticalLayout {
     callback install-requested();
     callback quit-requested();
 
+    // Wizard-local keyboard navigation. Emitted from `wizard-focus-scope`
+    // and bound to Rust's on_key_nav_* handlers in app.slint.
+    callback key-nav-down();
+    callback key-nav-up();
+    callback key-nav-activate();
+
     padding: 0px;
     spacing: 0px;
+
+    // Wizard-local FocusScope: handles arrow / j / k / Enter for the items
+    // list. Global shortcuts (Tab/Backtab/q/1–7) live in the App root scope
+    // and pick up events that this scope rejects.
+    wizard-focus-scope := FocusScope {
+        x: 0;
+        width: 0px;
+        height: 0px;
+        enabled: !PopupState.select-visible
+            && !PopupState.text-input-visible
+            && !PopupState.users-visible
+            && !PopupState.strlist-visible
+            && !PopupState.pkg-search-visible;
+
+        key-pressed(event) => {
+            if event.text == Key.DownArrow || event.text == "j" {
+                root.key-nav-down();
+                return accept;
+            }
+            if event.text == Key.UpArrow || event.text == "k" {
+                root.key-nav-up();
+                return accept;
+            }
+            if event.text == Key.Return {
+                root.key-nav-activate();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    init => { wizard-focus-scope.focus(); }
 
     // Title bar
     Rectangle {
