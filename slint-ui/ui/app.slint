@@ -12,6 +12,12 @@ export { EditingState }
 import { PopupState } from "state/popup-state.slint";
 export { PopupState }
 
+import { WelcomeState } from "state/welcome-state.slint";
+export { WelcomeState }
+
+import { InstallState } from "state/install-state.slint";
+export { InstallState }
+
 import { ItemType, ConfigItem, SelectOption, UserEntry, PackageEntry, PackageSearchResult, LogMessage, DownloadInfo } from "types.slint";
 export { ItemType, ConfigItem, SelectOption, UserEntry, PackageEntry, PackageSearchResult, LogMessage, DownloadInfo }
 
@@ -37,18 +43,6 @@ export component App inherits Window {
     title: "archinstall-zfs";
     forward-focus: main-focus-scope;
 
-    // Welcome screen status
-    in property <bool> net-ok: false;
-    in property <bool> uefi-ok: false;
-    in property <bool> zfs-ok: false;
-    in property <bool> zfs-installing: false;
-    in property <int> zfs-install-pct: 0;
-    in property <string> zfs-install-status: "";
-
-    out property <bool> all-checks-ok: net-ok && uefi-ok && zfs-ok;
-
-    callback check-internet();
-
     in property <[ConfigItem]> config-items;
 
     // User management popup state
@@ -69,23 +63,6 @@ export component App inherits Window {
     callback pkg-search-aur(string);
     callback pkg-added(int);
     callback pkg-removed(int);
-
-    // Install state: 0=config, 1=installing, 2=done, 3=failed
-    in-out property <int> install-state: 0;
-
-    // Log messages
-    in property <[LogMessage]> log-messages;
-
-    // Global install progress
-    in property <string> install-phase-label: "Starting...";
-    in property <int> install-phase: 0;
-    in property <int> install-total-phases: 14;
-
-    // Package download/install progress
-    in property <[DownloadInfo]> download-items;
-    in property <int> download-pct: 0;
-    in property <string> download-status: "";
-    in property <bool> download-active: false;
 
     // Status text
     in property <string> status-text;
@@ -111,7 +88,7 @@ export component App inherits Window {
 
     // ── Keyboard navigation ─────────────────────────
     main-focus-scope := FocusScope {
-        enabled: install-state == 0 && !PopupState.select-visible && !PopupState.text-input-visible && !users-visible && !pkg-search-visible && !strlist-visible;
+        enabled: InstallState.state == 0 && !PopupState.select-visible && !PopupState.text-input-visible && !users-visible && !pkg-search-visible && !strlist-visible;
         key-pressed(e) => {
             if e.text == Key.DownArrow || e.text == "j" {
                 key-nav-down();
@@ -149,7 +126,7 @@ export component App inherits Window {
     }
 
     // ── Welcome screen (step 0, no sidebar) ───────────
-    if install-state == 0 && WizardState.current-step == 0: Rectangle {
+    if InstallState.state == 0 && WizardState.current-step == 0: Rectangle {
         background: Theme.c.base;
 
         VerticalLayout {
@@ -201,8 +178,8 @@ export component App inherits Window {
                                 spacing: 12px;
 
                                 Text {
-                                    text: net-ok ? "\u{2713}" : "\u{2717}";
-                                    color: net-ok ? Theme.c.green : Theme.c.red;
+                                    text: WelcomeState.net-ok ? "\u{2713}" : "\u{2717}";
+                                    color: WelcomeState.net-ok ? Theme.c.green : Theme.c.red;
                                     font-size: 18px;
                                     vertical-alignment: center;
                                     width: 24px;
@@ -217,20 +194,20 @@ export component App inherits Window {
                                 }
 
                                 Text {
-                                    text: net-ok ? "Connected" : "Not connected";
-                                    color: net-ok ? Theme.c.green : Theme.c.overlay0;
+                                    text: WelcomeState.net-ok ? "Connected" : "Not connected";
+                                    color: WelcomeState.net-ok ? Theme.c.green : Theme.c.overlay0;
                                     font-size: 13px;
                                     vertical-alignment: center;
                                 }
 
-                                if !net-ok: Rectangle {
+                                if !WelcomeState.net-ok: Rectangle {
                                     width: 90px;
                                     height: 30px;
                                     background: check-net-ta.has-hover ? Theme.c.surface1 : Theme.c.mantle;
                                     border-radius: 6px;
 
                                     check-net-ta := TouchArea {
-                                        clicked => { check-internet(); }
+                                        clicked => { WelcomeState.check-internet(); }
                                     }
 
                                     Text {
@@ -256,8 +233,8 @@ export component App inherits Window {
                                 spacing: 12px;
 
                                 Text {
-                                    text: uefi-ok ? "\u{2713}" : "\u{2717}";
-                                    color: uefi-ok ? Theme.c.green : Theme.c.red;
+                                    text: WelcomeState.uefi-ok ? "\u{2713}" : "\u{2717}";
+                                    color: WelcomeState.uefi-ok ? Theme.c.green : Theme.c.red;
                                     font-size: 18px;
                                     vertical-alignment: center;
                                     width: 24px;
@@ -272,8 +249,8 @@ export component App inherits Window {
                                 }
 
                                 Text {
-                                    text: uefi-ok ? "Detected" : "Not detected (required)";
-                                    color: uefi-ok ? Theme.c.green : Theme.c.red;
+                                    text: WelcomeState.uefi-ok ? "Detected" : "Not detected (required)";
+                                    color: WelcomeState.uefi-ok ? Theme.c.green : Theme.c.red;
                                     font-size: 13px;
                                     vertical-alignment: center;
                                 }
@@ -282,7 +259,7 @@ export component App inherits Window {
 
                         // ZFS status
                         Rectangle {
-                            height: zfs-installing ? 72px : 48px;
+                            height: WelcomeState.zfs-installing ? 72px : 48px;
                             background: Theme.c.surface0;
                             border-radius: 10px;
 
@@ -297,11 +274,11 @@ export component App inherits Window {
                                     spacing: 12px;
 
                                     Text {
-                                        text: zfs-ok ? "\u{2713}"
-                                            : zfs-installing ? "\u{21bb}"
+                                        text: WelcomeState.zfs-ok ? "\u{2713}"
+                                            : WelcomeState.zfs-installing ? "\u{21bb}"
                                             : "\u{2717}";
-                                        color: zfs-ok ? Theme.c.green
-                                            : zfs-installing ? Theme.c.blue
+                                        color: WelcomeState.zfs-ok ? Theme.c.green
+                                            : WelcomeState.zfs-installing ? Theme.c.blue
                                             : Theme.c.overlay0;
                                         font-size: 18px;
                                         vertical-alignment: center;
@@ -317,11 +294,11 @@ export component App inherits Window {
                                     }
 
                                     Text {
-                                        text: zfs-ok ? "Ready"
-                                            : zfs-installing ? zfs-install-status
+                                        text: WelcomeState.zfs-ok ? "Ready"
+                                            : WelcomeState.zfs-installing ? WelcomeState.zfs-install-status
                                             : "Waiting for network...";
-                                        color: zfs-ok ? Theme.c.green
-                                            : zfs-installing ? Theme.c.blue
+                                        color: WelcomeState.zfs-ok ? Theme.c.green
+                                            : WelcomeState.zfs-installing ? Theme.c.blue
                                             : Theme.c.overlay0;
                                         font-size: 13px;
                                         vertical-alignment: center;
@@ -329,7 +306,7 @@ export component App inherits Window {
                                 }
 
                                 // ZFS install progress bar
-                                if zfs-installing: Rectangle {
+                                if WelcomeState.zfs-installing: Rectangle {
                                     height: 6px;
                                     x: 16px;
                                     width: parent.width - 32px;
@@ -340,14 +317,14 @@ export component App inherits Window {
                                     Rectangle {
                                         x: 0; y: 0;
                                         height: parent.height;
-                                        width: parent.width * zfs-install-pct / 100;
+                                        width: parent.width * WelcomeState.zfs-install-pct / 100;
                                         background: Theme.c.blue;
                                         border-radius: 3px;
                                     }
                                 }
 
                                 // spacer at bottom when installing
-                                if zfs-installing: Rectangle {
+                                if WelcomeState.zfs-installing: Rectangle {
                                     height: 12px;
                                 }
                             }
@@ -361,20 +338,20 @@ export component App inherits Window {
                         Rectangle {
                             width: 160px;
                             height: 44px;
-                            background: all-checks-ok
+                            background: WelcomeState.all-checks-ok
                                 ? (start-ta.has-hover ? Theme.c.sky : Theme.c.blue)
                                 : Theme.c.surface1;
                             border-radius: 10px;
 
                             start-ta := TouchArea {
-                                enabled: all-checks-ok;
+                                enabled: WelcomeState.all-checks-ok;
                                 mouse-cursor: self.enabled ? pointer : default;
                                 clicked => { WizardState.go-to(1); }
                             }
 
                             Text {
                                 text: "Get Started \u{2192}";
-                                color: all-checks-ok ? Theme.c.base : Theme.c.overlay0;
+                                color: WelcomeState.all-checks-ok ? Theme.c.base : Theme.c.overlay0;
                                 font-size: 15px;
                                 font-weight: FontWeight.semi-bold;
                                 horizontal-alignment: center;
@@ -396,7 +373,7 @@ export component App inherits Window {
     }
 
     // ── Wizard config screen (steps 1+, with sidebar) ──
-    if install-state == 0 && WizardState.current-step > 0: VerticalLayout {
+    if InstallState.state == 0 && WizardState.current-step > 0: VerticalLayout {
         padding: 0px;
         spacing: 0px;
 
@@ -598,13 +575,13 @@ export component App inherits Window {
     }
 
     // ── Install progress screen ──────────────────────
-    if install-state >= 1: VerticalLayout {
+    if InstallState.state >= 1: VerticalLayout {
         padding: 12px;
         spacing: 8px;
 
         // ── Log area (fills available space) ────────
         log-view := ListView {
-            for msg[index] in log-messages: Rectangle {
+            for msg[index] in InstallState.log-messages: Rectangle {
                 height: msg-text.preferred-height + 4px;
 
                 msg-text := Text {
@@ -624,14 +601,14 @@ export component App inherits Window {
             }
         }
 
-        property <int> scroll-trigger: log-messages.length;
+        property <int> scroll-trigger: InstallState.log-messages.length;
         changed scroll-trigger => {
             log-view.viewport-y = -100000px;
         }
 
         // ── Progress card (always visible during install) ──
         Rectangle {
-            height: download-active ? 180px : 80px;
+            height: InstallState.download-active ? 180px : 80px;
             background: Theme.c.surface0;
             border-radius: 10px;
 
@@ -644,11 +621,11 @@ export component App inherits Window {
                     spacing: 10px;
 
                     Text {
-                        text: install-state == 2 ? "\u{2713} Complete"
-                            : install-state == 3 ? "\u{2717} Failed"
-                            : install-phase-label;
-                        color: install-state == 2 ? Theme.c.green
-                            : install-state == 3 ? Theme.c.red
+                        text: InstallState.state == 2 ? "\u{2713} Complete"
+                            : InstallState.state == 3 ? "\u{2717} Failed"
+                            : InstallState.phase-label;
+                        color: InstallState.state == 2 ? Theme.c.green
+                            : InstallState.state == 3 ? Theme.c.red
                             : Theme.c.text;
                         font-size: 14px;
                         font-weight: FontWeight.semi-bold;
@@ -657,8 +634,8 @@ export component App inherits Window {
                     }
 
                     Text {
-                        text: install-state >= 2 ? ""
-                            : install-phase + " / " + install-total-phases;
+                        text: InstallState.state >= 2 ? ""
+                            : InstallState.phase + " / " + InstallState.total-phases;
                         color: Theme.c.overlay0;
                         font-size: 13px;
                         vertical-alignment: center;
@@ -666,7 +643,7 @@ export component App inherits Window {
                 }
 
                 // Global progress bar
-                if install-state == 1: Rectangle {
+                if InstallState.state == 1: Rectangle {
                     height: 8px;
                     background: Theme.c.mantle;
                     border-radius: 4px;
@@ -675,20 +652,20 @@ export component App inherits Window {
                     Rectangle {
                         x: 0; y: 0;
                         height: parent.height;
-                        width: parent.width * install-phase / install-total-phases;
+                        width: parent.width * InstallState.phase / InstallState.total-phases;
                         background: Theme.c.blue;
                         border-radius: 4px;
                     }
                 }
 
                 // Package progress (download or install)
-                if download-active: VerticalLayout {
+                if InstallState.download-active: VerticalLayout {
                     spacing: 6px;
 
                     // Download/install status line
                     HorizontalLayout {
                         Text {
-                            text: download-status;
+                            text: InstallState.download-status;
                             color: Theme.c.teal;
                             font-size: 12px;
                             vertical-alignment: center;
@@ -696,7 +673,7 @@ export component App inherits Window {
                         }
 
                         Text {
-                            text: download-pct + "%";
+                            text: InstallState.download-pct + "%";
                             color: Theme.c.teal;
                             font-size: 12px;
                             font-weight: FontWeight.semi-bold;
@@ -714,7 +691,7 @@ export component App inherits Window {
                         Rectangle {
                             x: 0; y: 0;
                             height: parent.height;
-                            width: parent.width * download-pct / 100;
+                            width: parent.width * InstallState.download-pct / 100;
                             background: Theme.c.teal;
                             border-radius: 3px;
                         }
@@ -722,7 +699,7 @@ export component App inherits Window {
 
                     // Per-package lines
                     ListView {
-                        for dl[index] in download-items: Rectangle {
+                        for dl[index] in InstallState.download-items: Rectangle {
                             height: 18px;
 
                             HorizontalLayout {
@@ -757,7 +734,7 @@ export component App inherits Window {
                 }
 
                 // Exit button
-                if install-state >= 2: Rectangle {
+                if InstallState.state >= 2: Rectangle {
                     height: 36px;
                     background: exit-ta.has-hover ? Theme.c.blue : Theme.c.surface1;
                     border-radius: 8px;
@@ -767,7 +744,7 @@ export component App inherits Window {
                     }
 
                     Text {
-                        text: install-state == 2 ? "Reboot" : "Exit";
+                        text: InstallState.state == 2 ? "Reboot" : "Exit";
                         color: exit-ta.has-hover ? Theme.c.base : Theme.c.text;
                         font-size: 14px;
                         font-weight: FontWeight.semi-bold;

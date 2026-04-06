@@ -1,0 +1,23 @@
+// Install-progress state. `state` is the high-level mode (0=config, 1=running,
+// 2=done, 3=failed); the rest is driven by the install pipeline running in a
+// background thread.
+
+import { LogMessage, DownloadInfo } from "../types.slint";
+
+export global InstallState {
+    // 0 = config screen, 1 = installing, 2 = done, 3 = failed
+    in-out property <int> state: 0;
+
+    in property <[LogMessage]> log-messages;
+
+    // Global phase progress
+    in property <string> phase-label: "Starting...";
+    in property <int> phase: 0;
+    in property <int> total-phases: 14;
+
+    // Per-package download / install progress
+    in property <[DownloadInfo]> download-items;
+    in property <int> download-pct: 0;
+    in property <string> download-status: "";
+    in property <bool> download-active: false;
+}

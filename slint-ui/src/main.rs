@@ -162,9 +162,10 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
         )
         .unwrap_or(false);
 
-        app.set_net_ok(net);
-        app.set_uefi_ok(uefi);
-        app.set_zfs_ok(zfs_mod && zfs_utils);
+        app.global::<WelcomeState>().set_net_ok(net);
+        app.global::<WelcomeState>().set_uefi_ok(uefi);
+        app.global::<WelcomeState>()
+            .set_zfs_ok(zfs_mod && zfs_utils);
 
         if net {
             // Start ZFS init if needed
@@ -181,12 +182,14 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
         let weak = app.as_weak();
         let cfg = config.clone();
         let kscan = kernel_scan.clone();
-        app.on_check_internet(move || {
+        app.global::<WelcomeState>().on_check_internet(move || {
             let Some(app) = weak.upgrade() else { return };
             let net = archinstall_zfs_core::system::net::check_internet();
-            app.set_net_ok(net);
+            app.global::<WelcomeState>().set_net_ok(net);
             if net {
-                if !app.get_zfs_ok() && !app.get_zfs_installing() {
+                if !app.global::<WelcomeState>().get_zfs_ok()
+                    && !app.global::<WelcomeState>().get_zfs_installing()
+                {
                     start_zfs_init(&app, &cfg.borrow());
                 }
                 if kscan.lock().unwrap().is_none() {
@@ -604,8 +607,9 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 return;
             }
 
-            app.set_install_state(1);
-            app.set_log_messages(ModelRc::new(VecModel::<LogMessage>::default()));
+            app.global::<InstallState>().set_state(1);
+            app.global::<InstallState>()
+                .set_log_messages(ModelRc::new(VecModel::<LogMessage>::default()));
 
             let (log_tx, log_rx) = crossbeam_channel::bounded::<(String, i32)>(512);
 
@@ -640,11 +644,12 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                     let _ = weak_log.upgrade_in_event_loop(move |app| {
                         // Update phase if detected
                         if let Some((phase_num, label)) = phase_update {
-                            app.set_install_phase(phase_num);
-                            app.set_install_phase_label(SharedString::from(&label));
+                            app.global::<InstallState>().set_phase(phase_num);
+                            app.global::<InstallState>()
+                                .set_phase_label(SharedString::from(&label));
                         }
 
-                        let model = app.get_log_messages();
+                        let model = app.global::<InstallState>().get_log_messages();
                         let vec_model = model
                             .as_any()
                             .downcast_ref::<VecModel<LogMessage>>()
@@ -678,7 +683,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                     match rx.has_changed() {
                         Err(_) => {
                             let _ = weak_dl.upgrade_in_event_loop(|app| {
-                                app.set_download_active(false);
+                                app.global::<InstallState>().set_download_active(false);
                             });
                             break;
                         }
@@ -761,10 +766,12 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                             }
 
                             let _ = weak_dl.upgrade_in_event_loop(move |app| {
-                                app.set_download_active(is_active);
-                                app.set_download_pct(pct);
-                                app.set_download_status(SharedString::from(&status));
-                                app.set_download_items(ModelRc::new(VecModel::from(dl_items)));
+                                app.global::<InstallState>().set_download_active(is_active);
+                                app.global::<InstallState>().set_download_pct(pct);
+                                app.global::<InstallState>()
+                                    .set_download_status(SharedString::from(&status));
+                                app.global::<InstallState>()
+                                    .set_download_items(ModelRc::new(VecModel::from(dl_items)));
                             });
                         }
                         PackageProgress::Installing {
@@ -776,15 +783,17 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                             let status = format!("Installing {current}/{total}: {package}");
                             let pct = percent as i32;
                             let _ = weak_dl.upgrade_in_event_loop(move |app| {
-                                app.set_download_active(true);
-                                app.set_download_pct(pct);
-                                app.set_download_status(SharedString::from(&status));
-                                app.set_download_items(ModelRc::default());
+                                app.global::<InstallState>().set_download_active(true);
+                                app.global::<InstallState>().set_download_pct(pct);
+                                app.global::<InstallState>()
+                                    .set_download_status(SharedString::from(&status));
+                                app.global::<InstallState>()
+                                    .set_download_items(ModelRc::default());
                             });
                         }
                         PackageProgress::Done => {
                             let _ = weak_dl.upgrade_in_event_loop(|app| {
-                                app.set_download_active(false);
+                                app.global::<InstallState>().set_download_active(false);
                             });
                         }
                     }
@@ -821,7 +830,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
 
                 let state = if result.is_ok() { 2 } else { 3 };
                 let _ = weak_install.upgrade_in_event_loop(move |app| {
-                    app.set_install_state(state);
+                    app.global::<InstallState>().set_state(state);
                 });
             });
         });
@@ -1007,7 +1016,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
         let weak = app.as_weak();
         app.on_quit_requested(move || {
             if let Some(app) = weak.upgrade() {
-                let should_reboot = app.get_install_state() == 2;
+                let should_reboot = app.global::<InstallState>().get_state() == 2;
                 let _ = app.window().hide();
                 if should_reboot {
                     let _ = std::process::Command::new("systemctl")
@@ -1025,8 +1034,9 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
 // ── ZFS initialization on welcome screen ────────────
 
 fn start_zfs_init(app: &App, config: &GlobalConfig) {
-    app.set_zfs_installing(true);
-    app.set_zfs_install_status(SharedString::from("Initializing..."));
+    app.global::<WelcomeState>().set_zfs_installing(true);
+    app.global::<WelcomeState>()
+        .set_zfs_install_status(SharedString::from("Initializing..."));
 
     let weak = app.as_weak();
     let kernel = config.primary_kernel().to_string();
@@ -1040,7 +1050,8 @@ fn start_zfs_init(app: &App, config: &GlobalConfig) {
         // Update status
         let w = weak.clone();
         let _ = w.upgrade_in_event_loop(|app| {
-            app.set_zfs_install_status(SharedString::from("Checking reflector..."));
+            app.global::<WelcomeState>()
+                .set_zfs_install_status(SharedString::from("Checking reflector..."));
         });
 
         archinstall_zfs_core::zfs::kmod::ensure_reflector_finished_and_stopped(&*runner).ok();
@@ -1048,22 +1059,24 @@ fn start_zfs_init(app: &App, config: &GlobalConfig) {
 
         let w = weak.clone();
         let _ = w.upgrade_in_event_loop(|app| {
-            app.set_zfs_install_status(SharedString::from("Installing ZFS packages..."));
-            app.set_zfs_install_pct(30);
+            app.global::<WelcomeState>()
+                .set_zfs_install_status(SharedString::from("Installing ZFS packages..."));
+            app.global::<WelcomeState>().set_zfs_install_pct(30);
         });
 
         let result =
             archinstall_zfs_core::zfs::kmod::initialize_zfs(&*runner, &kernel, zfs_mode, &cancel);
 
         let _ = weak.upgrade_in_event_loop(move |app| {
-            app.set_zfs_installing(false);
+            app.global::<WelcomeState>().set_zfs_installing(false);
             match result {
                 Ok(()) => {
-                    app.set_zfs_ok(true);
-                    app.set_zfs_install_pct(100);
+                    app.global::<WelcomeState>().set_zfs_ok(true);
+                    app.global::<WelcomeState>().set_zfs_install_pct(100);
                 }
                 Err(e) => {
-                    app.set_zfs_install_status(SharedString::from(format!("Failed: {e}")));
+                    app.global::<WelcomeState>()
+                        .set_zfs_install_status(SharedString::from(format!("Failed: {e}")));
                 }
             }
         });
