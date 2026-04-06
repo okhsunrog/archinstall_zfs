@@ -1,0 +1,210 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "../styling.slint";
+import { PackageSearchResult, PackageEntry } from "../types.slint";
+import { StyledButton } from "../components/styled-button.slint";
+import { StyledTextInput } from "../components/styled-text-input.slint";
+import { Badge } from "../components/badge.slint";
+
+export component PackageSearchPopup inherits Rectangle {
+    in property <[PackageSearchResult]> search-results;
+    in property <[PackageEntry]> selected-packages;
+    in property <bool> popup-visible;
+    in property <bool> searching-aur: false;
+    in property <string> status-text;
+
+    callback search-changed(string);
+    callback search-aur(string);
+    callback package-added(int);
+    callback package-removed(int);
+    callback closed();
+
+    if popup-visible: Rectangle {
+        background: #00000080;
+        width: 100%; height: 100%;
+
+        TouchArea { clicked => { closed(); } }
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(600px, parent.width - 40px);
+            height: min(parent.height - 60px, 520px);
+            background: Theme.c.mantle;
+            border-radius: Theme.radius-md;
+            border-color: Theme.c.surface1;
+            border-width: 1px;
+            clip: true;
+            accessible-role: groupbox;
+            accessible-label: "Package search";
+
+            VerticalLayout {
+                padding: Theme.spacing-lg;
+                spacing: Theme.spacing-sm;
+
+                Text {
+                    text: root.searching-aur ? "AUR search" : "Package search";
+                    color: Theme.c.blue;
+                    font-size: Theme.font-lg;
+                    font-weight: FontWeight.semi-bold;
+                }
+
+                HorizontalLayout {
+                    spacing: Theme.spacing-sm;
+
+                    pkg-search-input := StyledTextInput {
+                        horizontal-stretch: 1;
+                        font-size: Theme.font-base;
+                        placeholder: "type to search packages...";
+                        height: Theme.control-height;
+                        edited(text) => { root.search-changed(text); }
+                    }
+
+                    init => { pkg-search-input.focus-input(); }
+
+                    // AUR search button
+                    Rectangle {
+                        width: 60px;
+                        height: Theme.control-height;
+                        background: aur-btn-ta.has-hover ? Theme.c.mauve : Theme.c.surface0;
+                        border-radius: Theme.radius-sm;
+                        border-color: root.searching-aur ? Theme.c.mauve : Theme.c.surface1;
+                        border-width: 1px;
+
+                        aur-btn-ta := TouchArea {
+                            clicked => { root.search-aur(pkg-search-input.text); }
+                        }
+
+                        Text {
+                            text: "AUR";
+                            color: aur-btn-ta.has-hover ? Theme.c.base : (root.searching-aur ? Theme.c.mauve : Theme.c.subtext0);
+                            font-size: Theme.font-md;
+                            font-weight: FontWeight.semi-bold;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                if root.status-text != "": Text {
+                    text: root.status-text;
+                    color: Theme.c.overlay0;
+                    font-size: Theme.font-sm;
+                    height: Theme.spacing-lg;
+                }
+
+                ListView {
+                    vertical-stretch: 1;
+
+                    for result[index] in root.search-results: Rectangle {
+                        height: Theme.control-height;
+                        background: result-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
+                        border-radius: Theme.radius-sm;
+
+                        result-ta := TouchArea {
+                            clicked => {
+                                root.package-added(index);
+                                pkg-search-input.text = "";
+                                pkg-search-input.focus-input();
+                            }
+                        }
+
+                        HorizontalLayout {
+                            padding-left: Theme.spacing-md;
+                            padding-right: Theme.spacing-md;
+                            spacing: Theme.spacing-sm;
+
+                            Text {
+                                text: result.name;
+                                color: Theme.c.text;
+                                font-size: Theme.font-md;
+                                vertical-alignment: center;
+                            }
+
+                            Badge {
+                                label: result.repo;
+                                bg: result.repo == "aur" ? Theme.c.mauve : Theme.c.blue;
+                            }
+
+                            Text {
+                                text: result.description;
+                                color: Theme.c.overlay0;
+                                font-size: Theme.font-sm;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                            }
+                        }
+                    }
+                }
+
+                if root.selected-packages.length > 0: Rectangle {
+                    height: 1px;
+                    background: Theme.c.surface1;
+                }
+
+                if root.selected-packages.length > 0: VerticalLayout {
+                    spacing: Theme.spacing-xs;
+                    height: min(self.preferred-height, 100px);
+
+                    Text {
+                        text: "Selected";
+                        color: Theme.c.subtext0;
+                        font-size: Theme.font-sm;
+                        font-weight: FontWeight.semi-bold;
+                        height: Theme.spacing-lg;
+                    }
+
+                    Flickable {
+                        HorizontalLayout {
+                            spacing: Theme.spacing-xs + 2px;
+                            alignment: start;
+
+                            for pkg[index] in root.selected-packages: Rectangle {
+                                width: pkg-chip-layout.preferred-width;
+                                height: Theme.control-height-sm - 4px;
+                                background: pkg-del-ta.has-hover ? Theme.c.red : Theme.c.surface0;
+                                border-radius: Theme.radius-sm;
+
+                                pkg-del-ta := TouchArea {
+                                    clicked => { root.package-removed(index); }
+                                }
+
+                                pkg-chip-layout := HorizontalLayout {
+                                    padding-left: Theme.spacing-sm;
+                                    padding-right: Theme.spacing-sm;
+                                    spacing: Theme.spacing-xs;
+
+                                    Text {
+                                        text: pkg.name;
+                                        color: pkg-del-ta.has-hover ? Theme.c.base : Theme.c.text;
+                                        font-size: Theme.font-sm;
+                                        vertical-alignment: center;
+                                    }
+
+                                    Text {
+                                        text: pkg.repo == "aur" ? "[aur]" : "[repo]";
+                                        color: pkg-del-ta.has-hover ? Theme.c.base : Theme.c.overlay0;
+                                        font-size: 10px;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    alignment: end;
+
+                    StyledButton {
+                        label: "Done";
+                        bg: Theme.c.blue;
+                        bg-hover: Theme.c.sky;
+                        fg: Theme.c.base;
+                        clicked => { root.closed(); }
+                    }
+                }
+            }
+        }
+    }
+}

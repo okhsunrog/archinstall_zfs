@@ -1,0 +1,54 @@
+import { Theme } from "../styling.slint";
+
+export component StyledTextInput inherits Rectangle {
+    in property <string> placeholder: "";
+    in-out property <string> text <=> input.text;
+    in property <bool> is-password: false;
+    in property <length> font-size: Theme.font-md;
+    out property <bool> has-focus: input.has-focus;
+
+    callback edited(string);
+    callback accepted(string);
+
+    public function focus-input() { input.focus(); }
+
+    height: Theme.control-height;
+    background: Theme.c.surface0;
+    border-radius: Theme.radius-sm;
+    border-color: input.has-focus ? Theme.c.blue : Theme.c.surface1;
+    border-width: 1px;
+    clip: true;
+    forward-focus: input;
+
+    if input.text == "" && input.preedit-text == "": Text {
+        x: 8px;
+        width: parent.width - 16px;
+        text: root.placeholder;
+        color: Theme.c.overlay0;
+        font-size: root.font-size;
+        vertical-alignment: center;
+    }
+
+    input := TextInput {
+        property <length> computed-x: 8px;
+        x: min(0px, max(parent.width - self.width - self.text-cursor-width, self.computed-x));
+        width: max(parent.width - self.text-cursor-width, self.preferred-width);
+        height: 100%;
+        vertical-alignment: center;
+        color: Theme.c.text;
+        font-size: root.font-size;
+        input-type: root.is-password ? InputType.password : InputType.text;
+        single-line: true;
+
+        cursor-position-changed(cursor-position) => {
+            if cursor-position.x + self.computed-x < 8px {
+                self.computed-x = -cursor-position.x + 8px;
+            } else if cursor-position.x + self.computed-x > parent.width - 8px - self.text-cursor-width {
+                self.computed-x = parent.width - cursor-position.x - 8px - self.text-cursor-width;
+            }
+        }
+
+        accepted => { root.accepted(self.text); }
+        edited => { root.edited(self.text); }
+    }
+}

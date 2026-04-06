@@ -903,15 +903,19 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
             let item = &items[idx as usize];
             let item_type = item.item_type;
             let key = item.key.clone();
-            if item_type == 5 {
+            if item_type == ItemType::Action {
                 if key == "install" {
                     app.invoke_install_requested();
                 } else if key == "quit" {
                     let _ = app.window().hide();
                 }
-            } else if item_type == 3 {
+            } else if item_type == ItemType::Toggle {
                 app.invoke_toggle_activated(key);
-            } else if item_type != 4 && item_type != 6 && item_type != 7 && item_type != 8 {
+            } else if item_type != ItemType::Separator
+                && item_type != ItemType::Readonly
+                && item_type != ItemType::Warning
+                && item_type != ItemType::RadioHeader
+            {
                 app.invoke_item_activated(key);
             }
         });
@@ -1257,9 +1261,14 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             "pool_name",
             "Pool name",
             &c.pool_name.clone().unwrap_or("Not set".into()),
-            0,
+            ItemType::Text,
         ),
-        ci("dataset_prefix", "Dataset prefix", &c.dataset_prefix, 0),
+        ci(
+            "dataset_prefix",
+            "Dataset prefix",
+            &c.dataset_prefix,
+            ItemType::Text,
+        ),
     ];
 
     items.extend(radio_group(
@@ -1299,7 +1308,7 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             } else {
                 "Not set"
             },
-            2,
+            ItemType::Password,
         ));
     }
 
@@ -1325,7 +1334,7 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             "swap_partition_size",
             "Swap size",
             &c.swap_partition_size.clone().unwrap_or("Not set".into()),
-            0,
+            ItemType::Text,
         ));
     }
     if !matches!(mode, Some(InstallationMode::FullDisk) | None) && has_swap_partition {
@@ -1372,32 +1381,37 @@ fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                     .unwrap_or_else(|| c.primary_kernel().to_string()),
                 c.zfs_module_mode
             ),
-            1,
+            ItemType::Select,
         ),
         ci(
             "hostname",
             "Hostname",
             &c.hostname.clone().unwrap_or("Not set".into()),
-            0,
+            ItemType::Text,
         ),
         ci(
             "locale",
             "Locale",
             &c.locale.clone().unwrap_or("Not set".into()),
-            1,
+            ItemType::Select,
         ),
         ci(
             "timezone",
             "Timezone",
             &c.timezone.clone().unwrap_or("Not set".into()),
-            1,
+            ItemType::Select,
         ),
-        ci("keyboard", "Keyboard layout", &c.keyboard_layout, 1),
+        ci(
+            "keyboard",
+            "Keyboard layout",
+            &c.keyboard_layout,
+            ItemType::Select,
+        ),
         ci(
             "ntp",
             "NTP (time sync)",
             if c.ntp { "Enabled" } else { "Disabled" },
-            3,
+            ItemType::Toggle,
         ),
     ];
 
@@ -1405,7 +1419,7 @@ fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         "parallel_downloads",
         "Parallel downloads",
         &c.parallel_downloads.to_string(),
-        0,
+        ItemType::Text,
     ));
 
     items
@@ -1421,7 +1435,7 @@ fn build_users_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             } else {
                 "Not set"
             },
-            2,
+            ItemType::Password,
         ),
         ci(
             "users",
@@ -1440,7 +1454,7 @@ fn build_users_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                     .join(", "),
                 _ => "None".into(),
             },
-            0,
+            ItemType::Text,
         ),
     ]
 }
@@ -1450,7 +1464,7 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         "profile",
         "Profile",
         c.profile.as_deref().unwrap_or("None"),
-        1,
+        ItemType::Select,
     )];
 
     items.extend(radio_group(
@@ -1469,7 +1483,7 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             "bluetooth",
             "Bluetooth",
             if c.bluetooth { "Enabled" } else { "Disabled" },
-            3,
+            ItemType::Toggle,
         ),
         ci(
             "packages",
@@ -1485,7 +1499,7 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                     parts.join(", ")
                 }
             },
-            0,
+            ItemType::Text,
         ),
         ci(
             "extra_services",
@@ -1495,7 +1509,7 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             } else {
                 c.extra_services.join(", ")
             },
-            0,
+            ItemType::Text,
         ),
         ci(
             "zrepl",
@@ -1505,7 +1519,7 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             } else {
                 "Disabled"
             },
-            3,
+            ItemType::Toggle,
         ),
     ]);
 
@@ -1522,19 +1536,19 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             key: SharedString::default(),
             label: label.into(),
             value: SharedString::default(),
-            item_type: 4, // separator used as section label
+            item_type: ItemType::Separator,
         });
 
         let step_items = build_step_items(step, c);
         let mut i = 0;
         while i < step_items.len() {
             let item = &step_items[i];
-            if item.item_type == 8 {
+            if item.item_type == ItemType::RadioHeader {
                 // Radio header: find the selected option and show as "Header: Selected"
                 let header_label = item.label.clone();
                 let mut selected_label: SharedString = "Not set".into();
                 i += 1;
-                while i < step_items.len() && step_items[i].item_type == 9 {
+                while i < step_items.len() && step_items[i].item_type == ItemType::RadioOption {
                     if step_items[i].value == "selected" {
                         selected_label = step_items[i].label.clone();
                     }
@@ -1544,14 +1558,14 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                     key: SharedString::default(),
                     label: header_label,
                     value: selected_label,
-                    item_type: 6,
+                    item_type: ItemType::Readonly,
                 });
             } else {
                 items.push(ConfigItem {
                     key: item.key.clone(),
                     label: item.label.clone(),
                     value: item.value.clone(),
-                    item_type: 6,
+                    item_type: ItemType::Readonly,
                 });
                 i += 1;
             }
@@ -1567,7 +1581,7 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                 key: SharedString::default(),
                 label: SharedString::default(),
                 value: error.as_str().into(),
-                item_type: 7, // warning
+                item_type: ItemType::Warning,
             });
         }
     }
@@ -1577,19 +1591,19 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         key: "install".into(),
         label: "Install".into(),
         value: SharedString::default(),
-        item_type: 5,
+        item_type: ItemType::Action,
     });
     items.push(ConfigItem {
         key: "quit".into(),
         label: "Quit".into(),
         value: SharedString::default(),
-        item_type: 5,
+        item_type: ItemType::Action,
     });
 
     items
 }
 
-fn ci(key: &str, label: &str, value: &str, item_type: i32) -> ConfigItem {
+fn ci(key: &str, label: &str, value: &str, item_type: ItemType) -> ConfigItem {
     ConfigItem {
         key: key.into(),
         label: label.into(),
@@ -1603,11 +1617,11 @@ fn sep() -> ConfigItem {
         key: SharedString::default(),
         label: SharedString::default(),
         value: SharedString::default(),
-        item_type: 4,
+        item_type: ItemType::Separator,
     }
 }
 
-/// Emit a radio group: a header (item_type 8) followed by clickable options (item_type 9).
+/// Emit a radio group: a header followed by clickable options.
 /// `key` is the logical group key (e.g. "compression").
 /// `selected` is the currently selected index.
 fn radio_group(key: &str, label: &str, options: &[&str], selected: i32) -> Vec<ConfigItem> {
@@ -1615,7 +1629,7 @@ fn radio_group(key: &str, label: &str, options: &[&str], selected: i32) -> Vec<C
         key: SharedString::default(),
         label: label.into(),
         value: SharedString::default(),
-        item_type: 8, // radio header
+        item_type: ItemType::RadioHeader,
     }];
     for (i, opt) in options.iter().enumerate() {
         items.push(ConfigItem {
@@ -1626,7 +1640,7 @@ fn radio_group(key: &str, label: &str, options: &[&str], selected: i32) -> Vec<C
             } else {
                 SharedString::default()
             },
-            item_type: 9, // radio option
+            item_type: ItemType::RadioOption,
         });
     }
     items
@@ -1900,8 +1914,11 @@ fn next_selectable_index(items: &[ConfigItem], current: i32, dir: i32) -> i32 {
     for offset in 1..=len {
         let idx = ((current + dir * offset) % len + len) % len;
         let t = items[idx as usize].item_type;
-        // Skip separator (4), readonly (6), warning (7), radio-header (8)
-        if t != 4 && t != 6 && t != 7 && t != 8 {
+        if t != ItemType::Separator
+            && t != ItemType::Readonly
+            && t != ItemType::Warning
+            && t != ItemType::RadioHeader
+        {
             return idx;
         }
     }

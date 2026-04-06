@@ -1,0 +1,120 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../styling.slint";
+import { SelectOption } from "../types.slint";
+import { StyledButton } from "../components/styled-button.slint";
+import { StyledTextInput } from "../components/styled-text-input.slint";
+import { DeleteButton } from "../components/delete-button.slint";
+
+export component StringListPopup inherits Rectangle {
+    in property <string> title;
+    in property <[SelectOption]> items;
+    in property <bool> popup-visible;
+
+    callback item-added(string);
+    callback item-removed(int);
+    callback closed();
+
+    if popup-visible: Rectangle {
+        background: #00000080;
+        width: 100%; height: 100%;
+
+        TouchArea { clicked => { closed(); } }
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(540px, parent.width - 40px);
+            height: min(self.preferred-height, parent.height - 80px);
+            background: Theme.c.mantle;
+            border-radius: Theme.radius-md;
+            border-color: Theme.c.surface1;
+            border-width: 1px;
+            clip: true;
+            accessible-role: groupbox;
+            accessible-label: root.title;
+
+            VerticalLayout {
+                padding: Theme.spacing-lg;
+                spacing: Theme.spacing-sm;
+
+                Text {
+                    text: root.title;
+                    color: Theme.c.blue;
+                    font-size: Theme.font-lg;
+                    font-weight: FontWeight.semi-bold;
+                    height: Theme.spacing-xl;
+                }
+
+                ScrollView {
+                    max-height: 300px;
+
+                    VerticalLayout {
+                        spacing: Theme.spacing-xs;
+
+                        for item[index] in root.items: Rectangle {
+                            height: Theme.control-height;
+                            background: Theme.c.surface0;
+                            border-radius: Theme.radius-sm;
+
+                            HorizontalLayout {
+                                padding-left: Theme.spacing-md;
+                                padding-right: Theme.spacing-sm;
+                                alignment: space-between;
+
+                                Text {
+                                    text: item.text;
+                                    color: Theme.c.text;
+                                    font-size: Theme.font-base;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                DeleteButton {
+                                    clicked => { root.item-removed(index); }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: Theme.spacing-sm;
+
+                    add-input := StyledTextInput {
+                        horizontal-stretch: 1;
+                        placeholder: "add new entry...";
+                        accepted(val) => {
+                            if val != "" {
+                                root.item-added(val);
+                                add-input.text = "";
+                            }
+                        }
+                    }
+
+                    init => { add-input.focus-input(); }
+
+                    StyledButton {
+                        label: "Add";
+                        button-width: 60px;
+                        bg: Theme.c.blue;
+                        bg-hover: Theme.c.sky;
+                        fg: Theme.c.base;
+                        clicked => {
+                            if add-input.text != "" {
+                                root.item-added(add-input.text);
+                                add-input.text = "";
+                                add-input.focus-input();
+                            }
+                        }
+                    }
+
+                    StyledButton {
+                        label: "Done";
+                        button-width: 60px;
+                        clicked => { root.closed(); }
+                    }
+                }
+            }
+        }
+    }
+}

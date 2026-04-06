@@ -1,1206 +1,22 @@
 import { ListView, ScrollView } from "std-widgets.slint";
 
-// Catppuccin Mocha color palette
-export struct Catppuccin {
-    base: color,
-    mantle: color,
-    surface0: color,
-    surface1: color,
-    overlay0: color,
-    text: color,
-    subtext0: color,
-    subtext1: color,
-    blue: color,
-    green: color,
-    red: color,
-    yellow: color,
-    mauve: color,
-    teal: color,
-    sky: color,
-    peach: color,
-}
-
-export global Theme {
-    out property <Catppuccin> c: {
-        base: #1e1e2e,
-        mantle: #181825,
-        surface0: #313244,
-        surface1: #45475a,
-        overlay0: #6c7086,
-        text: #cdd6f4,
-        subtext0: #a6adc8,
-        subtext1: #bac2de,
-        blue: #89b4fa,
-        green: #a6e3a1,
-        red: #f38ba8,
-        yellow: #f9e2af,
-        mauve: #cba6f7,
-        teal: #94e2d5,
-        sky: #89dceb,
-        peach: #fab387,
-    };
-}
-
-export struct ConfigItem {
-    key: string,
-    label: string,
-    value: string,
-    item-type: int, // 0=text, 1=select, 2=password, 3=toggle, 4=separator, 5=action,
-                    // 6=readonly, 7=warning, 8=radio-header, 9=radio-option
-}
-
-export struct SelectOption {
-    text: string,
-}
-
-export struct UserEntry {
-    username: string,
-    has-sudo: bool,
-}
-
-export struct PackageEntry {
-    name: string,
-    repo: string,  // "extra", "core", "aur", etc.
-}
-
-export struct PackageSearchResult {
-    name: string,
-    description: string,
-    repo: string,
-}
-
-export struct LogMessage {
-    text: string,
-    level: int,
-}
-
-export struct DownloadInfo {
-    filename: string,
-    pct: int,
-    speed: string,
-    state: int, // 0=downloading, 1=verifying, 2=done
-}
-
-export struct StepInfo {
-    label: string,
-    state: int, // 0=pending, 1=current, 2=done
-}
-
-// ── Text input popup ─────────────────────────────────
-
-component TextInputPopup inherits Rectangle {
-    in property <string> title;
-    in-out property <string> input-text;
-    in property <bool> is-password: false;
-    in property <bool> popup-visible;
-    // Password strength (set from Rust)
-    in property <int> strength-score: -1; // -1=hidden, 0..4=zxcvbn score
-    in property <string> strength-label;
-    in property <string> strength-hint; // crack time or suggestion
-    in property <color> strength-color: Theme.c.overlay0;
-
-    callback confirmed(string);
-    callback cancelled();
-    callback text-edited(string);
-
-    if popup-visible: Rectangle {
-        background: #00000080;
-        width: 100%; height: 100%;
-
-        TouchArea { clicked => { cancelled(); } }
-
-        Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: min(500px, parent.width - 40px);
-            height: self.preferred-height;
-            background: Theme.c.mantle;
-            border-radius: 8px;
-            border-color: Theme.c.surface1;
-            border-width: 1px;
-            accessible-role: groupbox;
-            accessible-label: title;
-
-            VerticalLayout {
-                padding: 16px;
-                spacing: 12px;
-
-                Text {
-                    text: title;
-                    color: Theme.c.blue;
-                    font-size: 16px;
-                    font-weight: FontWeight.semi-bold;
-                }
-
-                Rectangle {
-                    height: 36px;
-                    background: Theme.c.surface0;
-                    border-radius: 4px;
-                    border-color: Theme.c.blue;
-                    border-width: 1px;
-                    clip: true;
-
-                    input := TextInput {
-                        width: max(parent.width - 16px, self.preferred-width);
-                        x: 8px;
-                        vertical-alignment: center;
-                        color: Theme.c.text;
-                        font-size: 14px;
-                        text: input-text;
-                        input-type: is-password ? InputType.password : InputType.text;
-
-                        private property <length> margin: 8px;
-                        cursor-position-changed(cursor-position) => {
-                            if cursor-position.x + self.x < margin {
-                                self.x = - cursor-position.x + margin;
-                            } else if cursor-position.x + self.x > parent.width - margin - self.text-cursor-width {
-                                self.x = parent.width - cursor-position.x - margin - self.text-cursor-width;
-                            }
-                        }
-
-                        edited => {
-                            text-edited(self.text);
-                        }
-
-                        accepted => {
-                            confirmed(self.text);
-                        }
-                    }
-
-                    init => { input.focus(); }
-                }
-
-                // Password strength bar
-                if is-password && strength-score >= 0: VerticalLayout {
-                    spacing: 4px;
-
-                    Rectangle {
-                        height: 6px;
-                        background: Theme.c.surface0;
-                        border-radius: 3px;
-                        clip: true;
-
-                        Rectangle {
-                            x: 0;
-                            y: 0;
-                            height: parent.height;
-                            width: parent.width * (strength-score + 1) / 5;
-                            background: strength-color;
-                            border-radius: 3px;
-                        }
-                    }
-
-                    HorizontalLayout {
-                        alignment: center;
-                        spacing: 12px;
-
-                        Text {
-                            text: strength-label;
-                            color: strength-color;
-                            font-size: 12px;
-                            font-weight: FontWeight.semi-bold;
-                        }
-
-                        if strength-hint != "": Text {
-                            text: strength-hint;
-                            color: Theme.c.overlay0;
-                            font-size: 12px;
-                        }
-                    }
-                }
-
-                HorizontalLayout {
-                    spacing: 8px;
-                    alignment: end;
-
-                    Rectangle {
-                        width: 80px;
-                        height: 30px;
-                        background: cancel-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
-                        border-radius: 4px;
-                        accessible-role: button;
-                        accessible-label: "Cancel";
-
-                        cancel-ta := TouchArea {
-                            clicked => { cancelled(); }
-                        }
-
-                        Text {
-                            text: "Cancel";
-                            color: Theme.c.subtext0;
-                            font-size: 13px;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-
-                    Rectangle {
-                        width: 80px;
-                        height: 30px;
-                        background: ok-ta.has-hover ? Theme.c.sky : Theme.c.blue;
-                        border-radius: 4px;
-                        accessible-role: button;
-                        accessible-label: "OK";
-
-                        ok-ta := TouchArea {
-                            clicked => { confirmed(input.text); }
-                        }
-
-                        Text {
-                            text: "OK";
-                            color: Theme.c.base;
-                            font-size: 13px;
-                            font-weight: FontWeight.semi-bold;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ── Select popup ─────────────────────────────────────
-
-component SelectPopup inherits Rectangle {
-    in property <string> title;
-    in property <[SelectOption]> options;
-    in property <int> selected-index;
-    out property <int> result-index: selected-index;
-    in property <bool> popup-visible;
-    in property <bool> show-filter: false;
-
-    callback accepted(int);
-    callback cancelled();
-    callback filter-changed(string);
-
-    if popup-visible: Rectangle {
-        background: #00000080;
-        width: 100%; height: 100%;
-
-        TouchArea {
-            clicked => { cancelled(); }
-            scroll-event(e) => {
-                return accept;
-            }
-        }
-
-        Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: min(500px, parent.width - 40px);
-            height: min(parent.height - 80px, 500px);
-            background: Theme.c.mantle;
-            border-radius: 8px;
-            border-color: Theme.c.surface1;
-            border-width: 1px;
-            clip: true;
-            accessible-role: groupbox;
-            accessible-label: title;
-
-            VerticalLayout {
-                padding: 16px;
-                spacing: 8px;
-
-                Text {
-                    text: title;
-                    color: Theme.c.blue;
-                    font-size: 16px;
-                    font-weight: FontWeight.semi-bold;
-                    height: 24px;
-                }
-
-                if show-filter: Rectangle {
-                    height: 32px;
-                    background: Theme.c.surface0;
-                    border-radius: 4px;
-                    border-color: Theme.c.blue;
-                    border-width: 1px;
-                    clip: true;
-
-                    filter-input := TextInput {
-                        width: max(parent.width - 16px, self.preferred-width);
-                        x: 8px;
-                        vertical-alignment: center;
-                        color: Theme.c.text;
-                        font-size: 13px;
-
-                        private property <length> margin: 8px;
-                        cursor-position-changed(cursor-position) => {
-                            if cursor-position.x + self.x < margin {
-                                self.x = - cursor-position.x + margin;
-                            } else if cursor-position.x + self.x > parent.width - margin - self.text-cursor-width {
-                                self.x = parent.width - cursor-position.x - margin - self.text-cursor-width;
-                            }
-                        }
-
-                        edited => {
-                            filter-changed(self.text);
-                        }
-                    }
-
-                    init => { filter-input.focus(); }
-                }
-
-                ListView {
-                    for option[index] in options: Rectangle {
-                        height: 32px;
-                        background: item-ta.has-hover ? Theme.c.surface1
-                                  : index == result-index ? Theme.c.surface0
-                                  : transparent;
-                        border-radius: 4px;
-                        accessible-role: list-item;
-                        accessible-label: option.text;
-                        accessible-item-selected: index == result-index;
-                        accessible-item-index: index;
-                        accessible-item-count: options.length;
-
-                        item-ta := TouchArea {
-                            clicked => {
-                                result-index = index;
-                                accepted(index);
-                            }
-                        }
-
-                        HorizontalLayout {
-                            padding-left: 12px;
-                            alignment: start;
-
-                            Text {
-                                text: index == result-index ? "> " + option.text : "  " + option.text;
-                                color: index == result-index ? Theme.c.green : Theme.c.text;
-                                font-size: 14px;
-                                vertical-alignment: center;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ── User management popup ────────────────────────────
-
-component UserManagePopup inherits Rectangle {
-    in property <[UserEntry]> users;
-    in property <bool> popup-visible;
-
-    callback user-added(string, string, bool); // username, password, sudo
-    callback user-removed(int);
-    callback user-sudo-toggled(int);
-    callback closed();
-
-    if popup-visible: Rectangle {
-        background: #00000080;
-        width: 100%; height: 100%;
-
-        TouchArea { clicked => { closed(); } }
-
-        Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: min(520px, parent.width - 40px);
-            height: min(parent.height - 80px, 480px);
-            background: Theme.c.mantle;
-            border-radius: 8px;
-            border-color: Theme.c.surface1;
-            border-width: 1px;
-            clip: true;
-            accessible-role: groupbox;
-            accessible-label: "User accounts";
-
-            VerticalLayout {
-                padding: 16px;
-                spacing: 12px;
-
-                Text {
-                    text: "User accounts";
-                    color: Theme.c.blue;
-                    font-size: 16px;
-                    font-weight: FontWeight.semi-bold;
-                    height: 24px;
-                }
-
-                // ── Existing users list ──
-                ListView {
-                    vertical-stretch: 1;
-
-                    for user[index] in users: Rectangle {
-                        height: 40px;
-                        background: user-row-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
-                        border-radius: 4px;
-
-                        user-row-ta := TouchArea {
-                            clicked => { user-sudo-toggled(index); }
-                        }
-
-                        HorizontalLayout {
-                            padding-left: 12px;
-                            padding-right: 8px;
-                            spacing: 8px;
-                            alignment: space-between;
-
-                            HorizontalLayout {
-                                spacing: 8px;
-                                alignment: start;
-
-                                Text {
-                                    text: user.username;
-                                    color: Theme.c.text;
-                                    font-size: 14px;
-                                    vertical-alignment: center;
-                                }
-
-                                if user.has-sudo: Rectangle {
-                                    width: sudo-text.preferred-width + 12px;
-                                    height: 20px;
-                                    background: Theme.c.blue;
-                                    border-radius: 3px;
-
-                                    sudo-text := Text {
-                                        text: "sudo";
-                                        color: Theme.c.base;
-                                        font-size: 11px;
-                                        font-weight: FontWeight.semi-bold;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                }
-
-                                if !user.has-sudo: Text {
-                                    text: "(click to toggle sudo)";
-                                    color: Theme.c.overlay0;
-                                    font-size: 12px;
-                                }
-                            }
-
-                            Rectangle {
-                                width: 28px;
-                                height: 28px;
-                                background: del-ta.has-hover ? Theme.c.red : transparent;
-                                border-radius: 4px;
-
-                                del-ta := TouchArea {
-                                    clicked => { user-removed(index); }
-                                }
-
-                                Text {
-                                    text: "\u{2715}"; // ✕
-                                    color: del-ta.has-hover ? Theme.c.base : Theme.c.overlay0;
-                                    font-size: 14px;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // ── Add user form ──
-                Rectangle {
-                    height: 1px;
-                    background: Theme.c.surface1;
-                }
-
-                Text {
-                    text: "Add user";
-                    color: Theme.c.subtext0;
-                    font-size: 13px;
-                    font-weight: FontWeight.semi-bold;
-                    height: 20px;
-                }
-
-                HorizontalLayout {
-                    spacing: 8px;
-
-                    // Username
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        height: 34px;
-                        background: Theme.c.surface0;
-                        border-radius: 4px;
-                        border-color: username-input.has-focus ? Theme.c.blue : Theme.c.surface1;
-                        border-width: 1px;
-                        clip: true;
-
-                        username-input := TextInput {
-                            width: max(parent.width - 16px, self.preferred-width);
-                            x: 8px;
-                            vertical-alignment: center;
-                            color: Theme.c.text;
-                            font-size: 13px;
-
-                            private property <length> margin: 8px;
-                            cursor-position-changed(cursor-position) => {
-                                if cursor-position.x + self.x < margin {
-                                    self.x = - cursor-position.x + margin;
-                                } else if cursor-position.x + self.x > parent.width - margin - self.text-cursor-width {
-                                    self.x = parent.width - cursor-position.x - margin - self.text-cursor-width;
-                                }
-                            }
-                        }
-
-                        // Placeholder
-                        if username-input.text == "": Text {
-                            x: 8px;
-                            text: "username";
-                            color: Theme.c.overlay0;
-                            font-size: 13px;
-                            vertical-alignment: center;
-                        }
-                    }
-
-                    // Password
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        height: 34px;
-                        background: Theme.c.surface0;
-                        border-radius: 4px;
-                        border-color: password-input.has-focus ? Theme.c.blue : Theme.c.surface1;
-                        border-width: 1px;
-                        clip: true;
-
-                        password-input := TextInput {
-                            width: max(parent.width - 16px, self.preferred-width);
-                            x: 8px;
-                            vertical-alignment: center;
-                            color: Theme.c.text;
-                            font-size: 13px;
-                            input-type: InputType.password;
-
-                            private property <length> margin: 8px;
-                            cursor-position-changed(cursor-position) => {
-                                if cursor-position.x + self.x < margin {
-                                    self.x = - cursor-position.x + margin;
-                                } else if cursor-position.x + self.x > parent.width - margin - self.text-cursor-width {
-                                    self.x = parent.width - cursor-position.x - margin - self.text-cursor-width;
-                                }
-                            }
-                        }
-
-                        // Placeholder
-                        if password-input.text == "": Text {
-                            x: 8px;
-                            text: "password (optional)";
-                            color: Theme.c.overlay0;
-                            font-size: 13px;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
-
-                HorizontalLayout {
-                    spacing: 8px;
-                    alignment: end;
-
-                    // Sudo toggle
-                    sudo-toggle := Rectangle {
-                        height: 30px;
-                        width: sudo-check-text.preferred-width + 36px;
-                        background: sudo-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
-                        border-radius: 4px;
-
-                        property <bool> sudo-checked: true;
-
-                        sudo-ta := TouchArea {
-                            clicked => { parent.sudo-checked = !parent.sudo-checked; }
-                        }
-
-                        HorizontalLayout {
-                            padding-left: 10px;
-                            padding-right: 10px;
-                            spacing: 6px;
-                            alignment: center;
-
-                            Text {
-                                text: sudo-toggle.sudo-checked ? "\u{25cf}" : "\u{25cb}";
-                                color: sudo-toggle.sudo-checked ? Theme.c.green : Theme.c.overlay0;
-                                font-size: 14px;
-                                vertical-alignment: center;
-                            }
-
-                            sudo-check-text := Text {
-                                text: "sudo";
-                                color: Theme.c.subtext0;
-                                font-size: 13px;
-                                vertical-alignment: center;
-                            }
-                        }
-                    }
-
-                    // Add button
-                    Rectangle {
-                        width: 80px;
-                        height: 30px;
-                        background: add-ta.has-hover ? Theme.c.sky : Theme.c.blue;
-                        border-radius: 4px;
-                        accessible-role: button;
-                        accessible-label: "Add";
-
-                        add-ta := TouchArea {
-                            clicked => {
-                                if username-input.text != "" {
-                                    user-added(username-input.text, password-input.text, sudo-toggle.sudo-checked);
-                                    sudo-toggle.sudo-checked = true;
-                                    username-input.text = "";
-                                    password-input.text = "";
-                                    username-input.focus();
-                                }
-                            }
-                        }
-
-                        Text {
-                            text: "Add";
-                            color: Theme.c.base;
-                            font-size: 13px;
-                            font-weight: FontWeight.semi-bold;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
-
-                // ── Done button ──
-                HorizontalLayout {
-                    alignment: end;
-
-                    Rectangle {
-                        width: 80px;
-                        height: 30px;
-                        background: done-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
-                        border-radius: 4px;
-                        accessible-role: button;
-                        accessible-label: "Done";
-
-                        done-ta := TouchArea {
-                            clicked => { closed(); }
-                        }
-
-                        Text {
-                            text: "Done";
-                            color: Theme.c.subtext0;
-                            font-size: 13px;
-                            font-weight: FontWeight.semi-bold;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ── String list popup (for extra_services, etc.) ────
-
-component StringListPopup inherits Rectangle {
-    in property <string> title;
-    in property <[SelectOption]> items;
-    in property <bool> popup-visible;
-
-    callback item-added(string);
-    callback item-removed(int);
-    callback closed();
-
-    if popup-visible: Rectangle {
-        background: #00000080;
-        width: 100%; height: 100%;
-
-        TouchArea { clicked => { closed(); } }
-
-        Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: min(540px, parent.width - 40px);
-            // 160px base + items capped at 300px (ScrollView max-height)
-            height: min(160px + min(items.length * 40px, 300px), parent.height - 80px);
-            background: Theme.c.mantle;
-            border-radius: 8px;
-            border-color: Theme.c.surface1;
-            border-width: 1px;
-            clip: true;
-            accessible-role: groupbox;
-            accessible-label: title;
-
-            VerticalLayout {
-                padding: 16px;
-                spacing: 10px;
-
-                Text {
-                    text: title;
-                    color: Theme.c.blue;
-                    font-size: 16px;
-                    font-weight: FontWeight.semi-bold;
-                    height: 24px;
-                }
-
-                // Existing items
-                ScrollView {
-                    max-height: 300px;
-
-                    VerticalLayout {
-                        spacing: 4px;
-
-                        for item[index] in items: Rectangle {
-                            height: 36px;
-                            background: Theme.c.surface0;
-                            border-radius: 4px;
-
-                            HorizontalLayout {
-                                padding-left: 12px;
-                                padding-right: 8px;
-                                alignment: space-between;
-
-                                Text {
-                                    text: item.text;
-                                    color: Theme.c.text;
-                                    font-size: 14px;
-                                    vertical-alignment: center;
-                                    horizontal-stretch: 1;
-                                }
-
-                                Rectangle {
-                                    width: 28px;
-                                    height: 28px;
-                                    background: sl-del-ta.has-hover ? Theme.c.red : transparent;
-                                    border-radius: 4px;
-
-                                    sl-del-ta := TouchArea {
-                                        clicked => { item-removed(index); }
-                                    }
-
-                                    Text {
-                                        text: "\u{2715}";
-                                        color: sl-del-ta.has-hover ? Theme.c.base : Theme.c.overlay0;
-                                        font-size: 14px;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Add input + Add + Done in one row
-                HorizontalLayout {
-                    spacing: 8px;
-
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        height: 34px;
-                        background: Theme.c.surface0;
-                        border-radius: 4px;
-                        border-color: sl-add-input.has-focus ? Theme.c.blue : Theme.c.surface1;
-                        border-width: 1px;
-                        clip: true;
-
-                        sl-add-input := TextInput {
-                            width: max(parent.width - 16px, self.preferred-width);
-                            x: 8px;
-                            vertical-alignment: center;
-                            color: Theme.c.text;
-                            font-size: 13px;
-
-                            accepted => {
-                                if self.text != "" {
-                                    item-added(self.text);
-                                    self.text = "";
-                                }
-                            }
-                        }
-
-                        if sl-add-input.text == "": Text {
-                            x: 8px;
-                            text: "add new entry...";
-                            color: Theme.c.overlay0;
-                            font-size: 13px;
-                            vertical-alignment: center;
-                        }
-
-                        init => { sl-add-input.focus(); }
-                    }
-
-                    Rectangle {
-                        width: 60px;
-                        height: 34px;
-                        background: sl-add-ta.has-hover ? Theme.c.sky : Theme.c.blue;
-                        border-radius: 4px;
-
-                        sl-add-ta := TouchArea {
-                            clicked => {
-                                if sl-add-input.text != "" {
-                                    item-added(sl-add-input.text);
-                                    sl-add-input.text = "";
-                                    sl-add-input.focus();
-                                }
-                            }
-                        }
-
-                        Text {
-                            text: "Add";
-                            color: Theme.c.base;
-                            font-size: 13px;
-                            font-weight: FontWeight.semi-bold;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-
-                    Rectangle {
-                        width: 60px;
-                        height: 34px;
-                        background: sl-done-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
-                        border-radius: 4px;
-
-                        sl-done-ta := TouchArea {
-                            clicked => { closed(); }
-                        }
-
-                        Text {
-                            text: "Done";
-                            color: Theme.c.subtext0;
-                            font-size: 13px;
-                            font-weight: FontWeight.semi-bold;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ── Package search popup ─────────────────────────────
-
-component PackageSearchPopup inherits Rectangle {
-    in property <[PackageSearchResult]> search-results;
-    in property <[PackageEntry]> selected-packages;
-    in property <bool> popup-visible;
-    in property <bool> searching-aur: false;
-    in property <string> status-text;
-
-    callback search-changed(string);  // fired on each keystroke
-    callback search-aur(string);      // fired on Tab
-    callback package-added(int);      // index in search-results
-    callback package-removed(int);    // index in selected-packages
-    callback closed();
-
-    if popup-visible: Rectangle {
-        background: #00000080;
-        width: 100%; height: 100%;
-
-        TouchArea { clicked => { closed(); } }
-
-        Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: min(600px, parent.width - 40px);
-            height: min(parent.height - 60px, 520px);
-            background: Theme.c.mantle;
-            border-radius: 8px;
-            border-color: Theme.c.surface1;
-            border-width: 1px;
-            clip: true;
-            accessible-role: groupbox;
-            accessible-label: "Package search";
-
-            VerticalLayout {
-                padding: 16px;
-                spacing: 10px;
-
-                // Title
-                Text {
-                    text: searching-aur ? "AUR search" : "Package search";
-                    color: Theme.c.blue;
-                    font-size: 16px;
-                    font-weight: FontWeight.semi-bold;
-                }
-
-                // Search input + AUR button
-                HorizontalLayout {
-                    spacing: 8px;
-
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        height: 36px;
-                        background: Theme.c.surface0;
-                        border-radius: 4px;
-                        border-color: pkg-search-input.has-focus ? Theme.c.blue : Theme.c.surface1;
-                        border-width: 1px;
-                        clip: true;
-
-                        pkg-search-input := TextInput {
-                            width: max(parent.width - 16px, self.preferred-width);
-                            x: 8px;
-                            vertical-alignment: center;
-                            color: Theme.c.text;
-                            font-size: 14px;
-
-                            private property <length> margin: 8px;
-                            cursor-position-changed(cursor-position) => {
-                                if cursor-position.x + self.x < margin {
-                                    self.x = - cursor-position.x + margin;
-                                } else if cursor-position.x + self.x > parent.width - margin - self.text-cursor-width {
-                                    self.x = parent.width - cursor-position.x - margin - self.text-cursor-width;
-                                }
-                            }
-
-                            edited => {
-                                search-changed(self.text);
-                            }
-                        }
-
-                        // Placeholder
-                        if pkg-search-input.text == "": Text {
-                            x: 8px;
-                            text: "type to search packages...";
-                            color: Theme.c.overlay0;
-                            font-size: 14px;
-                            vertical-alignment: center;
-                        }
-
-                        init => { pkg-search-input.focus(); }
-                    }
-
-                    // AUR search button
-                    Rectangle {
-                        width: 60px;
-                        height: 36px;
-                        background: aur-btn-ta.has-hover ? Theme.c.mauve : Theme.c.surface0;
-                        border-radius: 4px;
-                        border-color: searching-aur ? Theme.c.mauve : Theme.c.surface1;
-                        border-width: 1px;
-
-                        aur-btn-ta := TouchArea {
-                            clicked => {
-                                search-aur(pkg-search-input.text);
-                            }
-                        }
-
-                        Text {
-                            text: "AUR";
-                            color: aur-btn-ta.has-hover ? Theme.c.base : (searching-aur ? Theme.c.mauve : Theme.c.subtext0);
-                            font-size: 13px;
-                            font-weight: FontWeight.semi-bold;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
-
-                // Status / hint
-                if status-text != "": Text {
-                    text: status-text;
-                    color: Theme.c.overlay0;
-                    font-size: 12px;
-                    height: 16px;
-                }
-
-                // Search results
-                ListView {
-                    vertical-stretch: 1;
-
-                    for result[index] in search-results: Rectangle {
-                        height: 36px;
-                        background: result-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
-                        border-radius: 4px;
-
-                        result-ta := TouchArea {
-                            clicked => {
-                                package-added(index);
-                                pkg-search-input.text = "";
-                                pkg-search-input.focus();
-                            }
-                        }
-
-                        HorizontalLayout {
-                            padding-left: 12px;
-                            padding-right: 12px;
-                            spacing: 8px;
-
-                            Text {
-                                text: result.name;
-                                color: Theme.c.text;
-                                font-size: 13px;
-                                vertical-alignment: center;
-                            }
-
-                            // Repo badge
-                            Rectangle {
-                                width: repo-badge-text.preferred-width + 10px;
-                                height: 18px;
-                                background: result.repo == "aur" ? Theme.c.mauve : Theme.c.blue;
-                                border-radius: 3px;
-
-                                repo-badge-text := Text {
-                                    text: result.repo;
-                                    color: Theme.c.base;
-                                    font-size: 10px;
-                                    font-weight: FontWeight.semi-bold;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                            }
-
-                            Text {
-                                text: result.description;
-                                color: Theme.c.overlay0;
-                                font-size: 12px;
-                                vertical-alignment: center;
-                                overflow: elide;
-                                horizontal-stretch: 1;
-                            }
-                        }
-                    }
-                }
-
-                // Separator
-                if selected-packages.length > 0: Rectangle {
-                    height: 1px;
-                    background: Theme.c.surface1;
-                }
-
-                // Selected packages
-                if selected-packages.length > 0: VerticalLayout {
-                    spacing: 4px;
-                    height: min(self.preferred-height, 100px);
-
-                    Text {
-                        text: "Selected";
-                        color: Theme.c.subtext0;
-                        font-size: 12px;
-                        font-weight: FontWeight.semi-bold;
-                        height: 16px;
-                    }
-
-                    Flickable {
-                        HorizontalLayout {
-                            spacing: 6px;
-                            alignment: start;
-
-                            for pkg[index] in selected-packages: Rectangle {
-                                width: pkg-chip-layout.preferred-width;
-                                height: 26px;
-                                background: pkg-del-ta.has-hover ? Theme.c.red : Theme.c.surface0;
-                                border-radius: 4px;
-
-                                pkg-del-ta := TouchArea {
-                                    clicked => { package-removed(index); }
-                                }
-
-                                pkg-chip-layout := HorizontalLayout {
-                                    padding-left: 8px;
-                                    padding-right: 8px;
-                                    spacing: 4px;
-
-                                    Text {
-                                        text: pkg.name;
-                                        color: pkg-del-ta.has-hover ? Theme.c.base : Theme.c.text;
-                                        font-size: 12px;
-                                        vertical-alignment: center;
-                                    }
-
-                                    Text {
-                                        text: pkg.repo == "aur" ? "[aur]" : "[repo]";
-                                        color: pkg-del-ta.has-hover ? Theme.c.base : Theme.c.overlay0;
-                                        font-size: 10px;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Done button
-                HorizontalLayout {
-                    alignment: end;
-
-                    Rectangle {
-                        width: 80px;
-                        height: 30px;
-                        background: pkg-done-ta.has-hover ? Theme.c.sky : Theme.c.blue;
-                        border-radius: 4px;
-
-                        pkg-done-ta := TouchArea {
-                            clicked => { closed(); }
-                        }
-
-                        Text {
-                            text: "Done";
-                            color: Theme.c.base;
-                            font-size: 13px;
-                            font-weight: FontWeight.semi-bold;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ── Sidebar step item ────────────────────────────────
-
-component SidebarItem inherits Rectangle {
-    in property <string> label;
-    in property <int> state; // 0=pending, 1=current, 2=done
-    in property <int> step-index;
-
-    callback clicked();
-
-    accessible-role: button;
-    accessible-label: label;
-    accessible-enabled: state == 1 || state == 2;
-
-    height: 36px;
-    background: state == 1 ? Theme.c.surface0
-              : step-ta.has-hover && state == 2 ? Theme.c.surface0
-              : transparent;
-    border-radius: 4px;
-
-    step-ta := TouchArea {
-        mouse-cursor: state == 2 ? pointer : default;
-        clicked => {
-            if state == 2 || state == 1 {
-                root.clicked();
-            }
-        }
-    }
-
-    HorizontalLayout {
-        padding-left: 12px;
-        spacing: 8px;
-        alignment: start;
-
-        Text {
-            text: state == 1 ? "\u{25b8}"  // ▸
-                : state == 2 ? "\u{25cf}"   // ●
-                : "\u{25cb}";               // ○
-            color: state == 1 ? Theme.c.blue
-                 : state == 2 ? Theme.c.green
-                 : Theme.c.overlay0;
-            font-size: 14px;
-            vertical-alignment: center;
-            width: 16px;
-        }
-
-        Text {
-            text: label;
-            color: state == 1 ? Theme.c.blue
-                 : state == 2 ? Theme.c.green
-                 : Theme.c.overlay0;
-            font-size: 14px;
-            font-weight: state == 1 ? FontWeight.semi-bold : FontWeight.normal;
-            vertical-alignment: center;
-        }
-    }
-}
+import { Catppuccin, Theme } from "styling.slint";
+export { Catppuccin, Theme }
+
+import { ItemType, ConfigItem, SelectOption, UserEntry, PackageEntry, PackageSearchResult, LogMessage, DownloadInfo, StepInfo } from "types.slint";
+export { ItemType, ConfigItem, SelectOption, UserEntry, PackageEntry, PackageSearchResult, LogMessage, DownloadInfo, StepInfo }
+
+import { StyledButton } from "components/styled-button.slint";
+import { StyledTextInput } from "components/styled-text-input.slint";
+import { Badge } from "components/badge.slint";
+import { ProgressBar } from "components/progress-bar.slint";
+import { DeleteButton } from "components/delete-button.slint";
+import { SidebarItem } from "components/sidebar-item.slint";
+import { TextInputPopup } from "popups/text-input-popup.slint";
+import { SelectPopup } from "popups/select-popup.slint";
+import { UserManagePopup } from "popups/user-manage-popup.slint";
+import { StringListPopup } from "popups/string-list-popup.slint";
+import { PackageSearchPopup } from "popups/package-search-popup.slint";
 
 // ── Main application ─────────────────────────────────
 
@@ -1227,9 +43,6 @@ export component App inherits Window {
     callback check-internet();
     callback start-wizard();
 
-    // Config items model (per-step)
-    // item-type: 0=text, 1=select(popup), 2=password, 3=toggle, 4=separator,
-    //            5=action, 6=readonly, 7=warning, 8=radio-header, 9=radio-option
     in property <[ConfigItem]> config-items;
 
     // Select popup state
@@ -1706,43 +519,43 @@ export component App inherits Window {
 
                         for item[index] in config-items: Rectangle {
                             // Heights
-                            height: item.item-type == 4 ? 12px      // separator gap
-                                  : item.item-type == 7 ? 32px      // warning
-                                  : item.item-type == 8 ? 36px      // radio card header
-                                  : item.item-type == 9 ? 36px      // radio option
-                                  : item.item-type == 5 ? 40px      // action button
+                            height: item.item-type == ItemType.separator ? 12px      // separator gap
+                                  : item.item-type == ItemType.warning ? 32px      // warning
+                                  : item.item-type == ItemType.radio-header ? 36px      // radio card header
+                                  : item.item-type == ItemType.radio-option ? 36px      // radio option
+                                  : item.item-type == ItemType.action ? 40px      // action button
                                   : 44px;                           // normal items
 
                             // Card backgrounds
-                            border-radius: item.item-type == 8 ? 8px    // radio header: top corners only visually
-                                         : item.item-type == 4 ? 0px
-                                         : item.item-type == 7 ? 6px
+                            border-radius: item.item-type == ItemType.radio-header ? 8px    // radio header: top corners only visually
+                                         : item.item-type == ItemType.separator ? 0px
+                                         : item.item-type == ItemType.warning ? 6px
                                          : 8px;
 
-                            background: item.item-type == 4 ? transparent
-                                      : item.item-type == 8 ? Theme.c.surface0  // radio header = card top
-                                      : item.item-type == 9 ? Theme.c.surface0  // radio body = card body
-                                      : item.item-type == 7 ? transparent
-                                      : item.item-type == 5 ? transparent       // actions = no card bg
-                                      : item.item-type == 6 ? Theme.c.surface0  // readonly = card
+                            background: item.item-type == ItemType.separator ? transparent
+                                      : item.item-type == ItemType.radio-header ? Theme.c.surface0  // radio header = card top
+                                      : item.item-type == ItemType.radio-option ? Theme.c.surface0  // radio body = card body
+                                      : item.item-type == ItemType.warning ? transparent
+                                      : item.item-type == ItemType.action ? transparent       // actions = no card bg
+                                      : item.item-type == ItemType.readonly ? Theme.c.surface0  // readonly = card
                                       : Theme.c.surface0;                       // normal items = card
 
                             // Hover highlight
                             Rectangle {
                                 visible: (row-ta.has-hover || index == focused-index)
-                                    && item.item-type != 4
-                                    && item.item-type != 6
-                                    && item.item-type != 7
-                                    && item.item-type != 8;
+                                    && item.item-type != ItemType.separator
+                                    && item.item-type != ItemType.readonly
+                                    && item.item-type != ItemType.warning
+                                    && item.item-type != ItemType.radio-header;
                                 background: #ffffff10;
                                 border-radius: parent.border-radius;
                             }
 
                             // ── Separator ──
-                            if item.item-type == 4: Rectangle { }
+                            if item.item-type == ItemType.separator: Rectangle { }
 
                             // ── Warning ──
-                            if item.item-type == 7: HorizontalLayout {
+                            if item.item-type == ItemType.warning: HorizontalLayout {
                                 padding-left: 12px;
                                 spacing: 8px;
                                 alignment: start;
@@ -1762,7 +575,7 @@ export component App inherits Window {
                             }
 
                             // ── Radio group header (card title bar) ──
-                            if item.item-type == 8: HorizontalLayout {
+                            if item.item-type == ItemType.radio-header: HorizontalLayout {
                                 padding-left: 14px;
                                 alignment: start;
 
@@ -1776,7 +589,7 @@ export component App inherits Window {
                             }
 
                             // ── Radio option (card body row) ──
-                            if item.item-type == 9: HorizontalLayout {
+                            if item.item-type == ItemType.radio-option: HorizontalLayout {
                                 padding-left: 14px;
                                 padding-right: 14px;
                                 spacing: 10px;
@@ -1799,7 +612,7 @@ export component App inherits Window {
                             }
 
                             // ── Action button ──
-                            if item.item-type == 5: Rectangle {
+                            if item.item-type == ItemType.action: Rectangle {
                                 background: item.key == "install" ? Theme.c.blue : Theme.c.surface0;
                                 border-radius: 8px;
 
@@ -1820,7 +633,7 @@ export component App inherits Window {
                             }
 
                             // ── Read-only summary (review step) ──
-                            if item.item-type == 6: HorizontalLayout {
+                            if item.item-type == ItemType.readonly: HorizontalLayout {
                                 padding-left: 14px;
                                 padding-right: 14px;
 
@@ -1843,8 +656,8 @@ export component App inherits Window {
                             }
 
                             // ── Normal config items (text, select, password, toggle) ──
-                            if item.item-type == 0 || item.item-type == 1
-                                || item.item-type == 2 || item.item-type == 3: HorizontalLayout {
+                            if item.item-type == ItemType.text || item.item-type == ItemType.select
+                                || item.item-type == ItemType.password || item.item-type == ItemType.toggle: HorizontalLayout {
                                 padding-left: 14px;
                                 padding-right: 14px;
 
@@ -1862,7 +675,7 @@ export component App inherits Window {
                                     alignment: end;
 
                                     // Toggle indicator
-                                    if item.item-type == 3: Text {
+                                    if item.item-type == ItemType.toggle: Text {
                                         text: item.value == "Enabled" ? "\u{25cf}" : "\u{25cb}";
                                         color: item.value == "Enabled" ? Theme.c.green : Theme.c.overlay0;
                                         font-size: 14px;
@@ -1882,20 +695,20 @@ export component App inherits Window {
 
                             // ── Touch area (for all item types) ──
                             row-ta := TouchArea {
-                                mouse-cursor: item.item-type == 4 || item.item-type == 6
-                                    || item.item-type == 7 || item.item-type == 8
+                                mouse-cursor: item.item-type == ItemType.separator || item.item-type == ItemType.readonly
+                                    || item.item-type == ItemType.warning || item.item-type == ItemType.radio-header
                                     ? default : pointer;
                                 clicked => {
                                     focused-index = index;
-                                    if item.item-type == 5 {
+                                    if item.item-type == ItemType.action {
                                         if item.key == "install" { install-requested(); }
                                         if item.key == "quit" { quit-requested(); }
-                                    } else if item.item-type == 3 {
+                                    } else if item.item-type == ItemType.toggle {
                                         toggle-activated(item.key);
-                                    } else if item.item-type != 4
-                                           && item.item-type != 6
-                                           && item.item-type != 7
-                                           && item.item-type != 8 {
+                                    } else if item.item-type != ItemType.separator
+                                           && item.item-type != ItemType.readonly
+                                           && item.item-type != ItemType.warning
+                                           && item.item-type != ItemType.radio-header {
                                         item-activated(item.key);
                                     }
                                 }

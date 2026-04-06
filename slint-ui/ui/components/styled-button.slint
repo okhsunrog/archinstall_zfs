@@ -1,0 +1,34 @@
+import { Theme } from "../styling.slint";
+
+export component StyledButton inherits Rectangle {
+    in property <string> label;
+    in property <color> bg: Theme.c.surface0;
+    in property <color> bg-hover: Theme.c.surface1;
+    in property <color> fg: Theme.c.subtext0;
+    in property <bool> enabled: true;
+    in property <length> button-width: 80px;
+
+    callback clicked();
+
+    width: button-width;
+    height: Theme.control-height-sm;
+    background: root.enabled ? (ta.has-hover ? root.bg-hover : root.bg) : Theme.c.surface1;
+    border-radius: Theme.radius-sm;
+    accessible-role: button;
+    accessible-label: root.label;
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        text: root.label;
+        color: root.enabled ? root.fg : Theme.c.overlay0;
+        font-size: Theme.font-md;
+        font-weight: FontWeight.semi-bold;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}

@@ -1,0 +1,22 @@
+import { Theme } from "../styling.slint";
+
+export component DeleteButton inherits Rectangle {
+    callback clicked();
+
+    width: 28px;
+    height: 28px;
+    background: ta.has-hover ? Theme.c.red : transparent;
+    border-radius: Theme.radius-sm;
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        text: "\u{2715}";
+        color: ta.has-hover ? Theme.c.base : Theme.c.overlay0;
+        font-size: Theme.font-base;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}

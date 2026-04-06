@@ -1,0 +1,21 @@
+import { Theme } from "../styling.slint";
+
+export component Badge inherits Rectangle {
+    in property <string> label;
+    in property <color> bg: Theme.c.blue;
+    in property <color> fg: Theme.c.base;
+
+    width: badge-text.preferred-width + 12px;
+    height: 20px;
+    background: root.bg;
+    border-radius: 3px;
+
+    badge-text := Text {
+        text: root.label;
+        color: root.fg;
+        font-size: Theme.font-xs;
+        font-weight: FontWeight.semi-bold;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}

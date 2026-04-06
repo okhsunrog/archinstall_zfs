@@ -1,0 +1,56 @@
+import { Theme } from "../styling.slint";
+
+export component SidebarItem inherits Rectangle {
+    in property <string> label;
+    in property <int> state; // 0=pending, 1=current, 2=done
+    in property <int> step-index;
+
+    callback clicked();
+
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: state == 1 || state == 2;
+
+    height: 36px;
+    background: state == 1 ? Theme.c.surface0
+              : step-ta.has-hover && state == 2 ? Theme.c.surface0
+              : transparent;
+    border-radius: Theme.radius-sm;
+
+    step-ta := TouchArea {
+        mouse-cursor: state == 2 ? pointer : default;
+        clicked => {
+            if state == 2 || state == 1 {
+                root.clicked();
+            }
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        spacing: 8px;
+        alignment: start;
+
+        Text {
+            text: state == 1 ? "\u{25b8}"
+                : state == 2 ? "\u{25cf}"
+                : "\u{25cb}";
+            color: state == 1 ? Theme.c.blue
+                 : state == 2 ? Theme.c.green
+                 : Theme.c.overlay0;
+            font-size: Theme.font-base;
+            vertical-alignment: center;
+            width: 16px;
+        }
+
+        Text {
+            text: root.label;
+            color: state == 1 ? Theme.c.blue
+                 : state == 2 ? Theme.c.green
+                 : Theme.c.overlay0;
+            font-size: Theme.font-base;
+            font-weight: state == 1 ? FontWeight.semi-bold : FontWeight.normal;
+            vertical-alignment: center;
+        }
+    }
+}

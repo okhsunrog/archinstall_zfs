@@ -1,0 +1,58 @@
+// Data types shared between Slint UI and Rust
+
+export enum ItemType {
+    text,
+    select,
+    password,
+    toggle,
+    separator,
+    action,
+    readonly,
+    warning,
+    radio-header,
+    radio-option,
+}
+
+export struct ConfigItem {
+    key: string,
+    label: string,
+    value: string,
+    item-type: ItemType,
+}
+
+export struct SelectOption {
+    text: string,
+}
+
+export struct UserEntry {
+    username: string,
+    has-sudo: bool,
+}
+
+export struct PackageEntry {
+    name: string,
+    repo: string,
+}
+
+export struct PackageSearchResult {
+    name: string,
+    description: string,
+    repo: string,
+}
+
+export struct LogMessage {
+    text: string,
+    level: int,
+}
+
+export struct DownloadInfo {
+    filename: string,
+    pct: int,
+    speed: string,
+    state: int,
+}
+
+export struct StepInfo {
+    label: string,
+    state: int,
+}

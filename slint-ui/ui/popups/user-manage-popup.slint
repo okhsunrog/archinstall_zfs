@@ -1,0 +1,192 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "../styling.slint";
+import { UserEntry } from "../types.slint";
+import { StyledButton } from "../components/styled-button.slint";
+import { StyledTextInput } from "../components/styled-text-input.slint";
+import { Badge } from "../components/badge.slint";
+import { DeleteButton } from "../components/delete-button.slint";
+
+export component UserManagePopup inherits Rectangle {
+    in property <[UserEntry]> users;
+    in property <bool> popup-visible;
+
+    callback user-added(string, string, bool);
+    callback user-removed(int);
+    callback user-sudo-toggled(int);
+    callback closed();
+
+    if popup-visible: Rectangle {
+        background: #00000080;
+        width: 100%; height: 100%;
+
+        TouchArea { clicked => { closed(); } }
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(520px, parent.width - 40px);
+            height: min(parent.height - 80px, 480px);
+            background: Theme.c.mantle;
+            border-radius: Theme.radius-md;
+            border-color: Theme.c.surface1;
+            border-width: 1px;
+            clip: true;
+            accessible-role: groupbox;
+            accessible-label: "User accounts";
+
+            VerticalLayout {
+                padding: Theme.spacing-lg;
+                spacing: Theme.spacing-md;
+
+                Text {
+                    text: "User accounts";
+                    color: Theme.c.blue;
+                    font-size: Theme.font-lg;
+                    font-weight: FontWeight.semi-bold;
+                    height: Theme.spacing-xl;
+                }
+
+                ListView {
+                    vertical-stretch: 1;
+
+                    for user[index] in root.users: Rectangle {
+                        height: Theme.control-height-lg - 4px;
+                        background: user-row-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
+                        border-radius: Theme.radius-sm;
+
+                        user-row-ta := TouchArea {
+                            clicked => { root.user-sudo-toggled(index); }
+                        }
+
+                        HorizontalLayout {
+                            padding-left: Theme.spacing-md;
+                            padding-right: Theme.spacing-sm;
+                            spacing: Theme.spacing-sm;
+                            alignment: space-between;
+
+                            HorizontalLayout {
+                                spacing: Theme.spacing-sm;
+                                alignment: start;
+
+                                Text {
+                                    text: user.username;
+                                    color: Theme.c.text;
+                                    font-size: Theme.font-base;
+                                    vertical-alignment: center;
+                                }
+
+                                if user.has-sudo: Badge {
+                                    label: "sudo";
+                                }
+
+                                if !user.has-sudo: Text {
+                                    text: "(click to toggle sudo)";
+                                    color: Theme.c.overlay0;
+                                    font-size: Theme.font-sm;
+                                }
+                            }
+
+                            DeleteButton {
+                                clicked => { root.user-removed(index); }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: 1px;
+                    background: Theme.c.surface1;
+                }
+
+                Text {
+                    text: "Add user";
+                    color: Theme.c.subtext0;
+                    font-size: Theme.font-md;
+                    font-weight: FontWeight.semi-bold;
+                    height: Theme.spacing-xl - Theme.spacing-xs;
+                }
+
+                HorizontalLayout {
+                    spacing: Theme.spacing-sm;
+
+                    username-input := StyledTextInput {
+                        horizontal-stretch: 1;
+                        placeholder: "username";
+                    }
+
+                    password-input := StyledTextInput {
+                        horizontal-stretch: 1;
+                        placeholder: "password (optional)";
+                        is-password: true;
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: Theme.spacing-sm;
+                    alignment: end;
+
+                    // Sudo toggle
+                    sudo-toggle := Rectangle {
+                        height: Theme.control-height-sm;
+                        width: sudo-check-text.preferred-width + Theme.spacing-xl + Theme.spacing-md;
+                        background: sudo-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
+                        border-radius: Theme.radius-sm;
+
+                        property <bool> sudo-checked: true;
+
+                        sudo-ta := TouchArea {
+                            clicked => { parent.sudo-checked = !parent.sudo-checked; }
+                        }
+
+                        HorizontalLayout {
+                            padding-left: Theme.spacing-sm + 2px;
+                            padding-right: Theme.spacing-sm + 2px;
+                            spacing: Theme.spacing-xs + 2px;
+                            alignment: center;
+
+                            Text {
+                                text: sudo-toggle.sudo-checked ? "\u{25cf}" : "\u{25cb}";
+                                color: sudo-toggle.sudo-checked ? Theme.c.green : Theme.c.overlay0;
+                                font-size: Theme.font-base;
+                                vertical-alignment: center;
+                            }
+
+                            sudo-check-text := Text {
+                                text: "sudo";
+                                color: Theme.c.subtext0;
+                                font-size: Theme.font-md;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    StyledButton {
+                        label: "Add";
+                        bg: Theme.c.blue;
+                        bg-hover: Theme.c.sky;
+                        fg: Theme.c.base;
+
+                        clicked => {
+                            if username-input.text != "" {
+                                root.user-added(username-input.text, password-input.text, sudo-toggle.sudo-checked);
+                                sudo-toggle.sudo-checked = true;
+                                username-input.text = "";
+                                password-input.text = "";
+                                username-input.focus-input();
+                            }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    alignment: end;
+
+                    StyledButton {
+                        label: "Done";
+                        clicked => { root.closed(); }
+                    }
+                }
+            }
+        }
+    }
+}

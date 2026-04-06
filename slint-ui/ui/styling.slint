@@ -1,0 +1,66 @@
+// Catppuccin Mocha color palette + design tokens
+
+export struct Catppuccin {
+    base: color,
+    mantle: color,
+    surface0: color,
+    surface1: color,
+    overlay0: color,
+    text: color,
+    subtext0: color,
+    subtext1: color,
+    blue: color,
+    green: color,
+    red: color,
+    yellow: color,
+    mauve: color,
+    teal: color,
+    sky: color,
+    peach: color,
+}
+
+export global Theme {
+    out property <Catppuccin> c: {
+        base: #1e1e2e,
+        mantle: #181825,
+        surface0: #313244,
+        surface1: #45475a,
+        overlay0: #6c7086,
+        text: #cdd6f4,
+        subtext0: #a6adc8,
+        subtext1: #bac2de,
+        blue: #89b4fa,
+        green: #a6e3a1,
+        red: #f38ba8,
+        yellow: #f9e2af,
+        mauve: #cba6f7,
+        teal: #94e2d5,
+        sky: #89dceb,
+        peach: #fab387,
+    };
+
+    // Spacing
+    out property <length> spacing-xs: 4px;
+    out property <length> spacing-sm: 8px;
+    out property <length> spacing-md: 12px;
+    out property <length> spacing-lg: 16px;
+    out property <length> spacing-xl: 24px;
+
+    // Control heights
+    out property <length> control-height: 34px;
+    out property <length> control-height-sm: 30px;
+    out property <length> control-height-lg: 44px;
+
+    // Border radii
+    out property <length> radius-sm: 4px;
+    out property <length> radius-md: 8px;
+    out property <length> radius-lg: 10px;
+
+    // Font sizes
+    out property <length> font-xs: 11px;
+    out property <length> font-sm: 12px;
+    out property <length> font-md: 13px;
+    out property <length> font-base: 14px;
+    out property <length> font-lg: 16px;
+    out property <length> font-xl: 18px;
+}
