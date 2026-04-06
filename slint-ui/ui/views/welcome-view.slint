@@ -136,8 +136,8 @@ export component WelcomeView inherits Rectangle {
                     }
 
                     // ZFS status
-                    Rectangle {
-                        height: WelcomeState.zfs-installing ? 72px : 48px;
+                    zfs-card := Rectangle {
+                        height: 48px;
                         background: Theme.c.surface0;
                         border-radius: 10px;
 
@@ -151,13 +151,9 @@ export component WelcomeView inherits Rectangle {
                                 padding-right: 16px;
                                 spacing: 12px;
 
-                                Text {
-                                    text: WelcomeState.zfs-ok ? "\u{2713}"
-                                        : WelcomeState.zfs-installing ? "\u{21bb}"
-                                        : "\u{2717}";
-                                    color: WelcomeState.zfs-ok ? Theme.c.green
-                                        : WelcomeState.zfs-installing ? Theme.c.blue
-                                        : Theme.c.overlay0;
+                                zfs-icon := Text {
+                                    text: "\u{2717}";
+                                    color: Theme.c.overlay0;
                                     font-size: 18px;
                                     vertical-alignment: center;
                                     width: 24px;
@@ -171,13 +167,9 @@ export component WelcomeView inherits Rectangle {
                                     horizontal-stretch: 1;
                                 }
 
-                                Text {
-                                    text: WelcomeState.zfs-ok ? "Ready"
-                                        : WelcomeState.zfs-installing ? WelcomeState.zfs-install-status
-                                        : "Waiting for network...";
-                                    color: WelcomeState.zfs-ok ? Theme.c.green
-                                        : WelcomeState.zfs-installing ? Theme.c.blue
-                                        : Theme.c.overlay0;
+                                zfs-status := Text {
+                                    text: "Waiting for network...";
+                                    color: Theme.c.overlay0;
                                     font-size: 13px;
                                     vertical-alignment: center;
                                 }
@@ -204,6 +196,25 @@ export component WelcomeView inherits Rectangle {
                                 height: 12px;
                             }
                         }
+
+                        // Three-way state: idle (base) → installing → ready.
+                        // Last match wins, so `ready` overrides `installing` if
+                        // both somehow match.
+                        states [
+                            installing when WelcomeState.zfs-installing: {
+                                zfs-card.height: 72px;
+                                zfs-icon.text: "\u{21bb}";
+                                zfs-icon.color: Theme.c.blue;
+                                zfs-status.text: WelcomeState.zfs-install-status;
+                                zfs-status.color: Theme.c.blue;
+                            }
+                            ready when WelcomeState.zfs-ok: {
+                                zfs-icon.text: "\u{2713}";
+                                zfs-icon.color: Theme.c.green;
+                                zfs-status.text: "Ready";
+                                zfs-status.color: Theme.c.green;
+                            }
+                        ]
                     }
                 }
 
@@ -211,12 +222,10 @@ export component WelcomeView inherits Rectangle {
                 HorizontalLayout {
                     alignment: center;
 
-                    Rectangle {
+                    start-button := Rectangle {
                         width: 160px;
                         height: 44px;
-                        background: WelcomeState.all-checks-ok
-                            ? (start-ta.has-hover ? Theme.c.sky : Theme.c.blue)
-                            : Theme.c.surface1;
+                        background: Theme.c.surface1;
                         border-radius: 10px;
 
                         start-ta := TouchArea {
@@ -225,14 +234,25 @@ export component WelcomeView inherits Rectangle {
                             clicked => { WizardState.go-to(1); }
                         }
 
-                        Text {
+                        start-text := Text {
                             text: "Get Started \u{2192}";
-                            color: WelcomeState.all-checks-ok ? Theme.c.base : Theme.c.overlay0;
+                            color: Theme.c.overlay0;
                             font-size: 15px;
                             font-weight: FontWeight.semi-bold;
                             horizontal-alignment: center;
                             vertical-alignment: center;
                         }
+
+                        states [
+                            ready when WelcomeState.all-checks-ok: {
+                                start-button.background: Theme.c.blue;
+                                start-text.color: Theme.c.base;
+                            }
+                            ready-hover when WelcomeState.all-checks-ok && start-ta.has-hover: {
+                                start-button.background: Theme.c.sky;
+                                start-text.color: Theme.c.base;
+                            }
+                        ]
                     }
                 }
 
