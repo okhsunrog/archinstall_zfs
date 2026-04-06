@@ -1,0 +1,274 @@
+// Catppuccin palette + semantic Palette + design tokens.
+//
+// Architecture (inspired by vivi-ui and Slint's std-widgets):
+//   - `Catppuccin` global holds all four flavors and the current_flavor selection.
+//   - `Palette` exposes semantic brushes (accent_background, state_pressed, ...)
+//     derived from the current flavor.
+//   - `AnimationSettings` holds shared durations.
+//   - `Theme` is a facade that re-exports the legacy raw colors plus the spacing
+//     and size tokens. Existing call sites keep working; new code should prefer
+//     `Palette` / `AnimationSettings`.
+
+import { Palette as StdPalette } from "std-widgets.slint";
+
+export struct ButtonStyle {
+    background: color,
+    foreground: color,
+}
+
+export struct CatppuccinPalette {
+    rosewater: color,
+    flamingo: color,
+    pink: color,
+    mauve: color,
+    red: color,
+    maroon: color,
+    peach: color,
+    yellow: color,
+    green: color,
+    teal: color,
+    sky: color,
+    sapphire: color,
+    blue: color,
+    lavender: color,
+    text: color,
+    subtext_1: color,
+    subtext_0: color,
+    overlay_2: color,
+    overlay_1: color,
+    overlay_0: color,
+    surface_2: color,
+    surface_1: color,
+    surface_0: color,
+    base: color,
+    mantle: color,
+    crust: color,
+}
+
+export enum Flavor {
+    Latte,
+    Frappe,
+    Macchiato,
+    Mocha,
+}
+
+export struct SemanticPalette {
+    background: color,
+    foreground: color,
+    placeholder_foreground: color,
+    alternate_background: color,
+    control_background: color,
+    control_foreground: color,
+    accent_background: color,
+    accent_foreground: color,
+    accent_hover: color,
+    destructive_background: color,
+    destructive_foreground: color,
+    success_background: color,
+    warning_background: color,
+    border: color,
+    focus_border: color,
+    state_pressed: color,
+    state_hovered: color,
+    selection_background: color,
+}
+
+export global Catppuccin {
+    out property <CatppuccinPalette> latte: {
+        rosewater: #dc8a78, flamingo: #dd7878, pink: #ea76cb, mauve: #8839ef,
+        red: #d20f39, maroon: #e64553, peach: #fe640b, yellow: #df8e1d,
+        green: #40a02b, teal: #179299, sky: #04a5e5, sapphire: #209fb5,
+        blue: #1e66f5, lavender: #7287fd,
+        text: #4c4f69, subtext_1: #5c5f77, subtext_0: #6c6f85,
+        overlay_2: #7c7f93, overlay_1: #8c8fa1, overlay_0: #9ca0b0,
+        surface_2: #acb0be, surface_1: #bcc0cc, surface_0: #ccd0da,
+        base: #eff1f5, mantle: #e6e9ef, crust: #dce0e8,
+    };
+
+    out property <CatppuccinPalette> frappe: {
+        rosewater: #f2d5cf, flamingo: #eebebe, pink: #f4b8e4, mauve: #ca9ee6,
+        red: #e78284, maroon: #ea999c, peach: #ef9f76, yellow: #e5c890,
+        green: #a6d189, teal: #81c8be, sky: #99d1db, sapphire: #85c1dc,
+        blue: #8caaee, lavender: #babbf1,
+        text: #c6d0f5, subtext_1: #b5bfe2, subtext_0: #a5adce,
+        overlay_2: #949cbb, overlay_1: #838ba7, overlay_0: #737994,
+        surface_2: #626880, surface_1: #51576d, surface_0: #414559,
+        base: #303446, mantle: #292c3c, crust: #232634,
+    };
+
+    out property <CatppuccinPalette> macchiato: {
+        rosewater: #f4dbd6, flamingo: #f0c6c6, pink: #f5bde6, mauve: #c6a0f6,
+        red: #ed8796, maroon: #ee99a0, peach: #f5a97f, yellow: #eed49f,
+        green: #a6da95, teal: #8bd5ca, sky: #91d7e3, sapphire: #7dc4e4,
+        blue: #8aadf4, lavender: #b7bdf8,
+        text: #cad3f5, subtext_1: #b8c0e0, subtext_0: #a5adcb,
+        overlay_2: #939ab7, overlay_1: #8087a2, overlay_0: #6e738d,
+        surface_2: #5b6078, surface_1: #494d64, surface_0: #363a4f,
+        base: #24273a, mantle: #1e2030, crust: #181926,
+    };
+
+    out property <CatppuccinPalette> mocha: {
+        rosewater: #f5e0dc, flamingo: #f2cdcd, pink: #f5c2e7, mauve: #cba6f7,
+        red: #f38ba8, maroon: #eba0ac, peach: #fab387, yellow: #f9e2af,
+        green: #a6e3a1, teal: #94e2d5, sky: #89dceb, sapphire: #74c7ec,
+        blue: #89b4fa, lavender: #b4befe,
+        text: #cdd6f4, subtext_1: #bac2de, subtext_0: #a6adc8,
+        overlay_2: #9399b2, overlay_1: #7f849c, overlay_0: #6c7086,
+        surface_2: #585b70, surface_1: #45475a, surface_0: #313244,
+        base: #1e1e2e, mantle: #181825, crust: #11111b,
+    };
+
+    in property <Flavor> current-flavor:
+        StdPalette.color-scheme == ColorScheme.light ? Flavor.Latte : Flavor.Mocha;
+
+    out property <bool> is-dark: root.current-flavor != Flavor.Latte;
+
+    pure function flavor-palette(flavor: Flavor) -> CatppuccinPalette {
+        if flavor == Flavor.Latte { return root.latte; }
+        if flavor == Flavor.Frappe { return root.frappe; }
+        if flavor == Flavor.Macchiato { return root.macchiato; }
+        return root.mocha;
+    }
+
+    out property <CatppuccinPalette> current: root.flavor-palette(root.current-flavor);
+}
+
+export global Palette {
+    out property <SemanticPalette> current: {
+        background: Catppuccin.current.base,
+        foreground: Catppuccin.current.text,
+        placeholder_foreground: Catppuccin.current.subtext_0,
+        alternate_background: Catppuccin.is-dark ? Catppuccin.current.surface_1 : Catppuccin.current.base,
+        control_background: Catppuccin.current.surface_0,
+        control_foreground: Catppuccin.current.text,
+        accent_background: Catppuccin.current.blue,
+        accent_foreground: Catppuccin.current.base,
+        accent_hover: Catppuccin.current.sky,
+        destructive_background: Catppuccin.current.red,
+        destructive_foreground: Catppuccin.current.base,
+        success_background: Catppuccin.current.green,
+        warning_background: Catppuccin.current.yellow,
+        border: Catppuccin.current.surface_1,
+        focus_border: Catppuccin.current.lavender,
+        state_pressed: Catppuccin.is-dark ? #000000.with-alpha(0.4) : #000000.with-alpha(0.3),
+        state_hovered: Catppuccin.is-dark ? #ffffff.with-alpha(0.16) : #000000.with-alpha(0.16),
+        selection_background: Catppuccin.current.surface_0,
+    };
+
+    // Convenience direct accessors for the current semantic palette.
+    out property <color> background: root.current.background;
+    out property <color> foreground: root.current.foreground;
+    out property <color> placeholder-foreground: root.current.placeholder_foreground;
+    out property <color> alternate-background: root.current.alternate_background;
+    out property <color> control-background: root.current.control_background;
+    out property <color> control-foreground: root.current.control_foreground;
+    out property <color> accent-background: root.current.accent_background;
+    out property <color> accent-foreground: root.current.accent_foreground;
+    out property <color> accent-hover: root.current.accent_hover;
+    out property <color> destructive-background: root.current.destructive_background;
+    out property <color> destructive-foreground: root.current.destructive_foreground;
+    out property <color> success-background: root.current.success_background;
+    out property <color> warning-background: root.current.warning_background;
+    out property <color> border: root.current.border;
+    out property <color> focus-border: root.current.focus_border;
+    out property <color> state-pressed: root.current.state_pressed;
+    out property <color> state-hovered: root.current.state_hovered;
+    out property <color> selection-background: root.current.selection_background;
+}
+
+export global AnimationSettings {
+    out property <duration> color-duration: 125ms;
+    out property <duration> resize-duration: 250ms;
+    out property <duration> move-in-duration: 250ms;
+    out property <duration> move-out-duration: 200ms;
+    out property <easing> move-in-easing: cubic-bezier(0, 0, 0, 1);
+    out property <easing> move-out-easing: cubic-bezier(0.3, 0, 1, 1);
+}
+
+// ── Legacy facade ────────────────────────────────────────────────────────────
+// Kept so existing call sites continue to work. New code should import
+// `Palette` / `AnimationSettings` directly.
+
+export struct CatppuccinLegacy {
+    base: color,
+    mantle: color,
+    surface0: color,
+    surface1: color,
+    overlay0: color,
+    text: color,
+    subtext0: color,
+    subtext1: color,
+    blue: color,
+    green: color,
+    red: color,
+    yellow: color,
+    mauve: color,
+    teal: color,
+    sky: color,
+    peach: color,
+}
+
+export global Theme {
+    out property <CatppuccinLegacy> c: {
+        base: Catppuccin.current.base,
+        mantle: Catppuccin.current.mantle,
+        surface0: Catppuccin.current.surface_0,
+        surface1: Catppuccin.current.surface_1,
+        overlay0: Catppuccin.current.overlay_0,
+        text: Catppuccin.current.text,
+        subtext0: Catppuccin.current.subtext_0,
+        subtext1: Catppuccin.current.subtext_1,
+        blue: Catppuccin.current.blue,
+        green: Catppuccin.current.green,
+        red: Catppuccin.current.red,
+        yellow: Catppuccin.current.yellow,
+        mauve: Catppuccin.current.mauve,
+        teal: Catppuccin.current.teal,
+        sky: Catppuccin.current.sky,
+        peach: Catppuccin.current.peach,
+    };
+
+    // Spacing
+    out property <length> spacing-xs: 4px;
+    out property <length> spacing-sm: 8px;
+    out property <length> spacing-md: 12px;
+    out property <length> spacing-lg: 16px;
+    out property <length> spacing-xl: 24px;
+
+    // Control heights
+    out property <length> control-height: 34px;
+    out property <length> control-height-sm: 30px;
+    out property <length> control-height-lg: 44px;
+
+    // Border radii
+    out property <length> radius-sm: 4px;
+    out property <length> radius-md: 8px;
+    out property <length> radius-lg: 10px;
+
+    // Button styles (the StateLayer overlay color comes from Palette globally,
+    // so styles only carry background + foreground now).
+    out property <ButtonStyle> button-default: {
+        background: Palette.control-background,
+        foreground: Catppuccin.current.subtext_0,
+    };
+    out property <ButtonStyle> button-primary: {
+        background: Palette.accent-background,
+        foreground: Palette.accent-foreground,
+    };
+    out property <ButtonStyle> button-danger: {
+        background: Palette.destructive-background,
+        foreground: Palette.destructive-foreground,
+    };
+    out property <ButtonStyle> button-ghost: {
+        background: #00000000,
+        foreground: Catppuccin.current.subtext_0,
+    };
+
+    // Font sizes
+    out property <length> font-xs: 11px;
+    out property <length> font-sm: 12px;
+    out property <length> font-md: 13px;
+    out property <length> font-base: 14px;
+    out property <length> font-lg: 16px;
+    out property <length> font-xl: 18px;
+}

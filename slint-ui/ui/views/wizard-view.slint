@@ -1,0 +1,214 @@
+// Wizard config screen — title bar, sidebar with step list, content area
+// with the per-step ConfigItemRow list, and a footer with Quit / Back / Next.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../styling.slint";
+import { WizardState } from "../state/wizard-state.slint";
+import { SidebarItem } from "../components/sidebar-item.slint";
+import { ConfigItemRow } from "../components/config-item.slint";
+
+export component WizardView inherits VerticalLayout {
+    callback item-activated(string);
+    callback toggle-activated(string);
+    callback install-requested();
+    callback quit-requested();
+
+    padding: 0px;
+    spacing: 0px;
+
+    // Title bar
+    Rectangle {
+        height: 48px;
+        background: Theme.c.mantle;
+
+        HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+
+            Text {
+                text: "archinstall-zfs";
+                color: Theme.c.blue;
+                font-size: 22px;
+                font-weight: FontWeight.bold;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+
+            Text {
+                text: WizardState.current-step + " / " + (WizardState.total-steps - 1);
+                color: Theme.c.overlay0;
+                font-size: 14px;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    // Body: sidebar + content
+    HorizontalLayout {
+        spacing: 0px;
+
+        // Sidebar (skip Welcome in sidebar, show steps 1-6)
+        Rectangle {
+            width: 140px;
+            background: Theme.c.mantle;
+
+            VerticalLayout {
+                padding: 8px;
+                spacing: 2px;
+                alignment: start;
+
+                for label[index] in WizardState.step-labels: SidebarItem {
+                    visible: index > 0;
+                    label: label;
+                    state: WizardState.step-state-at(index);
+                    step-index: index;
+
+                    clicked => {
+                        if index <= WizardState.max-visited {
+                            WizardState.go-to(index);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Vertical separator
+        Rectangle {
+            width: 1px;
+            background: Theme.c.surface1;
+        }
+
+        // Content area
+        VerticalLayout {
+            spacing: 0px;
+
+            // Step title
+            Rectangle {
+                height: 40px;
+                background: transparent;
+
+                HorizontalLayout {
+                    padding-left: 16px;
+                    alignment: start;
+
+                    Text {
+                        text: WizardState.current-step < WizardState.step-labels.length
+                            ? WizardState.step-labels[WizardState.current-step] : "";
+                        color: Theme.c.mauve;
+                        font-size: 18px;
+                        font-weight: FontWeight.semi-bold;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // Config items list — card-based design
+            ScrollView {
+                VerticalLayout {
+                    spacing: 2px;
+                    padding: 8px;
+                    padding-left: 12px;
+                    padding-right: 12px;
+
+                    for item[index] in WizardState.config-items: ConfigItemRow {
+                        item: item;
+                        index: index;
+                        focused-index: WizardState.focused-index;
+
+                        focus-requested(i) => { WizardState.focused-index = i; }
+                        activated(key) => { root.item-activated(key); }
+                        toggled(key) => { root.toggle-activated(key); }
+                        action-clicked(key) => {
+                            if key == "install" { root.install-requested(); }
+                            if key == "quit" { root.quit-requested(); }
+                        }
+                    }
+                }
+            }
+
+            // Footer with navigation buttons
+            Rectangle {
+                height: 44px;
+                background: Theme.c.mantle;
+
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    spacing: 8px;
+                    alignment: center;
+
+                    // Quit button
+                    Rectangle {
+                        width: 60px;
+                        height: 32px;
+                        background: quit-nav-ta.has-hover ? Theme.c.surface1 : transparent;
+                        border-radius: 4px;
+
+                        quit-nav-ta := TouchArea {
+                            clicked => { root.quit-requested(); }
+                        }
+
+                        Text {
+                            text: "Quit";
+                            color: Theme.c.overlay0;
+                            font-size: 13px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    // Back button (not on first wizard step)
+                    if WizardState.current-step > 1: Rectangle {
+                        width: 80px;
+                        height: 32px;
+                        background: back-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
+                        border-radius: 4px;
+
+                        back-ta := TouchArea {
+                            clicked => { WizardState.back(); }
+                        }
+
+                        Text {
+                            text: "\u{25c2} Back";
+                            color: Theme.c.subtext0;
+                            font-size: 13px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    // Status text
+                    Text {
+                        text: WizardState.status-text;
+                        color: Theme.c.overlay0;
+                        font-size: 12px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+
+                    // Next button
+                    if WizardState.current-step < WizardState.total-steps - 1: Rectangle {
+                        width: 80px;
+                        height: 32px;
+                        background: next-ta.has-hover ? Theme.c.sky : Theme.c.blue;
+                        border-radius: 4px;
+
+                        next-ta := TouchArea {
+                            clicked => { WizardState.next(); }
+                        }
+
+                        Text {
+                            text: "Next \u{25b8}";
+                            color: Theme.c.base;
+                            font-size: 13px;
+                            font-weight: FontWeight.semi-bold;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

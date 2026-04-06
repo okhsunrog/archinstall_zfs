@@ -1,0 +1,109 @@
+import { Theme } from "../styling.slint";
+import { StyledButton } from "../components/styled-button.slint";
+import { StyledTextInput } from "../components/styled-text-input.slint";
+import { ProgressBar } from "../components/progress-bar.slint";
+
+export component TextInputPopup inherits Rectangle {
+    in property <string> title;
+    in-out property <string> input-text;
+    in property <bool> is-password: false;
+    in property <bool> popup-visible;
+    in property <int> strength-score: -1;
+    in property <string> strength-label;
+    in property <string> strength-hint;
+    in property <color> strength-color: Theme.c.overlay0;
+
+    callback confirmed(string);
+    callback cancelled();
+    callback text-edited(string);
+
+    if popup-visible: Rectangle {
+        background: #00000080;
+        width: 100%; height: 100%;
+
+        TouchArea { clicked => { cancelled(); } }
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(500px, parent.width - 40px);
+            height: self.preferred-height;
+            background: Theme.c.mantle;
+            border-radius: Theme.radius-md;
+            border-color: Theme.c.surface1;
+            border-width: 1px;
+            accessible-role: groupbox;
+            accessible-label: root.title;
+
+            VerticalLayout {
+                padding: Theme.spacing-lg;
+                spacing: Theme.spacing-md;
+
+                Text {
+                    text: root.title;
+                    color: Theme.c.blue;
+                    font-size: Theme.font-lg;
+                    font-weight: FontWeight.semi-bold;
+                }
+
+                input := StyledTextInput {
+                    is-password: root.is-password;
+                    font-size: Theme.font-base;
+                    text: root.input-text;
+                    border-color: Theme.c.blue;
+                    height: Theme.control-height;
+
+                    edited(val) => { root.text-edited(val); }
+                    accepted(val) => { root.confirmed(val); }
+                }
+
+                init => { input.focus-input(); }
+
+                // Password strength bar
+                if root.is-password && root.strength-score >= 0: VerticalLayout {
+                    spacing: Theme.spacing-xs;
+
+                    ProgressBar {
+                        value: root.strength-score + 1;
+                        max: 5;
+                        fill-color: root.strength-color;
+                    }
+
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: Theme.spacing-md;
+
+                        Text {
+                            text: root.strength-label;
+                            color: root.strength-color;
+                            font-size: Theme.font-sm;
+                            font-weight: FontWeight.semi-bold;
+                        }
+
+                        if root.strength-hint != "": Text {
+                            text: root.strength-hint;
+                            color: Theme.c.overlay0;
+                            font-size: Theme.font-sm;
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: Theme.spacing-sm;
+                    alignment: end;
+
+                    StyledButton {
+                        label: "Cancel";
+                        clicked => { root.cancelled(); }
+                    }
+
+                    StyledButton {
+                        label: "OK";
+                        style: Theme.button-primary;
+                        clicked => { root.confirmed(input.text); }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,18 @@
+// Editable list state shared between popups and Rust.
+//
+// Rust owns long-lived `VecModel<T>`s and pushes them into this global once
+// at startup. Popups read the lists from here directly. Mutations still go
+// through callbacks (because Slint cannot filter/splice an array on its own),
+// but the Rust handlers update the underlying VecModels in place — no full
+// model rebuild on every edit.
+
+import { UserEntry, PackageEntry, PackageSearchResult, SelectOption } from "../types.slint";
+
+export global EditingState {
+    in property <[UserEntry]> users;
+    in property <[SelectOption]> extra-services;
+    in property <[PackageEntry]> packages-selected;
+    in property <[PackageSearchResult]> package-search-results;
+    in property <bool> package-searching-aur: false;
+    in property <string> package-status-text;
+}

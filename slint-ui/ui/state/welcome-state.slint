@@ -1,0 +1,15 @@
+// Welcome-screen state, populated by Rust system checks.
+
+export global WelcomeState {
+    in property <bool> net-ok: false;
+    in property <bool> uefi-ok: false;
+    in property <bool> zfs-ok: false;
+
+    in property <bool> zfs-installing: false;
+    in property <int> zfs-install-pct: 0;
+    in property <string> zfs-install-status: "";
+
+    out property <bool> all-checks-ok: net-ok && uefi-ok && zfs-ok;
+
+    callback check-internet();
+}

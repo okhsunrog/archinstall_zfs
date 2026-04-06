@@ -1,0 +1,41 @@
+// Popup seed state — values Rust pushes once when opening a popup. The
+// popup's own local editing state lives inside the popup component itself
+// (e.g. TextInputPopup has its own `input-text` that the user edits).
+//
+// Callbacks for accepted / cancelled / edited still go through the App root
+// because Rust binds to them; only the seed-and-display state lives here.
+
+import { SelectOption } from "../types.slint";
+
+export global PopupState {
+    // ── Select popup ──
+    in-out property <bool> select-visible: false;
+    in-out property <string> select-title;
+    in-out property <[SelectOption]> select-options;
+    in-out property <int> select-index;
+    in-out property <string> select-key;
+    in-out property <bool> select-show-filter: false;
+
+    // ── Text input popup ──
+    in-out property <bool> text-input-visible: false;
+    in-out property <string> text-input-title;
+    in-out property <string> text-input-value;
+    in-out property <bool> text-input-password: false;
+    in-out property <string> text-input-key;
+
+    // Password strength feedback (Rust drives this on every keystroke).
+    in-out property <int> password-strength-score: -1;
+    in-out property <string> password-strength-label;
+    in-out property <string> password-strength-hint;
+    in-out property <color> password-strength-color;
+
+    // ── User management popup ──
+    in-out property <bool> users-visible: false;
+
+    // ── String list popup ──
+    in-out property <bool> strlist-visible: false;
+    in-out property <string> strlist-title;
+
+    // ── Package search popup ──
+    in-out property <bool> pkg-search-visible: false;
+}

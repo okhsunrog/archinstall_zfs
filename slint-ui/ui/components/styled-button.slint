@@ -1,0 +1,60 @@
+import { Theme, ButtonStyle } from "../styling.slint";
+import { AnimationSettings } from "../styling.slint";
+import { StateLayer, FocusTouchArea } from "internal/state-layer.slint";
+
+export component StyledButton {
+    in property <string> label;
+    in property <ButtonStyle> style: Theme.button-default;
+    in property <bool> enabled: true;
+
+    callback clicked <=> touch-area.clicked;
+
+    min-width: max(80px, content-layout.min-width);
+    min-height: Theme.control-height-sm;
+    forward-focus: touch-area;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { touch-area.clicked(); }
+
+    background-rect := Rectangle {
+        background: root.style.background;
+        border-radius: Theme.radius-sm;
+    }
+
+    state-layer := StateLayer {
+        width: 100%;
+        height: 100%;
+        border-radius: Theme.radius-sm;
+        enabled: root.enabled;
+        pressed: touch-area.pressed;
+        has-hover: touch-area.has-hover;
+        has-focus: touch-area.has-focus;
+    }
+
+    content-layout := HorizontalLayout {
+        padding-left: Theme.spacing-md;
+        padding-right: Theme.spacing-md;
+
+        Text {
+            text: root.label;
+            color: root.style.foreground;
+            font-size: Theme.font-md;
+            font-weight: 600;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    touch-area := FocusTouchArea {
+        width: 100%;
+        height: 100%;
+        enabled: root.enabled;
+    }
+
+    states [
+        disabled when !root.enabled: {
+            root.opacity: 0.5;
+        }
+    ]
+}
