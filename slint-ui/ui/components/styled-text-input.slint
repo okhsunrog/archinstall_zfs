@@ -44,10 +44,25 @@ export component StyledTextInput inherits Rectangle {
         accessible-role: none;
     }
 
+    // Horizontal padding inside the input — keeps the first character and the
+    // leftmost cursor position from sitting on the rounded border, matching
+    // what std-widgets material/lineedit and vivi-ui's text-field do (they
+    // wrap the TextInput in a HorizontalLayout with padding; we use explicit
+    // bounds in the x/width formulas instead since we don't have a wrapper).
+    property <length> input-padding: 8px;
+
     input := TextInput {
-        property <length> computed-x: 8px;
-        x: min(0px, max(parent.width - self.width - self.text-cursor-width, self.computed-x));
-        width: max(parent.width - self.text-cursor-width, self.preferred-width);
+        property <length> computed-x: root.input-padding;
+        // x is clamped to [parent.width - input-padding - width - cursor, input-padding].
+        // When text fits, x = input-padding (text starts inside the padding).
+        // When text overflows, computed-x is driven negative by the cursor handler
+        // and x follows it (text scrolls left under the right padding).
+        x: min(root.input-padding,
+               max(parent.width - root.input-padding - self.width - self.text-cursor-width,
+                   self.computed-x));
+        // Reserve `input-padding` on both sides of the visible area.
+        width: max(parent.width - 2 * root.input-padding - self.text-cursor-width,
+                   self.preferred-width);
         height: 100%;
         vertical-alignment: center;
         color: Theme.c.text;
@@ -59,10 +74,10 @@ export component StyledTextInput inherits Rectangle {
         accessible-role: none;
 
         cursor-position-changed(cursor-position) => {
-            if cursor-position.x + self.computed-x < 8px {
-                self.computed-x = -cursor-position.x + 8px;
-            } else if cursor-position.x + self.computed-x > parent.width - 8px - self.text-cursor-width {
-                self.computed-x = parent.width - cursor-position.x - 8px - self.text-cursor-width;
+            if cursor-position.x + self.computed-x < root.input-padding {
+                self.computed-x = -cursor-position.x + root.input-padding;
+            } else if cursor-position.x + self.computed-x > parent.width - root.input-padding - self.text-cursor-width {
+                self.computed-x = parent.width - cursor-position.x - root.input-padding - self.text-cursor-width;
             }
         }
 
