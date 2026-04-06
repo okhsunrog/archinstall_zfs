@@ -643,3 +643,332 @@ pub fn apply_text(config: &mut GlobalConfig, key: &str, val: &str) {
         _ => {}
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg() -> GlobalConfig {
+        GlobalConfig::default()
+    }
+
+    // ── apply_radio ─────────────────────────────────────
+
+    #[test]
+    fn radio_installation_mode_sets_and_clears_dependents() {
+        let mut c = cfg();
+        c.disk_by_id = Some("/dev/sda".into());
+        c.efi_partition_by_id = Some("/dev/sda1".into());
+
+        // Switching mode should clear all by-id selections
+        apply_radio(&mut c, "installation_mode", 1);
+        assert_eq!(c.installation_mode, Some(InstallationMode::NewPool));
+        assert!(c.disk_by_id.is_none());
+        assert!(c.efi_partition_by_id.is_none());
+        assert!(c.zfs_partition_by_id.is_none());
+        assert!(c.swap_partition_by_id.is_none());
+    }
+
+    #[test]
+    fn radio_installation_mode_no_clear_when_unchanged() {
+        let mut c = cfg();
+        c.installation_mode = Some(InstallationMode::FullDisk);
+        c.disk_by_id = Some("/dev/sda".into());
+
+        apply_radio(&mut c, "installation_mode", 0); // Same mode (FullDisk)
+        assert_eq!(c.installation_mode, Some(InstallationMode::FullDisk));
+        // Selections should be preserved when mode doesn't actually change
+        assert!(c.disk_by_id.is_some());
+    }
+
+    #[test]
+    fn radio_installation_mode_indices() {
+        let cases = [
+            (0, InstallationMode::FullDisk),
+            (1, InstallationMode::NewPool),
+            (2, InstallationMode::ExistingPool),
+        ];
+        for (idx, expected) in cases {
+            let mut c = cfg();
+            apply_radio(&mut c, "installation_mode", idx);
+            assert_eq!(c.installation_mode, Some(expected), "idx={idx}");
+        }
+    }
+
+    #[test]
+    fn radio_compression_indices() {
+        let cases = [
+            (0, CompressionAlgo::Lz4),
+            (1, CompressionAlgo::Zstd),
+            (2, CompressionAlgo::Zstd5),
+            (3, CompressionAlgo::Zstd10),
+            (4, CompressionAlgo::Off),
+        ];
+        for (idx, expected) in cases {
+            let mut c = cfg();
+            apply_radio(&mut c, "compression", idx);
+            assert_eq!(c.compression, expected, "idx={idx}");
+        }
+    }
+
+    #[test]
+    fn radio_encryption_clears_password_when_set_to_none() {
+        let mut c = cfg();
+        c.zfs_encryption_mode = ZfsEncryptionMode::Pool;
+        c.zfs_encryption_password = Some("hunter2".into());
+
+        apply_radio(&mut c, "encryption", 0); // None
+        assert_eq!(c.zfs_encryption_mode, ZfsEncryptionMode::None);
+        assert!(c.zfs_encryption_password.is_none());
+    }
+
+    #[test]
+    fn radio_encryption_keeps_password_when_set_to_pool() {
+        let mut c = cfg();
+        c.zfs_encryption_mode = ZfsEncryptionMode::Dataset;
+        c.zfs_encryption_password = Some("hunter2".into());
+
+        apply_radio(&mut c, "encryption", 1); // Pool
+        assert_eq!(c.zfs_encryption_mode, ZfsEncryptionMode::Pool);
+        assert_eq!(c.zfs_encryption_password.as_deref(), Some("hunter2"));
+    }
+
+    #[test]
+    fn radio_swap_mode_indices() {
+        let cases = [
+            (0, SwapMode::None),
+            (1, SwapMode::Zram),
+            (2, SwapMode::ZswapPartition),
+            (3, SwapMode::ZswapPartitionEncrypted),
+        ];
+        for (idx, expected) in cases {
+            let mut c = cfg();
+            apply_radio(&mut c, "swap_mode", idx);
+            assert_eq!(c.swap_mode, expected, "idx={idx}");
+        }
+    }
+
+    #[test]
+    fn radio_init_system_indices() {
+        let mut c = cfg();
+        apply_radio(&mut c, "init_system", 0);
+        assert_eq!(c.init_system, InitSystem::Dracut);
+        apply_radio(&mut c, "init_system", 1);
+        assert_eq!(c.init_system, InitSystem::Mkinitcpio);
+    }
+
+    #[test]
+    fn radio_audio_indices() {
+        let cases = [
+            (0, None),
+            (1, Some(AudioServer::Pipewire)),
+            (2, Some(AudioServer::Pulseaudio)),
+        ];
+        for (idx, expected) in cases {
+            let mut c = cfg();
+            apply_radio(&mut c, "audio", idx);
+            assert_eq!(c.audio, expected, "idx={idx}");
+        }
+    }
+
+    #[test]
+    fn radio_unknown_key_is_noop() {
+        let mut c = cfg();
+        let before_mode = c.installation_mode;
+        let before_compression = c.compression;
+        let before_swap = c.swap_mode;
+        apply_radio(&mut c, "totally_made_up", 5);
+        assert_eq!(c.installation_mode, before_mode);
+        assert_eq!(c.compression, before_compression);
+        assert_eq!(c.swap_mode, before_swap);
+    }
+
+    // ── apply_text ──────────────────────────────────────
+
+    #[test]
+    fn text_pool_name_sets_and_clears() {
+        let mut c = cfg();
+        apply_text(&mut c, "pool_name", "rpool");
+        assert_eq!(c.pool_name.as_deref(), Some("rpool"));
+
+        // Empty string clears the field
+        apply_text(&mut c, "pool_name", "");
+        assert!(c.pool_name.is_none());
+    }
+
+    #[test]
+    fn text_dataset_prefix_does_not_clear_on_empty() {
+        let mut c = cfg();
+        let original = c.dataset_prefix.clone();
+        apply_text(&mut c, "dataset_prefix", "myprefix");
+        assert_eq!(c.dataset_prefix, "myprefix");
+
+        // Empty string is a no-op (must not blank the prefix)
+        apply_text(&mut c, "dataset_prefix", "");
+        assert_eq!(c.dataset_prefix, "myprefix");
+
+        // Restoring the default works
+        apply_text(&mut c, "dataset_prefix", &original);
+        assert_eq!(c.dataset_prefix, original);
+    }
+
+    #[test]
+    fn text_hostname_sets_and_clears() {
+        let mut c = cfg();
+        apply_text(&mut c, "hostname", "archbox");
+        assert_eq!(c.hostname.as_deref(), Some("archbox"));
+        apply_text(&mut c, "hostname", "");
+        assert!(c.hostname.is_none());
+    }
+
+    #[test]
+    fn text_timezone_sets_and_clears() {
+        let mut c = cfg();
+        apply_text(&mut c, "timezone", "Europe/Berlin");
+        assert_eq!(c.timezone.as_deref(), Some("Europe/Berlin"));
+        apply_text(&mut c, "timezone", "");
+        assert!(c.timezone.is_none());
+    }
+
+    #[test]
+    fn text_root_password_sets_and_clears() {
+        let mut c = cfg();
+        apply_text(&mut c, "root_password", "hunter2");
+        assert_eq!(c.root_password.as_deref(), Some("hunter2"));
+        apply_text(&mut c, "root_password", "");
+        assert!(c.root_password.is_none());
+    }
+
+    #[test]
+    fn text_encryption_password_sets_and_clears() {
+        let mut c = cfg();
+        apply_text(&mut c, "encryption_password", "secret");
+        assert_eq!(c.zfs_encryption_password.as_deref(), Some("secret"));
+        apply_text(&mut c, "encryption_password", "");
+        assert!(c.zfs_encryption_password.is_none());
+    }
+
+    #[test]
+    fn text_parallel_downloads_clamps_and_rejects_garbage() {
+        let mut c = cfg();
+
+        apply_text(&mut c, "parallel_downloads", "8");
+        assert_eq!(c.parallel_downloads, 8);
+
+        // Above 20 → clamped to 20
+        apply_text(&mut c, "parallel_downloads", "100");
+        assert_eq!(c.parallel_downloads, 20);
+
+        // Zero → clamped to 1
+        apply_text(&mut c, "parallel_downloads", "0");
+        assert_eq!(c.parallel_downloads, 1);
+
+        // Garbage / non-numeric → previous value preserved
+        c.parallel_downloads = 5;
+        apply_text(&mut c, "parallel_downloads", "abc");
+        assert_eq!(c.parallel_downloads, 5);
+
+        // Negative parses fail (it's u32) → preserved
+        apply_text(&mut c, "parallel_downloads", "-3");
+        assert_eq!(c.parallel_downloads, 5);
+    }
+
+    #[test]
+    fn text_unknown_key_is_noop() {
+        let mut c = cfg();
+        let before_pool = c.pool_name.clone();
+        let before_hostname = c.hostname.clone();
+        let before_parallel = c.parallel_downloads;
+        apply_text(&mut c, "totally_made_up", "value");
+        assert_eq!(c.pool_name, before_pool);
+        assert_eq!(c.hostname, before_hostname);
+        assert_eq!(c.parallel_downloads, before_parallel);
+    }
+
+    // ── next_selectable_index ───────────────────────────
+
+    #[test]
+    fn next_selectable_skips_non_interactive_types() {
+        let items = vec![
+            ConfigItem {
+                key: "a".into(),
+                label: "A".into(),
+                value: "".into(),
+                item_type: ItemType::RadioHeader,
+            },
+            ConfigItem {
+                key: "b".into(),
+                label: "B".into(),
+                value: "".into(),
+                item_type: ItemType::RadioOption,
+            },
+            ConfigItem {
+                key: "c".into(),
+                label: "C".into(),
+                value: "".into(),
+                item_type: ItemType::Separator,
+            },
+            ConfigItem {
+                key: "d".into(),
+                label: "D".into(),
+                value: "".into(),
+                item_type: ItemType::Text,
+            },
+        ];
+
+        // From -1, going forward, the first selectable is index 1 (RadioOption)
+        assert_eq!(next_selectable_index(&items, -1, 1), 1);
+        // From 1, forward, skip Separator(2), land on Text(3)
+        assert_eq!(next_selectable_index(&items, 1, 1), 3);
+        // From 3, backward, skip Separator(2), land on RadioOption(1)
+        assert_eq!(next_selectable_index(&items, 3, -1), 1);
+    }
+
+    #[test]
+    fn next_selectable_wraps_around() {
+        let items = vec![
+            ConfigItem {
+                key: "a".into(),
+                label: "A".into(),
+                value: "".into(),
+                item_type: ItemType::Text,
+            },
+            ConfigItem {
+                key: "b".into(),
+                label: "B".into(),
+                value: "".into(),
+                item_type: ItemType::Toggle,
+            },
+        ];
+        // From last item, forward → wraps to first
+        assert_eq!(next_selectable_index(&items, 1, 1), 0);
+        // From first item, backward → wraps to last
+        assert_eq!(next_selectable_index(&items, 0, -1), 1);
+    }
+
+    #[test]
+    fn next_selectable_returns_minus_one_for_empty() {
+        let items: Vec<ConfigItem> = vec![];
+        assert_eq!(next_selectable_index(&items, -1, 1), -1);
+        assert_eq!(next_selectable_index(&items, 5, -1), -1);
+    }
+
+    #[test]
+    fn next_selectable_returns_current_when_no_interactive_items() {
+        let items = vec![
+            ConfigItem {
+                key: "".into(),
+                label: "".into(),
+                value: "".into(),
+                item_type: ItemType::Separator,
+            },
+            ConfigItem {
+                key: "".into(),
+                label: "".into(),
+                value: "".into(),
+                item_type: ItemType::Readonly,
+            },
+        ];
+        assert_eq!(next_selectable_index(&items, 0, 1), 0);
+    }
+}
