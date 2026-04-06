@@ -1,3 +1,4 @@
+import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../styling.slint";
 import { SelectOption } from "../types.slint";
 import { StyledButton } from "../components/styled-button.slint";
@@ -6,15 +7,23 @@ import { DeleteButton } from "../components/delete-button.slint";
 
 // String-list editor popup. Used for `extra_services`.
 //
-// We deliberately do NOT use ScrollView/ListView for the rows: in Slint both
-// take a parent-assigned height and do not propagate their content's
-// preferred-height upward, which means the popup card would never grow when
-// items are added (the bug this file used to have). Instead, the rows live
-// in a plain VerticalLayout and the popup card sizes itself via the standard
-// preferred-height computation, clamped to `parent.height - 80px` so it
-// doesn't overflow the window. For an installer with ~10 entries this is
-// fine; if someone adds 100, the bottom would clip — acceptable trade-off
-// for not needing manual height math.
+// Sizing strategy — popup grows with content up to a cap, scrolls beyond:
+//
+//   1. The card's `height` is `min(self.preferred-height, parent.height - 80px)`,
+//      so it tracks content up to the window-bounds clamp.
+//   2. The list region is a ScrollView with two non-default properties:
+//      - `preferred-height: items-vbox.preferred-height` — overrides the std
+//        ScrollView's hardcoded `100%` so the parent layout's preferred-height
+//        actually reflects how many items there are, instead of always
+//        reporting "as much as you'll give me".
+//      - `vertical-stretch: 1` (the std default) — when the popup is capped
+//        below its full preferred-height, the ScrollView absorbs the deficit,
+//        its viewport becomes shorter than `items-vbox`, and the inner
+//        Flickable starts scrolling.
+//
+// Result: 1-10 items grow the popup naturally; 30+ items cap the popup at
+// the window bound and scroll the overflow inside the ScrollView. No manual
+// height math, no `max-height: 300px` magic number.
 
 export component StringListPopup inherits Rectangle {
     in property <string> title;
@@ -56,32 +65,37 @@ export component StringListPopup inherits Rectangle {
                     height: Theme.spacing-xl;
                 }
 
-                // Items list — plain VerticalLayout, grows naturally with the
-                // model. See file header for the rationale on not using
-                // ScrollView here.
-                VerticalLayout {
-                    spacing: Theme.spacing-xs;
+                // Items list. ScrollView grows with content (preferred-height
+                // override) up to the popup's window-bounds cap, then scrolls
+                // overflow. See file header for the full rationale.
+                ScrollView {
+                    preferred-height: items-vbox.preferred-height;
+                    vertical-stretch: 1;
 
-                    for item[index] in root.items: Rectangle {
-                        height: Theme.control-height;
-                        background: Theme.c.surface0;
-                        border-radius: Theme.radius-sm;
+                    items-vbox := VerticalLayout {
+                        spacing: Theme.spacing-xs;
 
-                        HorizontalLayout {
-                            padding-left: Theme.spacing-md;
-                            padding-right: Theme.spacing-sm;
-                            alignment: space-between;
+                        for item[index] in root.items: Rectangle {
+                            height: Theme.control-height;
+                            background: Theme.c.surface0;
+                            border-radius: Theme.radius-sm;
 
-                            Text {
-                                text: item.text;
-                                color: Theme.c.text;
-                                font-size: Theme.font-base;
-                                vertical-alignment: center;
-                                horizontal-stretch: 1;
-                            }
+                            HorizontalLayout {
+                                padding-left: Theme.spacing-md;
+                                padding-right: Theme.spacing-sm;
+                                alignment: space-between;
 
-                            DeleteButton {
-                                clicked => { root.item-removed(index); }
+                                Text {
+                                    text: item.text;
+                                    color: Theme.c.text;
+                                    font-size: Theme.font-base;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                DeleteButton {
+                                    clicked => { root.item-removed(index); }
+                                }
                             }
                         }
                     }
