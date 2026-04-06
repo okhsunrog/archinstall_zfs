@@ -1,34 +1,36 @@
 import { Theme } from "../styling.slint";
+import { StateLayer, FocusTouchArea } from "internal/state-layer.slint";
 
 export component SidebarItem inherits Rectangle {
     in property <string> label;
     in property <int> state; // 0=pending, 1=current, 2=done
     in property <int> step-index;
 
-    callback clicked();
+    callback clicked <=> touch-area.clicked;
 
+    height: 36px;
+    background: state == 1 ? Theme.c.surface0 : #00000000;
+    border-radius: Theme.radius-sm;
+    forward-focus: touch-area;
     accessible-role: button;
     accessible-label: root.label;
     accessible-enabled: state == 1 || state == 2;
+    accessible-action-default => { touch-area.clicked(); }
 
-    height: 36px;
-    background: state == 1 ? Theme.c.surface0
-              : step-ta.has-hover && state == 2 ? Theme.c.surface0
-              : transparent;
-    border-radius: Theme.radius-sm;
-
-    step-ta := TouchArea {
-        mouse-cursor: state == 2 ? pointer : default;
-        clicked => {
-            if state == 2 || state == 1 {
-                root.clicked();
-            }
-        }
+    state-layer := StateLayer {
+        width: 100%;
+        height: 100%;
+        border-radius: Theme.radius-sm;
+        enabled: state == 1 || state == 2;
+        pressed: touch-area.pressed;
+        has-hover: touch-area.has-hover;
+        has-focus: touch-area.has-focus;
+        state-brush: Theme.c.text;
     }
 
     HorizontalLayout {
-        padding-left: 12px;
-        spacing: 8px;
+        padding-left: Theme.spacing-md;
+        spacing: Theme.spacing-sm;
         alignment: start;
 
         Text {
@@ -49,8 +51,14 @@ export component SidebarItem inherits Rectangle {
                  : state == 2 ? Theme.c.green
                  : Theme.c.overlay0;
             font-size: Theme.font-base;
-            font-weight: state == 1 ? FontWeight.semi-bold : FontWeight.normal;
+            font-weight: state == 1 ? 600 : 400;
             vertical-alignment: center;
         }
+    }
+
+    touch-area := FocusTouchArea {
+        width: 100%;
+        height: 100%;
+        enabled: state == 1 || state == 2;
     }
 }
