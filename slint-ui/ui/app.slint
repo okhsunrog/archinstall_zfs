@@ -134,7 +134,7 @@ export component App inherits Window {
             PopupState.select-visible = false;
             select-confirmed(PopupState.select-key, idx);
         }
-        cancelled() => {
+        closed() => {
             PopupState.select-visible = false;
         }
         filter-changed(text) => {
@@ -156,7 +156,7 @@ export component App inherits Window {
             PopupState.text-input-visible = false;
             text-confirmed(PopupState.text-input-key, val);
         }
-        cancelled() => {
+        closed() => {
             PopupState.text-input-visible = false;
         }
         text-edited(val) => {

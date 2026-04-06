@@ -14,14 +14,14 @@ export component TextInputPopup inherits Rectangle {
     in property <color> strength-color: Theme.c.overlay0;
 
     callback confirmed(string);
-    callback cancelled();
+    callback closed();
     callback text-edited(string);
 
     if popup-visible: Rectangle {
         background: #00000080;
         width: 100%; height: 100%;
 
-        TouchArea { clicked => { cancelled(); } }
+        TouchArea { clicked => { closed(); } }
 
         Rectangle {
             x: (parent.width - self.width) / 2;
@@ -94,7 +94,7 @@ export component TextInputPopup inherits Rectangle {
 
                     StyledButton {
                         label: "Cancel";
-                        clicked => { root.cancelled(); }
+                        clicked => { root.closed(); }
                     }
 
                     StyledButton {
