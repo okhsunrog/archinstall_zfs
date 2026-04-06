@@ -38,6 +38,8 @@ export component App inherits Window {
     in property <int> zfs-install-pct: 0;
     in property <string> zfs-install-status: "";
 
+    out property <bool> all-checks-ok: net-ok && uefi-ok && zfs-ok;
+
     callback check-internet();
 
     in property <[ConfigItem]> config-items;
@@ -379,21 +381,20 @@ export component App inherits Window {
                         Rectangle {
                             width: 160px;
                             height: 44px;
-                            background: net-ok && uefi-ok && zfs-ok
+                            background: all-checks-ok
                                 ? (start-ta.has-hover ? Theme.c.sky : Theme.c.blue)
                                 : Theme.c.surface1;
                             border-radius: 10px;
 
                             start-ta := TouchArea {
-                                enabled: net-ok && uefi-ok && zfs-ok;
+                                enabled: all-checks-ok;
                                 mouse-cursor: self.enabled ? pointer : default;
                                 clicked => { WizardState.go-to(1); }
                             }
 
                             Text {
                                 text: "Get Started \u{2192}";
-                                color: net-ok && uefi-ok && zfs-ok
-                                    ? Theme.c.base : Theme.c.overlay0;
+                                color: all-checks-ok ? Theme.c.base : Theme.c.overlay0;
                                 font-size: 15px;
                                 font-weight: FontWeight.semi-bold;
                                 horizontal-alignment: center;
