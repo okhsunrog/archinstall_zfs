@@ -198,9 +198,7 @@ export component PackageSearchPopup inherits Rectangle {
 
                     StyledButton {
                         label: "Done";
-                        bg: Theme.c.blue;
-                        bg-hover: Theme.c.sky;
-                        fg: Theme.c.base;
+                        style: Theme.button-primary;
                         clicked => { root.closed(); }
                     }
                 }

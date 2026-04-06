@@ -95,10 +95,8 @@ export component StringListPopup inherits Rectangle {
 
                     StyledButton {
                         label: "Add";
-                        button-width: 60px;
-                        bg: Theme.c.blue;
-                        bg-hover: Theme.c.sky;
-                        fg: Theme.c.base;
+                        min-width: 60px;
+                        style: Theme.button-primary;
                         clicked => {
                             if add-input.text != "" {
                                 root.item-added(add-input.text);
@@ -110,7 +108,7 @@ export component StringListPopup inherits Rectangle {
 
                     StyledButton {
                         label: "Done";
-                        button-width: 60px;
+                        min-width: 60px;
                         clicked => { root.closed(); }
                     }
                 }

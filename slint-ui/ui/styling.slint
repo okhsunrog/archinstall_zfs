@@ -1,5 +1,11 @@
 // Catppuccin Mocha color palette + design tokens
 
+export struct ButtonStyle {
+    background: brush,
+    foreground: brush,
+    state-brush: brush,
+}
+
 export struct Catppuccin {
     base: color,
     mantle: color,
@@ -55,6 +61,28 @@ export global Theme {
     out property <length> radius-sm: 4px;
     out property <length> radius-md: 8px;
     out property <length> radius-lg: 10px;
+
+    // Button styles
+    out property <ButtonStyle> button-default: {
+        background: c.surface0,
+        foreground: c.subtext0,
+        state-brush: c.text,
+    };
+    out property <ButtonStyle> button-primary: {
+        background: c.blue,
+        foreground: c.base,
+        state-brush: c.base,
+    };
+    out property <ButtonStyle> button-danger: {
+        background: c.red,
+        foreground: c.base,
+        state-brush: c.base,
+    };
+    out property <ButtonStyle> button-ghost: {
+        background: #00000000,
+        foreground: c.subtext0,
+        state-brush: c.text,
+    };
 
     // Font sizes
     out property <length> font-xs: 11px;

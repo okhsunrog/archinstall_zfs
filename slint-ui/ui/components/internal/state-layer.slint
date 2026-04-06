@@ -1,0 +1,51 @@
+// Canonical hover/pressed/focus visual overlay and input handler.
+// Adapted from Slint's internal-components.slint.
+
+export component StateLayer inherits Rectangle {
+    in property <bool> pressed;
+    in property <bool> has-hover;
+    in property <bool> has-focus;
+    in property <bool> enabled;
+    in property <brush> state-brush;
+
+    states [
+        highlighted when root.enabled && (root.pressed || root.has-focus): {
+            root.background: root.state-brush.with-alpha(0.16);
+        }
+        hovered when root.enabled && root.has-hover: {
+            root.background: root.state-brush.with-alpha(0.10);
+        }
+    ]
+
+    animate background { duration: 100ms; easing: ease-out; }
+}
+
+export component FocusTouchArea {
+    in property <bool> enabled: true;
+    out property <bool> pressed <=> touch-area.pressed;
+    out property <bool> has-hover <=> touch-area.has-hover;
+    out property <bool> has-focus <=> focus-scope.has-focus;
+
+    callback clicked <=> touch-area.clicked;
+
+    forward-focus: focus-scope;
+
+    touch-area := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+    }
+
+    focus-scope := FocusScope {
+        x: 0;
+        width: 0px;
+        enabled: root.enabled;
+
+        key-pressed(event) => {
+            if event.text == " " || event.text == "\n" {
+                touch-area.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
