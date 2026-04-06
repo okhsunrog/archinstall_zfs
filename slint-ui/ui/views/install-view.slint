@@ -1,0 +1,187 @@
+// Install progress screen — scrolling log + a progress card with the current
+// phase, optional package-download details, and an Exit/Reboot button when
+// done.
+
+import { ListView } from "std-widgets.slint";
+import { Theme } from "../styling.slint";
+import { InstallState } from "../state/install-state.slint";
+
+export component InstallView inherits VerticalLayout {
+    callback quit-requested();
+
+    padding: 12px;
+    spacing: 8px;
+
+    // Log area (fills available space)
+    log-view := ListView {
+        for msg[index] in InstallState.log-messages: Rectangle {
+            height: msg-text.preferred-height + 4px;
+
+            msg-text := Text {
+                text: msg.text;
+                color: msg.level == 4 ? Theme.c.red
+                     : msg.level == 3 ? Theme.c.yellow
+                     : msg.level == 2 ? Theme.c.green
+                     : msg.level == 1 ? Theme.c.blue
+                     : Theme.c.overlay0;
+                font-family: "monospace";
+                font-size: 12px;
+                x: 8px;
+                width: parent.width - 16px;
+                wrap: word-wrap;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    property <int> scroll-trigger: InstallState.log-messages.length;
+    changed scroll-trigger => {
+        log-view.viewport-y = -100000px;
+    }
+
+    // Progress card (always visible during install)
+    Rectangle {
+        height: InstallState.download-active ? 180px : 80px;
+        background: Theme.c.surface0;
+        border-radius: 10px;
+
+        VerticalLayout {
+            padding: 14px;
+            spacing: 8px;
+
+            // Global phase status
+            HorizontalLayout {
+                spacing: 10px;
+
+                Text {
+                    text: InstallState.state == 2 ? "\u{2713} Complete"
+                        : InstallState.state == 3 ? "\u{2717} Failed"
+                        : InstallState.phase-label;
+                    color: InstallState.state == 2 ? Theme.c.green
+                        : InstallState.state == 3 ? Theme.c.red
+                        : Theme.c.text;
+                    font-size: 14px;
+                    font-weight: FontWeight.semi-bold;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+
+                Text {
+                    text: InstallState.state >= 2 ? ""
+                        : InstallState.phase + " / " + InstallState.total-phases;
+                    color: Theme.c.overlay0;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                }
+            }
+
+            // Global progress bar
+            if InstallState.state == 1: Rectangle {
+                height: 8px;
+                background: Theme.c.mantle;
+                border-radius: 4px;
+                clip: true;
+
+                Rectangle {
+                    x: 0; y: 0;
+                    height: parent.height;
+                    width: parent.width * InstallState.phase / InstallState.total-phases;
+                    background: Theme.c.blue;
+                    border-radius: 4px;
+                }
+            }
+
+            // Package progress (download or install)
+            if InstallState.download-active: VerticalLayout {
+                spacing: 6px;
+
+                HorizontalLayout {
+                    Text {
+                        text: InstallState.download-status;
+                        color: Theme.c.teal;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+
+                    Text {
+                        text: InstallState.download-pct + "%";
+                        color: Theme.c.teal;
+                        font-size: 12px;
+                        font-weight: FontWeight.semi-bold;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Rectangle {
+                    height: 6px;
+                    background: Theme.c.mantle;
+                    border-radius: 3px;
+                    clip: true;
+
+                    Rectangle {
+                        x: 0; y: 0;
+                        height: parent.height;
+                        width: parent.width * InstallState.download-pct / 100;
+                        background: Theme.c.teal;
+                        border-radius: 3px;
+                    }
+                }
+
+                ListView {
+                    for dl[index] in InstallState.download-items: Rectangle {
+                        height: 18px;
+
+                        HorizontalLayout {
+                            padding-left: 4px;
+                            padding-right: 4px;
+                            spacing: 8px;
+
+                            Text {
+                                text: dl.filename;
+                                color: dl.state == 1 ? Theme.c.overlay0
+                                     : dl.state == 2 ? Theme.c.green
+                                     : Theme.c.text;
+                                font-size: 11px;
+                                font-family: "monospace";
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                                vertical-alignment: center;
+                            }
+
+                            Text {
+                                text: dl.state == 1 ? "verifying..."
+                                     : dl.state == 2 ? "done"
+                                     : dl.pct + "% " + dl.speed;
+                                color: dl.state == 2 ? Theme.c.green : Theme.c.overlay0;
+                                font-size: 11px;
+                                font-family: "monospace";
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Exit button
+            if InstallState.state >= 2: Rectangle {
+                height: 36px;
+                background: exit-ta.has-hover ? Theme.c.blue : Theme.c.surface1;
+                border-radius: 8px;
+
+                exit-ta := TouchArea {
+                    clicked => { root.quit-requested(); }
+                }
+
+                Text {
+                    text: InstallState.state == 2 ? "Reboot" : "Exit";
+                    color: exit-ta.has-hover ? Theme.c.base : Theme.c.text;
+                    font-size: 14px;
+                    font-weight: FontWeight.semi-bold;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

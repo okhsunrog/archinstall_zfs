@@ -603,7 +603,8 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
 
             let errors = c.validate_for_install();
             if !errors.is_empty() {
-                app.set_status_text(SharedString::from(format!("Validation: {}", errors[0])));
+                app.global::<WizardState>()
+                    .set_status_text(SharedString::from(format!("Validation: {}", errors[0])));
                 return;
             }
 
@@ -846,9 +847,9 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 app.global::<WizardState>().get_current_step() as usize,
                 &cfg.borrow(),
             );
-            let current = app.get_focused_index();
+            let current = app.global::<WizardState>().get_focused_index();
             let next = next_selectable_index(&items, current, 1);
-            app.set_focused_index(next);
+            app.global::<WizardState>().set_focused_index(next);
         });
     }
     {
@@ -860,9 +861,9 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
                 app.global::<WizardState>().get_current_step() as usize,
                 &cfg.borrow(),
             );
-            let current = app.get_focused_index();
+            let current = app.global::<WizardState>().get_focused_index();
             let next = next_selectable_index(&items, current, -1);
-            app.set_focused_index(next);
+            app.global::<WizardState>().set_focused_index(next);
         });
     }
     {
@@ -870,7 +871,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
         let cfg = config.clone();
         app.on_key_nav_activate(move || {
             let Some(app) = weak.upgrade() else { return };
-            let idx = app.get_focused_index();
+            let idx = app.global::<WizardState>().get_focused_index();
             let items = build_step_items(
                 app.global::<WizardState>().get_current_step() as usize,
                 &cfg.borrow(),
@@ -1121,9 +1122,11 @@ fn refresh_items(app: &App, config: &GlobalConfig) {
     let step = app.global::<WizardState>().get_current_step() as usize;
     let items = build_step_items(step, config);
     let first = next_selectable_index(&items, -1, 1);
-    app.set_focused_index(first);
-    app.set_config_items(ModelRc::new(VecModel::from(items)));
-    app.set_status_text(SharedString::default());
+    app.global::<WizardState>().set_focused_index(first);
+    app.global::<WizardState>()
+        .set_config_items(ModelRc::new(VecModel::from(items)));
+    app.global::<WizardState>()
+        .set_status_text(SharedString::default());
 }
 
 // ── Item activation (open popup) ─────────────────────

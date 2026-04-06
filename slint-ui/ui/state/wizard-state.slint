@@ -4,7 +4,18 @@
 // when to rebuild the config-items list, and may call `go-to(idx)` directly
 // (e.g. to skip from welcome to step 1).
 
+import { ConfigItem } from "../types.slint";
+
 export global WizardState {
+    // Per-step config items (rebuilt by Rust on step-changed).
+    in property <[ConfigItem]> config-items;
+
+    // Keyboard-driven focus index (-1 = none).
+    in-out property <int> focused-index: -1;
+
+    // Footer status / validation message.
+    in property <string> status-text;
+
     in-out property <int> current-step: 0;
     in-out property <int> max-visited: 0;
     in property <int> total-steps: 7;

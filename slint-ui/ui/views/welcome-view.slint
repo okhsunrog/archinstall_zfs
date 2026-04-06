@@ -1,0 +1,248 @@
+// Welcome screen — three system-check status cards (network / UEFI / ZFS)
+// and a Get-Started button gated by all checks passing.
+
+import { Theme } from "../styling.slint";
+import { WelcomeState } from "../state/welcome-state.slint";
+import { WizardState } from "../state/wizard-state.slint";
+
+export component WelcomeView inherits Rectangle {
+    background: Theme.c.base;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 0px;
+
+        HorizontalLayout {
+            alignment: center;
+
+            VerticalLayout {
+                width: min(500px, root.width - 60px);
+                spacing: 24px;
+                alignment: center;
+
+                // Title
+                VerticalLayout {
+                    spacing: 8px;
+
+                    Text {
+                        text: "archinstall-zfs";
+                        color: Theme.c.blue;
+                        font-size: 36px;
+                        font-weight: FontWeight.bold;
+                        horizontal-alignment: center;
+                    }
+
+                    Text {
+                        text: "Arch Linux installer with ZFS root";
+                        color: Theme.c.subtext0;
+                        font-size: 16px;
+                        horizontal-alignment: center;
+                    }
+                }
+
+                // Status cards
+                VerticalLayout {
+                    spacing: 8px;
+
+                    // Network status
+                    Rectangle {
+                        height: 48px;
+                        background: Theme.c.surface0;
+                        border-radius: 10px;
+
+                        HorizontalLayout {
+                            padding-left: 16px;
+                            padding-right: 12px;
+                            spacing: 12px;
+
+                            Text {
+                                text: WelcomeState.net-ok ? "\u{2713}" : "\u{2717}";
+                                color: WelcomeState.net-ok ? Theme.c.green : Theme.c.red;
+                                font-size: 18px;
+                                vertical-alignment: center;
+                                width: 24px;
+                            }
+
+                            Text {
+                                text: "Internet connection";
+                                color: Theme.c.text;
+                                font-size: 14px;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+
+                            Text {
+                                text: WelcomeState.net-ok ? "Connected" : "Not connected";
+                                color: WelcomeState.net-ok ? Theme.c.green : Theme.c.overlay0;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                            }
+
+                            if !WelcomeState.net-ok: Rectangle {
+                                width: 90px;
+                                height: 30px;
+                                background: check-net-ta.has-hover ? Theme.c.surface1 : Theme.c.mantle;
+                                border-radius: 6px;
+
+                                check-net-ta := TouchArea {
+                                    clicked => { WelcomeState.check-internet(); }
+                                }
+
+                                Text {
+                                    text: "Check again";
+                                    color: Theme.c.blue;
+                                    font-size: 12px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    // UEFI status
+                    Rectangle {
+                        height: 48px;
+                        background: Theme.c.surface0;
+                        border-radius: 10px;
+
+                        HorizontalLayout {
+                            padding-left: 16px;
+                            padding-right: 16px;
+                            spacing: 12px;
+
+                            Text {
+                                text: WelcomeState.uefi-ok ? "\u{2713}" : "\u{2717}";
+                                color: WelcomeState.uefi-ok ? Theme.c.green : Theme.c.red;
+                                font-size: 18px;
+                                vertical-alignment: center;
+                                width: 24px;
+                            }
+
+                            Text {
+                                text: "UEFI boot mode";
+                                color: Theme.c.text;
+                                font-size: 14px;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+
+                            Text {
+                                text: WelcomeState.uefi-ok ? "Detected" : "Not detected (required)";
+                                color: WelcomeState.uefi-ok ? Theme.c.green : Theme.c.red;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    // ZFS status
+                    Rectangle {
+                        height: WelcomeState.zfs-installing ? 72px : 48px;
+                        background: Theme.c.surface0;
+                        border-radius: 10px;
+
+                        VerticalLayout {
+                            padding: 0px;
+                            spacing: 0px;
+
+                            HorizontalLayout {
+                                height: 48px;
+                                padding-left: 16px;
+                                padding-right: 16px;
+                                spacing: 12px;
+
+                                Text {
+                                    text: WelcomeState.zfs-ok ? "\u{2713}"
+                                        : WelcomeState.zfs-installing ? "\u{21bb}"
+                                        : "\u{2717}";
+                                    color: WelcomeState.zfs-ok ? Theme.c.green
+                                        : WelcomeState.zfs-installing ? Theme.c.blue
+                                        : Theme.c.overlay0;
+                                    font-size: 18px;
+                                    vertical-alignment: center;
+                                    width: 24px;
+                                }
+
+                                Text {
+                                    text: "ZFS support";
+                                    color: Theme.c.text;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                Text {
+                                    text: WelcomeState.zfs-ok ? "Ready"
+                                        : WelcomeState.zfs-installing ? WelcomeState.zfs-install-status
+                                        : "Waiting for network...";
+                                    color: WelcomeState.zfs-ok ? Theme.c.green
+                                        : WelcomeState.zfs-installing ? Theme.c.blue
+                                        : Theme.c.overlay0;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            if WelcomeState.zfs-installing: Rectangle {
+                                height: 6px;
+                                x: 16px;
+                                width: parent.width - 32px;
+                                background: Theme.c.mantle;
+                                border-radius: 3px;
+                                clip: true;
+
+                                Rectangle {
+                                    x: 0; y: 0;
+                                    height: parent.height;
+                                    width: parent.width * WelcomeState.zfs-install-pct / 100;
+                                    background: Theme.c.blue;
+                                    border-radius: 3px;
+                                }
+                            }
+
+                            if WelcomeState.zfs-installing: Rectangle {
+                                height: 12px;
+                            }
+                        }
+                    }
+                }
+
+                // Start button
+                HorizontalLayout {
+                    alignment: center;
+
+                    Rectangle {
+                        width: 160px;
+                        height: 44px;
+                        background: WelcomeState.all-checks-ok
+                            ? (start-ta.has-hover ? Theme.c.sky : Theme.c.blue)
+                            : Theme.c.surface1;
+                        border-radius: 10px;
+
+                        start-ta := TouchArea {
+                            enabled: WelcomeState.all-checks-ok;
+                            mouse-cursor: self.enabled ? pointer : default;
+                            clicked => { WizardState.go-to(1); }
+                        }
+
+                        Text {
+                            text: "Get Started \u{2192}";
+                            color: WelcomeState.all-checks-ok ? Theme.c.base : Theme.c.overlay0;
+                            font-size: 15px;
+                            font-weight: FontWeight.semi-bold;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                Text {
+                    text: "v0.1.0";
+                    color: Theme.c.overlay0;
+                    font-size: 11px;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+    }
+}
