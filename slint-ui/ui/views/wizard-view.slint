@@ -8,7 +8,7 @@ import { PopupState } from "../state/popup-state.slint";
 import { SidebarItem } from "../components/sidebar-item.slint";
 import { ConfigItemRow } from "../components/config-item.slint";
 
-export component WizardView inherits VerticalLayout {
+export component WizardView inherits Rectangle {
     callback item-activated(string);
     callback toggle-activated(string);
     callback install-requested();
@@ -20,8 +20,10 @@ export component WizardView inherits VerticalLayout {
     callback key-nav-up();
     callback key-nav-activate();
 
-    padding: 0px;
-    spacing: 0px;
+    // Single shell color: header, sidebar, and footer all sit on this.
+    // The content area is a lighter card floating on top, see the body
+    // HorizontalLayout below.
+    background: Theme.c.mantle;
 
     // Wizard-local FocusScope: handles arrow / j / k / Enter for the items
     // list. Global shortcuts (Tab/Backtab/q/1–7) live in the App root scope
@@ -55,12 +57,13 @@ export component WizardView inherits VerticalLayout {
 
     init => { wizard-focus-scope.focus(); }
 
-    // Title bar
-    Rectangle {
-        height: 48px;
-        background: Theme.c.mantle;
+    VerticalLayout {
+        padding: 0px;
+        spacing: 0px;
 
+        // Title bar — sits directly on the shell, no separate Rectangle
         HorizontalLayout {
+            height: 48px;
             padding-left: 16px;
             padding-right: 16px;
 
@@ -80,18 +83,18 @@ export component WizardView inherits VerticalLayout {
                 vertical-alignment: center;
             }
         }
-    }
 
-    // Body: sidebar + content
-    HorizontalLayout {
-        spacing: 0px;
+        // Body: sidebar + floating content card
+        HorizontalLayout {
+            vertical-stretch: 1;
+            spacing: 8px;
+            padding-right: 16px;
+            padding-bottom: 8px;
 
-        // Sidebar (skip Welcome in sidebar, show steps 1-6)
-        Rectangle {
-            width: 140px;
-            background: Theme.c.mantle;
-
+            // Sidebar — transparent, just sits on the shell color.
+            // No background Rectangle, no vertical separator.
             VerticalLayout {
+                width: 140px;
                 padding: 8px;
                 spacing: 2px;
                 alignment: start;
@@ -109,27 +112,22 @@ export component WizardView inherits VerticalLayout {
                     }
                 }
             }
-        }
 
-        // Vertical separator
-        Rectangle {
-            width: 1px;
-            background: Theme.c.surface1;
-        }
-
-        // Content area
-        VerticalLayout {
-            spacing: 0px;
-
-            // Step title
+            // Content card — lighter than the shell, rounded corners,
+            // floats inside the body padding.
             Rectangle {
-                height: 40px;
-                background: transparent;
+                horizontal-stretch: 1;
+                background: Theme.c.base;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: Theme.c.surface0;
+                clip: true;
 
-                HorizontalLayout {
-                    padding-left: 16px;
-                    alignment: start;
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 4px;
 
+                    // Step title
                     Text {
                         text: WizardState.current-step < WizardState.step-labels.length
                             ? WizardState.step-labels[WizardState.current-step] : "";
@@ -137,117 +135,113 @@ export component WizardView inherits VerticalLayout {
                         font-size: 18px;
                         font-weight: FontWeight.semi-bold;
                         vertical-alignment: center;
+                        height: 32px;
                     }
-                }
-            }
 
-            // Config items list — card-based design
-            ScrollView {
-                VerticalLayout {
-                    spacing: 2px;
-                    padding: 8px;
-                    padding-left: 12px;
-                    padding-right: 12px;
+                    // Config items list
+                    ScrollView {
+                        VerticalLayout {
+                            spacing: 2px;
+                            padding-left: 4px;
+                            padding-right: 4px;
 
-                    for item[index] in WizardState.config-items: ConfigItemRow {
-                        item: item;
-                        index: index;
-                        focused-index: WizardState.focused-index;
+                            for item[index] in WizardState.config-items: ConfigItemRow {
+                                item: item;
+                                index: index;
+                                focused-index: WizardState.focused-index;
 
-                        focus-requested(i) => { WizardState.focused-index = i; }
-                        activated(key) => { root.item-activated(key); }
-                        toggled(key) => { root.toggle-activated(key); }
-                        action-clicked(key) => {
-                            if key == "install" { root.install-requested(); }
-                            if key == "quit" { root.quit-requested(); }
+                                focus-requested(i) => { WizardState.focused-index = i; }
+                                activated(key) => { root.item-activated(key); }
+                                toggled(key) => { root.toggle-activated(key); }
+                                action-clicked(key) => {
+                                    if key == "install" { root.install-requested(); }
+                                    if key == "quit" { root.quit-requested(); }
+                                }
+                            }
                         }
                     }
                 }
             }
+        }
 
-            // Footer with navigation buttons
+        // Footer — full window width, sits on the shell color
+        HorizontalLayout {
+            height: 56px;
+            padding-left: 16px;
+            padding-right: 16px;
+            padding-top: 12px;
+            padding-bottom: 12px;
+            spacing: 8px;
+            alignment: center;
+
+            // Quit button
             Rectangle {
-                height: 56px;
-                background: Theme.c.mantle;
+                width: 60px;
+                height: 32px;
+                background: quit-nav-ta.has-hover ? Theme.c.surface1 : transparent;
+                border-radius: 4px;
 
-                HorizontalLayout {
-                    padding-left: 16px;
-                    padding-right: 16px;
-                    padding-top: 12px;
-                    padding-bottom: 12px;
-                    spacing: 8px;
-                    alignment: center;
+                quit-nav-ta := TouchArea {
+                    clicked => { root.quit-requested(); }
+                }
 
-                    // Quit button
-                    Rectangle {
-                        width: 60px;
-                        height: 32px;
-                        background: quit-nav-ta.has-hover ? Theme.c.surface1 : transparent;
-                        border-radius: 4px;
+                Text {
+                    text: "Quit";
+                    color: Theme.c.overlay0;
+                    font-size: 13px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
 
-                        quit-nav-ta := TouchArea {
-                            clicked => { root.quit-requested(); }
-                        }
+            // Back button (not on first wizard step)
+            if WizardState.current-step > 1: Rectangle {
+                width: 80px;
+                height: 32px;
+                background: back-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
+                border-radius: 4px;
 
-                        Text {
-                            text: "Quit";
-                            color: Theme.c.overlay0;
-                            font-size: 13px;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
+                back-ta := TouchArea {
+                    clicked => { WizardState.back(); }
+                }
 
-                    // Back button (not on first wizard step)
-                    if WizardState.current-step > 1: Rectangle {
-                        width: 80px;
-                        height: 32px;
-                        background: back-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
-                        border-radius: 4px;
+                Text {
+                    text: "\u{25c2} Back";
+                    color: Theme.c.subtext0;
+                    font-size: 13px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
 
-                        back-ta := TouchArea {
-                            clicked => { WizardState.back(); }
-                        }
+            // Status text
+            Text {
+                text: WizardState.status-text;
+                color: Theme.c.overlay0;
+                font-size: 12px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
 
-                        Text {
-                            text: "\u{25c2} Back";
-                            color: Theme.c.subtext0;
-                            font-size: 13px;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
+            // Next button
+            if WizardState.current-step < WizardState.total-steps - 1: Rectangle {
+                width: 80px;
+                height: 32px;
+                background: next-ta.has-hover ? Theme.c.sky : Theme.c.blue;
+                border-radius: 4px;
 
-                    // Status text
-                    Text {
-                        text: WizardState.status-text;
-                        color: Theme.c.overlay0;
-                        font-size: 12px;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                    }
+                next-ta := TouchArea {
+                    clicked => { WizardState.next(); }
+                }
 
-                    // Next button
-                    if WizardState.current-step < WizardState.total-steps - 1: Rectangle {
-                        width: 80px;
-                        height: 32px;
-                        background: next-ta.has-hover ? Theme.c.sky : Theme.c.blue;
-                        border-radius: 4px;
-
-                        next-ta := TouchArea {
-                            clicked => { WizardState.next(); }
-                        }
-
-                        Text {
-                            text: "Next \u{25b8}";
-                            color: Theme.c.base;
-                            font-size: 13px;
-                            font-weight: FontWeight.semi-bold;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
+                Text {
+                    text: "Next \u{25b8}";
+                    color: Theme.c.base;
+                    font-size: 13px;
+                    font-weight: FontWeight.semi-bold;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
                 }
             }
         }
