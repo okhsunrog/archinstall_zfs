@@ -127,13 +127,14 @@ export component ConfigItemRow inherits Rectangle {
     if item.item-type == ItemType.readonly: HorizontalLayout {
         padding-left: 14px;
         padding-right: 14px;
+        spacing: 12px;
 
         Text {
             text: item.label;
             color: Theme.c.subtext0;
             font-size: 13px;
             vertical-alignment: center;
-            horizontal-stretch: 1;
+            horizontal-stretch: 0;
         }
 
         Text {
@@ -143,32 +144,42 @@ export component ConfigItemRow inherits Rectangle {
                 : Theme.c.green;
             font-size: 13px;
             vertical-alignment: center;
+            horizontal-alignment: right;
+            horizontal-stretch: 1;
+            overflow: elide;
         }
     }
 
     // ── Normal config items (text, select, password, toggle) ──
+    //
+    // Layout: label on the left at its natural width, value column on the
+    // right with stretch + elide. When the value is long ("one, two, three,
+    // ...") it truncates with `…` instead of overflowing the row past the
+    // right padding. Label stays anchored, value shrinks to fit.
     if item.item-type == ItemType.text || item.item-type == ItemType.select
         || item.item-type == ItemType.password || item.item-type == ItemType.toggle: HorizontalLayout {
         padding-left: 14px;
         padding-right: 14px;
+        spacing: 12px;
 
         Text {
             text: item.label;
             color: Theme.c.subtext1;
             font-size: 14px;
             vertical-alignment: center;
-            horizontal-stretch: 1;
+            horizontal-stretch: 0;
         }
 
         HorizontalLayout {
             spacing: 6px;
-            alignment: end;
+            horizontal-stretch: 1;
 
             if item.item-type == ItemType.toggle: Text {
                 text: item.value == "Enabled" ? "\u{25cf}" : "\u{25cb}";
                 color: item.value == "Enabled" ? Theme.c.green : Theme.c.overlay0;
                 font-size: 14px;
                 vertical-alignment: center;
+                horizontal-stretch: 0;
             }
 
             Text {
@@ -178,6 +189,9 @@ export component ConfigItemRow inherits Rectangle {
                     : Theme.c.green;
                 font-size: 14px;
                 vertical-alignment: center;
+                horizontal-alignment: right;
+                horizontal-stretch: 1;
+                overflow: elide;
             }
         }
     }
