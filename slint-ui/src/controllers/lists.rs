@@ -18,6 +18,47 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>, models: &EditingMode
     setup_users(app, config, models);
     setup_extra_services(app, config, models);
     setup_packages(app, config, models);
+    setup_multi_select(app, config, models);
+}
+
+/// Multi-select popup handler. Currently only `optional_packages` uses it,
+/// but the dispatch is keyed so future multi-selects can plug in here.
+fn setup_multi_select(app: &App, config: &Rc<RefCell<GlobalConfig>>, models: &EditingModels) {
+    let weak = app.as_weak();
+    let cfg = config.clone();
+    let model = models.multi_select.clone();
+    app.on_multi_select_toggled(move |key, idx| {
+        let Some(app) = weak.upgrade() else { return };
+        let i = idx as usize;
+        let Some(mut row) = model.row_data(i) else {
+            return;
+        };
+        row.checked = !row.checked;
+        let pkg_name = row.text.to_string();
+        model.set_row_data(i, row.clone());
+
+        if key == "optional_packages" {
+            let mut c = cfg.borrow_mut();
+            if let Some(sel) = c.profile_selection.as_mut() {
+                if row.checked {
+                    sel.optional_packages.insert(pkg_name);
+                } else {
+                    sel.optional_packages.remove(&pkg_name);
+                }
+            }
+            // Don't rebuild the wizard list — the popup is open and the
+            // background list isn't visible anyway. Refresh on close instead.
+            let _ = &app;
+        }
+    });
+
+    // On close, refresh the wizard items so the "N of M" summary updates.
+    let weak = app.as_weak();
+    let cfg = config.clone();
+    app.on_multi_select_closed(move |_key| {
+        let Some(app) = weak.upgrade() else { return };
+        refresh_items(&app, &cfg.borrow());
+    });
 }
 
 fn setup_users(app: &App, config: &Rc<RefCell<GlobalConfig>>, models: &EditingModels) {

@@ -3,29 +3,26 @@ use archinstall_zfs_core::config::types::{AudioServer, GlobalConfig, SeatAccess}
 use super::{MenuItem, MenuKind, radio_group};
 
 pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
+    let sel = config.profile_selection.as_ref();
+    let profile_def = sel.and_then(|s| s.profile_def());
+
     let mut items = vec![
         MenuItem {
             key: "profile",
             label: "Profile",
-            value: config
-                .profile
-                .as_deref()
-                .and_then(archinstall_zfs_core::profile::get_profile)
+            value: profile_def
+                .as_ref()
                 .map(|p| p.display_name.to_string())
-                .unwrap_or("Not set".into()),
+                .unwrap_or_else(|| "Not set".into()),
             kind: MenuKind::Custom,
         },
         MenuItem {
             key: "display_manager",
             label: "Display manager",
-            value: config.display_manager_override.clone().unwrap_or_else(|| {
-                config
-                    .profile
-                    .as_deref()
-                    .and_then(archinstall_zfs_core::profile::get_profile)
-                    .and_then(|p| p.display_manager().map(str::to_string))
-                    .unwrap_or("Profile default".into())
-            }),
+            value: sel
+                .and_then(|s| s.effective_display_manager())
+                .map(|d| d.display_name().to_string())
+                .unwrap_or_else(|| "Profile default".into()),
             kind: MenuKind::Custom,
         },
     ];
@@ -34,22 +31,29 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
         "seat_access",
         "Seat access",
         &["None", "seatd", "polkit"],
-        match config.seat_access {
+        match sel.and_then(|s| s.seat_access) {
             None => 0,
             Some(SeatAccess::Seatd) => 1,
             Some(SeatAccess::Polkit) => 2,
         },
     ));
 
-    items.push(MenuItem {
-        key: "gpu_driver",
-        label: "GPU driver",
-        value: config
-            .gfx_driver
-            .map(|d| d.to_string())
-            .unwrap_or("None".into()),
-        kind: MenuKind::Custom,
-    });
+    // GPU driver is only meaningful for graphical profiles. Hide the row
+    // for Server / Minimal selections to keep the step focused.
+    if profile_def
+        .as_ref()
+        .is_some_and(|p| p.supports_gfx_driver())
+    {
+        items.push(MenuItem {
+            key: "gpu_driver",
+            label: "GPU driver",
+            value: config
+                .gfx_driver
+                .map(|d| d.to_string())
+                .unwrap_or("None".into()),
+            kind: MenuKind::Custom,
+        });
+    }
 
     items.extend(radio_group(
         "audio",

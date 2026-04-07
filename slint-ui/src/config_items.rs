@@ -4,8 +4,8 @@
 use slint::SharedString;
 
 use archinstall_zfs_core::config::types::{
-    AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, SwapMode,
-    ZfsEncryptionMode,
+    AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, ProfileSelection,
+    SeatAccess, SwapMode, ZfsEncryptionMode,
 };
 
 use crate::ui::{ConfigItem, ItemType};
@@ -319,15 +319,70 @@ fn build_users_items(c: &GlobalConfig) -> Vec<ConfigItem> {
 }
 
 fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
+    let sel = c.profile_selection.as_ref();
+    let profile_def = sel.and_then(|s| s.profile_def());
+
     let mut items = vec![
         section_header("Desktop"),
         ci(
             "profile",
             "Profile",
-            c.profile.as_deref().unwrap_or("None"),
+            &profile_def
+                .as_ref()
+                .map(|p| p.display_name.to_string())
+                .unwrap_or_else(|| "None".into()),
             ItemType::Select,
         ),
     ];
+
+    // ── Profile configuration: only when a desktop profile is active ──
+    if let (Some(sel), Some(p)) = (sel, profile_def.as_ref())
+        && p.is_desktop()
+    {
+        items.push(section_header("Profile configuration"));
+
+        // Optional packages: "N of M"
+        let total = p.optional_packages().len();
+        if total > 0 {
+            let chosen = sel.optional_packages.len();
+            items.push(ci(
+                "optional_packages",
+                "Optional packages",
+                &format!("{chosen} of {total}"),
+                ItemType::Select,
+            ));
+        }
+
+        // Display manager: shows the effective DM with (default) or
+        // (override) suffix so the user can tell at a glance whether they
+        // diverged from the profile.
+        let value = match (sel.display_manager_override, p.default_display_manager()) {
+            (Some(over), _) => format!("{} (override)", over.display_name()),
+            (None, Some(def)) => format!("{} (default)", def.display_name()),
+            (None, None) => "None".to_string(),
+        };
+        items.push(ci(
+            "display_manager",
+            "Display manager",
+            &value,
+            ItemType::Select,
+        ));
+
+        // Seat access (Wayland compositors). Its own section card via
+        // radio_group, like Audio.
+        if p.needs_seat_access() {
+            items.extend(radio_group(
+                "seat_access",
+                "Seat access",
+                &["None", "seatd", "polkit"],
+                match sel.seat_access {
+                    None => 0,
+                    Some(SeatAccess::Seatd) => 1,
+                    Some(SeatAccess::Polkit) => 2,
+                },
+            ));
+        }
+    }
 
     items.extend(radio_group(
         "audio",
@@ -341,6 +396,38 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     ));
 
     items.push(section_header("Hardware"));
+    // GPU driver — only shown for graphical profiles (mirrors upstream
+    // archinstall's `is_graphic_driver_supported` gate). Headless installs
+    // skip the row entirely.
+    if profile_def
+        .as_ref()
+        .is_some_and(|p| p.supports_gfx_driver())
+    {
+        items.push(ci(
+            "gpu_driver",
+            "GPU driver",
+            &c.gfx_driver
+                .map(|d| d.to_string())
+                .unwrap_or_else(|| "None".into()),
+            ItemType::Select,
+        ));
+
+        // Inline warning when the proprietary NVIDIA driver is paired with
+        // a Wayland-only compositor. The TUI shows a confirmation dialog;
+        // the GUI surfaces it as a Warning row inside the same section so
+        // the user sees it without opening a popup.
+        if profile_def.as_ref().is_some_and(|p| p.is_wayland_only())
+            && c.gfx_driver == Some(archinstall_zfs_core::system::gpu::GfxDriver::NvidiaOpen)
+        {
+            items.push(ConfigItem {
+                value: "Proprietary NVIDIA driver is known-problematic on \
+                        Wayland-only compositors."
+                    .into(),
+                item_type: ItemType::Warning,
+                ..Default::default()
+            });
+        }
+    }
     items.push(ci(
         "bluetooth",
         "Bluetooth",
@@ -402,33 +489,43 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         let mut i = 0;
         while i < step_items.len() {
             let item = &step_items[i];
-            if item.item_type == ItemType::SectionHeader {
-                // Collapse `header + N radio options` into a single readonly
-                // row showing "Group: Selected option".
-                let header_label = item.label.clone();
-                let mut selected_label: SharedString = "Not set".into();
-                i += 1;
-                while i < step_items.len() && step_items[i].item_type == ItemType::RadioOption {
-                    if step_items[i].value == "selected" {
-                        selected_label = step_items[i].label.clone();
+            match item.item_type {
+                ItemType::RadioHeader => {
+                    // Collapse `radio-header + N radio-options` into a single
+                    // readonly row showing "Group: Selected option".
+                    let header_label = item.label.clone();
+                    let mut selected_label: SharedString = "Not set".into();
+                    i += 1;
+                    while i < step_items.len() && step_items[i].item_type == ItemType::RadioOption {
+                        if step_items[i].value == "selected" {
+                            selected_label = step_items[i].label.clone();
+                        }
+                        i += 1;
                     }
+                    items.push(ConfigItem {
+                        label: header_label,
+                        value: selected_label,
+                        item_type: ItemType::Readonly,
+                        ..Default::default()
+                    });
+                }
+                ItemType::SectionHeader => {
+                    // Visual section divider — the step-level header above
+                    // already groups things on the review screen, so the
+                    // inner divider would just produce an empty Readonly
+                    // row ("Not set"). Drop it.
                     i += 1;
                 }
-                items.push(ConfigItem {
-                    label: header_label,
-                    value: selected_label,
-                    item_type: ItemType::Readonly,
-                    ..Default::default()
-                });
-            } else {
-                items.push(ConfigItem {
-                    key: item.key.clone(),
-                    label: item.label.clone(),
-                    value: item.value.clone(),
-                    item_type: ItemType::Readonly,
-                    ..Default::default()
-                });
-                i += 1;
+                _ => {
+                    items.push(ConfigItem {
+                        key: item.key.clone(),
+                        label: item.label.clone(),
+                        value: item.value.clone(),
+                        item_type: ItemType::Readonly,
+                        ..Default::default()
+                    });
+                    i += 1;
+                }
             }
         }
     }
@@ -487,9 +584,17 @@ fn section_header(label: &str) -> ConfigItem {
     }
 }
 
-/// Emit a radio group: a section header followed by clickable options.
+/// Emit a radio group: a `RadioHeader` followed by clickable `RadioOption`
+/// rows. The header is a distinct `ItemType` from a plain `SectionHeader`
+/// so the review screen knows to collapse the header + options into one
+/// summary row, while bare section headers (used as visual dividers) get
+/// dropped in review entirely.
 fn radio_group(key: &str, label: &str, options: &[&str], selected: i32) -> Vec<ConfigItem> {
-    let mut items = vec![section_header(label)];
+    let mut items = vec![ConfigItem {
+        label: label.into(),
+        item_type: ItemType::RadioHeader,
+        ..Default::default()
+    }];
     for (i, opt) in options.iter().enumerate() {
         items.push(ConfigItem {
             key: format!("radio:{key}:{i}").into(),
@@ -525,6 +630,10 @@ fn mark_section_boundaries(items: &mut [ConfigItem]) {
                 | ItemType::Readonly
         )
     }
+    // SectionHeader and RadioHeader both break sections; everything that
+    // isn't a field naturally is a "non-field" and breaks the section, so
+    // no extra check needed beyond is_field above (RadioHeader != any
+    // field variant).
 
     let n = items.len();
     for i in 0..n {
@@ -554,6 +663,7 @@ pub fn next_selectable_index(items: &[ConfigItem], current: i32, dir: i32) -> i3
             && t != ItemType::Readonly
             && t != ItemType::Warning
             && t != ItemType::SectionHeader
+            && t != ItemType::RadioHeader
         {
             return idx;
         }
@@ -643,10 +753,12 @@ pub fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
         }
         "profile" => {
             let profiles = archinstall_zfs_core::profile::all_profiles();
-            config.profile = if idx == 0 {
+            config.profile_selection = if idx == 0 {
                 None
             } else {
-                profiles.get((idx - 1) as usize).map(|p| p.name.to_string())
+                profiles
+                    .get((idx - 1) as usize)
+                    .and_then(|p| ProfileSelection::new(p.name))
             };
         }
         "audio" => {
@@ -654,6 +766,15 @@ pub fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
                 0 => None,
                 1 => Some(AudioServer::Pipewire),
                 _ => Some(AudioServer::Pulseaudio),
+            }
+        }
+        "seat_access" => {
+            if let Some(sel) = config.profile_selection.as_mut() {
+                sel.seat_access = match idx {
+                    0 => None,
+                    1 => Some(SeatAccess::Seatd),
+                    _ => Some(SeatAccess::Polkit),
+                };
             }
         }
         _ => {}

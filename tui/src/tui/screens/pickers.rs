@@ -3,9 +3,10 @@ use std::path::PathBuf;
 use color_eyre::eyre::Result;
 
 use archinstall_zfs_core::config::types::{
-    AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, SeatAccess, SwapMode,
-    UserConfig, ZfsEncryptionMode, ZfsModuleMode,
+    AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, ProfileSelection,
+    SeatAccess, SwapMode, UserConfig, ZfsEncryptionMode, ZfsModuleMode,
 };
+use archinstall_zfs_core::profile::{DisplayManager, OptionalPackage};
 use archinstall_zfs_core::system::gpu::{GfxDriver, detect_gpus, suggested_driver};
 
 use super::edit::run_edit;
@@ -253,12 +254,18 @@ pub async fn pick_kernel(
 /// Pick a GPU driver.
 ///
 /// Detects installed GPUs via `lspci` and highlights the auto-suggested
-/// driver. Returns:
+/// driver. When `wayland_only_profile` is true and the user picks the
+/// proprietary Nvidia open-kernel-module driver, prompts a confirmation
+/// because that combination is known-broken for Wayland-only compositors
+/// (mirrors upstream archinstall's profile_menu.py:97-110 logic).
+///
+/// Returns:
 /// - `None`         — user cancelled (no config change)
 /// - `Some(None)`   — user explicitly chose "None" (clear `gfx_driver`)
 /// - `Some(Some(d))`— user selected a specific driver
 pub fn pick_gpu_driver(
     terminal: &mut ratatui::DefaultTerminal,
+    wayland_only_profile: bool,
 ) -> Result<Option<Option<GfxDriver>>> {
     let gpus = detect_gpus();
     let suggestion = suggested_driver(&gpus);
@@ -305,10 +312,28 @@ pub fn pick_gpu_driver(
         .unwrap_or(0);
 
     let result = run_select(terminal, &title, &opt_refs, current)?;
-    match result.selected {
-        None => Ok(None),                    // cancelled
-        Some(idx) => Ok(Some(drivers[idx])), // Some(None) or Some(Some(driver))
+    let Some(idx) = result.selected else {
+        return Ok(None); // cancelled
+    };
+    let chosen = drivers[idx];
+
+    // Nvidia-on-Wayland-only conflict warning. Only the proprietary open
+    // kernel module is at issue — nouveau works fine on Wayland.
+    if wayland_only_profile && chosen == Some(GfxDriver::NvidiaOpen) {
+        let confirm = run_select(
+            terminal,
+            "The proprietary NVIDIA driver is known-problematic on \
+             Wayland-only compositors. Install it anyway?",
+            &["No — pick a different driver", "Yes — install anyway"],
+            0,
+        )?;
+        if confirm.selected != Some(1) {
+            // User backed out — leave the existing config alone.
+            return Ok(None);
+        }
     }
+
+    Ok(Some(chosen))
 }
 
 /// Full profile selection flow: profile → optional packages → DM → seat access.
@@ -325,9 +350,9 @@ pub fn pick_profile(
 
     // Pre-select the current profile
     let initial = config
-        .profile
-        .as_deref()
-        .and_then(|name| profiles.iter().position(|p| p.name == name))
+        .profile_selection
+        .as_ref()
+        .and_then(|sel| profiles.iter().position(|p| p.name == sel.profile))
         .map(|i| i + 1)
         .unwrap_or(0);
 
@@ -337,50 +362,36 @@ pub fn pick_profile(
     };
 
     if idx == 0 {
-        // "None" selected — clear profile-related config
-        config.profile = None;
-        config.seat_access = None;
-        config.display_manager_override = None;
+        // "None" selected — clear the whole selection
+        config.profile_selection = None;
         return Ok(());
     }
 
     let chosen = &profiles[idx - 1];
 
-    // Remove optional packages from the previous profile before switching
-    if let Some(ref old_name) = config.profile.clone()
-        && let Some(old_profile) = archinstall_zfs_core::profile::get_profile(old_name)
-    {
-        config
-            .additional_packages
-            .retain(|pkg| !old_profile.optional_packages.contains(&pkg.as_str()));
-    }
-
-    config.profile = Some(chosen.name.to_string());
+    // Fresh selection with profile defaults — atomic replace, no stale fields.
+    let mut sel = ProfileSelection::new(chosen.name).expect("profile from registry");
 
     // Optional packages checklist
-    if !chosen.optional_packages.is_empty() {
-        let extras = pick_optional_packages(terminal, &chosen.optional_packages)?;
-        for pkg in extras {
-            if !config.additional_packages.contains(&pkg) {
-                config.additional_packages.push(pkg);
-            }
-        }
+    let opts = chosen.optional_packages();
+    if !opts.is_empty() {
+        let chosen_opts = pick_optional_packages(terminal, opts)?;
+        sel.optional_packages = chosen_opts.into_iter().collect();
     }
 
     // Display manager override
-    if let Some(dm_result) = pick_display_manager(terminal, chosen.display_manager())? {
-        config.display_manager_override = dm_result;
+    if let Some(dm_result) = pick_display_manager(terminal, chosen.default_display_manager())? {
+        sel.display_manager_override = dm_result;
     }
 
     // Seat access (Wayland compositors only)
-    if chosen.needs_seat_access {
-        if let Some(seat) = pick_seat_access(terminal)? {
-            config.seat_access = Some(seat);
-        }
-    } else {
-        config.seat_access = None;
+    if chosen.needs_seat_access()
+        && let Some(seat) = pick_seat_access(terminal)?
+    {
+        sel.seat_access = Some(seat);
     }
 
+    config.profile_selection = Some(sel);
     Ok(())
 }
 
@@ -388,19 +399,33 @@ pub fn pick_profile(
 /// Cancelling returns an empty Vec (treated as "skip optional packages").
 pub fn pick_optional_packages(
     terminal: &mut ratatui::DefaultTerminal,
-    optional: &[&str],
+    optional: &[OptionalPackage],
 ) -> Result<Vec<String>> {
     if optional.is_empty() {
         return Ok(Vec::new());
     }
+    let labels: Vec<String> = optional
+        .iter()
+        .map(|p| {
+            if p.description.is_empty() {
+                p.package.to_string()
+            } else {
+                format!("{}  — {}", p.package, p.description)
+            }
+        })
+        .collect();
+    let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
     let result = run_multiselect(
         terminal,
         "Optional packages (Space to toggle)",
-        optional,
+        &label_refs,
         &[],
     )?;
     match result.selected {
-        Some(indices) => Ok(indices.iter().map(|&i| optional[i].to_string()).collect()),
+        Some(indices) => Ok(indices
+            .iter()
+            .map(|&i| optional[i].package.to_string())
+            .collect()),
         None => Ok(Vec::new()),
     }
 }
@@ -410,26 +435,28 @@ pub fn pick_optional_packages(
 /// Returns:
 /// - `None`         — user cancelled (no change)
 /// - `Some(None)`   — user chose "Use profile default" (clear override)
-/// - `Some(Some(s))`— user selected a specific DM
+/// - `Some(Some(d))`— user selected a specific DM
 pub fn pick_display_manager(
     terminal: &mut ratatui::DefaultTerminal,
-    profile_default: Option<&str>,
-) -> Result<Option<Option<String>>> {
-    const DMS: &[&str] = &["gdm", "sddm", "lightdm", "ly"];
-
+    profile_default: Option<DisplayManager>,
+) -> Result<Option<Option<DisplayManager>>> {
     let default_label = format!(
         "Use profile default ({})",
-        profile_default.unwrap_or("none")
+        profile_default.map(|d| d.service()).unwrap_or("none")
     );
     let mut labels: Vec<String> = vec![default_label];
-    labels.extend(DMS.iter().map(|s| s.to_string()));
+    labels.extend(
+        DisplayManager::ALL
+            .iter()
+            .map(|d| d.display_name().to_string()),
+    );
     let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
 
     let result = run_select(terminal, "Display manager", &label_refs, 0)?;
     match result.selected {
         None => Ok(None),
         Some(0) => Ok(Some(None)),
-        Some(idx) => Ok(Some(Some(DMS[idx - 1].to_string()))),
+        Some(idx) => Ok(Some(Some(DisplayManager::ALL[idx - 1]))),
     }
 }
 
@@ -618,12 +645,14 @@ pub fn apply_select(
             config.network_copy_iso = idx == 0;
         }
         "seat_access" => {
-            config.seat_access = match idx {
-                0 => None,
-                1 => Some(SeatAccess::Seatd),
-                2 => Some(SeatAccess::Polkit),
-                _ => return Ok(()),
-            };
+            if let Some(sel) = config.profile_selection.as_mut() {
+                sel.seat_access = match idx {
+                    0 => None,
+                    1 => Some(SeatAccess::Seatd),
+                    2 => Some(SeatAccess::Polkit),
+                    _ => return Ok(()),
+                };
+            }
         }
         _ => {}
     }

@@ -6,8 +6,13 @@ import { StyledTextInput } from "../components/styled-text-input.slint";
 export component SelectPopup inherits Rectangle {
     in property <string> title;
     in property <[SelectOption]> options;
+    // Index of the row to highlight on open. The popup never tracks a
+    // separate "current" highlight — clicking a row immediately fires
+    // `accepted(idx)` and closes, so the only highlight that matters is
+    // the initial one driven directly by `selected-index`. Earlier
+    // versions had an `out property result-index: selected-index;` that
+    // got broken by the first click and then leaked across re-opens.
     in property <int> selected-index;
-    out property <int> result-index: selected-index;
     in property <bool> popup-visible;
     in property <bool> show-filter: false;
 
@@ -65,20 +70,17 @@ export component SelectPopup inherits Rectangle {
                     for option[index] in root.options: Rectangle {
                         height: Theme.control-height-sm;
                         background: item-ta.has-hover ? Theme.c.surface1
-                                  : index == root.result-index ? Theme.c.surface0
+                                  : index == root.selected-index ? Theme.c.surface0
                                   : transparent;
                         border-radius: Theme.radius-sm;
                         accessible-role: list-item;
                         accessible-label: option.text;
-                        accessible-item-selected: index == root.result-index;
+                        accessible-item-selected: index == root.selected-index;
                         accessible-item-index: index;
                         accessible-item-count: root.options.length;
 
                         item-ta := TouchArea {
-                            clicked => {
-                                root.result-index = index;
-                                root.accepted(index);
-                            }
+                            clicked => { root.accepted(index); }
                         }
 
                         HorizontalLayout {
@@ -86,8 +88,8 @@ export component SelectPopup inherits Rectangle {
                             alignment: start;
 
                             Text {
-                                text: index == root.result-index ? "> " + option.text : "  " + option.text;
-                                color: index == root.result-index ? Theme.c.green : Theme.c.text;
+                                text: index == root.selected-index ? "> " + option.text : "  " + option.text;
+                                color: index == root.selected-index ? Theme.c.green : Theme.c.text;
                                 font-size: Theme.font-base;
                                 vertical-alignment: center;
                             }

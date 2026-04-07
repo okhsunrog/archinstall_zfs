@@ -9,11 +9,16 @@ use std::rc::Rc;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use archinstall_zfs_core::config::types::GlobalConfig;
+use archinstall_zfs_core::profile::DisplayManager;
+use archinstall_zfs_core::system::gpu::{GfxDriver, detect_gpus, suggested_driver};
 
 use crate::config_items::{apply_radio, apply_text, build_step_items, next_selectable_index};
 use crate::controllers::welcome::KernelScan;
+use crate::editing_models::set_multi_select_options;
 use crate::refresh::refresh_items;
-use crate::ui::{App, EditingState, ItemType, PopupState, SelectOption, Theme, WizardState};
+use crate::ui::{
+    App, EditingState, ItemType, MultiSelectOption, PopupState, SelectOption, Theme, WizardState,
+};
 
 pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_scan: &KernelScan) {
     setup_step_changed(app, config);
@@ -144,6 +149,53 @@ fn setup_select_confirmed(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_
             return;
         }
 
+        if key == "dm_select" {
+            // Indices map 1:1 to DisplayManager::ALL. Canonicalize: picking
+            // the profile's own default DM clears the override entirely so
+            // the stored state stays in canonical form (override == None ⇔
+            // "use profile default").
+            let mut c = cfg.borrow_mut();
+            let profile_default = c
+                .profile_selection
+                .as_ref()
+                .and_then(|s| s.profile_def())
+                .and_then(|p| p.default_display_manager());
+            if let Some(sel) = c.profile_selection.as_mut()
+                && let Some(&picked) = DisplayManager::ALL.get(idx as usize)
+            {
+                sel.display_manager_override = if Some(picked) == profile_default {
+                    None
+                } else {
+                    Some(picked)
+                };
+            }
+            refresh_items(&app, &c);
+            return;
+        }
+
+        if key == "gfx_driver_select" {
+            // Index 0 = None (skip GPU packages), 1..N = drivers in the
+            // same order as the popup builder.
+            let drivers: &[Option<GfxDriver>] = &[
+                None,
+                Some(GfxDriver::AllOpenSource),
+                Some(GfxDriver::Amd),
+                Some(GfxDriver::Intel),
+                Some(GfxDriver::NvidiaOpen),
+                Some(GfxDriver::NvidiaNouveau),
+                Some(GfxDriver::Vm),
+            ];
+            let mut c = cfg.borrow_mut();
+            if let Some(d) = drivers.get(idx as usize) {
+                c.gfx_driver = *d;
+            }
+            // The Nvidia/Wayland warning is rendered as a Warning row by
+            // build_desktop_items the next time the items are refreshed —
+            // no extra confirmation popup needed in the GUI.
+            refresh_items(&app, &c);
+            return;
+        }
+
         let mut c = cfg.borrow_mut();
         apply_radio(&mut c, &key, idx);
         refresh_items(&app, &c);
@@ -215,6 +267,7 @@ fn setup_keyboard_nav(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
             && item_type != ItemType::Readonly
             && item_type != ItemType::Warning
             && item_type != ItemType::SectionHeader
+            && item_type != ItemType::RadioHeader
         {
             app.invoke_item_activated(key);
         }
@@ -332,6 +385,23 @@ fn build_kernel_options(
         .collect()
 }
 
+/// Build the DM picker label list. `DisplayManager::ALL` is the canonical
+/// option order (indices map 1:1); we just decorate the profile's own
+/// default with `  ✦ default`, mirroring the GPU driver picker's
+/// `  ✦ suggested` annotation.
+fn dm_picker_labels(profile_default: Option<DisplayManager>) -> Vec<String> {
+    DisplayManager::ALL
+        .iter()
+        .map(|d| {
+            if Some(*d) == profile_default {
+                format!("{}  ✦ default", d.display_name())
+            } else {
+                d.display_name().to_string()
+            }
+        })
+        .collect()
+}
+
 // ── Item activation (open the right popup for the clicked row) ──────
 
 fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_scan: &KernelScan) {
@@ -365,15 +435,95 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
         "profile" => {
             let profiles = archinstall_zfs_core::profile::all_profiles();
             let mut names: Vec<String> = vec!["None".to_string()];
-            names.extend(profiles.iter().map(|p| p.name.to_string()));
+            names.extend(profiles.iter().map(|p| p.display_name.to_string()));
             let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
             let current = config
-                .profile
+                .profile_selection
                 .as_ref()
-                .and_then(|sel| profiles.iter().position(|p| p.name == *sel))
+                .and_then(|sel| profiles.iter().position(|p| p.name == sel.profile))
                 .map(|i| (i + 1) as i32)
                 .unwrap_or(0);
             show_select(app, "profile", "Profile", &refs, current);
+        }
+        "optional_packages" => {
+            // Build a fresh MultiSelectOption list from the profile's
+            // optional packages and the user's current checked subset.
+            let Some(sel) = config.profile_selection.as_ref() else {
+                return;
+            };
+            let Some(p) = sel.profile_def() else { return };
+            let opts: Vec<MultiSelectOption> = p
+                .optional_packages()
+                .iter()
+                .map(|op| MultiSelectOption {
+                    text: SharedString::from(op.package),
+                    description: SharedString::from(op.description),
+                    checked: sel.optional_packages.contains(op.package),
+                })
+                .collect();
+            set_multi_select_options(app, opts);
+            let popup = app.global::<PopupState>();
+            popup.set_multi_select_key("optional_packages".into());
+            popup.set_multi_select_title(format!("Optional packages — {}", p.display_name).into());
+            popup.set_multi_select_visible(true);
+        }
+        "gpu_driver" => {
+            // Build the GPU driver options list. Order matches the TUI
+            // picker (None first, then drivers in display order). The
+            // suggested driver based on detected hardware is annotated.
+            let suggestion = suggested_driver(&detect_gpus());
+            let drivers: &[Option<GfxDriver>] = &[
+                None,
+                Some(GfxDriver::AllOpenSource),
+                Some(GfxDriver::Amd),
+                Some(GfxDriver::Intel),
+                Some(GfxDriver::NvidiaOpen),
+                Some(GfxDriver::NvidiaNouveau),
+                Some(GfxDriver::Vm),
+            ];
+            let labels: Vec<String> = drivers
+                .iter()
+                .map(|d| {
+                    let base = match d {
+                        None => "None — skip GPU driver installation".to_string(),
+                        Some(drv) => drv.to_string(),
+                    };
+                    if *d == suggestion {
+                        format!("{base}  ✦ suggested")
+                    } else {
+                        base
+                    }
+                })
+                .collect();
+            let refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
+            let current = drivers
+                .iter()
+                .position(|d| *d == config.gfx_driver)
+                .unwrap_or(0) as i32;
+            show_select(app, "gfx_driver_select", "GPU driver", &refs, current);
+        }
+        "display_manager" => {
+            // Open SelectPopup with the full DisplayManager list, annotating
+            // the profile's own default with `  ✦ default` (same idiom as the
+            // GPU driver picker uses for its suggestion). Picking the
+            // annotated row clears the override (canonical "use default")
+            // — handled in setup_select_confirmed under "dm_select".
+            let sel = config.profile_selection.as_ref();
+            let profile_default = sel
+                .and_then(|s| s.profile_def())
+                .and_then(|p| p.default_display_manager());
+            let labels = dm_picker_labels(profile_default);
+            let refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
+
+            // Pre-select the effective DM: explicit override if set, else
+            // the profile default. -1 (no highlight) only if the profile
+            // has no default DM and the user hasn't picked one.
+            let effective = sel.and_then(|s| s.display_manager_override.or(profile_default));
+            let current = effective
+                .and_then(|d| DisplayManager::ALL.iter().position(|x| *x == d))
+                .map(|i| i as i32)
+                .unwrap_or(-1);
+            show_select(app, "dm_select", "Display manager", &refs, current);
         }
         "timezone" => {
             let regions = archinstall_zfs_core::installer::locale::list_timezone_regions();

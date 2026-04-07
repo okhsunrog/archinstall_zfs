@@ -33,7 +33,12 @@ export component ConfigItemRow inherits Rectangle {
     callback focus-requested(int);       // pointer hover/click → set focus
 
     // Pre-computed predicates so the rest of the component reads cleanly.
-    property <bool> is-section-header: item.item-type == ItemType.section-header;
+    // Section header and radio header render identically — the distinction
+    // only matters in Rust (build_review_items collapses radio-header + the
+    // following radio-options into one row, plain section-headers are dropped
+    // in review).
+    property <bool> is-section-header: item.item-type == ItemType.section-header
+        || item.item-type == ItemType.radio-header;
     property <bool> is-separator: item.item-type == ItemType.separator;
     property <bool> is-warning: item.item-type == ItemType.warning;
     property <bool> is-action: item.item-type == ItemType.action;
