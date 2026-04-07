@@ -1,7 +1,9 @@
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::profile::DisplayManager;
 use crate::system::gpu::GfxDriver;
 
 pub const ZFS_PASSPHRASE_MIN_LENGTH: usize = 8;
@@ -192,14 +194,16 @@ pub struct GlobalConfig {
     pub root_password: Option<String>,
     pub users: Option<Vec<UserConfig>>,
     pub kernels: Option<Vec<String>>,
-    pub profile: Option<String>,
+    /// User's profile choice plus all profile-scoped sub-selections
+    /// (optional packages, DM override, seat access).
+    ///
+    /// Replaces the previous flat `profile` / `display_manager_override` /
+    /// `seat_access` fields. The whole struct is replaced atomically when
+    /// the user switches profiles, so stale settings cannot leak across.
+    #[serde(default, alias = "profile")]
+    pub profile_selection: Option<ProfileSelection>,
+    /// GPU driver (independent of profile — useful for headless installs too).
     pub gfx_driver: Option<GfxDriver>,
-    /// Override the display manager provided by the selected profile.
-    #[serde(default)]
-    pub display_manager_override: Option<String>,
-    /// Seat access mechanism for Wayland compositors.
-    #[serde(default)]
-    pub seat_access: Option<SeatAccess>,
     pub mirror_regions: Option<Vec<String>>,
     #[serde(default)]
     pub additional_packages: Vec<String>,
@@ -228,6 +232,74 @@ pub struct UserConfig {
     pub ssh_authorized_keys: Vec<String>,
     #[serde(default)]
     pub autologin: bool,
+}
+
+/// User selection for a profile, plus all profile-scoped settings derived
+/// from it. Replacing this struct atomically guarantees stale fields can't
+/// leak between profile switches.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileSelection {
+    /// Profile registry key (e.g. `"gnome"`).
+    pub profile: String,
+    /// Optional extras the user enabled. Subset of the profile's
+    /// `optional_packages`. Sorted for stable diffs.
+    #[serde(default)]
+    pub optional_packages: BTreeSet<String>,
+    /// User-chosen DM override. `None` means "use the profile's default DM".
+    #[serde(default)]
+    pub display_manager_override: Option<DisplayManager>,
+    /// Seat access for Wayland compositors. Only meaningful when the
+    /// underlying profile has `needs_seat_access = true`.
+    #[serde(default)]
+    pub seat_access: Option<SeatAccess>,
+}
+
+impl ProfileSelection {
+    /// Create a fresh selection for `profile_name` with sensible defaults
+    /// pulled from the registry. Returns `None` if the profile is unknown.
+    pub fn new(profile_name: &str) -> Option<Self> {
+        let p = crate::profile::get_profile(profile_name)?;
+        Some(Self {
+            profile: profile_name.to_string(),
+            optional_packages: BTreeSet::new(),
+            display_manager_override: None,
+            // Pre-fill seatd as a sensible default for Wayland compositors
+            // that need explicit seat access; user can override.
+            seat_access: if p.needs_seat_access() {
+                Some(SeatAccess::Seatd)
+            } else {
+                None
+            },
+        })
+    }
+
+    /// Resolve this selection's profile in the registry. Returns `None`
+    /// when the profile name no longer exists (e.g. after a downgrade).
+    pub fn profile_def(&self) -> Option<crate::profile::Profile> {
+        crate::profile::get_profile(&self.profile)
+    }
+
+    /// Effective DM = explicit override, falling back to the profile default.
+    pub fn effective_display_manager(&self) -> Option<DisplayManager> {
+        self.display_manager_override
+            .or_else(|| self.profile_def().and_then(|p| p.default_display_manager()))
+    }
+
+    /// Profile packages ∪ chosen optionals. Does *not* include the DM
+    /// package — the installer enables/installs the DM separately so it can
+    /// also handle overrides.
+    pub fn resolved_packages(&self) -> Vec<String> {
+        let Some(p) = self.profile_def() else {
+            return Vec::new();
+        };
+        let mut out: Vec<String> = p.packages.iter().map(|s| s.to_string()).collect();
+        for opt in &self.optional_packages {
+            if !out.contains(opt) {
+                out.push(opt.clone());
+            }
+        }
+        out
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -299,10 +371,8 @@ impl Default for GlobalConfig {
             root_password: None,
             users: None,
             kernels: None,
-            profile: None,
+            profile_selection: None,
             gfx_driver: None,
-            display_manager_override: None,
-            seat_access: None,
             mirror_regions: None,
             additional_packages: Vec::new(),
             network_copy_iso: false,

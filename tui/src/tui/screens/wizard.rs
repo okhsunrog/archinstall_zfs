@@ -272,17 +272,16 @@ impl Wizard {
                     pickers::pick_profile(&mut self.config, terminal)?;
                 }
                 "display_manager" => {
-                    let eff_dm = self.config.display_manager_override.clone().or_else(|| {
-                        self.config
-                            .profile
-                            .as_deref()
-                            .and_then(archinstall_zfs_core::profile::get_profile)
-                            .and_then(|p| p.display_manager().map(str::to_string))
-                    });
-                    if let Some(result) =
-                        pickers::pick_display_manager(terminal, eff_dm.as_deref())?
+                    let profile_default = self
+                        .config
+                        .profile_selection
+                        .as_ref()
+                        .and_then(|s| s.profile_def())
+                        .and_then(|p| p.default_display_manager());
+                    if let Some(result) = pickers::pick_display_manager(terminal, profile_default)?
+                        && let Some(sel) = self.config.profile_selection.as_mut()
                     {
-                        self.config.display_manager_override = result;
+                        sel.display_manager_override = result;
                     }
                 }
                 "gpu_driver" => {

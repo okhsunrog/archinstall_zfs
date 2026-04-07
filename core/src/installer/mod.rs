@@ -244,12 +244,13 @@ impl Installer {
     }
 
     fn install_profile(&mut self) -> Result<()> {
-        if let Some(profile_name) = self.config.profile.clone() {
-            let profile = crate::profile::get_profile(&profile_name);
-            if let Some(p) = profile {
-                // 1. Install packages
-                if !p.packages.is_empty() {
-                    let pkg_refs: Vec<&str> = p.packages.to_vec();
+        if let Some(selection) = self.config.profile_selection.clone() {
+            let profile_name = selection.profile.clone();
+            if let Some(p) = selection.profile_def() {
+                // 1. Install packages (profile base + chosen optionals)
+                let pkgs = selection.resolved_packages();
+                if !pkgs.is_empty() {
+                    let pkg_refs: Vec<&str> = pkgs.iter().map(|s| s.as_str()).collect();
                     self.install_target_packages(&pkg_refs)?;
                 }
 
@@ -263,31 +264,39 @@ impl Installer {
                     services::enable_user_service(&*self.runner, &self.target, service)?;
                 }
 
-                // 4. Autologin — use effective DM (override or profile default)
-                let eff_dm = self.effective_display_manager(&p);
-                if let Some(dm) = eff_dm
-                    && let Some(ref user_list) = self.config.users
-                    && let Some(user) = user_list.iter().find(|u| u.autologin)
-                {
-                    let session = sddm_session_for_profile(&profile_name);
-                    autologin::configure(&*self.runner, &self.target, dm, &user.username, session)?;
-                }
-
-                // 5. Display manager override
-                if let Some(ref new_dm) = self.config.display_manager_override.clone() {
-                    let profile_dm = p.display_manager();
-                    if Some(new_dm.as_str()) != profile_dm {
-                        self.install_target_packages(&[new_dm.as_str()])?;
-                        if let Some(old_dm) = profile_dm {
-                            services::disable_service(&*self.runner, &self.target, old_dm)?;
+                // 4. Display manager — install + enable the effective DM.
+                //    If the user picked a different DM than the profile default,
+                //    install the override package and disable the original.
+                let profile_dm = p.default_display_manager();
+                let effective_dm = selection.effective_display_manager();
+                if let Some(dm) = effective_dm {
+                    let is_override = profile_dm != Some(dm);
+                    if is_override {
+                        self.install_target_packages(&[dm.package()])?;
+                        if let Some(old) = profile_dm {
+                            services::disable_service(&*self.runner, &self.target, old.service())?;
                         }
-                        services::enable_service(&*self.runner, &self.target, new_dm)?;
+                    }
+                    services::enable_service(&*self.runner, &self.target, dm.service())?;
+
+                    // 5. Autologin
+                    if let Some(ref user_list) = self.config.users
+                        && let Some(user) = user_list.iter().find(|u| u.autologin)
+                    {
+                        let session = p.sddm_session();
+                        autologin::configure(
+                            &*self.runner,
+                            &self.target,
+                            dm.service(),
+                            &user.username,
+                            session,
+                        )?;
                     }
                 }
 
                 // 6. Seat access for Wayland compositors
-                if p.needs_seat_access {
-                    self.configure_seat_access()?;
+                if p.needs_seat_access() {
+                    self.configure_seat_access(selection.seat_access)?;
                 }
 
                 // 7. Post-install steps (db init, group membership, etc.)
@@ -335,24 +344,16 @@ impl Installer {
         Ok(())
     }
 
-    /// Return the display manager to use: `display_manager_override` takes
-    /// priority over the profile's built-in DM.
-    fn effective_display_manager<'a>(
-        &'a self,
-        profile: &'a crate::profile::Profile,
-    ) -> Option<&'a str> {
-        self.config
-            .display_manager_override
-            .as_deref()
-            .or_else(|| profile.display_manager())
-    }
-
-    /// Configure seat access for Wayland compositors based on `config.seat_access`.
-    fn configure_seat_access(&mut self) -> Result<()> {
+    /// Configure seat access for Wayland compositors. The mode is taken
+    /// from the active profile selection (`ProfileSelection::seat_access`).
+    fn configure_seat_access(
+        &mut self,
+        seat: Option<crate::config::types::SeatAccess>,
+    ) -> Result<()> {
         use crate::config::types::SeatAccess;
         use crate::system::cmd::{check_exit, chroot_cmd};
 
-        match self.config.seat_access {
+        match seat {
             Some(SeatAccess::Seatd) => {
                 self.install_target_packages(&["seatd"])?;
                 services::enable_service(&*self.runner, &self.target, "seatd")?;
@@ -622,22 +623,6 @@ impl Installer {
         }
 
         Ok(())
-    }
-}
-
-/// Map an installer profile name to the SDDM session name (.desktop file stem).
-/// Returns `None` when the mapping is unknown — SDDM will use its default.
-fn sddm_session_for_profile(profile: &str) -> Option<&'static str> {
-    match profile {
-        "kde" => Some("plasma"),
-        "hyprland" => Some("hyprland"),
-        "sway" => Some("sway"),
-        "i3" => Some("i3"),
-        "lxqt" => Some("lxqt"),
-        "labwc" => Some("labwc"),
-        "niri" => Some("niri"),
-        "river" => Some("river"),
-        _ => None,
     }
 }
 

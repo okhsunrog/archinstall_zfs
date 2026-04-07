@@ -1,91 +1,101 @@
-use super::{PostInstallStep, Profile};
+use super::{PostInstallStep, Profile, ProfileKind};
+
+/// Helper to keep server profile literals concise.
+fn server(
+    name: &'static str,
+    display_name: &'static str,
+    packages: Vec<&'static str>,
+    services: Vec<&'static str>,
+    post_install_steps: Vec<PostInstallStep>,
+) -> Profile {
+    Profile {
+        name,
+        display_name,
+        description: "",
+        packages,
+        services,
+        user_services: Vec::new(),
+        post_install_steps,
+        kind: ProfileKind::Server,
+    }
+}
 
 pub fn server_profiles() -> Vec<Profile> {
     vec![
         Profile {
             name: "minimal",
             display_name: "Minimal",
-            ..Profile::default()
+            description: "Bare base system, nothing extra.",
+            packages: Vec::new(),
+            services: Vec::new(),
+            user_services: Vec::new(),
+            post_install_steps: Vec::new(),
+            kind: ProfileKind::Minimal,
         },
-        Profile {
-            name: "sshd",
-            display_name: "SSH Server",
-            packages: vec!["openssh"],
-            services: vec!["sshd"],
-            ..Profile::default()
-        },
-        Profile {
-            name: "docker",
-            display_name: "Docker",
-            packages: vec!["docker"],
-            services: vec!["docker"],
-            // Add every installer-created user to the docker group so they can
-            // use Docker without sudo.
-            post_install_steps: vec![PostInstallStep::AddUsersToGroup { group: "docker" }],
-            ..Profile::default()
-        },
-        Profile {
-            name: "httpd",
-            display_name: "Apache",
-            packages: vec!["apache"],
-            services: vec!["httpd"],
-            ..Profile::default()
-        },
-        Profile {
-            name: "nginx",
-            display_name: "Nginx",
-            packages: vec!["nginx"],
-            services: vec!["nginx"],
-            ..Profile::default()
-        },
-        Profile {
-            name: "cockpit",
-            display_name: "Cockpit",
-            packages: vec!["cockpit", "udisks2", "packagekit"],
-            services: vec!["cockpit.socket"],
-            ..Profile::default()
-        },
-        Profile {
-            name: "postgresql",
-            display_name: "PostgreSQL",
-            packages: vec!["postgresql"],
-            services: vec!["postgresql"],
-            // The postgresql package creates the `postgres` system user via its
-            // install scripts (run by pacman during libalpm install). initdb
-            // must run after that as the postgres user to initialise the data
-            // directory. Failure is warn-only so idempotent reinstalls don't
-            // abort if the directory already exists.
-            post_install_steps: vec![PostInstallStep::RunAsUser {
+        server(
+            "sshd",
+            "SSH Server",
+            vec!["openssh"],
+            vec!["sshd"],
+            Vec::new(),
+        ),
+        server(
+            "docker",
+            "Docker",
+            vec!["docker"],
+            vec!["docker"],
+            // Add every installer-created user to the docker group so they
+            // can use Docker without sudo.
+            vec![PostInstallStep::AddUsersToGroup { group: "docker" }],
+        ),
+        server("httpd", "Apache", vec!["apache"], vec!["httpd"], Vec::new()),
+        server("nginx", "Nginx", vec!["nginx"], vec!["nginx"], Vec::new()),
+        server(
+            "cockpit",
+            "Cockpit",
+            vec!["cockpit", "udisks2", "packagekit"],
+            vec!["cockpit.socket"],
+            Vec::new(),
+        ),
+        server(
+            "postgresql",
+            "PostgreSQL",
+            vec!["postgresql"],
+            vec!["postgresql"],
+            // The postgresql package creates the `postgres` system user via
+            // its install scripts. initdb runs after that as the postgres
+            // user to initialise the data directory. Failure is warn-only so
+            // idempotent reinstalls don't abort if the directory already
+            // exists.
+            vec![PostInstallStep::RunAsUser {
                 user: "postgres",
                 cmd: "initdb",
                 args: &["-D", "/var/lib/postgres/data"],
             }],
-            ..Profile::default()
-        },
-        Profile {
-            name: "mariadb",
-            display_name: "MariaDB",
-            packages: vec!["mariadb"],
-            services: vec!["mariadb"],
-            post_install_steps: vec![PostInstallStep::RunAsRoot {
+        ),
+        server(
+            "mariadb",
+            "MariaDB",
+            vec!["mariadb"],
+            vec!["mariadb"],
+            vec![PostInstallStep::RunAsRoot {
                 cmd: "mariadb-install-db",
                 args: &["--user=mysql", "--basedir=/usr", "--datadir=/var/lib/mysql"],
             }],
-            ..Profile::default()
-        },
-        Profile {
-            name: "lighttpd",
-            display_name: "Lighttpd",
-            packages: vec!["lighttpd"],
-            services: vec!["lighttpd"],
-            ..Profile::default()
-        },
-        Profile {
-            name: "tomcat",
-            display_name: "Tomcat",
-            packages: vec!["tomcat10", "java-runtime"],
-            services: vec!["tomcat10"],
-            ..Profile::default()
-        },
+        ),
+        server(
+            "lighttpd",
+            "Lighttpd",
+            vec!["lighttpd"],
+            vec!["lighttpd"],
+            Vec::new(),
+        ),
+        server(
+            "tomcat",
+            "Tomcat",
+            vec!["tomcat10", "java-runtime"],
+            vec!["tomcat10"],
+            Vec::new(),
+        ),
     ]
 }

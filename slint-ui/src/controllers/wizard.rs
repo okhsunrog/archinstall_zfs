@@ -368,9 +368,9 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
             names.extend(profiles.iter().map(|p| p.name.to_string()));
             let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
             let current = config
-                .profile
+                .profile_selection
                 .as_ref()
-                .and_then(|sel| profiles.iter().position(|p| p.name == *sel))
+                .and_then(|sel| profiles.iter().position(|p| p.name == sel.profile))
                 .map(|i| (i + 1) as i32)
                 .unwrap_or(0);
             show_select(app, "profile", "Profile", &refs, current);

@@ -4,8 +4,8 @@
 use slint::SharedString;
 
 use archinstall_zfs_core::config::types::{
-    AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, SwapMode,
-    ZfsEncryptionMode,
+    AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, ProfileSelection,
+    SwapMode, ZfsEncryptionMode,
 };
 
 use crate::ui::{ConfigItem, ItemType};
@@ -324,7 +324,11 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         ci(
             "profile",
             "Profile",
-            c.profile.as_deref().unwrap_or("None"),
+            &c.profile_selection
+                .as_ref()
+                .and_then(|s| s.profile_def())
+                .map(|p| p.display_name.to_string())
+                .unwrap_or_else(|| "None".into()),
             ItemType::Select,
         ),
     ];
@@ -643,10 +647,12 @@ pub fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
         }
         "profile" => {
             let profiles = archinstall_zfs_core::profile::all_profiles();
-            config.profile = if idx == 0 {
+            config.profile_selection = if idx == 0 {
                 None
             } else {
-                profiles.get((idx - 1) as usize).map(|p| p.name.to_string())
+                profiles
+                    .get((idx - 1) as usize)
+                    .and_then(|p| ProfileSelection::new(p.name))
             };
         }
         "audio" => {

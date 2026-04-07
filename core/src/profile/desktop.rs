@@ -1,19 +1,60 @@
-use super::Profile;
+use super::{DesktopProfile, DisplayManager, DisplayServer, OptionalPackage, Profile, ProfileKind};
+
+/// Helper to keep desktop profile literals concise.
+#[allow(clippy::too_many_arguments)]
+fn desktop(
+    name: &'static str,
+    display_name: &'static str,
+    packages: Vec<&'static str>,
+    display_server: DisplayServer,
+    default_display_manager: Option<DisplayManager>,
+    needs_seat_access: bool,
+    sddm_session: Option<&'static str>,
+    optional_packages: Vec<OptionalPackage>,
+) -> Profile {
+    Profile {
+        name,
+        display_name,
+        description: "",
+        packages,
+        services: Vec::new(),
+        user_services: Vec::new(),
+        post_install_steps: Vec::new(),
+        kind: ProfileKind::Desktop(DesktopProfile {
+            display_server,
+            default_display_manager,
+            needs_seat_access,
+            sddm_session,
+            optional_packages,
+        }),
+    }
+}
+
+/// Convenience: build a `Vec<OptionalPackage>` from a list of bare package
+/// names. Descriptions can be filled in later.
+fn opts(pkgs: &[&'static str]) -> Vec<OptionalPackage> {
+    pkgs.iter().copied().map(OptionalPackage::new).collect()
+}
 
 pub fn desktop_profiles() -> Vec<Profile> {
+    use DisplayManager::*;
+    use DisplayServer::*;
+
     vec![
-        Profile {
-            name: "gnome",
-            display_name: "GNOME",
-            packages: vec!["gnome", "gnome-tweaks"],
-            services: vec!["gdm"],
-            optional_packages: vec!["gnome-extra", "gnome-software", "flatpak"],
-            ..Profile::default()
-        },
-        Profile {
-            name: "kde",
-            display_name: "KDE Plasma",
-            packages: vec![
+        desktop(
+            "gnome",
+            "GNOME",
+            vec!["gnome", "gnome-tweaks"],
+            Both,
+            Some(Gdm),
+            false,
+            None,
+            opts(&["gnome-extra", "gnome-software", "flatpak"]),
+        ),
+        desktop(
+            "kde",
+            "KDE Plasma",
+            vec![
                 "plasma-desktop",
                 "konsole",
                 "kate",
@@ -21,22 +62,26 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "ark",
                 "plasma-workspace",
             ],
-            services: vec!["sddm"],
-            optional_packages: vec!["kde-applications", "flatpak", "discover"],
-            ..Profile::default()
-        },
-        Profile {
-            name: "xfce",
-            display_name: "Xfce",
-            packages: vec!["xfce4", "xfce4-goodies", "pavucontrol", "gvfs", "xarchiver"],
-            services: vec!["lightdm"],
-            optional_packages: vec!["thunar", "mousepad", "ristretto"],
-            ..Profile::default()
-        },
-        Profile {
-            name: "cinnamon",
-            display_name: "Cinnamon",
-            packages: vec![
+            Both,
+            Some(Sddm),
+            false,
+            Some("plasma"),
+            opts(&["kde-applications", "flatpak", "discover"]),
+        ),
+        desktop(
+            "xfce",
+            "Xfce",
+            vec!["xfce4", "xfce4-goodies", "pavucontrol", "gvfs", "xarchiver"],
+            Xorg,
+            Some(Lightdm),
+            false,
+            None,
+            opts(&["thunar", "mousepad", "ristretto"]),
+        ),
+        desktop(
+            "cinnamon",
+            "Cinnamon",
+            vec![
                 "cinnamon",
                 "system-config-printer",
                 "gnome-keyring",
@@ -47,40 +92,52 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "xed",
                 "xdg-user-dirs-gtk",
             ],
-            services: vec!["lightdm"],
-            ..Profile::default()
-        },
-        Profile {
-            name: "budgie",
-            display_name: "Budgie",
-            packages: vec![
+            Xorg,
+            Some(Lightdm),
+            false,
+            None,
+            Vec::new(),
+        ),
+        desktop(
+            "budgie",
+            "Budgie",
+            vec![
                 "materia-gtk-theme",
                 "budgie",
                 "mate-terminal",
                 "nemo",
                 "papirus-icon-theme",
             ],
-            services: vec!["lightdm"],
-            ..Profile::default()
-        },
-        Profile {
-            name: "mate",
-            display_name: "MATE",
-            packages: vec!["mate", "mate-extra"],
-            services: vec!["lightdm"],
-            ..Profile::default()
-        },
-        Profile {
-            name: "deepin",
-            display_name: "Deepin",
-            packages: vec!["deepin", "deepin-terminal", "deepin-editor"],
-            services: vec!["lightdm"],
-            ..Profile::default()
-        },
-        Profile {
-            name: "lxqt",
-            display_name: "LXQt",
-            packages: vec![
+            Xorg,
+            Some(Lightdm),
+            false,
+            None,
+            Vec::new(),
+        ),
+        desktop(
+            "mate",
+            "MATE",
+            vec!["mate", "mate-extra"],
+            Xorg,
+            Some(Lightdm),
+            false,
+            None,
+            Vec::new(),
+        ),
+        desktop(
+            "deepin",
+            "Deepin",
+            vec!["deepin", "deepin-terminal", "deepin-editor"],
+            Xorg,
+            Some(Lightdm),
+            false,
+            None,
+            Vec::new(),
+        ),
+        desktop(
+            "lxqt",
+            "LXQt",
+            vec![
                 "lxqt",
                 "breeze-icons",
                 "oxygen-icons",
@@ -89,13 +146,16 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "l3afpad",
                 "slock",
             ],
-            services: vec!["sddm"],
-            ..Profile::default()
-        },
-        Profile {
-            name: "hyprland",
-            display_name: "Hyprland",
-            packages: vec![
+            Xorg,
+            Some(Sddm),
+            false,
+            Some("lxqt"),
+            Vec::new(),
+        ),
+        desktop(
+            "hyprland",
+            "Hyprland",
+            vec![
                 "hyprland",
                 "dunst",
                 "kitty",
@@ -109,22 +169,23 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "grim",
                 "slurp",
             ],
-            services: vec!["sddm"],
-            needs_seat_access: true,
-            optional_packages: vec![
+            Wayland,
+            Some(Sddm),
+            true,
+            Some("hyprland"),
+            opts(&[
                 "hyprpaper",
                 "hypridle",
                 "hyprlock",
                 "swww",
                 "mako",
                 "wl-clipboard",
-            ],
-            ..Profile::default()
-        },
-        Profile {
-            name: "sway",
-            display_name: "Sway",
-            packages: vec![
+            ]),
+        ),
+        desktop(
+            "sway",
+            "Sway",
+            vec![
                 "sway",
                 "swaybg",
                 "swaylock",
@@ -138,15 +199,16 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "foot",
                 "xorg-xwayland",
             ],
-            services: vec!["lightdm"],
-            needs_seat_access: true,
-            optional_packages: vec!["swaylock-effects", "wl-clipboard", "mako"],
-            ..Profile::default()
-        },
-        Profile {
-            name: "i3",
-            display_name: "i3",
-            packages: vec![
+            Wayland,
+            Some(Lightdm),
+            true,
+            Some("sway"),
+            opts(&["swaylock-effects", "wl-clipboard", "mako"]),
+        ),
+        desktop(
+            "i3",
+            "i3",
+            vec![
                 "i3-wm",
                 "i3lock",
                 "i3status",
@@ -154,84 +216,95 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "xss-lock",
                 "xterm",
                 "lightdm-gtk-greeter",
-                "lightdm",
                 "dmenu",
             ],
-            services: vec!["lightdm"],
-            optional_packages: vec!["polybar", "rofi", "feh", "nitrogen"],
-            ..Profile::default()
-        },
-        Profile {
-            name: "cosmic",
-            display_name: "COSMIC",
-            packages: vec!["cosmic", "xdg-user-dirs"],
-            services: vec!["cosmic-greeter"],
-            ..Profile::default()
-        },
-        Profile {
-            name: "enlightenment",
-            display_name: "Enlightenment",
-            packages: vec![
+            Xorg,
+            Some(Lightdm),
+            false,
+            Some("i3"),
+            opts(&["polybar", "rofi", "feh", "nitrogen"]),
+        ),
+        desktop(
+            "cosmic",
+            "COSMIC",
+            vec!["cosmic", "xdg-user-dirs"],
+            Wayland,
+            Some(CosmicGreeter),
+            false,
+            None,
+            Vec::new(),
+        ),
+        desktop(
+            "enlightenment",
+            "Enlightenment",
+            vec![
                 "enlightenment",
                 "terminology",
-                "lightdm",
                 "lightdm-gtk-greeter",
                 "xdg-user-dirs",
             ],
-            services: vec!["lightdm"],
-            ..Profile::default()
-        },
-        Profile {
-            name: "awesome",
-            display_name: "Awesome",
-            packages: vec![
+            Xorg,
+            Some(Lightdm),
+            false,
+            None,
+            Vec::new(),
+        ),
+        desktop(
+            "awesome",
+            "Awesome",
+            vec![
                 "awesome",
                 "xterm",
-                "lightdm",
                 "lightdm-gtk-greeter",
                 "dmenu",
                 "picom",
                 "xdg-user-dirs",
             ],
-            services: vec!["lightdm"],
-            ..Profile::default()
-        },
-        Profile {
-            name: "bspwm",
-            display_name: "Bspwm",
-            packages: vec![
+            Xorg,
+            Some(Lightdm),
+            false,
+            None,
+            Vec::new(),
+        ),
+        desktop(
+            "bspwm",
+            "Bspwm",
+            vec![
                 "bspwm",
                 "sxhkd",
                 "xterm",
-                "lightdm",
                 "lightdm-gtk-greeter",
                 "dmenu",
                 "picom",
                 "xdg-user-dirs",
             ],
-            services: vec!["lightdm"],
-            ..Profile::default()
-        },
-        Profile {
-            name: "labwc",
-            display_name: "LabWC",
-            packages: vec![
+            Xorg,
+            Some(Lightdm),
+            false,
+            None,
+            Vec::new(),
+        ),
+        desktop(
+            "labwc",
+            "LabWC",
+            vec![
                 "labwc",
                 "waybar",
                 "foot",
                 "fuzzel",
                 "xdg-desktop-portal-wlr",
                 "xdg-user-dirs",
-                "sddm",
             ],
-            services: vec!["sddm"],
-            needs_seat_access: true,
-            ..Profile::default()
-        },
-        Profile {
-            name: "niri",
-            display_name: "Niri",
-            packages: vec![
+            Wayland,
+            Some(Sddm),
+            true,
+            Some("labwc"),
+            Vec::new(),
+        ),
+        desktop(
+            "niri",
+            "Niri",
+            vec![
                 "niri",
                 "foot",
                 "fuzzel",
@@ -239,56 +312,62 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "xdg-desktop-portal-gnome",
                 "xwayland-satellite",
                 "xdg-user-dirs",
-                "sddm",
             ],
-            services: vec!["sddm"],
-            needs_seat_access: true,
-            ..Profile::default()
-        },
-        Profile {
-            name: "qtile",
-            display_name: "Qtile",
-            packages: vec![
+            Wayland,
+            Some(Sddm),
+            true,
+            Some("niri"),
+            Vec::new(),
+        ),
+        desktop(
+            "qtile",
+            "Qtile",
+            vec![
                 "qtile",
                 "xterm",
-                "lightdm",
                 "lightdm-gtk-greeter",
                 "dmenu",
                 "xdg-user-dirs",
             ],
-            services: vec!["lightdm"],
-            ..Profile::default()
-        },
-        Profile {
-            name: "river",
-            display_name: "River",
-            packages: vec![
+            Xorg,
+            Some(Lightdm),
+            false,
+            None,
+            Vec::new(),
+        ),
+        desktop(
+            "river",
+            "River",
+            vec![
                 "river",
                 "foot",
                 "fuzzel",
                 "waybar",
                 "xdg-desktop-portal-wlr",
                 "xdg-user-dirs",
-                "sddm",
             ],
-            services: vec!["sddm"],
-            needs_seat_access: true,
-            ..Profile::default()
-        },
-        Profile {
-            name: "xmonad",
-            display_name: "XMonad",
-            packages: vec![
+            Wayland,
+            Some(Sddm),
+            true,
+            Some("river"),
+            Vec::new(),
+        ),
+        desktop(
+            "xmonad",
+            "XMonad",
+            vec![
                 "xmonad",
                 "xmonad-contrib",
                 "xterm",
-                "lightdm",
                 "lightdm-gtk-greeter",
                 "dmenu",
                 "xdg-user-dirs",
             ],
-            services: vec!["lightdm"],
-            ..Profile::default()
-        },
+            Xorg,
+            Some(Lightdm),
+            false,
+            None,
+            Vec::new(),
+        ),
     ]
 }
