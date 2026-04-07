@@ -232,7 +232,7 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
 name = "archinstall-zfs-core"
-version = "0.1.0"
+version = "0.4.1"
 dependencies = [
  "alpm",
  "alpm-utils",
@@ -268,7 +268,7 @@ dependencies = [
 
 [[package]]
 name = "archinstall-zfs-slint"
-version = "0.1.0"
+version = "0.4.1"
 dependencies = [
  "archinstall-zfs-core",
  "clap",
@@ -288,7 +288,7 @@ dependencies = [
 
 [[package]]
 name = "archinstall-zfs-tui"
-version = "0.1.0"
+version = "0.4.1"
 dependencies = [
  "archinstall-zfs-core",
  "clap",
@@ -7902,7 +7902,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.4.1"
 dependencies = [
  "clap",
  "serde_json",
