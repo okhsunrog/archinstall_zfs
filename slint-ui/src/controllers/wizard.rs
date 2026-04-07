@@ -150,13 +150,23 @@ fn setup_select_confirmed(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_
         }
 
         if key == "dm_select" {
-            // 0 = "use profile default", 1..N = DisplayManager::ALL[idx-1].
+            // Indices map 1:1 to DisplayManager::ALL. Canonicalize: picking
+            // the profile's own default DM clears the override entirely so
+            // the stored state stays in canonical form (override == None ⇔
+            // "use profile default").
             let mut c = cfg.borrow_mut();
-            if let Some(sel) = c.profile_selection.as_mut() {
-                sel.display_manager_override = if idx == 0 {
+            let profile_default = c
+                .profile_selection
+                .as_ref()
+                .and_then(|s| s.profile_def())
+                .and_then(|p| p.default_display_manager());
+            if let Some(sel) = c.profile_selection.as_mut()
+                && let Some(&picked) = DisplayManager::ALL.get(idx as usize)
+            {
+                sel.display_manager_override = if Some(picked) == profile_default {
                     None
                 } else {
-                    DisplayManager::ALL.get((idx - 1) as usize).copied()
+                    Some(picked)
                 };
             }
             refresh_items(&app, &c);
@@ -375,6 +385,23 @@ fn build_kernel_options(
         .collect()
 }
 
+/// Build the DM picker label list. `DisplayManager::ALL` is the canonical
+/// option order (indices map 1:1); we just decorate the profile's own
+/// default with `  ✦ default`, mirroring the GPU driver picker's
+/// `  ✦ suggested` annotation.
+fn dm_picker_labels(profile_default: Option<DisplayManager>) -> Vec<String> {
+    DisplayManager::ALL
+        .iter()
+        .map(|d| {
+            if Some(*d) == profile_default {
+                format!("{}  ✦ default", d.display_name())
+            } else {
+                d.display_name().to_string()
+            }
+        })
+        .collect()
+}
+
 // ── Item activation (open the right popup for the clicked row) ──────
 
 fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_scan: &KernelScan) {
@@ -476,31 +503,26 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
             show_select(app, "gfx_driver_select", "GPU driver", &refs, current);
         }
         "display_manager" => {
-            // Open SelectPopup with [ "Use profile default (X)", Gdm, Sddm,
-            // Lightdm, Ly, CosmicGreeter ]. Result handled in
-            // setup_select_confirmed under the "dm_select" key.
+            // Open SelectPopup with the full DisplayManager list, annotating
+            // the profile's own default with `  ✦ default` (same idiom as the
+            // GPU driver picker uses for its suggestion). Picking the
+            // annotated row clears the override (canonical "use default")
+            // — handled in setup_select_confirmed under "dm_select".
             let sel = config.profile_selection.as_ref();
             let profile_default = sel
                 .and_then(|s| s.profile_def())
                 .and_then(|p| p.default_display_manager());
-            let default_label = format!(
-                "Use profile default ({})",
-                profile_default.map(|d| d.display_name()).unwrap_or("none")
-            );
-            let mut labels: Vec<String> = vec![default_label];
-            labels.extend(
-                DisplayManager::ALL
-                    .iter()
-                    .map(|d| d.display_name().to_string()),
-            );
+            let labels = dm_picker_labels(profile_default);
             let refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
 
-            // Pre-select current override if set, else "use default" (0).
-            let current = sel
-                .and_then(|s| s.display_manager_override)
+            // Pre-select the effective DM: explicit override if set, else
+            // the profile default. -1 (no highlight) only if the profile
+            // has no default DM and the user hasn't picked one.
+            let effective = sel.and_then(|s| s.display_manager_override.or(profile_default));
+            let current = effective
                 .and_then(|d| DisplayManager::ALL.iter().position(|x| *x == d))
-                .map(|i| (i + 1) as i32)
-                .unwrap_or(0);
+                .map(|i| i as i32)
+                .unwrap_or(-1);
             show_select(app, "dm_select", "Display manager", &refs, current);
         }
         "timezone" => {
