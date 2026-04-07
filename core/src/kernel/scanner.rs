@@ -547,12 +547,6 @@ mod tests {
     #[test]
     fn test_dkms_compatible_kernel() {
         // zfs-dkms 2.3.3-1, linux-lts 6.12.41-2, range 4.18-6.15
-        let versions: HashMap<String, String> = [
-            ("zfs-dkms".into(), "2.3.3-1".into()),
-            ("linux-lts".into(), "6.12.41-2".into()),
-        ]
-        .into_iter()
-        .collect();
         // Can't test with real GitHub call, but we can test the range check logic directly
         let kernel_base = "6.12.41";
         let kernel_parsed = parse_major_minor(kernel_base);
