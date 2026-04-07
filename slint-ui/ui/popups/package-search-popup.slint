@@ -120,9 +120,12 @@ export component PackageSearchPopup inherits Rectangle {
                                 vertical-alignment: center;
                             }
 
-                            Badge {
-                                label: result.repo;
-                                bg: result.repo == "aur" ? Theme.c.mauve : Theme.c.blue;
+                            VerticalLayout {
+                                alignment: center;
+                                Badge {
+                                    label: result.repo;
+                                    bg: result.repo == "aur" ? Theme.c.mauve : Theme.c.blue;
+                                }
                             }
 
                             Text {
