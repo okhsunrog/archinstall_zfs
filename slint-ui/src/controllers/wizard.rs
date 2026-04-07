@@ -9,11 +9,15 @@ use std::rc::Rc;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use archinstall_zfs_core::config::types::GlobalConfig;
+use archinstall_zfs_core::profile::DisplayManager;
 
 use crate::config_items::{apply_radio, apply_text, build_step_items, next_selectable_index};
 use crate::controllers::welcome::KernelScan;
+use crate::editing_models::set_multi_select_options;
 use crate::refresh::refresh_items;
-use crate::ui::{App, EditingState, ItemType, PopupState, SelectOption, Theme, WizardState};
+use crate::ui::{
+    App, EditingState, ItemType, MultiSelectOption, PopupState, SelectOption, Theme, WizardState,
+};
 
 pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_scan: &KernelScan) {
     setup_step_changed(app, config);
@@ -141,6 +145,20 @@ fn setup_select_confirmed(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_
                 cfg.borrow_mut().keyboard_layout = opt.text.to_string();
                 refresh_items(&app, &cfg.borrow());
             }
+            return;
+        }
+
+        if key == "dm_select" {
+            // 0 = "use profile default", 1..N = DisplayManager::ALL[idx-1].
+            let mut c = cfg.borrow_mut();
+            if let Some(sel) = c.profile_selection.as_mut() {
+                sel.display_manager_override = if idx == 0 {
+                    None
+                } else {
+                    DisplayManager::ALL.get((idx - 1) as usize).copied()
+                };
+            }
+            refresh_items(&app, &c);
             return;
         }
 
@@ -365,7 +383,7 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
         "profile" => {
             let profiles = archinstall_zfs_core::profile::all_profiles();
             let mut names: Vec<String> = vec!["None".to_string()];
-            names.extend(profiles.iter().map(|p| p.name.to_string()));
+            names.extend(profiles.iter().map(|p| p.display_name.to_string()));
             let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
             let current = config
                 .profile_selection
@@ -374,6 +392,56 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
                 .map(|i| (i + 1) as i32)
                 .unwrap_or(0);
             show_select(app, "profile", "Profile", &refs, current);
+        }
+        "optional_packages" => {
+            // Build a fresh MultiSelectOption list from the profile's
+            // optional packages and the user's current checked subset.
+            let Some(sel) = config.profile_selection.as_ref() else {
+                return;
+            };
+            let Some(p) = sel.profile_def() else { return };
+            let opts: Vec<MultiSelectOption> = p
+                .optional_packages()
+                .iter()
+                .map(|op| MultiSelectOption {
+                    text: SharedString::from(op.package),
+                    description: SharedString::from(op.description),
+                    checked: sel.optional_packages.contains(op.package),
+                })
+                .collect();
+            set_multi_select_options(app, opts);
+            let popup = app.global::<PopupState>();
+            popup.set_multi_select_key("optional_packages".into());
+            popup.set_multi_select_title(format!("Optional packages — {}", p.display_name).into());
+            popup.set_multi_select_visible(true);
+        }
+        "display_manager" => {
+            // Open SelectPopup with [ "Use profile default (X)", Gdm, Sddm,
+            // Lightdm, Ly, CosmicGreeter ]. Result handled in
+            // setup_select_confirmed under the "dm_select" key.
+            let sel = config.profile_selection.as_ref();
+            let profile_default = sel
+                .and_then(|s| s.profile_def())
+                .and_then(|p| p.default_display_manager());
+            let default_label = format!(
+                "Use profile default ({})",
+                profile_default.map(|d| d.display_name()).unwrap_or("none")
+            );
+            let mut labels: Vec<String> = vec![default_label];
+            labels.extend(
+                DisplayManager::ALL
+                    .iter()
+                    .map(|d| d.display_name().to_string()),
+            );
+            let refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
+
+            // Pre-select current override if set, else "use default" (0).
+            let current = sel
+                .and_then(|s| s.display_manager_override)
+                .and_then(|d| DisplayManager::ALL.iter().position(|x| *x == d))
+                .map(|i| (i + 1) as i32)
+                .unwrap_or(0);
+            show_select(app, "dm_select", "Display manager", &refs, current);
         }
         "timezone" => {
             let regions = archinstall_zfs_core::installer::locale::list_timezone_regions();

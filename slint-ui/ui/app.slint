@@ -26,6 +26,7 @@ import { SelectPopup } from "popups/select-popup.slint";
 import { UserManagePopup } from "popups/user-manage-popup.slint";
 import { StringListPopup } from "popups/string-list-popup.slint";
 import { PackageSearchPopup } from "popups/package-search-popup.slint";
+import { MultiSelectPopup } from "popups/multi-select-popup.slint";
 
 import { WelcomeView } from "views/welcome-view.slint";
 import { WizardView } from "views/wizard-view.slint";
@@ -49,6 +50,10 @@ export component App inherits Window {
     callback pkg-search-aur(string);
     callback pkg-added(int);
     callback pkg-removed(int);
+
+    // Multi-select popup callbacks (profile optional packages, etc.)
+    callback multi-select-toggled(string, int); // (key, index)
+    callback multi-select-closed(string);       // key (so Rust can refresh)
 
     // Callbacks to Rust
     callback item-activated(string);
@@ -77,7 +82,8 @@ export component App inherits Window {
             && !PopupState.text-input-visible
             && !PopupState.users-visible
             && !PopupState.pkg-search-visible
-            && !PopupState.strlist-visible;
+            && !PopupState.strlist-visible
+            && !PopupState.multi-select-visible;
         key-pressed(e) => {
             if e.text == Key.Tab {
                 WizardState.next();
@@ -189,6 +195,18 @@ export component App inherits Window {
         item-added(val) => { strlist-added(val); }
         item-removed(index) => { strlist-removed(index); }
         closed() => { PopupState.strlist-visible = false; }
+    }
+
+    MultiSelectPopup {
+        title: PopupState.multi-select-title;
+        options: EditingState.multi-select-options;
+        popup-visible: PopupState.multi-select-visible;
+
+        toggled(idx) => { multi-select-toggled(PopupState.multi-select-key, idx); }
+        closed() => {
+            PopupState.multi-select-visible = false;
+            multi-select-closed(PopupState.multi-select-key);
+        }
     }
 
     PackageSearchPopup {

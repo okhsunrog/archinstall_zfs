@@ -32,6 +32,16 @@ export struct SelectOption {
     text: string,
 }
 
+// One row in MultiSelectPopup. `text` is the package name (or whatever is
+// being multi-selected); `description` is an optional human-readable hint
+// shown to the right of the label. `checked` is the user's current toggle
+// state.
+export struct MultiSelectOption {
+    text: string,
+    description: string,
+    checked: bool,
+}
+
 export struct UserEntry {
     username: string,
     has-sudo: bool,

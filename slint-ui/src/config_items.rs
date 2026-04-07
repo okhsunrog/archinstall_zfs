@@ -5,7 +5,7 @@ use slint::SharedString;
 
 use archinstall_zfs_core::config::types::{
     AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, ProfileSelection,
-    SwapMode, ZfsEncryptionMode,
+    SeatAccess, SwapMode, ZfsEncryptionMode,
 };
 
 use crate::ui::{ConfigItem, ItemType};
@@ -319,19 +319,70 @@ fn build_users_items(c: &GlobalConfig) -> Vec<ConfigItem> {
 }
 
 fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
+    let sel = c.profile_selection.as_ref();
+    let profile_def = sel.and_then(|s| s.profile_def());
+
     let mut items = vec![
         section_header("Desktop"),
         ci(
             "profile",
             "Profile",
-            &c.profile_selection
+            &profile_def
                 .as_ref()
-                .and_then(|s| s.profile_def())
                 .map(|p| p.display_name.to_string())
                 .unwrap_or_else(|| "None".into()),
             ItemType::Select,
         ),
     ];
+
+    // ── Profile configuration: only when a desktop profile is active ──
+    if let (Some(sel), Some(p)) = (sel, profile_def.as_ref())
+        && p.is_desktop()
+    {
+        items.push(section_header("Profile configuration"));
+
+        // Optional packages: "N of M"
+        let total = p.optional_packages().len();
+        if total > 0 {
+            let chosen = sel.optional_packages.len();
+            items.push(ci(
+                "optional_packages",
+                "Optional packages",
+                &format!("{chosen} of {total}"),
+                ItemType::Select,
+            ));
+        }
+
+        // Display manager: shows the effective DM with (default) or
+        // (override) suffix so the user can tell at a glance whether they
+        // diverged from the profile.
+        let value = match (sel.display_manager_override, p.default_display_manager()) {
+            (Some(over), _) => format!("{} (override)", over.display_name()),
+            (None, Some(def)) => format!("{} (default)", def.display_name()),
+            (None, None) => "None".to_string(),
+        };
+        items.push(ci(
+            "display_manager",
+            "Display manager",
+            &value,
+            ItemType::Select,
+        ));
+
+        // Seat access (Wayland compositors). Its own section card via
+        // radio_group, like Audio.
+        if p.needs_seat_access() {
+            items.extend(radio_group(
+                "seat_access",
+                "Seat access",
+                &["None", "seatd", "polkit"],
+                match sel.seat_access {
+                    None => 0,
+                    Some(SeatAccess::Seatd) => 1,
+                    Some(SeatAccess::Polkit) => 2,
+                },
+            ));
+        }
+    }
 
     items.extend(radio_group(
         "audio",
@@ -660,6 +711,15 @@ pub fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
                 0 => None,
                 1 => Some(AudioServer::Pipewire),
                 _ => Some(AudioServer::Pulseaudio),
+            }
+        }
+        "seat_access" => {
+            if let Some(sel) = config.profile_selection.as_mut() {
+                sel.seat_access = match idx {
+                    0 => None,
+                    1 => Some(SeatAccess::Seatd),
+                    _ => Some(SeatAccess::Polkit),
+                };
             }
         }
         _ => {}

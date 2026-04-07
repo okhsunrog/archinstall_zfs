@@ -38,4 +38,9 @@ export global PopupState {
 
     // ── Package search popup ──
     in-out property <bool> pkg-search-visible: false;
+
+    // ── Multi-select popup (profile optional packages, etc.) ──
+    in-out property <bool> multi-select-visible: false;
+    in-out property <string> multi-select-title;
+    in-out property <string> multi-select-key;
 }

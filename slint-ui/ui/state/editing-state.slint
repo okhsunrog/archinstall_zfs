@@ -6,7 +6,7 @@
 // but the Rust handlers update the underlying VecModels in place — no full
 // model rebuild on every edit.
 
-import { UserEntry, PackageEntry, PackageSearchResult, SelectOption } from "../types.slint";
+import { UserEntry, PackageEntry, PackageSearchResult, SelectOption, MultiSelectOption } from "../types.slint";
 
 export global EditingState {
     in property <[UserEntry]> users;
@@ -15,4 +15,8 @@ export global EditingState {
     in property <[PackageSearchResult]> package-search-results;
     in property <bool> package-searching-aur: false;
     in property <string> package-status-text;
+
+    // Backing list for MultiSelectPopup. Rust seeds it on open and mutates
+    // the `checked` field in place when the user toggles a row.
+    in property <[MultiSelectOption]> multi-select-options;
 }

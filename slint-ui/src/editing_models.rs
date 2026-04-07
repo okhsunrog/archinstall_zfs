@@ -7,7 +7,10 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use archinstall_zfs_core::config::types::GlobalConfig;
 
-use crate::ui::{App, EditingState, PackageEntry, PackageSearchResult, SelectOption, UserEntry};
+use crate::ui::{
+    App, EditingState, MultiSelectOption, PackageEntry, PackageSearchResult, SelectOption,
+    UserEntry,
+};
 
 #[derive(Clone)]
 pub struct EditingModels {
@@ -15,6 +18,9 @@ pub struct EditingModels {
     pub extra_services: Rc<VecModel<SelectOption>>,
     pub packages_selected: Rc<VecModel<PackageEntry>>,
     pub package_search: Rc<VecModel<PackageSearchResult>>,
+    /// Backing model for `MultiSelectPopup`. Reseeded each time the popup
+    /// opens; rows are mutated in place when the user toggles them.
+    pub multi_select: Rc<VecModel<MultiSelectOption>>,
 }
 
 impl EditingModels {
@@ -24,16 +30,18 @@ impl EditingModels {
             extra_services: Rc::new(VecModel::default()),
             packages_selected: Rc::new(VecModel::default()),
             package_search: Rc::new(VecModel::default()),
+            multi_select: Rc::new(VecModel::default()),
         }
     }
 
-    /// Wire the four `VecModel`s into the EditingState global once at startup.
+    /// Wire the editing `VecModel`s into the EditingState global once at startup.
     pub fn attach(&self, app: &App) {
         let editing = app.global::<EditingState>();
         editing.set_users(self.users.clone().into());
         editing.set_extra_services(self.extra_services.clone().into());
         editing.set_packages_selected(self.packages_selected.clone().into());
         editing.set_package_search_results(self.package_search.clone().into());
+        editing.set_multi_select_options(self.multi_select.clone().into());
     }
 
     /// Mirror the canonical config lists into the live VecModels.
@@ -85,5 +93,17 @@ pub fn set_search_results(app: &App, items: Vec<PackageSearchResult>) {
         .as_any()
         .downcast_ref::<VecModel<PackageSearchResult>>()
         .expect("package_search_results is always a VecModel");
+    vec_model.set_vec(items);
+}
+
+/// Replace the contents of the multi-select VecModel. Used when opening the
+/// MultiSelectPopup with a fresh set of options.
+pub fn set_multi_select_options(app: &App, items: Vec<crate::ui::MultiSelectOption>) {
+    let model: ModelRc<crate::ui::MultiSelectOption> =
+        app.global::<EditingState>().get_multi_select_options();
+    let vec_model = model
+        .as_any()
+        .downcast_ref::<VecModel<crate::ui::MultiSelectOption>>()
+        .expect("multi_select_options is always a VecModel");
     vec_model.set_vec(items);
 }
