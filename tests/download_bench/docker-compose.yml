@@ -1,17 +1,30 @@
 # Local mirror harness for the download bench.
 #
-# Spawns four nginx containers on localhost:18001..18004, each serving the
+# Spawns nginx containers on 127.0.0.1:18001..18008, each serving the
 # same set of synthetic packages from ./packages/. Each container applies
-# its own `tc qdisc` rate limit on its `eth0` interface so we can model
-# realistic mirror conditions:
+# its own `tc qdisc` rate / netem rule on its `eth0` interface so we can
+# model realistic mirror conditions:
 #
-#   18001  mirror-fast    no rate limit            (top reflector mirror)
-#   18002  mirror-medium  ~10 mbit/s               (mid-list mirror)
-#   18003  mirror-slow    ~500 kbit/s              (bottom-of-list mirror)
-#   18004  mirror-flaky   100 mbit + 30% loss      (lossy mirror)
+#   18001  mirror-fast    no shaping               top reflector mirror
+#   18002  mirror-medium  10 mbit/s                mid-list mirror
+#   18003  mirror-slow    500 kbit/s               bottom-of-list mirror
+#   18004  mirror-flaky   30% packet loss          lossy / unstable mirror
+#   18005  mirror-fast2   no shaping               second fast host (multi-host)
+#   18006  mirror-fast3   no shaping               third fast host (multi-host)
+#   18007  mirror-http1   no shaping, HTTP/1.1     HTTP/1.1 baseline
+#   18008  mirror-laggy   netem delay 50ms         geo-distance mirror (RTT)
 #
 # A "dead" mirror is modeled by simply not running a container — point
-# the bench at e.g. localhost:18999 to get connection refused.
+# the bench at e.g. 127.0.0.1:18999 to get connection refused.
+#
+# fast2/fast3 are deliberately separate ports so reqwest/hyper sees them
+# as distinct origins (scheme + host + port) and opens separate TCP
+# connections to each — necessary for the multi_host bench group to
+# actually exercise multiple connections rather than one HTTP/2 session.
+#
+# mirror-http1 uses a separate nginx config (nginx-http1.conf) with
+# `http2 on;` removed so the bench can compare HTTP/2 multiplexing vs
+# HTTP/1.1 keep-alive on a single host.
 #
 # Each container needs NET_ADMIN to apply tc rules. The entrypoint script
 # (nginx/entrypoint.sh) reads the RATE_LIMIT / NETEM env vars, applies tc,
@@ -84,4 +97,68 @@ services:
     environment:
       RATE_LIMIT: ""
       NETEM: "loss 30%"
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+
+  mirror-fast2:
+    image: nginx:1.27-alpine
+    container_name: bench-mirror-fast2
+    ports:
+      - "127.0.0.1:18005:80"
+    volumes:
+      - ./packages:/usr/share/nginx/html/pkgs:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/entrypoint.sh:/entrypoint.sh:ro
+    cap_add:
+      - NET_ADMIN
+    environment:
+      RATE_LIMIT: ""
+      NETEM: ""
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+
+  mirror-fast3:
+    image: nginx:1.27-alpine
+    container_name: bench-mirror-fast3
+    ports:
+      - "127.0.0.1:18006:80"
+    volumes:
+      - ./packages:/usr/share/nginx/html/pkgs:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/entrypoint.sh:/entrypoint.sh:ro
+    cap_add:
+      - NET_ADMIN
+    environment:
+      RATE_LIMIT: ""
+      NETEM: ""
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+
+  mirror-http1:
+    image: nginx:1.27-alpine
+    container_name: bench-mirror-http1
+    ports:
+      - "127.0.0.1:18007:80"
+    volumes:
+      - ./packages:/usr/share/nginx/html/pkgs:ro
+      - ./nginx/nginx-http1.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/entrypoint.sh:/entrypoint.sh:ro
+    cap_add:
+      - NET_ADMIN
+    environment:
+      RATE_LIMIT: ""
+      NETEM: ""
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+
+  mirror-laggy:
+    image: nginx:1.27-alpine
+    container_name: bench-mirror-laggy
+    ports:
+      - "127.0.0.1:18008:80"
+    volumes:
+      - ./packages:/usr/share/nginx/html/pkgs:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/entrypoint.sh:/entrypoint.sh:ro
+    cap_add:
+      - NET_ADMIN
+    environment:
+      RATE_LIMIT: ""
+      NETEM: "delay 50ms"
     entrypoint: ["/bin/sh", "/entrypoint.sh"]

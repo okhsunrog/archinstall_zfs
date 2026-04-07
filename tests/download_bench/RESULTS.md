@@ -25,13 +25,16 @@ The harness, package set, and bench groups are documented in
 - Each iteration runs against a fresh `tempfile::TempDir` cache so the
   on-disk skip-if-cached fast path doesn't pollute timings
 
-> ⚠️ These numbers are loopback-bound. Local nginx over HTTP/2 has no
-> realistic per-IP throttle, no TCP RTT, no CDN behavior, and no real
-> mirror congestion. They establish the **upper bound** of what
+> ⚠️ Most numbers are loopback-bound. Local nginx over HTTP/2 has no
+> realistic per-IP throttle and (except in the `latency` group) no
+> RTT, no CDN behavior, and no real mirror congestion. The
+> non-`latency` numbers establish the **upper bound** of what
 > `download_packages()` can achieve given the algorithmic and code-path
-> overhead — not what you'd see against real Arch mirrors. For
-> end-to-end validation against real mirrors, use `cargo xtask
-> test-install` on a fresh disk.
+> overhead — not what you'd see against real Arch mirrors. The
+> `latency` group with `tc qdisc netem delay 50ms` is the closest the
+> harness gets to real conditions, and it shows that **RTT dominates
+> wall-time on realistic mirrors** by 6-8×. For end-to-end validation
+> against real mirrors, use `cargo xtask test-install` on a fresh disk.
 
 ## `full_install` group — concurrency=5
 
@@ -138,25 +141,125 @@ What the bench *does* tell us:
    experiment confirmed this empirically — spreading regressed
    throughput because the top mirror is genuinely the best.
 
+## `multi_host` group — multiple distinct fast hosts
+
+Three separate fast nginx containers (`fast`, `fast2`, `fast3`) on
+different ports = different origins = separate TCP connections from
+reqwest's pool. Tests whether having multiple hosts in the mirror list
+changes anything for the current code.
+
+| Scenario | Concurrency | Median time | vs `single_fast` |
+|---|---|---|---|
+| `three_fast_concurrency_5` | 5 | **171.62 ms** | −1% (within noise) |
+| `three_fast_concurrency_10` | 10 | **180.80 ms** | +4% |
+
+### Observations
+
+- **`multi_host` ≈ `single_fast`** (172 ms vs 174 ms). Confirms what we
+  suspected from `full_install`: the current code only ever uses
+  `mirrors[0]`. Adding more hosts to the list doesn't help because the
+  fallback path never runs.
+
+- **Concurrency=10 still slightly worse than concurrency=5** even with
+  multiple hosts available. With the current single-host strategy this
+  is expected (only mirror[0] is used, so HTTP/2 multiplexing limits
+  apply same as `concurrency_sweep`). A multi-host strategy that
+  actually distributed tasks across hosts should beat this — but we
+  haven't built one yet. **This number is the baseline that any future
+  spread / round-robin attempt has to beat.**
+
+## `protocol` group — HTTP/2 vs HTTP/1.1 on a single host
+
+| Scenario | Protocol | Median time |
+|---|---|---|
+| `http2_single_host` | HTTP/2 (h2c) | **172.80 ms** |
+| `http1_single_host` | HTTP/1.1 keep-alive | **173.13 ms** |
+
+### Observations
+
+- **HTTP/2 buys us nothing on loopback** (172.80 vs 173.13 ms — same
+  within noise). On a high-bandwidth low-latency link reqwest's
+  HTTP/1.1 keep-alive serializes 50 small requests over a few pooled
+  connections fast enough that multiplexing latency wins are zero.
+
+- **This is loopback-specific.** On real mirrors with TCP slow-start
+  and per-connection bandwidth caps, HTTP/2 multiplexing usually wins
+  by a substantial margin because all requests share one already-warm
+  congestion window. We'd need a `tc qdisc tbf` rate limit on the
+  http1 mirror to see the protocol difference manifest. Future work.
+
+- **Useful as a sanity check**: confirms our reqwest client handles
+  HTTP/1.1 fallback transparently and doesn't accidentally cripple
+  itself when HTTP/2 isn't available.
+
+## `latency` group — RTT-bound scenarios
+
+`mirror-laggy` adds `tc qdisc netem delay 50ms` to model a
+geographically distant mirror. Every request pays a 50 ms RTT for the
+TCP handshake plus per-stream HTTP/2 setup.
+
+| Scenario | Latency | Concurrency | Median time | vs `low_latency` |
+|---|---|---|---|---|
+| `low_latency` | ~0 ms (loopback) | 5 | **173.87 ms** | — |
+| `geo_50ms_concurrency_5` | 50 ms | 5 | **1.4277 s** | **8.2× slower** |
+| `geo_50ms_concurrency_10` | 50 ms | 10 | **1.1565 s** | **6.6× slower** |
+
+### Observations
+
+This is the **most important finding** in the entire bench suite.
+
+- **50 ms RTT costs ~1.25 seconds wall-time per install** on top of the
+  baseline. Real mirrors with realistic RTTs (20-200 ms) will be the
+  dominant cost in `download_packages()`, dwarfing everything our
+  algorithmic choices can do.
+
+- **At 50 ms RTT, concurrency=10 beats concurrency=5 by 19 %.**
+  (1.43 s → 1.16 s.) This is the **opposite** of what we saw on
+  loopback in `concurrency_sweep`, where conc=10 was a regression.
+
+- **The reason**: when RTT dominates, parallelism amortizes the
+  per-stream setup latency. With concurrency=5, only 5 streams have
+  their RTT in flight at any moment. With concurrency=10, 10 streams
+  share the RTT cost — they all wait for the same network round trip
+  in parallel instead of serially. HTTP/2 multiplexes them over one
+  TCP connection so the connection-setup RTT is paid once, but each
+  stream's first response still needs a round trip.
+
+- **The optimal concurrency depends on RTT, not on bandwidth.** Our
+  current default of 5 was chosen for low-RTT loopback-style
+  conditions. On real mirrors with 50-200 ms RTT, the optimum is
+  probably 10-20.
+
+### Implication for `DownloadConfig::default()`
+
+If we picked the default concurrency value based purely on the
+loopback `concurrency_sweep` numbers we'd lower it to 3. **Don't do
+that.** The latency group shows that on realistic-RTT mirrors a
+default of 5 is already conservative — the right answer is probably
+**8-10**, but we'd want to confirm with a real-mirror smoke test
+before changing the default.
+
 ## What we still need to measure
 
 The most important real-world questions the current bench *doesn't*
 answer:
 
-- **Does `concurrency=N` actually help on multi-host real mirrors?** To
-  answer this we'd need to add a benchmark that uses `[fast, fast2,
-  fast3]` (multiple distinct fast hosts) and varies concurrency.
-  Currently all our scenarios collapse to one host or one host plus
-  irrelevant fallbacks. Phase 4 work.
+- **Multi-host benefit at high RTT.** All our `multi_host` scenarios
+  use loopback (0 ms RTT). The interesting question is whether having
+  3 hosts at 50 ms RTT, with conc=10 distributed across them (3-4
+  streams per host), beats 1 host at 50 ms RTT with all 10 streams
+  multiplexed over one connection. Needs `mirror-fast2-laggy` and
+  `mirror-fast3-laggy` containers, plus a multi-host strategy in code
+  (round-robin / spread) before it's worth measuring.
 
-- **How much does HTTP/2 multiplexing actually save vs HTTP/1.1?** Our
-  nginx config enables HTTP/2; we don't have an HTTP/1.1 comparison.
-  Could add an `http_only` mirror container to measure.
+- **HTTP/2 advantage at high RTT.** HTTP/2 multiplexing's real benefit
+  shows up when RTT × number-of-requests dominates. Adding `tc qdisc
+  netem delay 50ms` to `mirror-http1` would let us compare HTTP/2 vs
+  HTTP/1.1 under realistic RTT conditions.
 
-- **What does real-world RTT do to these numbers?** A `tc qdisc add ...
-  netem delay 50ms` rule on `mirror-fast` would model a typical
-  geographic-distance mirror. Worth adding before the next round of
-  optimization work.
+- **Real mirror smoke test.** Phase 4 work — a one-shot bench against
+  3-5 real Arch mirrors via reflector to validate that everything we
+  learned in the lab holds up on the real internet.
 
 ## File index
 

@@ -38,6 +38,10 @@ const MIRROR_FAST: &str = "http://127.0.0.1:18001/pkgs";
 const MIRROR_MEDIUM: &str = "http://127.0.0.1:18002/pkgs";
 const MIRROR_SLOW: &str = "http://127.0.0.1:18003/pkgs";
 const MIRROR_FLAKY: &str = "http://127.0.0.1:18004/pkgs";
+const MIRROR_FAST2: &str = "http://127.0.0.1:18005/pkgs";
+const MIRROR_FAST3: &str = "http://127.0.0.1:18006/pkgs";
+const MIRROR_HTTP1: &str = "http://127.0.0.1:18007/pkgs";
+const MIRROR_LAGGY: &str = "http://127.0.0.1:18008/pkgs";
 /// A port nothing listens on — used to model "dead mirror at top of list".
 const MIRROR_DEAD: &str = "http://127.0.0.1:18999/pkgs";
 
@@ -198,6 +202,109 @@ fn bench_concurrency_sweep(c: &mut Criterion) {
     group.finish();
 }
 
+/// `multi_host` — exercises multiple distinct origins (separate TCP
+/// connections to fast2/fast3 in addition to fast). On `main` the current
+/// "always try mirrors[0] first" code only ever hits the first mirror,
+/// so these scenarios serve as the **baseline against which any future
+/// multi-host strategy** (round-robin, spread, slowness-failover) must
+/// be compared.
+fn bench_multi_host(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    check_harness_up(&rt);
+    let manifest = load_manifest();
+
+    let mut group = c.benchmark_group("multi_host");
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(60));
+
+    // Three distinct fast hosts in the mirror list. Different ports →
+    // different origins → reqwest opens separate TCP connections to
+    // each, instead of multiplexing everything over one HTTP/2 session.
+    // Current code always picks mirror[0] (fast), so this measures the
+    // *upper bound* a single-host strategy can achieve when the list
+    // would have allowed parallelism. Any future spread / round-robin
+    // implementation must beat this baseline to be worth shipping.
+    let three_fast = [MIRROR_FAST, MIRROR_FAST2, MIRROR_FAST3];
+
+    group.bench_function("three_fast_concurrency_5", |b| {
+        b.to_async(&rt)
+            .iter(|| run_download(make_tasks(&manifest, &three_fast), 5));
+    });
+
+    group.bench_function("three_fast_concurrency_10", |b| {
+        b.to_async(&rt)
+            .iter(|| run_download(make_tasks(&manifest, &three_fast), 10));
+    });
+
+    group.finish();
+}
+
+/// `protocol` — HTTP/2 multiplexing vs HTTP/1.1 keep-alive on the same
+/// single host. Both servers are otherwise identical (same nginx, same
+/// loopback, no shaping). Difference is purely the protocol negotiated.
+fn bench_protocol(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    check_harness_up(&rt);
+    let manifest = load_manifest();
+
+    let mut group = c.benchmark_group("protocol");
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(60));
+
+    group.bench_function("http2_single_host", |b| {
+        b.to_async(&rt)
+            .iter(|| run_download(make_tasks(&manifest, &[MIRROR_FAST]), 5));
+    });
+
+    group.bench_function("http1_single_host", |b| {
+        b.to_async(&rt)
+            .iter(|| run_download(make_tasks(&manifest, &[MIRROR_HTTP1]), 5));
+    });
+
+    group.finish();
+}
+
+/// `latency` — RTT-bound scenarios. The `mirror-laggy` container has
+/// `tc qdisc netem delay 50ms` on its eth0, so every request pays a
+/// 50ms RTT for the TCP handshake plus per-stream HTTP/2 setup. Models
+/// a geographically distant mirror.
+///
+/// The interesting question this group answers: does parallelism still
+/// help when the bottleneck is RTT instead of bandwidth?
+fn bench_latency(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    check_harness_up(&rt);
+    let manifest = load_manifest();
+
+    let mut group = c.benchmark_group("latency");
+    group.sample_size(10);
+    // Latency-bound iters take longer; budget more time per sample.
+    group.measurement_time(Duration::from_secs(120));
+
+    // Reference point: same workload on the no-shaping mirror so we can
+    // read off the pure RTT cost as the delta.
+    group.bench_function("low_latency", |b| {
+        b.to_async(&rt)
+            .iter(|| run_download(make_tasks(&manifest, &[MIRROR_FAST]), 5));
+    });
+
+    group.bench_function("geo_50ms_concurrency_5", |b| {
+        b.to_async(&rt)
+            .iter(|| run_download(make_tasks(&manifest, &[MIRROR_LAGGY]), 5));
+    });
+
+    // Higher concurrency to test whether parallelism amortizes RTT.
+    // With HTTP/2 multiplexing all streams share one connection, so
+    // they share the RTT cost — concurrency should help less here than
+    // you'd naively expect.
+    group.bench_function("geo_50ms_concurrency_10", |b| {
+        b.to_async(&rt)
+            .iter(|| run_download(make_tasks(&manifest, &[MIRROR_LAGGY]), 10));
+    });
+
+    group.finish();
+}
+
 // NOTE: a `size_profile` group (small_only / huge_only subsets) was tried
 // and removed because criterion's auto-tuned iteration count for
 // sub-100ms operations makes the bench fire thousands of network requests
@@ -206,5 +313,12 @@ fn bench_concurrency_sweep(c: &mut Criterion) {
 // fixed iteration count instead of `iter`. The realistic ~200MB workload
 // in `full_install` covers the same code paths.
 
-criterion_group!(benches, bench_full_install, bench_concurrency_sweep);
+criterion_group!(
+    benches,
+    bench_full_install,
+    bench_concurrency_sweep,
+    bench_multi_host,
+    bench_protocol,
+    bench_latency
+);
 criterion_main!(benches);
