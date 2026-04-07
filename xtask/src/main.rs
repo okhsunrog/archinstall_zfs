@@ -663,13 +663,12 @@ fn cmd_analyze_metrics(dir: &Path) -> Result<(), String> {
         // matches conc_N_sM
         if let Some(rest) = stem.strip_prefix("conc_") {
             let parts: Vec<&str> = rest.splitn(2, '_').collect();
-            if parts.len() == 2 {
-                if let (Ok(n), Some(_s)) = (parts[0].parse::<usize>(), parts[1].strip_prefix('s')) {
-                    if let Ok(content) = std::fs::read_to_string(e.path()) {
-                        let t = phase4_wall_ms_from_jsonl(&content);
-                        sample_map.entry(n).or_default().push(t);
-                    }
-                }
+            if parts.len() == 2
+                && let (Ok(n), Some(_s)) = (parts[0].parse::<usize>(), parts[1].strip_prefix('s'))
+                && let Ok(content) = std::fs::read_to_string(e.path())
+            {
+                let t = phase4_wall_ms_from_jsonl(&content);
+                sample_map.entry(n).or_default().push(t);
             }
         }
     }
@@ -729,10 +728,10 @@ fn cmd_analyze_metrics(dir: &Path) -> Result<(), String> {
         }
 
         // Use phase4→phase5 timestamps for wall-clock download time
-        if let Some((_, _, ts4)) = phase_ts.iter().find(|(n, _, _)| *n == 4) {
-            if let Some((_, _, ts5)) = phase_ts.iter().find(|(n, _, _)| *n == 5) {
-                stats.total_dl_ms = ts5 - ts4;
-            }
+        if let Some((_, _, ts4)) = phase_ts.iter().find(|(n, _, _)| *n == 4)
+            && let Some((_, _, ts5)) = phase_ts.iter().find(|(n, _, _)| *n == 5)
+        {
+            stats.total_dl_ms = ts5 - ts4;
         }
         // total_bytes must be measured from pkg_download events (set above, but reset by wall logic)
         // re-sum bytes properly
