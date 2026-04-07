@@ -8,21 +8,13 @@ jobs:
   check:
     runs-on: ubuntu-latest
     container:
-      image: archlinux:latest
+      image: ghcr.io/${{ github.repository }}/ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
     - uses: actions/checkout@v4
-
-    - name: Install system dependencies
-      run: |
-        pacman -Syu --noconfirm
-        pacman -S --noconfirm base-devel git pkgconf clang \
-          libxkbcommon libinput libdrm freetype2 fontconfig ttf-dejavu
-
-    - name: Install Rust
-      run: |
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
     - name: Cache cargo
       uses: actions/cache@v4
