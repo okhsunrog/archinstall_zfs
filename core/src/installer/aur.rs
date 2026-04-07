@@ -183,6 +183,7 @@ mod tests {
             Path::new("/mnt"),
             &[] as &[&str],
             &tokio_util::sync::CancellationToken::new(),
+            crate::system::async_download::DownloadConfig::default(),
         )
         .await
         .unwrap();
