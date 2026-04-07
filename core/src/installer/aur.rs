@@ -26,6 +26,7 @@ pub async fn install_aur_packages(
     target: &Path,
     packages: &[&str],
     cancel: &tokio_util::sync::CancellationToken,
+    download_config: crate::system::async_download::DownloadConfig,
 ) -> Result<()> {
     if packages.is_empty() {
         return Ok(());
@@ -58,7 +59,7 @@ pub async fn install_aur_packages(
     let t = target.to_path_buf();
     let c = cancel.clone();
     tokio::task::spawn_blocking(move || -> Result<()> {
-        setup_aur_environment(&*r, &t, &c)?;
+        setup_aur_environment(&*r, &t, &c, download_config)?;
 
         for pkg in &install_order {
             install_single_aur_package(&*r, &t, pkg)?;
@@ -119,10 +120,12 @@ fn setup_aur_environment(
     runner: &dyn CommandRunner,
     target: &Path,
     cancel: &tokio_util::sync::CancellationToken,
+    download_config: crate::system::async_download::DownloadConfig,
 ) -> Result<()> {
     // Install git and sudo via libalpm (base-devel already in base install)
     let target_conf = target.join("etc/pacman.conf");
-    let mut ctx = crate::system::alpm_pacman::AlpmContext::for_target(target, &target_conf)?;
+    let mut ctx =
+        crate::system::alpm_pacman::AlpmContext::for_target(target, &target_conf, download_config)?;
     ctx.sync_databases(false)?;
     ctx.install_packages(&["git", "sudo"], cancel, None)?;
 

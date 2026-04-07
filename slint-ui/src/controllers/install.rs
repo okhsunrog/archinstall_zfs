@@ -246,9 +246,14 @@ fn spawn_install_thread(
             .with_target(true)
             .with_filter(file_filter);
 
+        let metrics_layer =
+            archinstall_zfs_core::metrics::MetricsLayer::open("/tmp/archinstall-metrics.jsonl")
+                .expect("failed to open metrics file");
+
         let subscriber = tracing_subscriber::registry()
             .with(layer.with_filter(ui_filter))
-            .with(file_layer);
+            .with(file_layer)
+            .with(metrics_layer);
         let _guard = tracing::subscriber::set_default(subscriber);
 
         let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =

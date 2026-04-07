@@ -34,6 +34,7 @@ pub fn run_install(
     // Phase 0 checks (internet, UEFI, ZFS) are done on the welcome screen.
 
     tracing::info!("Phase 1: Disk preparation");
+    tracing::info!(target: "metrics", event = "phase_start", num = 1u32, name = "Disk preparation");
     let (efi_partition, zfs_partition, swap_partition) = match mode {
         InstallationMode::FullDisk => {
             let disk = config
@@ -85,6 +86,7 @@ pub fn run_install(
     };
 
     tracing::info!("Phase 2: ZFS pool and datasets");
+    tracing::info!(target: "metrics", event = "phase_start", num = 2u32, name = "ZFS pool and datasets");
     archinstall_zfs_core::zfs::cache::create_hostid(&*runner)?;
     archinstall_zfs_core::zfs::cache::prepare_zfs_cache(Path::new("/"), pool_name)?;
     let _ = runner.run("systemctl", &["enable", "--now", "zfs-zed.service"]);
@@ -171,6 +173,7 @@ pub fn run_install(
     )?;
 
     tracing::info!("Phase 3: Mounting EFI partition");
+    tracing::info!(target: "metrics", event = "phase_start", num = 3u32, name = "Mounting EFI partition");
     archinstall_zfs_core::disk::partition::mount_efi(&*runner, &efi_partition, &mountpoint)?;
 
     tracing::info!("Phase 4-12: Running installer pipeline");
@@ -187,6 +190,7 @@ pub fn run_install(
     installer.perform_installation()?;
 
     tracing::info!("Phase 13: Setting up ZFSBootMenu");
+    tracing::info!(target: "metrics", event = "phase_start", num = 13u32, name = "Setting up ZFSBootMenu");
     let zswap_on = matches!(
         config.swap_mode,
         SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
@@ -205,11 +209,16 @@ pub fn run_install(
             &mountpoint,
             config.init_system,
             &cancel,
+            archinstall_zfs_core::system::async_download::DownloadConfig {
+                concurrency: config.parallel_downloads as usize,
+                ..Default::default()
+            },
         ),
     )?;
     archinstall_zfs_core::zfs::bootmenu::create_efi_entries(&*runner, &efi_partition)?;
 
     tracing::info!("Phase 14: Cleanup");
+    tracing::info!(target: "metrics", event = "phase_start", num = 14u32, name = "Cleanup");
     nix::unistd::sync();
     let root_ds = format!("{pool_name}/{prefix}/root");
     archinstall_zfs_core::disk::partition::umount_efi(&*runner, &mountpoint)?;
