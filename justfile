@@ -39,7 +39,7 @@ check: fmt-check lint test
 
 # Internal: render profile templates
 _render-profile MODE="precompiled" KERNEL="linux-lts" FAST="":
-    cargo run --release -p archinstall-zfs-tui -- render-profile \
+    cargo xtask render-profile \
         --profile-dir {{PROFILE_DIR}} \
         --out-dir {{PROFILE_OUT}} \
         --kernel {{KERNEL}} \

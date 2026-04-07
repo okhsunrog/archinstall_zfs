@@ -65,6 +65,7 @@ jobs:
         path: |
           target/release/archinstall-zfs-tui
           target/release/archinstall-zfs-slint
+          target/release/xtask
 
   iso-linux:
     needs: build
@@ -89,19 +90,19 @@ jobs:
         path: target/release/
 
     - name: Fix binary permissions
-      run: chmod +x target/release/archinstall-zfs-tui target/release/archinstall-zfs-slint
+      run: chmod +x target/release/archinstall-zfs-tui target/release/archinstall-zfs-slint target/release/xtask
 
     - name: Build ISO with linux kernel
       continue-on-error: true
       run: |
-        target/release/archinstall-zfs-tui render-profile \
+        target/release/xtask render-profile \
           --profile-dir gen_iso/profile --out-dir gen_iso/profile_rendered \
           --kernel linux --zfs precompiled
         just _prepare-binary
         if ! sudo mkarchiso -v -w "gen_iso/workdir" -o gen_iso/out gen_iso/profile_rendered; then
           echo "Precompiled failed, retrying with DKMS..."
           rm -rf gen_iso/profile_rendered gen_iso/workdir
-          target/release/archinstall-zfs-tui render-profile \
+          target/release/xtask render-profile \
             --profile-dir gen_iso/profile --out-dir gen_iso/profile_rendered \
             --kernel linux --zfs dkms
           just _prepare-binary
@@ -138,18 +139,18 @@ jobs:
         path: target/release/
 
     - name: Fix binary permissions
-      run: chmod +x target/release/archinstall-zfs-tui target/release/archinstall-zfs-slint
+      run: chmod +x target/release/archinstall-zfs-tui target/release/archinstall-zfs-slint target/release/xtask
 
     - name: Build ISO with linux-lts kernel
       run: |
-        target/release/archinstall-zfs-tui render-profile \
+        target/release/xtask render-profile \
           --profile-dir gen_iso/profile --out-dir gen_iso/profile_rendered \
           --kernel linux-lts --zfs precompiled
         just _prepare-binary
         if ! sudo mkarchiso -v -w "gen_iso/workdir" -o gen_iso/out gen_iso/profile_rendered; then
           echo "Precompiled failed, retrying with DKMS..."
           rm -rf gen_iso/profile_rendered gen_iso/workdir
-          target/release/archinstall-zfs-tui render-profile \
+          target/release/xtask render-profile \
             --profile-dir gen_iso/profile --out-dir gen_iso/profile_rendered \
             --kernel linux-lts --zfs dkms
           just _prepare-binary
