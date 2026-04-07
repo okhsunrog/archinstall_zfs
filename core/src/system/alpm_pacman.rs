@@ -201,7 +201,12 @@ impl AlpmContext {
 
         tracing::info!("installing packages");
 
-        // Set up install progress callback
+        // Set up install progress callback. We hold a clone of the sender
+        // so we can emit a `Done` event after the transaction completes —
+        // without it the GUI's progress bar stays stuck on the last
+        // "Installing N/N: pkg 100%" until the install thread exits and
+        // the channel sender is dropped.
+        let progress_tx_clone = progress_tx.clone();
         if let Some(tx) = progress_tx {
             self.handle
                 .set_progress_cb(tx, |_kind, pkgname, percent, howmany, current, tx| {
@@ -214,11 +219,19 @@ impl AlpmContext {
                 });
         }
 
-        // Commit — libalpm finds packages in cache, skips download phase
-        self.handle.trans_commit().map_err(|e| {
+        // Commit — libalpm finds packages in cache, skips download phase.
+        // Always emit `Done` afterwards (success or failure) so the GUI
+        // bar gets dismissed before subsequent phases run.
+        let commit_result = self.handle.trans_commit().map_err(|e| {
             let msg = format!("transaction commit failed: {e}");
             eyre!(msg)
-        })?;
+        });
+
+        if let Some(tx) = &progress_tx_clone {
+            tx.send_replace(super::async_download::PackageProgress::Done);
+        }
+
+        commit_result?;
 
         self.handle
             .trans_release()
