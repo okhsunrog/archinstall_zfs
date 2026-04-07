@@ -18,7 +18,7 @@
     "additional_packages": ["openssh"],
     "aur_packages": [],
     "network_copy_iso": true,
-    "parallel_downloads": 5,
+    "parallel_downloads": 10,
     "zrepl_enabled": false,
     "bluetooth": false,
     "extra_services": ["sshd"]

@@ -47,9 +47,11 @@ pub fn install_network_manager(
     runner: &dyn CommandRunner,
     target: &Path,
     cancel: &tokio_util::sync::CancellationToken,
+    download_config: crate::system::async_download::DownloadConfig,
 ) -> Result<()> {
     let target_conf = target.join("etc/pacman.conf");
-    let mut ctx = crate::system::alpm_pacman::AlpmContext::for_target(target, &target_conf)?;
+    let mut ctx =
+        crate::system::alpm_pacman::AlpmContext::for_target(target, &target_conf, download_config)?;
     ctx.sync_databases(false)?;
     ctx.install_packages(&["networkmanager"], cancel, None)?;
 

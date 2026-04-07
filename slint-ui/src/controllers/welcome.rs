@@ -119,8 +119,13 @@ fn start_zfs_init(app: &App, config: &GlobalConfig) {
             app.global::<WelcomeState>().set_zfs_install_pct(30);
         });
 
-        let result =
-            archinstall_zfs_core::zfs::kmod::initialize_zfs(&*runner, &kernel, zfs_mode, &cancel);
+        let result = archinstall_zfs_core::zfs::kmod::initialize_zfs(
+            &*runner,
+            &kernel,
+            zfs_mode,
+            &cancel,
+            archinstall_zfs_core::system::async_download::DownloadConfig::default(),
+        );
 
         let _ = weak.upgrade_in_event_loop(move |app| {
             app.global::<WelcomeState>().set_zfs_installing(false);

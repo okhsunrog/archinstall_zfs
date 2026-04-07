@@ -6,7 +6,7 @@ use color_eyre::eyre::{Context, Result, bail, eyre};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
-use super::async_download::{DownloadProgress, DownloadTask};
+use super::async_download::{DownloadConfig, DownloadProgress, DownloadTask};
 
 /// Manages API filesystem mounts (proc, sys, dev, etc.) for a target chroot.
 /// Mounts are unmounted in reverse order on drop.
@@ -45,11 +45,12 @@ pub struct AlpmContext {
     handle: Alpm,
     root: PathBuf,
     is_target: bool,
+    download_config: DownloadConfig,
 }
 
 impl AlpmContext {
     /// Create a context for installing packages on the HOST system.
-    pub fn for_host(pacman_conf_path: &Path) -> Result<Self> {
+    pub fn for_host(pacman_conf_path: &Path, download_config: DownloadConfig) -> Result<Self> {
         let conf =
             pacmanconf::Config::from_file(pacman_conf_path.to_str().unwrap_or("/etc/pacman.conf"))
                 .wrap_err("failed to parse pacman.conf")?;
@@ -64,6 +65,7 @@ impl AlpmContext {
             handle,
             root: PathBuf::from(&conf.root_dir),
             is_target: false,
+            download_config,
         };
         ctx.setup_callbacks();
         Ok(ctx)
@@ -72,7 +74,11 @@ impl AlpmContext {
     /// Create a context for installing packages into a TARGET chroot.
     /// Requires that `TargetMounts::setup()` has already been called and
     /// the returned `TargetMounts` is kept alive for the duration.
-    pub fn for_target(target: &Path, pacman_conf_path: &Path) -> Result<Self> {
+    pub fn for_target(
+        target: &Path,
+        pacman_conf_path: &Path,
+        download_config: DownloadConfig,
+    ) -> Result<Self> {
         let conf =
             pacmanconf::Config::from_file(pacman_conf_path.to_str().unwrap_or("/etc/pacman.conf"))
                 .wrap_err("failed to parse pacman.conf")?;
@@ -102,6 +108,7 @@ impl AlpmContext {
             handle,
             root: target.to_path_buf(),
             is_target: true,
+            download_config,
         };
         ctx.setup_callbacks();
         Ok(ctx)
@@ -193,13 +200,15 @@ impl AlpmContext {
             rt.block_on(super::async_download::download_packages(
                 tasks,
                 cache_dir,
-                5,
+                self.download_config.concurrency,
                 cancel.clone(),
                 progress_tx.clone(),
             ))?;
         }
 
         tracing::info!("installing packages");
+        let batch_start = std::time::Instant::now();
+        let pkg_count = count;
 
         // Set up install progress callback. We hold a clone of the sender
         // so we can emit a `Done` event after the transaction completes —
@@ -232,6 +241,14 @@ impl AlpmContext {
         }
 
         commit_result?;
+
+        let batch_duration_ms = batch_start.elapsed().as_millis() as u64;
+        tracing::info!(
+            target: "metrics",
+            event = "batch_install",
+            count = pkg_count as u64,
+            duration_ms = batch_duration_ms,
+        );
 
         self.handle
             .trans_release()

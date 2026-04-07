@@ -4,6 +4,7 @@ use color_eyre::eyre::Result;
 
 use crate::config::types::ZfsModuleMode;
 use crate::system::alpm_pacman::AlpmContext;
+use crate::system::async_download::DownloadConfig;
 use crate::system::cmd::CommandRunner;
 
 pub fn load_zfs_module(runner: &dyn CommandRunner) -> Result<bool> {
@@ -130,6 +131,7 @@ pub fn install_zfs_on_host(
     kernel: &str,
     precompiled: bool,
     cancel: &tokio_util::sync::CancellationToken,
+    download_config: DownloadConfig,
 ) -> Result<()> {
     let packages = if precompiled {
         let zfs_pkg = format!("zfs-{kernel}");
@@ -145,7 +147,7 @@ pub fn install_zfs_on_host(
     let pkg_refs: Vec<&str> = packages.iter().map(|s| s.as_str()).collect();
 
     let pacman_conf = Path::new("/etc/pacman.conf");
-    let mut ctx = AlpmContext::for_host(pacman_conf)?;
+    let mut ctx = AlpmContext::for_host(pacman_conf, download_config)?;
     ctx.sync_databases(false)?;
     ctx.install_packages(&pkg_refs, cancel, None)?;
     Ok(())
@@ -158,6 +160,7 @@ pub fn initialize_zfs(
     kernel: &str,
     mode: ZfsModuleMode,
     cancel: &tokio_util::sync::CancellationToken,
+    download_config: DownloadConfig,
 ) -> Result<()> {
     // 1. Wait for reflector and stop it
     ensure_reflector_finished_and_stopped(runner)?;
@@ -183,10 +186,10 @@ pub fn initialize_zfs(
 
     // 6. Install ZFS packages (precompiled first, fallback to DKMS)
     let precompiled = mode == ZfsModuleMode::Precompiled;
-    if let Err(e) = install_zfs_on_host(kernel, precompiled, cancel) {
+    if let Err(e) = install_zfs_on_host(kernel, precompiled, cancel, download_config.clone()) {
         if precompiled {
             tracing::warn!("precompiled ZFS install failed ({e}), falling back to DKMS");
-            install_zfs_on_host(kernel, false, cancel)?;
+            install_zfs_on_host(kernel, false, cancel, download_config)?;
         } else {
             return Err(e);
         }
@@ -254,6 +257,7 @@ mod tests {
             "linux-lts",
             ZfsModuleMode::Precompiled,
             &tokio_util::sync::CancellationToken::new(),
+            crate::system::async_download::DownloadConfig::default(),
         )
         .unwrap();
 

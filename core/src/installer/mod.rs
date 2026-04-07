@@ -18,7 +18,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::types::{GlobalConfig, InitSystem, SwapMode, ZfsEncryptionMode};
 use crate::system::alpm_pacman::{AlpmContext, TargetMounts};
-use crate::system::async_download::DownloadProgress;
+use crate::system::async_download::{DownloadConfig, DownloadProgress};
 use crate::system::cmd::CommandRunner;
 
 pub struct Installer {
@@ -69,6 +69,7 @@ impl Installer {
 
         // Phase 4: install base system via libalpm
         tracing::info!("Phase 4: Installing base system...");
+        tracing::info!(target: "metrics", event = "phase_start", num = 4u32, name = "Installing base system");
         let target_mounts = base::install_base(
             &*self.runner,
             &self.target,
@@ -81,40 +82,55 @@ impl Installer {
         // Create a reusable AlpmContext for all subsequent package installs.
         // The target now has pacman.conf, keyring, and mirrorlist from finalize_target().
         let target_conf = self.target.join("etc/pacman.conf");
-        let mut ctx = AlpmContext::for_target(&self.target, &target_conf)?;
+        let mut ctx = AlpmContext::for_target(
+            &self.target,
+            &target_conf,
+            DownloadConfig {
+                concurrency: self.config.parallel_downloads as usize,
+                ..Default::default()
+            },
+        )?;
         ctx.sync_databases(false)?;
         self.alpm_ctx = Some(ctx);
 
         // Phase 5: System config
         tracing::info!("Phase 5: Configuring system...");
+        tracing::info!(target: "metrics", event = "phase_start", num = 5u32, name = "Configuring system");
         self.configure_system()?;
 
         // Phase 6: archzfs repo on target + ZFS packages
         tracing::info!("Phase 6: Installing ZFS packages on target...");
+        tracing::info!(target: "metrics", event = "phase_start", num = 6u32, name = "Installing ZFS packages");
         self.install_zfs_on_target()?;
 
         // Phase 7: Initramfs
         tracing::info!("Phase 7: Generating initramfs...");
+        tracing::info!(target: "metrics", event = "phase_start", num = 7u32, name = "Generating initramfs");
         self.generate_initramfs()?;
 
         // Phase 8: Users + authentication
         tracing::info!("Phase 8: Configuring users...");
+        tracing::info!(target: "metrics", event = "phase_start", num = 8u32, name = "Configuring users");
         self.configure_users()?;
 
         // Phase 9: Profile packages + services
         tracing::info!("Phase 9: Installing profile packages...");
+        tracing::info!(target: "metrics", event = "phase_start", num = 9u32, name = "Installing profile packages");
         self.install_profile()?;
 
         // Phase 10: Additional packages + AUR
         tracing::info!("Phase 10: Installing additional packages...");
+        tracing::info!(target: "metrics", event = "phase_start", num = 10u32, name = "Installing additional packages");
         self.install_additional_packages()?;
 
         // Phase 11: Swap configuration
         tracing::info!("Phase 11: Configuring swap...");
+        tracing::info!(target: "metrics", event = "phase_start", num = 11u32, name = "Configuring swap");
         self.configure_swap()?;
 
         // Phase 12: ZFS services + genfstab + misc files
         tracing::info!("Phase 12: Finalizing ZFS configuration...");
+        tracing::info!(target: "metrics", event = "phase_start", num = 12u32, name = "Finalizing ZFS configuration");
         self.finalize_zfs()?;
 
         Ok(())
@@ -472,6 +488,10 @@ impl Installer {
                 &self.target,
                 &aur_pkgs,
                 &self.cancel,
+                DownloadConfig {
+                    concurrency: self.config.parallel_downloads as usize,
+                    ..Default::default()
+                },
             ))?;
         }
 

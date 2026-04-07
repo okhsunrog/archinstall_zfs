@@ -113,11 +113,18 @@ pub async fn install_and_generate_zbm(
     target: &Path,
     init_system: InitSystem,
     cancel: &tokio_util::sync::CancellationToken,
+    download_config: crate::system::async_download::DownloadConfig,
 ) -> Result<()> {
     // 1. Install zfsbootmenu from AUR (async: AUR dependency resolution)
     tracing::info!("installing zfsbootmenu from AUR");
-    crate::installer::aur::install_aur_packages(runner.clone(), target, &["zfsbootmenu"], cancel)
-        .await?;
+    crate::installer::aur::install_aur_packages(
+        runner.clone(),
+        target,
+        &["zfsbootmenu"],
+        cancel,
+        download_config,
+    )
+    .await?;
 
     // 2-5. Sync operations: config, hooks, generate-zbm, copy EFI
     let r = runner;

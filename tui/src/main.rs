@@ -4,7 +4,7 @@ mod tui;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Result, WrapErr};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -78,9 +78,14 @@ fn setup_logging(ui_log_tx: tokio::sync::mpsc::UnboundedSender<(String, i32)>) -
         .with_target(true)
         .with_filter(file_filter);
 
+    let metrics_layer =
+        archinstall_zfs_core::metrics::MetricsLayer::open("/tmp/archinstall-metrics.jsonl")
+            .wrap_err("failed to open metrics file")?;
+
     tracing_subscriber::registry()
         .with(channel_layer.with_filter(ui_filter))
         .with(file_layer)
+        .with(metrics_layer)
         .init();
 
     Ok(())

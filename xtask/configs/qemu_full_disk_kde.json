@@ -15,8 +15,13 @@
     "ntp": true,
     "root_password": "test",
     "kernels": ["linux-lts"],
+    "profile_selection": {
+        "profile": "kde",
+        "optional_packages": [],
+        "display_manager_override": null
+    },
     "additional_packages": ["openssh"],
-    "aur_packages": ["neofetch"],
+    "aur_packages": [],
     "network_copy_iso": true,
     "parallel_downloads": 10,
     "zrepl_enabled": false,

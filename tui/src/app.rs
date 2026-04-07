@@ -101,8 +101,12 @@ pub async fn run_install(
         let k = kernel.clone();
         let zfs_mode = config.zfs_module_mode;
         let c = cancel.clone();
+        let dl_config = archinstall_zfs_core::system::async_download::DownloadConfig {
+            concurrency: config.parallel_downloads as usize,
+            ..Default::default()
+        };
         tokio::task::spawn_blocking(move || {
-            archinstall_zfs_core::zfs::kmod::initialize_zfs(&*r, &k, zfs_mode, &c)
+            archinstall_zfs_core::zfs::kmod::initialize_zfs(&*r, &k, zfs_mode, &c, dl_config)
         })
         .await??;
     }
@@ -327,6 +331,10 @@ pub async fn run_install(
         &mountpoint,
         config.init_system,
         &cancel,
+        archinstall_zfs_core::system::async_download::DownloadConfig {
+            concurrency: config.parallel_downloads as usize,
+            ..Default::default()
+        },
     )
     .await?;
     tracing::info!("ZFSBootMenu built and installed");

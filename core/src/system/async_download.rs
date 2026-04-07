@@ -374,6 +374,7 @@ async fn download_single(
     }
 
     let total_size = task.size.max(0) as u64;
+    let download_started = std::time::Instant::now();
 
     // Try each mirror
     let mut last_error = None;
@@ -411,14 +412,26 @@ async fn download_single(
             .await
             {
                 Ok(()) => {
-                    // Signatures (.sig) are not downloaded here — libalpm
-                    // fetches and verifies them during trans_commit().
-
                     shared.update_package(
                         index,
                         PackageState::Done {
                             filename: task.filename.clone(),
                         },
+                    );
+                    let duration_ms = download_started.elapsed().as_millis() as u64;
+                    let speed_bps = if duration_ms > 0 {
+                        total_size * 1000 / duration_ms
+                    } else {
+                        0
+                    };
+                    tracing::info!(
+                        target: "metrics",
+                        event = "pkg_download",
+                        filename = task.filename.as_str(),
+                        bytes = total_size,
+                        duration_ms = duration_ms,
+                        mirror = server.as_str(),
+                        speed_bps = speed_bps,
                     );
                     tracing::info!(file = %task.filename, "download complete");
                     return Ok(());
