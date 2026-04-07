@@ -9,7 +9,14 @@ export enum ItemType {
     action,
     readonly,
     warning,
+    // Visual section divider — small uppercase label, no card. Skipped in
+    // the review screen because the step-level header already groups things.
     section-header,
+    // Header of an inline radio group: same visual as section-header but
+    // semantically *bound* to the RadioOption rows that immediately follow.
+    // The review screen collapses (radio-header + N radio-options) into a
+    // single readonly summary row.
+    radio-header,
     radio-option,
 }
 

@@ -257,6 +257,7 @@ fn setup_keyboard_nav(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
             && item_type != ItemType::Readonly
             && item_type != ItemType::Warning
             && item_type != ItemType::SectionHeader
+            && item_type != ItemType::RadioHeader
         {
             app.invoke_item_activated(key);
         }
