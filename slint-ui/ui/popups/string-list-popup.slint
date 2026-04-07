@@ -93,8 +93,11 @@ export component StringListPopup inherits Rectangle {
                                     horizontal-stretch: 1;
                                 }
 
-                                DeleteButton {
-                                    clicked => { root.item-removed(index); }
+                                VerticalLayout {
+                                    alignment: center;
+                                    DeleteButton {
+                                        clicked => { root.item-removed(index); }
+                                    }
                                 }
                             }
                         }

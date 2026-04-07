@@ -95,19 +95,28 @@ export component UserManagePopup inherits Rectangle {
                                         vertical-alignment: center;
                                     }
 
-                                    if user.has-sudo: Badge {
-                                        label: "sudo";
+                                    // Wrap in a centering VerticalLayout —
+                                    // HorizontalLayout doesn't center
+                                    // fixed-size children on the cross axis
+                                    // by default, they get top-aligned.
+                                    if user.has-sudo: VerticalLayout {
+                                        alignment: center;
+                                        Badge { label: "sudo"; }
                                     }
 
                                     if !user.has-sudo: Text {
                                         text: "(click to toggle sudo)";
                                         color: Theme.c.overlay0;
                                         font-size: Theme.font-sm;
+                                        vertical-alignment: center;
                                     }
                                 }
 
-                                DeleteButton {
-                                    clicked => { root.user-removed(index); }
+                                VerticalLayout {
+                                    alignment: center;
+                                    DeleteButton {
+                                        clicked => { root.user-removed(index); }
+                                    }
                                 }
                             }
                         }
