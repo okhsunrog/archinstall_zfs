@@ -77,6 +77,7 @@ fn run_initial_checks(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_scan
     .unwrap_or(false);
 
     let welcome = app.global::<WelcomeState>();
+    welcome.set_app_version(env!("CARGO_PKG_VERSION").into());
     welcome.set_net_ok(net);
     welcome.set_uefi_ok(uefi);
     welcome.set_zfs_ok(zfs_mod && zfs_utils);

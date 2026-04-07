@@ -9,6 +9,8 @@ export global WelcomeState {
     in property <int> zfs-install-pct: 0;
     in property <string> zfs-install-status: "";
 
+    in property <string> app-version: "";
+
     out property <bool> all-checks-ok: net-ok && uefi-ok && zfs-ok;
 
     callback check-internet();
