@@ -1,4 +1,4 @@
-import { ListView } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
 import { Theme, Palette } from "../styling.slint";
 import { UserEntry } from "../types.slint";
 import { StyledButton } from "../components/styled-button.slint";
@@ -32,7 +32,10 @@ export component UserManagePopup inherits Rectangle {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             width: min(520px, parent.width - 40px);
-            height: min(parent.height - 80px, 520px);
+            // Grow with content up to the window-bounds clamp. ScrollView's
+            // preferred-height override exposes the inner content height to
+            // this layout (same trick as StringListPopup).
+            height: min(self.preferred-height, parent.height - 80px);
             background: Theme.c.mantle;
             border-radius: Theme.radius-md;
             border-color: Theme.c.surface1;
@@ -55,54 +58,63 @@ export component UserManagePopup inherits Rectangle {
                 }
 
                 // ── Existing users list ──
-                ListView {
+                // Grows naturally with the model up to the popup's
+                // window-bounds cap; ScrollView's preferred-height override
+                // exposes content height to the parent layout. See
+                // StringListPopup file header for the full rationale.
+                if root.users.length > 0: ScrollView {
+                    preferred-height: users-vbox.preferred-height;
                     vertical-stretch: 1;
 
-                    for user[index] in root.users: Rectangle {
-                        height: Theme.control-height-lg - 4px;
-                        background: user-row-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
-                        border-radius: Theme.radius-sm;
+                    users-vbox := VerticalLayout {
+                        spacing: Theme.spacing-xs;
 
-                        user-row-ta := TouchArea {
-                            clicked => { root.user-sudo-toggled(index); }
-                        }
+                        for user[index] in root.users: Rectangle {
+                            height: Theme.control-height-lg - 4px;
+                            background: user-row-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
+                            border-radius: Theme.radius-sm;
 
-                        HorizontalLayout {
-                            padding-left: Theme.spacing-md;
-                            padding-right: Theme.spacing-sm;
-                            spacing: Theme.spacing-sm;
-                            alignment: space-between;
-
-                            HorizontalLayout {
-                                spacing: Theme.spacing-sm;
-                                alignment: start;
-
-                                Text {
-                                    text: user.username;
-                                    color: Theme.c.text;
-                                    font-size: Theme.font-base;
-                                    vertical-alignment: center;
-                                }
-
-                                if user.has-sudo: Badge {
-                                    label: "sudo";
-                                }
-
-                                if !user.has-sudo: Text {
-                                    text: "(click to toggle sudo)";
-                                    color: Theme.c.overlay0;
-                                    font-size: Theme.font-sm;
-                                }
+                            user-row-ta := TouchArea {
+                                clicked => { root.user-sudo-toggled(index); }
                             }
 
-                            DeleteButton {
-                                clicked => { root.user-removed(index); }
+                            HorizontalLayout {
+                                padding-left: Theme.spacing-md;
+                                padding-right: Theme.spacing-sm;
+                                spacing: Theme.spacing-sm;
+                                alignment: space-between;
+
+                                HorizontalLayout {
+                                    spacing: Theme.spacing-sm;
+                                    alignment: start;
+
+                                    Text {
+                                        text: user.username;
+                                        color: Theme.c.text;
+                                        font-size: Theme.font-base;
+                                        vertical-alignment: center;
+                                    }
+
+                                    if user.has-sudo: Badge {
+                                        label: "sudo";
+                                    }
+
+                                    if !user.has-sudo: Text {
+                                        text: "(click to toggle sudo)";
+                                        color: Theme.c.overlay0;
+                                        font-size: Theme.font-sm;
+                                    }
+                                }
+
+                                DeleteButton {
+                                    clicked => { root.user-removed(index); }
+                                }
                             }
                         }
                     }
                 }
 
-                Rectangle {
+                if root.users.length > 0: Rectangle {
                     height: 1px;
                     background: Theme.c.surface1;
                 }
