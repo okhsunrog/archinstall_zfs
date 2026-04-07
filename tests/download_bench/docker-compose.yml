@@ -1,0 +1,87 @@
+# Local mirror harness for the download bench.
+#
+# Spawns four nginx containers on localhost:18001..18004, each serving the
+# same set of synthetic packages from ./packages/. Each container applies
+# its own `tc qdisc` rate limit on its `eth0` interface so we can model
+# realistic mirror conditions:
+#
+#   18001  mirror-fast    no rate limit            (top reflector mirror)
+#   18002  mirror-medium  ~10 mbit/s               (mid-list mirror)
+#   18003  mirror-slow    ~500 kbit/s              (bottom-of-list mirror)
+#   18004  mirror-flaky   100 mbit + 30% loss      (lossy mirror)
+#
+# A "dead" mirror is modeled by simply not running a container — point
+# the bench at e.g. localhost:18999 to get connection refused.
+#
+# Each container needs NET_ADMIN to apply tc rules. The entrypoint script
+# (nginx/entrypoint.sh) reads the RATE_LIMIT / NETEM env vars, applies tc,
+# then execs nginx in the foreground.
+#
+# Run:    docker compose up -d
+# Stop:   docker compose down
+# Logs:   docker compose logs -f mirror-slow
+
+services:
+  mirror-fast:
+    image: nginx:1.27-alpine
+    container_name: bench-mirror-fast
+    ports:
+      - "127.0.0.1:18001:80"
+    volumes:
+      - ./packages:/usr/share/nginx/html/pkgs:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/entrypoint.sh:/entrypoint.sh:ro
+    cap_add:
+      - NET_ADMIN
+    environment:
+      RATE_LIMIT: ""
+      NETEM: ""
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+
+  mirror-medium:
+    image: nginx:1.27-alpine
+    container_name: bench-mirror-medium
+    ports:
+      - "127.0.0.1:18002:80"
+    volumes:
+      - ./packages:/usr/share/nginx/html/pkgs:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/entrypoint.sh:/entrypoint.sh:ro
+    cap_add:
+      - NET_ADMIN
+    environment:
+      RATE_LIMIT: "10mbit"
+      NETEM: ""
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+
+  mirror-slow:
+    image: nginx:1.27-alpine
+    container_name: bench-mirror-slow
+    ports:
+      - "127.0.0.1:18003:80"
+    volumes:
+      - ./packages:/usr/share/nginx/html/pkgs:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/entrypoint.sh:/entrypoint.sh:ro
+    cap_add:
+      - NET_ADMIN
+    environment:
+      RATE_LIMIT: "500kbit"
+      NETEM: ""
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+
+  mirror-flaky:
+    image: nginx:1.27-alpine
+    container_name: bench-mirror-flaky
+    ports:
+      - "127.0.0.1:18004:80"
+    volumes:
+      - ./packages:/usr/share/nginx/html/pkgs:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/entrypoint.sh:/entrypoint.sh:ro
+    cap_add:
+      - NET_ADMIN
+    environment:
+      RATE_LIMIT: ""
+      NETEM: "loss 30%"
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
