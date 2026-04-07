@@ -272,7 +272,7 @@ fn setup_password_strength(app: &App) {
     app.on_text_input_edited(move |key, value| {
         let Some(app) = weak.upgrade() else { return };
 
-        if key != "root_password" && key != "encryption_password" {
+        if key != "root_password" && key != "encryption_password" && key != "user_password" {
             return;
         }
         if value.is_empty() {

@@ -1,0 +1,86 @@
+// Minimal labeled checkbox. Square 16px box with a check mark when checked,
+// label to the right. Click anywhere on the row toggles. Space/Enter
+// activate via FocusTouchArea.
+//
+// Distinct from RadioDot (which is a circular indicator for radio options
+// and toggle states) — this is the squarish "check this on/off" affordance
+// used for opt-in flags like "Grant sudo privileges".
+
+import { Theme, AnimationSettings } from "../styling.slint";
+import { FocusTouchArea } from "internal/state-layer.slint";
+
+export component CheckBox inherits Rectangle {
+    in property <string> label;
+    in-out property <bool> checked;
+    in property <bool> enabled: true;
+
+    callback toggled();
+
+    height: 24px;
+    forward-focus: touch-area;
+
+    accessible-role: checkbox;
+    accessible-checkable: true;
+    accessible-checked <=> root.checked;
+    accessible-label <=> root.label;
+    accessible-enabled <=> root.enabled;
+    accessible-action-default => { touch-area.clicked(); }
+
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: start;
+
+        // The square — sized smaller than the row height and vertically
+        // centered so it sits on the label baseline cleanly.
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 0;
+
+            box := Rectangle {
+                width: 16px;
+                height: 16px;
+                background: root.checked ? Theme.c.blue : #00000000;
+                border-color: root.checked ? Theme.c.blue : Theme.c.overlay0;
+                border-width: 1.5px;
+                border-radius: 3px;
+
+                if root.checked: Text {
+                    text: "\u{2713}";
+                    color: Theme.c.base;
+                    font-size: 12px;
+                    font-weight: FontWeight.bold;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                animate background, border-color {
+                    duration: AnimationSettings.color-duration;
+                    easing: ease-out;
+                }
+            }
+        }
+
+        Text {
+            text: root.label;
+            color: root.enabled ? Theme.c.subtext0 : Theme.c.overlay0;
+            font-size: 14px;
+            vertical-alignment: center;
+        }
+    }
+
+    touch-area := FocusTouchArea {
+        width: 100%;
+        height: 100%;
+        enabled: root.enabled;
+        clicked => {
+            if root.enabled {
+                root.checked = !root.checked;
+                root.toggled();
+            }
+        }
+    }
+
+    states [
+        disabled when !root.enabled: { root.opacity: 0.5; }
+    ]
+}

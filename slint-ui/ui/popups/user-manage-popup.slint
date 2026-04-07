@@ -1,11 +1,13 @@
 import { ListView } from "std-widgets.slint";
-import { Theme } from "../styling.slint";
+import { Theme, Palette } from "../styling.slint";
 import { UserEntry } from "../types.slint";
 import { StyledButton } from "../components/styled-button.slint";
 import { StyledTextInput } from "../components/styled-text-input.slint";
 import { Badge } from "../components/badge.slint";
 import { DeleteButton } from "../components/delete-button.slint";
-import { RadioDot } from "../components/radio-dot.slint";
+import { CheckBox } from "../components/check-box.slint";
+import { ProgressBar } from "../components/progress-bar.slint";
+import { PopupState } from "../state/popup-state.slint";
 
 export component UserManagePopup inherits Rectangle {
     in property <[UserEntry]> users;
@@ -14,6 +16,10 @@ export component UserManagePopup inherits Rectangle {
     callback user-added(string, string, bool);
     callback user-removed(int);
     callback user-sudo-toggled(int);
+    // Forwarded to Rust on every keystroke in the password field. Rust runs
+    // it through zxcvbn (same handler as TextInputPopup) and writes the
+    // strength values back into PopupState.
+    callback password-edited(string);
     callback closed();
 
     if popup-visible: Rectangle {
@@ -26,7 +32,7 @@ export component UserManagePopup inherits Rectangle {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             width: min(520px, parent.width - 40px);
-            height: min(parent.height - 80px, 480px);
+            height: min(parent.height - 80px, 520px);
             background: Theme.c.mantle;
             border-radius: Theme.radius-md;
             border-color: Theme.c.surface1;
@@ -39,6 +45,7 @@ export component UserManagePopup inherits Rectangle {
                 padding: Theme.spacing-lg;
                 spacing: Theme.spacing-md;
 
+                // ── Title ──
                 Text {
                     text: "User accounts";
                     color: Theme.c.blue;
@@ -47,6 +54,7 @@ export component UserManagePopup inherits Rectangle {
                     height: Theme.spacing-xl;
                 }
 
+                // ── Existing users list ──
                 ListView {
                     vertical-stretch: 1;
 
@@ -99,6 +107,7 @@ export component UserManagePopup inherits Rectangle {
                     background: Theme.c.surface1;
                 }
 
+                // ── Add user form ──
                 Text {
                     text: "Add user";
                     color: Theme.c.subtext0;
@@ -107,81 +116,78 @@ export component UserManagePopup inherits Rectangle {
                     height: Theme.spacing-xl - Theme.spacing-xs;
                 }
 
-                HorizontalLayout {
-                    spacing: Theme.spacing-sm;
+                username-input := StyledTextInput {
+                    placeholder: "username";
+                }
 
-                    username-input := StyledTextInput {
-                        horizontal-stretch: 1;
-                        placeholder: "username";
+                password-input := StyledTextInput {
+                    placeholder: "password (optional)";
+                    is-password: true;
+                    edited(val) => { root.password-edited(val); }
+                }
+
+                // Strength bar — only visible when there's a password and
+                // Rust has reported a strength score (>= 0).
+                if password-input.text != "" && PopupState.password-strength-score >= 0: VerticalLayout {
+                    spacing: Theme.spacing-xs;
+
+                    ProgressBar {
+                        value: PopupState.password-strength-score + 1;
+                        max: 5;
+                        fill-color: PopupState.password-strength-color;
                     }
 
-                    password-input := StyledTextInput {
-                        horizontal-stretch: 1;
-                        placeholder: "password (optional)";
-                        is-password: true;
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: Theme.spacing-md;
+
+                        Text {
+                            text: PopupState.password-strength-label;
+                            color: PopupState.password-strength-color;
+                            font-size: Theme.font-sm;
+                            font-weight: FontWeight.semi-bold;
+                        }
+
+                        if PopupState.password-strength-hint != "": Text {
+                            text: PopupState.password-strength-hint;
+                            color: Theme.c.overlay0;
+                            font-size: Theme.font-sm;
+                        }
                     }
+                }
+
+                // ── Sudo opt-in + action buttons ──
+                sudo-check := CheckBox {
+                    label: "Grant sudo privileges";
+                    checked: true;
                 }
 
                 HorizontalLayout {
                     spacing: Theme.spacing-sm;
-                    alignment: end;
-
-                    // Sudo toggle
-                    sudo-toggle := Rectangle {
-                        height: Theme.control-height-sm;
-                        width: sudo-check-text.preferred-width + Theme.spacing-xl + Theme.spacing-md;
-                        background: sudo-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
-                        border-radius: Theme.radius-sm;
-
-                        property <bool> sudo-checked: true;
-
-                        sudo-ta := TouchArea {
-                            clicked => { parent.sudo-checked = !parent.sudo-checked; }
-                        }
-
-                        HorizontalLayout {
-                            padding-left: Theme.spacing-sm + 2px;
-                            padding-right: Theme.spacing-sm + 2px;
-                            spacing: Theme.spacing-xs + 2px;
-                            alignment: center;
-
-                            RadioDot {
-                                width: 14px;
-                                dot-size: 10px;
-                                filled: sudo-toggle.sudo-checked;
-                                dot-color: sudo-toggle.sudo-checked ? Theme.c.green : Theme.c.overlay0;
-                            }
-
-                            sudo-check-text := Text {
-                                text: "sudo";
-                                color: Theme.c.subtext0;
-                                font-size: Theme.font-md;
-                                vertical-alignment: center;
-                            }
-                        }
-                    }
 
                     StyledButton {
-                        label: "Add";
+                        label: "Add user";
                         style: Theme.button-primary;
-
+                        min-width: 100px;
                         clicked => {
                             if username-input.text != "" {
-                                root.user-added(username-input.text, password-input.text, sudo-toggle.sudo-checked);
-                                sudo-toggle.sudo-checked = true;
+                                root.user-added(username-input.text, password-input.text, sudo-check.checked);
+                                sudo-check.checked = true;
                                 username-input.text = "";
                                 password-input.text = "";
                                 username-input.focus-input();
+                                // Reset strength feedback for the next user.
+                                root.password-edited("");
                             }
                         }
                     }
-                }
 
-                HorizontalLayout {
-                    alignment: end;
+                    // Spacer
+                    Rectangle { horizontal-stretch: 1; }
 
                     StyledButton {
                         label: "Done";
+                        min-width: 80px;
                         clicked => { root.closed(); }
                     }
                 }

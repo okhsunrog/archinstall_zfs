@@ -173,6 +173,11 @@ export component App inherits Window {
         }
         user-removed(index) => { root.user-removed(index); }
         user-sudo-toggled(index) => { root.user-sudo-toggled(index); }
+        // Reuse the same root callback as TextInputPopup for password
+        // strength feedback. Rust filters by key.
+        password-edited(val) => {
+            text-input-edited("user_password", val);
+        }
         closed() => { PopupState.users-visible = false; }
     }
 
