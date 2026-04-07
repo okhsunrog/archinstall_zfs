@@ -195,12 +195,9 @@ pub struct GlobalConfig {
     pub users: Option<Vec<UserConfig>>,
     pub kernels: Option<Vec<String>>,
     /// User's profile choice plus all profile-scoped sub-selections
-    /// (optional packages, DM override, seat access).
-    ///
-    /// Replaces the previous flat `profile` / `display_manager_override` /
-    /// `seat_access` fields. The whole struct is replaced atomically when
-    /// the user switches profiles, so stale settings cannot leak across.
-    #[serde(default, alias = "profile")]
+    /// (optional packages, DM override, seat access). Atomic replace on
+    /// profile switch, so stale settings cannot leak across.
+    #[serde(default)]
     pub profile_selection: Option<ProfileSelection>,
     /// GPU driver (independent of profile — useful for headless installs too).
     pub gfx_driver: Option<GfxDriver>,
