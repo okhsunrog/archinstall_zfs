@@ -163,6 +163,43 @@ A custom ZED hook (`history_event-zfs-list-cacher.sh`) ensures only the current 
 - Builds using a temporary user (`aurinstall`) with temporary passwordless sudo
 - Cleans up temp user and build artifacts after installation
 
+### Profiles
+
+Profiles bundle a desktop environment, window manager, or server role with the
+packages, services, display manager, and post-install hooks needed to make it
+work end-to-end. Both the TUI and GUI ask follow-up questions only when they're
+actually relevant: a desktop profile prompts for optional packages, display
+manager override, and (for Wayland compositors) seat access; a server profile
+skips all of those.
+
+> **One profile per install.** Unlike upstream archinstall you can't compose
+> several profiles in one run (no `gnome + i3` or `sshd + docker + postgresql`
+> in a single pick). If you need a combination, choose the closest profile and
+> add the extras through the **Extra packages** picker, plus **Extra services**
+> for any units that need enabling. We trade composition for simpler
+> reproducibility — your config JSON always names exactly one profile.
+
+The profile-scoped settings live inside a `profile_selection` block in the
+config JSON, and switching profiles atomically replaces the whole block so
+stale fields can never leak between selections:
+
+```json
+{
+  "profile_selection": {
+    "profile": "hyprland",
+    "optional_packages": ["hyprpaper", "hyprlock", "wl-clipboard"],
+    "display_manager_override": null,
+    "seat_access": "seatd"
+  },
+  "gfx_driver": "nvidia_open"
+}
+```
+
+GPU driver, audio server, and Bluetooth stay top-level because they're useful
+on headless installs too. The GPU driver picker is hidden for non-graphical
+profiles, and selecting the proprietary NVIDIA driver with a Wayland-only
+compositor surfaces a warning (TUI shows a confirmation, GUI an inline notice).
+
 ### Snapshot management (optional)
 - zrepl support for automatic snapshot creation and retention
 - Schedules: 15-minute intervals with tiered retention (4x15m, 24x1h, 3x1d)

@@ -396,6 +396,38 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     ));
 
     items.push(section_header("Hardware"));
+    // GPU driver — only shown for graphical profiles (mirrors upstream
+    // archinstall's `is_graphic_driver_supported` gate). Headless installs
+    // skip the row entirely.
+    if profile_def
+        .as_ref()
+        .is_some_and(|p| p.supports_gfx_driver())
+    {
+        items.push(ci(
+            "gpu_driver",
+            "GPU driver",
+            &c.gfx_driver
+                .map(|d| d.to_string())
+                .unwrap_or_else(|| "None".into()),
+            ItemType::Select,
+        ));
+
+        // Inline warning when the proprietary NVIDIA driver is paired with
+        // a Wayland-only compositor. The TUI shows a confirmation dialog;
+        // the GUI surfaces it as a Warning row inside the same section so
+        // the user sees it without opening a popup.
+        if profile_def.as_ref().is_some_and(|p| p.is_wayland_only())
+            && c.gfx_driver == Some(archinstall_zfs_core::system::gpu::GfxDriver::NvidiaOpen)
+        {
+            items.push(ConfigItem {
+                value: "Proprietary NVIDIA driver is known-problematic on \
+                        Wayland-only compositors."
+                    .into(),
+                item_type: ItemType::Warning,
+                ..Default::default()
+            });
+        }
+    }
     items.push(ci(
         "bluetooth",
         "Bluetooth",

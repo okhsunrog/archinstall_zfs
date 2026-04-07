@@ -30,10 +30,12 @@ fn desktop(
     }
 }
 
-/// Convenience: build a `Vec<OptionalPackage>` from a list of bare package
-/// names. Descriptions can be filled in later.
-fn opts(pkgs: &[&'static str]) -> Vec<OptionalPackage> {
-    pkgs.iter().copied().map(OptionalPackage::new).collect()
+/// Convenience: build a `Vec<OptionalPackage>` from `(package, description)`
+/// pairs. Pass an empty description to leave it blank.
+fn opts(pkgs: &[(&'static str, &'static str)]) -> Vec<OptionalPackage> {
+    pkgs.iter()
+        .map(|(p, d)| OptionalPackage::with_desc(p, d))
+        .collect()
 }
 
 pub fn desktop_profiles() -> Vec<Profile> {
@@ -41,6 +43,19 @@ pub fn desktop_profiles() -> Vec<Profile> {
     use DisplayServer::*;
 
     vec![
+        // Bare X server with no DE/WM/DM. Use this when you want to install
+        // X yourself or pair it with a window manager that isn't packaged
+        // here. Mirrors upstream archinstall's `Xorg` top-level profile.
+        desktop(
+            "xorg",
+            "Xorg (bare)",
+            vec!["xorg-server", "xorg-xinit"],
+            Xorg,
+            None,
+            false,
+            None,
+            Vec::new(),
+        ),
         desktop(
             "gnome",
             "GNOME",
@@ -49,7 +64,14 @@ pub fn desktop_profiles() -> Vec<Profile> {
             Some(Gdm),
             false,
             None,
-            opts(&["gnome-extra", "gnome-software", "flatpak"]),
+            opts(&[
+                (
+                    "gnome-extra",
+                    "Extra GNOME apps (Maps, Weather, Calendar, …)",
+                ),
+                ("gnome-software", "Software centre with Flatpak support"),
+                ("flatpak", "Sandboxed application runtime"),
+            ]),
         ),
         desktop(
             "kde",
@@ -66,7 +88,14 @@ pub fn desktop_profiles() -> Vec<Profile> {
             Some(Sddm),
             false,
             Some("plasma"),
-            opts(&["kde-applications", "flatpak", "discover"]),
+            opts(&[
+                (
+                    "kde-applications",
+                    "Full KDE application suite (Okular, Gwenview, …)",
+                ),
+                ("flatpak", "Sandboxed application runtime"),
+                ("discover", "KDE software centre"),
+            ]),
         ),
         desktop(
             "xfce",
@@ -76,7 +105,11 @@ pub fn desktop_profiles() -> Vec<Profile> {
             Some(Lightdm),
             false,
             None,
-            opts(&["thunar", "mousepad", "ristretto"]),
+            opts(&[
+                ("thunar", "File manager"),
+                ("mousepad", "Lightweight text editor"),
+                ("ristretto", "Image viewer"),
+            ]),
         ),
         desktop(
             "cinnamon",
@@ -174,12 +207,12 @@ pub fn desktop_profiles() -> Vec<Profile> {
             true,
             Some("hyprland"),
             opts(&[
-                "hyprpaper",
-                "hypridle",
-                "hyprlock",
-                "swww",
-                "mako",
-                "wl-clipboard",
+                ("hyprpaper", "Wallpaper utility from the Hyprland project"),
+                ("hypridle", "Idle daemon (auto-lock, dim, sleep)"),
+                ("hyprlock", "Screen locker"),
+                ("swww", "Animated wallpaper daemon"),
+                ("mako", "Wayland notification daemon"),
+                ("wl-clipboard", "Clipboard helper (wl-copy / wl-paste)"),
             ]),
         ),
         desktop(
@@ -203,7 +236,14 @@ pub fn desktop_profiles() -> Vec<Profile> {
             Some(Lightdm),
             true,
             Some("sway"),
-            opts(&["swaylock-effects", "wl-clipboard", "mako"]),
+            opts(&[
+                (
+                    "swaylock-effects",
+                    "swaylock fork with blur/screenshot effects",
+                ),
+                ("wl-clipboard", "Clipboard helper (wl-copy / wl-paste)"),
+                ("mako", "Wayland notification daemon"),
+            ]),
         ),
         desktop(
             "i3",
@@ -222,7 +262,12 @@ pub fn desktop_profiles() -> Vec<Profile> {
             Some(Lightdm),
             false,
             Some("i3"),
-            opts(&["polybar", "rofi", "feh", "nitrogen"]),
+            opts(&[
+                ("polybar", "Modular status bar"),
+                ("rofi", "Application launcher and dmenu replacement"),
+                ("feh", "Image viewer often used to set wallpaper"),
+                ("nitrogen", "Graphical wallpaper setter"),
+            ]),
         ),
         desktop(
             "cosmic",

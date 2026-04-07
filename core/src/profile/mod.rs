@@ -196,6 +196,21 @@ impl Profile {
         matches!(self.kind, ProfileKind::Desktop(_))
     }
 
+    /// Whether asking the user to pick a GPU driver makes sense for this
+    /// profile. Currently true for desktops only — server/minimal installs
+    /// don't need a GPU stack and the picker is hidden.
+    pub fn supports_gfx_driver(&self) -> bool {
+        self.is_desktop()
+    }
+
+    /// True for profiles that target Wayland exclusively (no Xorg fallback).
+    /// Used to flag the Nvidia-proprietary-on-Wayland conflict.
+    pub fn is_wayland_only(&self) -> bool {
+        self.desktop()
+            .map(|d| matches!(d.display_server, DisplayServer::Wayland))
+            .unwrap_or(false)
+    }
+
     /// DM shipped with the profile, if any. None for non-desktop profiles or
     /// compositors launched without a DM.
     pub fn default_display_manager(&self) -> Option<DisplayManager> {

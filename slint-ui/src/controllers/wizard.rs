@@ -10,6 +10,7 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use archinstall_zfs_core::config::types::GlobalConfig;
 use archinstall_zfs_core::profile::DisplayManager;
+use archinstall_zfs_core::system::gpu::{GfxDriver, detect_gpus, suggested_driver};
 
 use crate::config_items::{apply_radio, apply_text, build_step_items, next_selectable_index};
 use crate::controllers::welcome::KernelScan;
@@ -158,6 +159,29 @@ fn setup_select_confirmed(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_
                     DisplayManager::ALL.get((idx - 1) as usize).copied()
                 };
             }
+            refresh_items(&app, &c);
+            return;
+        }
+
+        if key == "gfx_driver_select" {
+            // Index 0 = None (skip GPU packages), 1..N = drivers in the
+            // same order as the popup builder.
+            let drivers: &[Option<GfxDriver>] = &[
+                None,
+                Some(GfxDriver::AllOpenSource),
+                Some(GfxDriver::Amd),
+                Some(GfxDriver::Intel),
+                Some(GfxDriver::NvidiaOpen),
+                Some(GfxDriver::NvidiaNouveau),
+                Some(GfxDriver::Vm),
+            ];
+            let mut c = cfg.borrow_mut();
+            if let Some(d) = drivers.get(idx as usize) {
+                c.gfx_driver = *d;
+            }
+            // The Nvidia/Wayland warning is rendered as a Warning row by
+            // build_desktop_items the next time the items are refreshed —
+            // no extra confirmation popup needed in the GUI.
             refresh_items(&app, &c);
             return;
         }
@@ -414,6 +438,41 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
             popup.set_multi_select_key("optional_packages".into());
             popup.set_multi_select_title(format!("Optional packages — {}", p.display_name).into());
             popup.set_multi_select_visible(true);
+        }
+        "gpu_driver" => {
+            // Build the GPU driver options list. Order matches the TUI
+            // picker (None first, then drivers in display order). The
+            // suggested driver based on detected hardware is annotated.
+            let suggestion = suggested_driver(&detect_gpus());
+            let drivers: &[Option<GfxDriver>] = &[
+                None,
+                Some(GfxDriver::AllOpenSource),
+                Some(GfxDriver::Amd),
+                Some(GfxDriver::Intel),
+                Some(GfxDriver::NvidiaOpen),
+                Some(GfxDriver::NvidiaNouveau),
+                Some(GfxDriver::Vm),
+            ];
+            let labels: Vec<String> = drivers
+                .iter()
+                .map(|d| {
+                    let base = match d {
+                        None => "None — skip GPU driver installation".to_string(),
+                        Some(drv) => drv.to_string(),
+                    };
+                    if *d == suggestion {
+                        format!("{base}  ✦ suggested")
+                    } else {
+                        base
+                    }
+                })
+                .collect();
+            let refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
+            let current = drivers
+                .iter()
+                .position(|d| *d == config.gfx_driver)
+                .unwrap_or(0) as i32;
+            show_select(app, "gfx_driver_select", "GPU driver", &refs, current);
         }
         "display_manager" => {
             // Open SelectPopup with [ "Use profile default (X)", Gdm, Sddm,

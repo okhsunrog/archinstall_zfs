@@ -38,15 +38,22 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
         },
     ));
 
-    items.push(MenuItem {
-        key: "gpu_driver",
-        label: "GPU driver",
-        value: config
-            .gfx_driver
-            .map(|d| d.to_string())
-            .unwrap_or("None".into()),
-        kind: MenuKind::Custom,
-    });
+    // GPU driver is only meaningful for graphical profiles. Hide the row
+    // for Server / Minimal selections to keep the step focused.
+    if profile_def
+        .as_ref()
+        .is_some_and(|p| p.supports_gfx_driver())
+    {
+        items.push(MenuItem {
+            key: "gpu_driver",
+            label: "GPU driver",
+            value: config
+                .gfx_driver
+                .map(|d| d.to_string())
+                .unwrap_or("None".into()),
+            kind: MenuKind::Custom,
+        });
+    }
 
     items.extend(radio_group(
         "audio",

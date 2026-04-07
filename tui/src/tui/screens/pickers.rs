@@ -254,12 +254,18 @@ pub async fn pick_kernel(
 /// Pick a GPU driver.
 ///
 /// Detects installed GPUs via `lspci` and highlights the auto-suggested
-/// driver. Returns:
+/// driver. When `wayland_only_profile` is true and the user picks the
+/// proprietary Nvidia open-kernel-module driver, prompts a confirmation
+/// because that combination is known-broken for Wayland-only compositors
+/// (mirrors upstream archinstall's profile_menu.py:97-110 logic).
+///
+/// Returns:
 /// - `None`         — user cancelled (no config change)
 /// - `Some(None)`   — user explicitly chose "None" (clear `gfx_driver`)
 /// - `Some(Some(d))`— user selected a specific driver
 pub fn pick_gpu_driver(
     terminal: &mut ratatui::DefaultTerminal,
+    wayland_only_profile: bool,
 ) -> Result<Option<Option<GfxDriver>>> {
     let gpus = detect_gpus();
     let suggestion = suggested_driver(&gpus);
@@ -306,10 +312,28 @@ pub fn pick_gpu_driver(
         .unwrap_or(0);
 
     let result = run_select(terminal, &title, &opt_refs, current)?;
-    match result.selected {
-        None => Ok(None),                    // cancelled
-        Some(idx) => Ok(Some(drivers[idx])), // Some(None) or Some(Some(driver))
+    let Some(idx) = result.selected else {
+        return Ok(None); // cancelled
+    };
+    let chosen = drivers[idx];
+
+    // Nvidia-on-Wayland-only conflict warning. Only the proprietary open
+    // kernel module is at issue — nouveau works fine on Wayland.
+    if wayland_only_profile && chosen == Some(GfxDriver::NvidiaOpen) {
+        let confirm = run_select(
+            terminal,
+            "The proprietary NVIDIA driver is known-problematic on \
+             Wayland-only compositors. Install it anyway?",
+            &["No — pick a different driver", "Yes — install anyway"],
+            0,
+        )?;
+        if confirm.selected != Some(1) {
+            // User backed out — leave the existing config alone.
+            return Ok(None);
+        }
     }
+
+    Ok(Some(chosen))
 }
 
 /// Full profile selection flow: profile → optional packages → DM → seat access.

@@ -285,7 +285,14 @@ impl Wizard {
                     }
                 }
                 "gpu_driver" => {
-                    if let Some(driver) = pickers::pick_gpu_driver(terminal)? {
+                    let wayland_only = self
+                        .config
+                        .profile_selection
+                        .as_ref()
+                        .and_then(|s| s.profile_def())
+                        .map(|p| p.is_wayland_only())
+                        .unwrap_or(false);
+                    if let Some(driver) = pickers::pick_gpu_driver(terminal, wayland_only)? {
                         self.config.gfx_driver = driver;
                     }
                 }
