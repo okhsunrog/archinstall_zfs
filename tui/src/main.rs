@@ -1,9 +1,7 @@
 mod app;
 mod tui;
 
-use std::path::PathBuf;
-
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use color_eyre::eyre::{Result, WrapErr};
 
 #[derive(Parser, Debug)]
@@ -12,50 +10,17 @@ use color_eyre::eyre::{Result, WrapErr};
     about = "Arch Linux installer with ZFS support"
 )]
 pub struct Cli {
-    #[command(subcommand)]
-    command: Option<Commands>,
-
     /// Path to a JSON configuration file
     #[arg(long, global = true)]
-    config: Option<PathBuf>,
+    pub config: Option<std::path::PathBuf>,
 
     /// Run installation without interactive prompts (requires --config)
     #[arg(long, global = true)]
-    silent: bool,
+    pub silent: bool,
 
     /// Preview commands without executing them
     #[arg(long, global = true)]
-    dry_run: bool,
-}
-
-#[derive(Subcommand, Debug)]
-pub enum Commands {
-    /// Render archiso profile templates for ISO building
-    RenderProfile {
-        /// Source profile directory containing .j2 templates
-        #[arg(long)]
-        profile_dir: PathBuf,
-
-        /// Output directory for rendered profile
-        #[arg(long)]
-        out_dir: PathBuf,
-
-        /// Kernel package (linux, linux-lts, linux-zen)
-        #[arg(long, default_value = "linux-lts")]
-        kernel: String,
-
-        /// ZFS module mode (precompiled or dkms)
-        #[arg(long, default_value = "precompiled")]
-        zfs: String,
-
-        /// Include kernel headers (auto, true, false)
-        #[arg(long, default_value = "auto")]
-        headers: String,
-
-        /// Fast build mode (minimal packages, erofs)
-        #[arg(long)]
-        fast: bool,
-    },
+    pub dry_run: bool,
 }
 
 fn setup_logging(ui_log_tx: tokio::sync::mpsc::UnboundedSender<(String, i32)>) -> Result<()> {
@@ -100,22 +65,5 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     tracing::info!(?cli, "starting archinstall-zfs");
 
-    match &cli.command {
-        Some(Commands::RenderProfile {
-            profile_dir,
-            out_dir,
-            kernel,
-            zfs,
-            headers,
-            fast,
-        }) => archinstall_zfs_core::iso::render_profile(
-            profile_dir,
-            out_dir,
-            kernel,
-            zfs,
-            headers,
-            *fast,
-        ),
-        None => app::run(cli, ui_log_rx).await,
-    }
+    app::run(cli, ui_log_rx).await
 }

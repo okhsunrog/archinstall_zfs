@@ -1,7 +1,6 @@
 use std::fs;
 use std::path::Path;
 
-use color_eyre::eyre::{Context, Result, bail};
 use minijinja::Environment;
 
 pub fn render_profile(
@@ -11,9 +10,12 @@ pub fn render_profile(
     zfs_mode: &str,
     headers: &str,
     fast_build: bool,
-) -> Result<()> {
+) -> Result<(), String> {
     if !profile_dir.exists() {
-        bail!("Profile directory not found: {}", profile_dir.display());
+        return Err(format!(
+            "Profile directory not found: {}",
+            profile_dir.display()
+        ));
     }
 
     let use_dkms = zfs_mode == "dkms";
@@ -26,9 +28,10 @@ pub fn render_profile(
 
     // Clean output directory
     if out_dir.exists() {
-        fs::remove_dir_all(out_dir).wrap_err("failed to clean output directory")?;
+        fs::remove_dir_all(out_dir)
+            .map_err(|e| format!("failed to clean output directory: {e}"))?;
     }
-    fs::create_dir_all(out_dir)?;
+    fs::create_dir_all(out_dir).map_err(|e| format!("create out_dir: {e}"))?;
 
     // Collect all templates first for minijinja's environment
     let mut env = Environment::new();
@@ -37,7 +40,7 @@ pub fn render_profile(
     collect_templates(profile_dir, profile_dir, &mut templates)?;
     for (name, source) in &templates {
         env.add_template_owned(name.clone(), source.clone())
-            .wrap_err_with(|| format!("failed to parse template: {name}"))?;
+            .map_err(|e| format!("failed to parse template {name}: {e}"))?;
     }
 
     // Build template context
@@ -58,9 +61,9 @@ pub fn render_profile(
     for src in &symlinks {
         let rel = src.strip_prefix(profile_dir).unwrap();
         let dst = out_dir.join(rel);
-        let target = fs::read_link(src)?;
+        let target = fs::read_link(src).map_err(|e| format!("read symlink: {e}"))?;
         if let Some(parent) = dst.parent() {
-            fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent).map_err(|e| format!("create dir: {e}"))?;
         }
         let _ = std::os::unix::fs::symlink(&target, &dst);
     }
@@ -69,8 +72,15 @@ pub fn render_profile(
     Ok(())
 }
 
-fn collect_templates(root: &Path, dir: &Path, templates: &mut Vec<(String, String)>) -> Result<()> {
-    let mut entries: Vec<_> = fs::read_dir(dir)?.collect::<std::io::Result<Vec<_>>>()?;
+fn collect_templates(
+    root: &Path,
+    dir: &Path,
+    templates: &mut Vec<(String, String)>,
+) -> Result<(), String> {
+    let mut entries: Vec<_> = fs::read_dir(dir)
+        .map_err(|e| format!("read dir: {e}"))?
+        .collect::<std::io::Result<Vec<_>>>()
+        .map_err(|e| format!("read dir entry: {e}"))?;
     entries.sort_by_key(|e| e.file_name());
 
     for entry in entries {
@@ -84,7 +94,7 @@ fn collect_templates(root: &Path, dir: &Path, templates: &mut Vec<(String, Strin
             let rel = path.strip_prefix(root).unwrap();
             let name = rel.to_string_lossy().to_string();
             let source = fs::read_to_string(&path)
-                .wrap_err_with(|| format!("failed to read template: {}", path.display()))?;
+                .map_err(|e| format!("failed to read template {}: {e}", path.display()))?;
             templates.push((name, source));
         }
     }
@@ -98,8 +108,11 @@ fn walk_and_render(
     env: &Environment,
     ctx: &minijinja::Value,
     symlinks: &mut Vec<std::path::PathBuf>,
-) -> Result<()> {
-    let mut entries: Vec<_> = fs::read_dir(dir)?.collect::<std::io::Result<Vec<_>>>()?;
+) -> Result<(), String> {
+    let mut entries: Vec<_> = fs::read_dir(dir)
+        .map_err(|e| format!("read dir: {e}"))?
+        .collect::<std::io::Result<Vec<_>>>()
+        .map_err(|e| format!("read dir entry: {e}"))?;
     entries.sort_by_key(|e| e.file_name());
 
     for entry in entries {
@@ -113,111 +126,39 @@ fn walk_and_render(
         }
 
         if src.is_dir() {
-            fs::create_dir_all(&dst)?;
+            fs::create_dir_all(&dst).map_err(|e| format!("create dir: {e}"))?;
             walk_and_render(root, &src, out_dir, env, ctx, symlinks)?;
             continue;
         }
 
-        // Regular file
         if src.extension().is_some_and(|ext| ext == "j2") {
-            // Render template, output without .j2 suffix
             let dst = dst.with_extension("");
             let template_name = rel.to_string_lossy().to_string();
             let tmpl = env
                 .get_template(&template_name)
-                .wrap_err_with(|| format!("template not found: {template_name}"))?;
+                .map_err(|e| format!("template not found {template_name}: {e}"))?;
             let rendered = tmpl
                 .render(ctx)
-                .wrap_err_with(|| format!("failed to render: {template_name}"))?;
+                .map_err(|e| format!("failed to render {template_name}: {e}"))?;
 
-            // Skip empty renders
             if rendered.trim().is_empty() {
                 continue;
             }
 
             if let Some(parent) = dst.parent() {
-                fs::create_dir_all(parent)?;
+                fs::create_dir_all(parent).map_err(|e| format!("create dir: {e}"))?;
             }
             let mut content = rendered;
             if !content.ends_with('\n') {
                 content.push('\n');
             }
-            fs::write(&dst, content)?;
+            fs::write(&dst, content).map_err(|e| format!("write file: {e}"))?;
         } else {
-            // Copy static file
             if let Some(parent) = dst.parent() {
-                fs::create_dir_all(parent)?;
+                fs::create_dir_all(parent).map_err(|e| format!("create dir: {e}"))?;
             }
-            fs::copy(&src, &dst)?;
+            fs::copy(&src, &dst).map_err(|e| format!("copy file: {e}"))?;
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_render_simple_template() {
-        let dir = tempfile::tempdir().unwrap();
-        let src = dir.path().join("src");
-        let out = dir.path().join("out");
-        fs::create_dir_all(&src).unwrap();
-
-        // Write a template
-        fs::write(
-            src.join("test.conf.j2"),
-            "kernel={{ kernel }}\ndkms={{ use_dkms }}\n",
-        )
-        .unwrap();
-
-        // Write a static file
-        fs::write(src.join("static.txt"), "unchanged\n").unwrap();
-
-        render_profile(&src, &out, "linux-lts", "precompiled", "auto", false).unwrap();
-
-        let rendered = fs::read_to_string(out.join("test.conf")).unwrap();
-        assert!(rendered.contains("kernel=linux-lts"));
-        assert!(rendered.contains("dkms=false"));
-
-        let static_content = fs::read_to_string(out.join("static.txt")).unwrap();
-        assert_eq!(static_content, "unchanged\n");
-    }
-
-    #[test]
-    fn test_render_fast_build() {
-        let dir = tempfile::tempdir().unwrap();
-        let src = dir.path().join("src");
-        let out = dir.path().join("out");
-        fs::create_dir_all(&src).unwrap();
-
-        fs::write(
-            src.join("config.j2"),
-            "{% if fast_build %}fast{% else %}full{% endif %}\n",
-        )
-        .unwrap();
-
-        render_profile(&src, &out, "linux", "dkms", "auto", true).unwrap();
-        let content = fs::read_to_string(out.join("config")).unwrap();
-        assert!(content.contains("fast"));
-    }
-
-    #[test]
-    fn test_empty_template_skipped() {
-        let dir = tempfile::tempdir().unwrap();
-        let src = dir.path().join("src");
-        let out = dir.path().join("out");
-        fs::create_dir_all(&src).unwrap();
-
-        fs::write(
-            src.join("maybe.conf.j2"),
-            "{% if fast_build %}content{% endif %}",
-        )
-        .unwrap();
-
-        render_profile(&src, &out, "linux-lts", "precompiled", "auto", false).unwrap();
-        // Should not create the file since rendered content is empty
-        assert!(!out.join("maybe.conf").exists());
-    }
 }

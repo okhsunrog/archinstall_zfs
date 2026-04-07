@@ -1,3 +1,4 @@
+mod iso;
 mod qemu;
 
 use std::path::{Path, PathBuf};
@@ -59,6 +60,33 @@ enum Commands {
         /// Directory containing metrics files (conc_N.jsonl naming)
         #[arg(long, default_value = "bench-results")]
         dir: PathBuf,
+    },
+
+    /// Render archiso profile Jinja2 templates for ISO building
+    RenderProfile {
+        /// Source profile directory containing .j2 templates
+        #[arg(long)]
+        profile_dir: PathBuf,
+
+        /// Output directory for rendered profile
+        #[arg(long)]
+        out_dir: PathBuf,
+
+        /// Kernel package (linux, linux-lts, linux-zen)
+        #[arg(long, default_value = "linux-lts")]
+        kernel: String,
+
+        /// ZFS module mode (precompiled or dkms)
+        #[arg(long, default_value = "precompiled")]
+        zfs: String,
+
+        /// Include kernel headers (auto, true, false)
+        #[arg(long, default_value = "auto")]
+        headers: String,
+
+        /// Fast build mode (minimal packages, erofs)
+        #[arg(long)]
+        fast: bool,
     },
 }
 
@@ -127,6 +155,14 @@ fn main() -> ExitCode {
             samples,
         } => cmd_bench_downloads(apply_tmpfs(opts), &concurrency, &out_dir, samples),
         Commands::AnalyzeMetrics { dir } => cmd_analyze_metrics(&dir),
+        Commands::RenderProfile {
+            profile_dir,
+            out_dir,
+            kernel,
+            zfs,
+            headers,
+            fast,
+        } => iso::render_profile(&profile_dir, &out_dir, &kernel, &zfs, &headers, fast),
     };
     match result {
         Ok(()) => {

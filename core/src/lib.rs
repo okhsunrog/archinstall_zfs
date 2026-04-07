@@ -1,7 +1,6 @@
 pub mod config;
 pub mod disk;
 pub mod installer;
-pub mod iso;
 pub mod kernel;
 pub mod metrics;
 pub mod packages;

@@ -11,8 +11,8 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use clap::{Parser, Subcommand};
-use color_eyre::eyre::{Result, bail};
+use clap::Parser;
+use color_eyre::eyre::Result;
 use slint::ComponentHandle;
 
 use archinstall_zfs_core::config::types::GlobalConfig;
@@ -30,9 +30,6 @@ use refresh::refresh_items;
     about = "Arch Linux installer with ZFS support (Slint UI)"
 )]
 struct Cli {
-    #[command(subcommand)]
-    command: Option<Commands>,
-
     #[arg(long, global = true)]
     config: Option<PathBuf>,
 
@@ -44,24 +41,6 @@ struct Cli {
     /// physical DPI; on desktop builds the OS value is used unless overridden.
     #[arg(long, global = true)]
     ui_scale: Option<f32>,
-}
-
-#[derive(Subcommand, Debug)]
-enum Commands {
-    RenderProfile {
-        #[arg(long)]
-        profile_dir: PathBuf,
-        #[arg(long)]
-        out_dir: PathBuf,
-        #[arg(long, default_value = "linux-lts")]
-        kernel: String,
-        #[arg(long, default_value = "precompiled")]
-        zfs: String,
-        #[arg(long, default_value = "auto")]
-        headers: String,
-        #[arg(long)]
-        fast: bool,
-    },
 }
 
 #[tokio::main]
@@ -79,44 +58,26 @@ async fn main() -> Result<()> {
         }
     }
 
-    match &cli.command {
-        Some(Commands::RenderProfile {
-            profile_dir,
-            out_dir,
-            kernel,
-            zfs,
-            headers,
-            fast,
-        }) => archinstall_zfs_core::iso::render_profile(
-            profile_dir,
-            out_dir,
-            kernel,
-            zfs,
-            headers,
-            *fast,
-        ),
-        None => {
-            let config = if let Some(ref path) = cli.config {
-                GlobalConfig::load_from_file(path)?
-            } else {
-                GlobalConfig::default()
-            };
+    let config = if let Some(ref path) = cli.config {
+        GlobalConfig::load_from_file(path)?
+    } else {
+        GlobalConfig::default()
+    };
 
-            if cli.silent {
-                if cli.config.is_none() {
-                    bail!("--silent requires --config");
-                }
-                let errors = config.validate_for_install();
-                if !errors.is_empty() {
-                    bail!("Config validation failed:\n  {}", errors.join("\n  "));
-                }
-                let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
-                    Arc::new(archinstall_zfs_core::system::cmd::RealRunner);
-                install::run_install(runner, &config, None)
-            } else {
-                run_gui(config)
-            }
+    if cli.silent {
+        use color_eyre::eyre::bail;
+        if cli.config.is_none() {
+            bail!("--silent requires --config");
         }
+        let errors = config.validate_for_install();
+        if !errors.is_empty() {
+            bail!("Config validation failed:\n  {}", errors.join("\n  "));
+        }
+        let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
+            Arc::new(archinstall_zfs_core::system::cmd::RealRunner);
+        install::run_install(runner, &config, None)
+    } else {
+        run_gui(config)
     }
 }
 
