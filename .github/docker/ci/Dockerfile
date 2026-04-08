@@ -6,8 +6,12 @@ RUN pacman -Syu --noconfirm && \
         libxkbcommon libinput libdrm freetype2 fontconfig ttf-dejavu && \
     rm -rf /var/cache/pacman/pkg/*
 
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
-    sh -s -- -y --default-toolchain stable --profile minimal && \
-    /root/.cargo/bin/rustup component add clippy rustfmt
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
 
-ENV PATH="/root/.cargo/bin:$PATH"
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --default-toolchain stable --profile minimal \
+              --no-modify-path && \
+    rustup component add clippy rustfmt && \
+    chmod -R a+w /usr/local/rustup /usr/local/cargo
