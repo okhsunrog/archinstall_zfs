@@ -27,7 +27,7 @@ sublime_fuzzy.workspace = true
 sysinfo = "0.38.4"
 tar = "0.4.45"
 thiserror = "2.0.18"
-tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "io-util", "fs", "sync", "time"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "io-util", "fs", "sync", "time", "process"] }
 tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

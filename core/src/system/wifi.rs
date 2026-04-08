@@ -13,8 +13,9 @@
 //! 4. `check_connected(iface)` — verify the connection succeeded
 
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
+
+use tokio::process::Command;
 
 /// A WiFi network discovered by a scan.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +28,9 @@ pub struct WifiNetwork {
 }
 
 /// Find all wireless network interface names present in `/sys/class/net`.
+///
+/// This is a synchronous kernel probe (reads `/sys/class/net`) and is cheap
+/// enough to stay non-async — callers can invoke it without `.await`.
 pub fn detect_wifi_interfaces() -> Vec<String> {
     let net_path = Path::new("/sys/class/net");
     let Ok(entries) = std::fs::read_dir(net_path) else {
@@ -44,19 +48,21 @@ pub fn detect_wifi_interfaces() -> Vec<String> {
 /// The scan is asynchronous at the driver level; we wait `SCAN_WAIT` before
 /// fetching results. Returns an empty Vec if `iface` is not managed by iwd
 /// or if no networks are found.
-pub fn scan_networks(iface: &str) -> Vec<WifiNetwork> {
+pub async fn scan_networks(iface: &str) -> Vec<WifiNetwork> {
     const SCAN_WAIT: Duration = Duration::from_secs(3);
 
     // Trigger scan — ignore errors (e.g. already scanning)
     let _ = Command::new("iwctl")
         .args(["station", iface, "scan"])
-        .output();
+        .output()
+        .await;
 
-    std::thread::sleep(SCAN_WAIT);
+    tokio::time::sleep(SCAN_WAIT).await;
 
     let Ok(out) = Command::new("iwctl")
         .args(["station", iface, "get-networks"])
         .output()
+        .await
     else {
         return Vec::new();
     };
@@ -69,14 +75,14 @@ pub fn scan_networks(iface: &str) -> Vec<WifiNetwork> {
 /// Pass `passphrase = None` for open networks.
 /// Returns `Ok(())` if `iwctl` exits successfully; the caller should verify
 /// the connection with `check_connected` afterwards.
-pub fn connect(iface: &str, ssid: &str, passphrase: Option<&str>) -> std::io::Result<()> {
+pub async fn connect(iface: &str, ssid: &str, passphrase: Option<&str>) -> std::io::Result<()> {
     let mut cmd = Command::new("iwctl");
     if let Some(psk) = passphrase {
         cmd.args(["--passphrase", psk]);
     }
     cmd.args(["station", iface, "connect", ssid]);
 
-    let status = cmd.status()?;
+    let status = cmd.status().await?;
     if status.success() {
         Ok(())
     } else {
@@ -91,15 +97,20 @@ pub fn connect(iface: &str, ssid: &str, passphrase: Option<&str>) -> std::io::Re
 ///
 /// Uses `/sys/class/net/<iface>/operstate` for a quick kernel-level check,
 /// then falls back to checking for a non-loopback IP via `ip addr`.
-pub fn check_connected(iface: &str) -> bool {
-    let operstate =
-        std::fs::read_to_string(format!("/sys/class/net/{iface}/operstate")).unwrap_or_default();
+pub async fn check_connected(iface: &str) -> bool {
+    let operstate = tokio::fs::read_to_string(format!("/sys/class/net/{iface}/operstate"))
+        .await
+        .unwrap_or_default();
     if operstate.trim() != "up" {
         return false;
     }
 
     // Verify an IP is actually assigned
-    let Ok(out) = Command::new("ip").args(["addr", "show", iface]).output() else {
+    let Ok(out) = Command::new("ip")
+        .args(["addr", "show", iface])
+        .output()
+        .await
+    else {
         return false;
     };
     let text = String::from_utf8_lossy(&out.stdout);

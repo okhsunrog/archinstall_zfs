@@ -21,6 +21,8 @@ pub async fn run_wifi_setup(
 ) -> color_eyre::eyre::Result<bool> {
     // ── 1. Already online ───────────────────────────────────────────────────
     terminal.draw(render_checking)?;
+    // net::check_internet is still sync (quick TCP probe); keep spawn_blocking
+    // so the TUI event loop isn't stalled waiting on DNS / connect timeouts.
     let online = tokio::task::spawn_blocking(net::check_internet).await?;
     if online {
         return Ok(false);
@@ -57,11 +59,9 @@ pub async fn run_wifi_setup(
 
     // ── 5. Scan → pick → connect loop ───────────────────────────────────────
     loop {
-        // Scan (blocks for ~3 s — show status while waiting)
+        // Scan (takes ~3 s — show status while waiting)
         terminal.draw(|frame| render_status(frame, &format!("Scanning on {iface}…")))?;
-        let iface_clone = iface.clone();
-        let mut networks =
-            tokio::task::spawn_blocking(move || wifi::scan_networks(&iface_clone)).await?;
+        let mut networks = wifi::scan_networks(&iface).await;
 
         if networks.is_empty() {
             let result = run_select(terminal, "No WiFi networks found", &["Rescan", "Skip"], 0)?;
@@ -124,13 +124,9 @@ pub async fn run_wifi_setup(
         terminal
             .draw(|frame| render_status(frame, &format!("Connecting to \"{}\"…", network.ssid)))?;
 
-        let ssid = network.ssid.clone();
-        let iface_clone = iface.clone();
-        let psk = passphrase.clone();
-        let connect_ok =
-            tokio::task::spawn_blocking(move || wifi::connect(&iface_clone, &ssid, psk.as_deref()))
-                .await?
-                .is_ok();
+        let connect_ok = wifi::connect(&iface, &network.ssid, passphrase.as_deref())
+            .await
+            .is_ok();
 
         if !connect_ok {
             let result = run_select(
@@ -150,7 +146,7 @@ pub async fn run_wifi_setup(
         terminal.draw(|frame| render_status(frame, "Waiting for IP address…"))?;
         tokio::time::sleep(std::time::Duration::from_secs(4)).await;
 
-        if wifi::check_connected(&iface) {
+        if wifi::check_connected(&iface).await {
             let _ = run_select(
                 terminal,
                 &format!("Connected to \"{}\"", network.ssid),
@@ -171,7 +167,7 @@ pub async fn run_wifi_setup(
         match result.selected {
             Some(0) => {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                if wifi::check_connected(&iface) {
+                if wifi::check_connected(&iface).await {
                     return Ok(true);
                 }
                 continue;
