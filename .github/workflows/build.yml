@@ -83,6 +83,8 @@ jobs:
 
     - name: Fix binary permissions
       run: chmod +x target/release/azfs-tui target/release/azfs target/release/xtask
+
+    - name: Build ISO with linux kernel
       continue-on-error: true
       run: |
         target/release/xtask render-profile \
