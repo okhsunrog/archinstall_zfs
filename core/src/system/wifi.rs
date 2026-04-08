@@ -1,36 +1,147 @@
-//! WiFi management via `iwd` / `iwctl`.
+//! WiFi management via iwd over D-Bus.
 //!
-//! The Arch ISO ships `iwd` as the WiFi backend. All operations here use
-//! `iwctl` in non-interactive (argument) mode. After connecting, the iwd
-//! profile is saved to `/var/lib/iwd/<SSID>.psk` and is automatically copied
-//! to the target by `network::copy_iso_network` when `network_copy_iso` is
-//! set, so the installed system reconnects on first boot without extra config.
+//! All operations here go through the `iwdrs` crate, which wraps iwd's
+//! `net.connman.iwd` system-bus interface. No subprocess spawning, no text
+//! parsing, no stringly-typed output.
 //!
-//! # Usage flow
-//! 1. `detect_wifi_interfaces()` — find wireless NICs
-//! 2. `scan_networks(iface)` — trigger scan and return available SSIDs
-//! 3. `connect(iface, ssid, passphrase)` — connect to a network
-//! 4. `check_connected(iface)` — verify the connection succeeded
+//! # Multi-interface
+//!
+//! For now, every operation acts on the **first** station iwd exposes.
+//! Machines with more than one wireless adapter are extremely rare in
+//! installer scenarios, so we deliberately skip the interface picker.
+//! TODO: expose a `station_by_name(&str)` variant if users actually
+//! request it.
+//!
+//! # Agent pattern
+//!
+//! iwd doesn't take passphrases as method arguments. It requires clients
+//! to register a D-Bus agent object, then call `Network::connect()`,
+//! at which point iwd calls back into the agent to ask for the passphrase.
+//! Our [`connect`] function constructs a one-shot [`PasswordAgent`]
+//! holding the user's passphrase, registers it for the duration of the
+//! connect call, and drops it when the Session goes out of scope.
+//!
+//! # Profile persistence
+//!
+//! After a successful `Network::connect()`, iwd writes the profile to
+//! `/var/lib/iwd/<SSID>.<type>` automatically. `copy_iso_network` in the
+//! installer picks that file up and copies it to the target so the
+//! installed system reconnects without re-prompting for credentials.
 
 use std::path::Path;
-use std::time::Duration;
 
-use tokio::process::Command;
+use std::pin::Pin;
 
-/// A WiFi network discovered by a scan.
+use futures::Stream;
+use iwdrs::{
+    agent::Agent,
+    error::{IWDError, agent::Canceled, network::ConnectError},
+    network::{Network, NetworkType},
+    session::Session,
+    station::{State as IwdState, Station},
+};
+use thiserror::Error;
+
+/// A wifi network, as seen by a scan.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WifiNetwork {
     pub ssid: String,
-    /// Signal strength 0–100.
+    /// Signal strength normalized to 0-100.
     pub signal_percent: u8,
-    /// Security type as reported by iwd (e.g. "psk", "open", "8021x").
-    pub security: String,
+    pub security: Security,
+    /// True if iwd has a saved profile for this network (so we can skip
+    /// the passphrase prompt when reconnecting).
+    pub known: bool,
+}
+
+/// A persisted iwd profile — a network the user previously connected to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KnownNetworkInfo {
+    pub ssid: String,
+    pub security: Security,
+    pub hidden: bool,
+}
+
+/// Wifi security mode exposed in the UI. Collapses iwd's `NetworkType`
+/// into the four cases we actually care about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Security {
+    Open,
+    Wep,
+    Psk,
+    /// 802.1x / EAP enterprise networks. We scan and display them but
+    /// the installer does not currently implement the connection flow
+    /// (EAP methods, certs, usernames) — the UI should disable the
+    /// connect action for these.
+    Enterprise,
+}
+
+impl Security {
+    pub fn requires_passphrase(self) -> bool {
+        matches!(self, Security::Wep | Security::Psk)
+    }
+}
+
+impl From<NetworkType> for Security {
+    fn from(nt: NetworkType) -> Self {
+        match nt {
+            NetworkType::Open => Security::Open,
+            NetworkType::Wep => Security::Wep,
+            NetworkType::Psk => Security::Psk,
+            NetworkType::Eap => Security::Enterprise,
+        }
+    }
+}
+
+/// Re-export iwd's station state so GUI/TUI callers don't need to pull in
+/// iwdrs directly.
+pub use iwdrs::station::State as StationState;
+
+#[derive(Debug, Error)]
+pub enum WifiError {
+    #[error("iwd is not available on the system bus")]
+    NotAvailable,
+    #[error("no wireless adapter found")]
+    NoAdapter,
+    #[error("no station exposed by iwd (adapter may be powered off)")]
+    NoStation,
+    #[error("network {0:?} not found in scan results")]
+    NetworkNotFound(String),
+    #[error("passphrase required for secured network {0:?}")]
+    PassphraseRequired(String),
+    #[error("connect failed: {0}")]
+    ConnectFailed(String),
+    #[error("scan failed")]
+    ScanFailed,
+    #[error("d-bus error: {0}")]
+    Dbus(#[from] zbus::Error),
+}
+
+/// Convert `iwdrs::error::IWDError<ConnectError>` into our error type.
+impl From<IWDError<ConnectError>> for WifiError {
+    fn from(err: IWDError<ConnectError>) -> Self {
+        match err {
+            IWDError::OperationError(op) => WifiError::ConnectFailed(op.to_string()),
+            IWDError::ZbusError(z) => WifiError::Dbus(z),
+        }
+    }
+}
+
+/// Fast probe: is iwd running and reachable on the system bus?
+///
+/// Returns `false` on a system where iwd is not installed (our `--fast`
+/// test ISO), where the daemon is masked, or where the D-Bus connection
+/// otherwise fails. This is the gate the GUI corner widget uses to
+/// decide whether to enable the rich wifi-management popup.
+pub async fn iwd_available() -> bool {
+    Session::new().await.is_ok()
 }
 
 /// Find all wireless network interface names present in `/sys/class/net`.
 ///
-/// This is a synchronous kernel probe (reads `/sys/class/net`) and is cheap
-/// enough to stay non-async — callers can invoke it without `.await`.
+/// Kept as a sync helper — `/sys` reads are cheap and this is useful
+/// before we've even confirmed iwd is running (e.g. to decide whether
+/// to show "no wifi hardware" vs "iwd not running").
 pub fn detect_wifi_interfaces() -> Vec<String> {
     let net_path = Path::new("/sys/class/net");
     let Ok(entries) = std::fs::read_dir(net_path) else {
@@ -43,256 +154,357 @@ pub fn detect_wifi_interfaces() -> Vec<String> {
         .collect()
 }
 
-/// Trigger a WiFi scan on `iface` and return discovered networks.
+/// Trigger a scan on the first station and return all discovered networks.
 ///
-/// The scan is asynchronous at the driver level; we wait `SCAN_WAIT` before
-/// fetching results. Returns an empty Vec if `iface` is not managed by iwd
-/// or if no networks are found.
-pub async fn scan_networks(iface: &str) -> Vec<WifiNetwork> {
-    const SCAN_WAIT: Duration = Duration::from_secs(3);
+/// The returned list is ordered by iwd's own ranking (roughly strongest
+/// first). Networks already in iwd's known-network database are flagged
+/// with `known: true`.
+pub async fn scan_networks() -> Result<Vec<WifiNetwork>, WifiError> {
+    let session = Session::new().await.map_err(|_| WifiError::NotAvailable)?;
+    let station = first_station(&session).await?;
 
-    // Trigger scan — ignore errors (e.g. already scanning)
-    let _ = Command::new("iwctl")
-        .args(["station", iface, "scan"])
-        .output()
-        .await;
-
-    tokio::time::sleep(SCAN_WAIT).await;
-
-    let Ok(out) = Command::new("iwctl")
-        .args(["station", iface, "get-networks"])
-        .output()
-        .await
-    else {
-        return Vec::new();
-    };
-
-    parse_get_networks(&String::from_utf8_lossy(&out.stdout))
-}
-
-/// Connect to a WiFi network.
-///
-/// Pass `passphrase = None` for open networks.
-/// Returns `Ok(())` if `iwctl` exits successfully; the caller should verify
-/// the connection with `check_connected` afterwards.
-pub async fn connect(iface: &str, ssid: &str, passphrase: Option<&str>) -> std::io::Result<()> {
-    let mut cmd = Command::new("iwctl");
-    if let Some(psk) = passphrase {
-        cmd.args(["--passphrase", psk]);
-    }
-    cmd.args(["station", iface, "connect", ssid]);
-
-    let status = cmd.status().await?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(std::io::Error::other(format!(
-            "iwctl connect exited with {:?}",
-            status.code()
-        )))
-    }
-}
-
-/// Return true if `iface` has an IP address (i.e. is connected).
-///
-/// Uses `/sys/class/net/<iface>/operstate` for a quick kernel-level check,
-/// then falls back to checking for a non-loopback IP via `ip addr`.
-pub async fn check_connected(iface: &str) -> bool {
-    let operstate = tokio::fs::read_to_string(format!("/sys/class/net/{iface}/operstate"))
-        .await
-        .unwrap_or_default();
-    if operstate.trim() != "up" {
-        return false;
+    // Trigger a fresh scan. iwd reports "already scanning" as a method
+    // error — treat it as success and fall through to fetching results.
+    if let Err(e) = station.scan().await {
+        tracing::debug!(?e, "iwd scan() returned error (may already be scanning)");
     }
 
-    // Verify an IP is actually assigned
-    let Ok(out) = Command::new("ip")
-        .args(["addr", "show", iface])
-        .output()
+    // Block until the scan finishes (iwd emits Scanning=false).
+    if station.wait_for_scan_complete().await.is_err() {
+        return Err(WifiError::ScanFailed);
+    }
+
+    let discovered = station
+        .discovered_networks()
         .await
-    else {
-        return false;
-    };
-    let text = String::from_utf8_lossy(&out.stdout);
-    text.contains("inet ") && !text.contains("inet 127.")
-}
+        .map_err(|_| WifiError::ScanFailed)?;
 
-/// Parse `iwctl station <iface> get-networks` output into `WifiNetwork` list.
-///
-/// Example output (ANSI colour codes are stripped by iwctl when non-interactive):
-/// ```text
-///                               Available networks
-/// ──────────────────────────────────────────────────────────────────────────────
-///       Network name                    Security            Signal
-/// ──────────────────────────────────────────────────────────────────────────────
-///   > * HomeNetwork                     psk                 ****
-///       OtherNet                        psk                 ***
-///       FreeWifi                        open                **
-/// ```
-///
-/// Signal asterisks map to percentage: `*`=25, `**`=50, `***`=75, `****`=100.
-pub fn parse_get_networks(output: &str) -> Vec<WifiNetwork> {
-    let mut networks = Vec::new();
+    let mut out = Vec::with_capacity(discovered.len());
+    for (network, signal) in discovered {
+        let ssid = match network.name().await {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+        let security = network
+            .network_type()
+            .await
+            .map(Security::from)
+            .unwrap_or(Security::Open);
+        let known = network
+            .known_network()
+            .await
+            .map(|k| k.is_some())
+            .unwrap_or(false);
 
-    for line in output.lines() {
-        // Strip ANSI escape codes (iwctl sometimes emits them)
-        let clean = strip_ansi(line);
-        let trimmed = clean.trim();
-
-        // Skip empty lines, header/separator lines
-        if trimmed.is_empty()
-            || trimmed.starts_with("Available")
-            || trimmed.starts_with("Network name")
-            || trimmed.chars().all(|c| c == '─' || c == '-' || c == ' ')
-        {
-            continue;
-        }
-
-        // Strip leading status markers: '>', '*', spaces
-        let data = trimmed.trim_start_matches(['>', '*', ' ']);
-
-        // Split on 2+ consecutive spaces to get fields
-        let fields: Vec<&str> = data
-            .splitn(3, |_| false) // placeholder — see below
-            .collect();
-        let _ = fields; // unused above
-
-        // Better: split on runs of ≥2 spaces
-        let parts: Vec<&str> = split_columns(data);
-
-        if parts.len() < 3 {
-            continue;
-        }
-
-        let ssid = parts[0].trim().to_string();
-        if ssid.is_empty() {
-            continue;
-        }
-
-        let security = parts[1].trim().to_string();
-        let signal_stars = parts[2].trim().chars().filter(|&c| c == '*').count();
-        let signal_percent = (signal_stars.min(4) as u8) * 25;
-
-        networks.push(WifiNetwork {
+        out.push(WifiNetwork {
             ssid,
-            signal_percent,
+            signal_percent: signal_to_percent(signal),
             security,
+            known,
         });
     }
 
-    networks
+    Ok(out)
 }
 
-/// Split a string on runs of 2 or more whitespace characters.
-fn split_columns(s: &str) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let mut start = 0;
-    let mut in_gap = false;
-    let mut gap_start = 0;
+/// Connect to `ssid` by triggering iwd's connect flow and providing
+/// `passphrase` via a registered one-shot agent.
+///
+/// For open networks `passphrase` may be `None`. For secured networks
+/// `passphrase` must be `Some(...)`; omitting it returns
+/// `WifiError::PassphraseRequired`.
+///
+/// This returns once iwd reports the connect call complete — success
+/// means the station reached the Connected state at layer 2. Callers
+/// that need to verify internet connectivity should follow up with
+/// `crate::system::net::check_internet`.
+pub async fn connect(ssid: &str, passphrase: Option<String>) -> Result<(), WifiError> {
+    let session = Session::new().await.map_err(|_| WifiError::NotAvailable)?;
+    let station = first_station(&session).await?;
 
-    for (i, c) in s.char_indices() {
-        if c == ' ' {
-            if !in_gap {
-                in_gap = true;
-                gap_start = i;
-            }
-        } else {
-            if in_gap && i - gap_start >= 2 {
-                parts.push(&s[start..gap_start]);
-                start = i;
-            }
-            in_gap = false;
-        }
+    let network = find_network_by_ssid(&station, ssid)
+        .await?
+        .ok_or_else(|| WifiError::NetworkNotFound(ssid.to_string()))?;
+
+    let security: Security = network
+        .network_type()
+        .await
+        .map(Security::from)
+        .unwrap_or(Security::Open);
+
+    if security.requires_passphrase() && passphrase.is_none() {
+        return Err(WifiError::PassphraseRequired(ssid.to_string()));
     }
 
-    let tail = s[start..].trim();
-    if !tail.is_empty() {
-        parts.push(tail);
-    }
+    // Register the agent before calling connect(). The AgentManager is
+    // held in `_agent_guard` for the duration of the connect call —
+    // when it drops, iwd unregisters the agent.
+    let agent = PasswordAgent::new(passphrase);
+    let _agent_guard = session
+        .register_agent(agent)
+        .await
+        .map_err(WifiError::Dbus)?;
 
-    parts
+    network.connect().await?;
+    Ok(())
 }
 
-/// Strip ANSI/VT100 escape sequences from a string.
-fn strip_ansi(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            // Consume the escape sequence: ESC [ ... <letter>
-            if chars.peek() == Some(&'[') {
-                chars.next();
-                for c2 in chars.by_ref() {
-                    if c2.is_ascii_alphabetic() {
-                        break;
-                    }
-                }
-            }
-        } else {
-            out.push(c);
+/// Connect to a hidden network — one that does not broadcast its SSID
+/// and therefore doesn't appear in scan results.
+pub async fn connect_hidden(ssid: &str, passphrase: Option<String>) -> Result<(), WifiError> {
+    let session = Session::new().await.map_err(|_| WifiError::NotAvailable)?;
+    let station = first_station(&session).await?;
+
+    let agent = PasswordAgent::new(passphrase);
+    let _agent_guard = session
+        .register_agent(agent)
+        .await
+        .map_err(WifiError::Dbus)?;
+
+    station
+        .connect_hidden_network(ssid.to_string())
+        .await
+        .map_err(|e| match e {
+            IWDError::OperationError(op) => WifiError::ConnectFailed(op.to_string()),
+            IWDError::ZbusError(z) => WifiError::Dbus(z),
+        })?;
+    Ok(())
+}
+
+/// Disconnect the active station, if any.
+pub async fn disconnect() -> Result<(), WifiError> {
+    let session = Session::new().await.map_err(|_| WifiError::NotAvailable)?;
+    let station = first_station(&session).await?;
+    station.disconnect().await.map_err(|e| match e {
+        IWDError::OperationError(op) => WifiError::ConnectFailed(op.to_string()),
+        IWDError::ZbusError(z) => WifiError::Dbus(z),
+    })?;
+    Ok(())
+}
+
+/// Return the current station state, or an error if iwd is not reachable.
+pub async fn station_state() -> Result<StationState, WifiError> {
+    let session = Session::new().await.map_err(|_| WifiError::NotAvailable)?;
+    let station = first_station(&session).await?;
+    station.state().await.map_err(WifiError::Dbus)
+}
+
+/// `true` if the station is in the Connected state. Quick layer-2 check;
+/// for "can reach the internet" use `system::net::check_internet`.
+pub async fn check_connected() -> Result<bool, WifiError> {
+    Ok(matches!(station_state().await?, IwdState::Connected))
+}
+
+/// Return the SSID of the currently-connected network, if any.
+pub async fn current_ssid() -> Result<Option<String>, WifiError> {
+    let session = Session::new().await.map_err(|_| WifiError::NotAvailable)?;
+    let station = first_station(&session).await?;
+    let Some(network) = station.connected_network().await.map_err(WifiError::Dbus)? else {
+        return Ok(None);
+    };
+    Ok(Some(network.name().await.map_err(WifiError::Dbus)?))
+}
+
+/// Subscribe to station-state changes. The stream yields every time iwd
+/// emits `PropertiesChanged` on the `State` property, starting with the
+/// current value. Used by the GUI to keep the corner widget in sync
+/// without polling.
+/// Boxed stream alias used by [`watch_station_state`] to work around the
+/// 2024-edition `impl Trait` capture rules: iwdrs's `state_stream` return
+/// type is declared `+ 'static` but the new capture rules still pull in
+/// the borrow of `&station` from the `.await` call. Boxing into a
+/// `dyn Stream` with an explicit `'static` bound strips those borrows.
+pub type StationStateStream =
+    Pin<Box<dyn Stream<Item = zbus::Result<StationState>> + Send + 'static>>;
+
+pub async fn watch_station_state() -> Result<StationStateStream, WifiError> {
+    let session = Session::new().await.map_err(|_| WifiError::NotAvailable)?;
+    let station = first_station(&session).await?;
+    let stream = station.state_stream().await.map_err(WifiError::Dbus)?;
+    // The underlying Proxy inside the stream already holds its own
+    // Connection clone, so dropping `session`/`station` is safe at the
+    // D-Bus level. We leak them anyway because the 2024 capture rules
+    // make the compiler conservative; the leak cost is a couple of
+    // Arc-ish handles per subscriber (the GUI opens at most one).
+    std::mem::forget(station);
+    std::mem::forget(session);
+    Ok(Box::pin(stream))
+}
+
+/// Enumerate saved networks in iwd's known-network database.
+pub async fn list_known_networks() -> Result<Vec<KnownNetworkInfo>, WifiError> {
+    let session = Session::new().await.map_err(|_| WifiError::NotAvailable)?;
+    let known = session.known_networks().await.map_err(WifiError::Dbus)?;
+
+    let mut out = Vec::with_capacity(known.len());
+    for kn in known {
+        let ssid = match kn.name().await {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+        let security = kn
+            .network_type()
+            .await
+            .map(Security::from)
+            .unwrap_or(Security::Open);
+        let hidden = kn.hidden().await.unwrap_or(false);
+        out.push(KnownNetworkInfo {
+            ssid,
+            security,
+            hidden,
+        });
+    }
+    out.sort_by(|a, b| a.ssid.cmp(&b.ssid));
+    Ok(out)
+}
+
+/// Forget the saved iwd profile for `ssid`.
+///
+/// iwd's `KnownNetwork.Forget` deletes the profile file (e.g.
+/// `/var/lib/iwd/Foo.psk`) and removes the object from the bus.
+/// Returns `Ok(())` if no profile was present under that name to
+/// begin with — idempotent on purpose.
+pub async fn forget_network(ssid: &str) -> Result<(), WifiError> {
+    let session = Session::new().await.map_err(|_| WifiError::NotAvailable)?;
+    let known = session.known_networks().await.map_err(WifiError::Dbus)?;
+    for kn in known {
+        if kn.name().await.ok().as_deref() == Some(ssid) {
+            kn.forget().await.map_err(WifiError::Dbus)?;
+            return Ok(());
         }
     }
-    out
+    Ok(())
+}
+
+// ─── internal helpers ───────────────────────────────────────────────────────
+
+/// Return the first station exposed by iwd.
+///
+/// TODO: multi-adapter machines pick the first station arbitrarily.
+/// Extend to take an interface name when a real user reports needing it.
+async fn first_station(session: &Session) -> Result<Station, WifiError> {
+    let mut stations = session.stations().await.map_err(WifiError::Dbus)?;
+    if stations.is_empty() {
+        // Distinguish "no wireless hardware" from "hardware present but
+        // no station registered" (adapter powered off, etc.). We only
+        // get here when iwd is running, so NoStation is the right
+        // variant — NoAdapter would mean no hardware at all.
+        return Err(WifiError::NoStation);
+    }
+    Ok(stations.swap_remove(0))
+}
+
+/// Walk the discovered networks of `station` looking for one whose SSID
+/// matches. Does not trigger a new scan.
+async fn find_network_by_ssid(station: &Station, ssid: &str) -> Result<Option<Network>, WifiError> {
+    let discovered = station
+        .discovered_networks()
+        .await
+        .map_err(WifiError::Dbus)?;
+    for (network, _signal) in discovered {
+        if network.name().await.ok().as_deref() == Some(ssid) {
+            return Ok(Some(network));
+        }
+    }
+    Ok(None)
+}
+
+/// Map iwd's dBm*100 signal strength to a 0-100 percentage.
+///
+/// iwd reports signal strength in hundredths of a dBm, i.e. `-5000`
+/// means `-50 dBm`. The classic mapping (also used by NetworkManager's
+/// `nm_wifi_utils_level_to_quality`) is:
+///
+/// * `≥ -50 dBm` → 100
+/// * `≤ -100 dBm` → 0
+/// * linear interpolation in between
+fn signal_to_percent(dbm_times_100: i16) -> u8 {
+    let dbm = dbm_times_100 as i32 / 100;
+    if dbm >= -50 {
+        100
+    } else if dbm <= -100 {
+        0
+    } else {
+        // dbm in (-100, -50) → 2 * (dbm + 100)
+        ((dbm + 100) * 2).clamp(0, 100) as u8
+    }
+}
+
+/// One-shot passphrase agent: holds a single passphrase and returns it
+/// exactly once when iwd asks. All other agent callbacks (private-key
+/// passphrase, user+password, etc.) return `Canceled` since the
+/// installer does not support enterprise authentication.
+struct PasswordAgent {
+    passphrase: Option<String>,
+}
+
+impl PasswordAgent {
+    fn new(passphrase: Option<String>) -> Self {
+        Self { passphrase }
+    }
+}
+
+impl Agent for PasswordAgent {
+    fn request_passphrase(
+        &self,
+        _network: &Network,
+    ) -> impl std::future::Future<Output = Result<String, Canceled>> + Send {
+        let result = match self.passphrase.clone() {
+            Some(psk) => Ok(psk),
+            None => Err(Canceled {}),
+        };
+        std::future::ready(result)
+    }
+
+    fn request_private_key_passphrase(
+        &self,
+        _network: &Network,
+    ) -> impl std::future::Future<Output = Result<String, Canceled>> + Send {
+        std::future::ready(Err(Canceled {}))
+    }
+
+    fn request_user_name_and_passphrase(
+        &self,
+        _network: &Network,
+    ) -> impl std::future::Future<Output = Result<(String, String), Canceled>> + Send {
+        std::future::ready(Err(Canceled {}))
+    }
+
+    fn request_user_password(
+        &self,
+        _network: &Network,
+        _user_name: Option<&String>,
+    ) -> impl std::future::Future<Output = Result<String, Canceled>> + Send {
+        std::future::ready(Err(Canceled {}))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const SAMPLE_OUTPUT: &str = "\
-                              Available networks
-────────────────────────────────────────────────────────────────────────────
-      Network name                    Security            Signal
-────────────────────────────────────────────────────────────────────────────
-  > * HomeNetwork                     psk                 ****
-      OtherNet                        psk                 ***
-      FreeWifi                        open                **
-      WeakSignal                      psk                 *
-";
-
-    #[test]
-    fn test_parse_get_networks() {
-        let networks = parse_get_networks(SAMPLE_OUTPUT);
-        assert_eq!(networks.len(), 4);
-
-        assert_eq!(networks[0].ssid, "HomeNetwork");
-        assert_eq!(networks[0].security, "psk");
-        assert_eq!(networks[0].signal_percent, 100);
-
-        assert_eq!(networks[1].ssid, "OtherNet");
-        assert_eq!(networks[1].signal_percent, 75);
-
-        assert_eq!(networks[2].ssid, "FreeWifi");
-        assert_eq!(networks[2].security, "open");
-        assert_eq!(networks[2].signal_percent, 50);
-
-        assert_eq!(networks[3].ssid, "WeakSignal");
-        assert_eq!(networks[3].signal_percent, 25);
-    }
-
-    #[test]
-    fn test_parse_empty_output() {
-        assert!(parse_get_networks("").is_empty());
-        assert!(parse_get_networks("No networks available\n").is_empty());
-    }
-
-    #[test]
-    fn test_strip_ansi() {
-        assert_eq!(strip_ansi("\x1b[1;32mHello\x1b[0m"), "Hello");
-        assert_eq!(strip_ansi("plain"), "plain");
-    }
-
-    #[test]
-    fn test_split_columns() {
-        let parts = split_columns("HomeNetwork                     psk                 ****");
-        assert_eq!(parts[0], "HomeNetwork");
-        assert_eq!(parts[1], "psk");
-        assert_eq!(parts[2], "****");
-    }
-
     #[test]
     fn test_detect_wifi_interfaces_does_not_panic() {
-        // Just verify it doesn't panic — result depends on the host machine
+        // Just verify it doesn't panic — result depends on the host machine.
         let _ = detect_wifi_interfaces();
+    }
+
+    #[test]
+    fn test_signal_to_percent_strong() {
+        assert_eq!(signal_to_percent(-4000), 100); // -40 dBm, saturates at -50
+        assert_eq!(signal_to_percent(-5000), 100); // -50 dBm
+    }
+
+    #[test]
+    fn test_signal_to_percent_weak() {
+        assert_eq!(signal_to_percent(-10000), 0); // -100 dBm, zero
+        assert_eq!(signal_to_percent(-11000), 0); // -110 dBm, clamped
+    }
+
+    #[test]
+    fn test_signal_to_percent_mid() {
+        assert_eq!(signal_to_percent(-7500), 50); // -75 dBm
+        assert_eq!(signal_to_percent(-6000), 80); // -60 dBm
+        assert_eq!(signal_to_percent(-9000), 20); // -90 dBm
     }
 }

@@ -244,6 +244,7 @@ dependencies = [
  "fs_extra",
  "futures",
  "hex",
+ "iwdrs",
  "lzma-rs",
  "nix 0.31.2",
  "pacmanconf",
@@ -263,6 +264,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "zbus",
 ]
 
 [[package]]
@@ -3145,6 +3147,20 @@ name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
+
+[[package]]
+name = "iwdrs"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2995175b0607f73574de8fe2d2ed70a08ef93d146c74327fe33e61e2b05bbb8"
+dependencies = [
+ "futures-lite",
+ "strum 0.27.2",
+ "thiserror 2.0.18",
+ "uuid",
+ "zbus",
+ "zvariant",
+]
 
 [[package]]
 name = "jni"
@@ -6338,6 +6354,7 @@ dependencies = [
  "signal-hook-registry",
  "socket2 0.6.3",
  "tokio-macros",
+ "tracing",
  "windows-sys 0.61.2",
 ]
 
@@ -7980,6 +7997,7 @@ dependencies = [
  "rustix 1.1.4",
  "serde",
  "serde_repr",
+ "tokio",
  "tracing",
  "uds_windows",
  "uuid",
