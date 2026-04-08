@@ -65,8 +65,7 @@ build-main MODE="precompiled" KERNEL="linux-lts":
     sudo mkarchiso -v -w "gen_iso/workdir" -o {{ISO_OUT}} {{PROFILE_OUT}}
     @echo "ISO built in {{ISO_OUT}}"
 
-# Build testing ISO (fast, minimal packages, serial+SSH enabled).
-# Good for QEMU iteration and CI. Skips wifi/bluetooth/firmware to stay small.
+# Build testing ISO (fast, minimal packages, serial+SSH enabled)
 # Usage: just build-test [pre|dkms] [linux|linux-lts|linux-zen]
 build-test MODE="precompiled" KERNEL="linux-lts":
     @echo "Building testing ISO (mode={{MODE}}, kernel={{KERNEL}})"
@@ -76,20 +75,6 @@ build-test MODE="precompiled" KERNEL="linux-lts":
     @echo "Building ISO..."
     sudo mkarchiso -v -w "gen_iso/workdir" -o {{ISO_OUT}} {{PROFILE_OUT}}
     @echo "Testing ISO built in {{ISO_OUT}}"
-
-# Build full-featured ISO locally (same package set as CI releases, includes
-# iwd/wireless-regdb/linux-firmware/etc). Use this for bare-metal testing of
-# features that QEMU cannot exercise — wifi, specific GPU drivers, etc.
-# Slower than build-test: larger squashfs, more packages to pacstrap.
-# Usage: just build-test-full [pre|dkms] [linux|linux-lts|linux-zen]
-build-test-full MODE="precompiled" KERNEL="linux-lts":
-    @echo "Building full testing ISO (mode={{MODE}}, kernel={{KERNEL}})"
-    just build
-    just _render-profile {{MODE}} {{KERNEL}}
-    just _prepare-binary
-    @echo "Building ISO..."
-    sudo mkarchiso -v -w "gen_iso/workdir" -o {{ISO_OUT}} {{PROFILE_OUT}}
-    @echo "Full testing ISO built in {{ISO_OUT}}"
 
 # List available ISOs
 list-isos:
