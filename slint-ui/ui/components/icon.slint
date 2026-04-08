@@ -1,0 +1,33 @@
+// Reusable SVG icon wrapper.
+//
+// All icons are vendored as Lucide SVGs under `slint-ui/assets/icons/`
+// (ISC-licensed, see `LICENSE.lucide`). Lucide icons are stroked
+// monochrome paths using `stroke="currentColor"` / `fill="none"`, which
+// makes them play perfectly with Slint's `Image.colorize`: setting
+// `colorize` recolors every non-transparent stroke pixel to the given
+// brush, so a single SVG can be rendered in any theme color just by
+// changing the `tint` property.
+//
+// Prefer this component over inline `Image { source: @image-url(...) }`
+// so every icon site in the app uses the same size tokens and default
+// tint, and so we have a single place to tweak if we ever swap the
+// icon set.
+
+import { Theme } from "../styling.slint";
+
+export component Icon inherits Image {
+    // Square edge length. Defaults to `font-lg` (16px) which matches
+    // the inline-with-text use case — icons next to a standard label.
+    in property <length> size: Theme.font-lg;
+
+    // Stroke color. Defaults to the regular text color; callers override
+    // for accent (Theme.c.blue), success (Theme.c.green), destructive
+    // (Theme.c.red), muted (Theme.c.overlay0), etc.
+    in property <brush> tint: Theme.c.text;
+
+    width: size;
+    height: size;
+    colorize: tint;
+    image-fit: contain;
+    accessible-role: none;
+}
