@@ -43,4 +43,10 @@ export global PopupState {
     in-out property <bool> multi-select-visible: false;
     in-out property <string> multi-select-title;
     in-out property <string> multi-select-key;
+
+    // ── WiFi management popup ──
+    // Mirrors WifiState.visible so existing FocusScope gates can read
+    // popup visibility uniformly from PopupState without also pulling
+    // in WifiState. The Rust controller writes both flags together.
+    in-out property <bool> wifi-visible: false;
 }

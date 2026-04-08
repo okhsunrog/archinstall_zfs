@@ -18,8 +18,11 @@ export { WelcomeState }
 import { InstallState } from "state/install-state.slint";
 export { InstallState }
 
-import { ItemType, ConfigItem, SelectOption, UserEntry, PackageEntry, PackageSearchResult, LogMessage, DownloadInfo } from "types.slint";
-export { ItemType, ConfigItem, SelectOption, UserEntry, PackageEntry, PackageSearchResult, LogMessage, DownloadInfo }
+import { WifiState } from "state/wifi-state.slint";
+export { WifiState }
+
+import { ItemType, ConfigItem, SelectOption, UserEntry, PackageEntry, PackageSearchResult, LogMessage, DownloadInfo, WifiSecurity, WifiPhase, WifiNetworkUi } from "types.slint";
+export { ItemType, ConfigItem, SelectOption, UserEntry, PackageEntry, PackageSearchResult, LogMessage, DownloadInfo, WifiSecurity, WifiPhase, WifiNetworkUi }
 
 import { TextInputPopup } from "popups/text-input-popup.slint";
 import { SelectPopup } from "popups/select-popup.slint";
@@ -27,6 +30,7 @@ import { UserManagePopup } from "popups/user-manage-popup.slint";
 import { StringListPopup } from "popups/string-list-popup.slint";
 import { PackageSearchPopup } from "popups/package-search-popup.slint";
 import { MultiSelectPopup } from "popups/multi-select-popup.slint";
+import { WifiPopup } from "popups/wifi-popup.slint";
 
 import { WelcomeView } from "views/welcome-view.slint";
 import { WizardView } from "views/wizard-view.slint";
@@ -83,7 +87,8 @@ export component App inherits Window {
             && !PopupState.users-visible
             && !PopupState.pkg-search-visible
             && !PopupState.strlist-visible
-            && !PopupState.multi-select-visible;
+            && !PopupState.multi-select-visible
+            && !PopupState.wifi-visible;
         key-pressed(e) => {
             if e.text == Key.Tab {
                 WizardState.next();
@@ -221,5 +226,12 @@ export component App inherits Window {
         package-added(index) => { root.pkg-added(index); }
         package-removed(index) => { root.pkg-removed(index); }
         closed() => { PopupState.pkg-search-visible = false; }
+    }
+
+    WifiPopup {
+        // Task #7 mounts the popup; task #8 fleshes out the inside.
+        // All callbacks already go through WifiState as globals, so
+        // the mount site has no per-callback plumbing.
+        popup-visible: PopupState.wifi-visible;
     }
 }

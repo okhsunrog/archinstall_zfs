@@ -1,0 +1,89 @@
+// WiFi management popup — scan, pick, connect, manage known networks,
+// show ethernet status.
+//
+// This file currently holds the skeleton: root overlay rectangle, a
+// dismiss-on-outside-click TouchArea, and a centered card that task #8
+// fills in with the real phase-driven content (list, auth, spinner,
+// error, connected). Wired up now so the popup mounts cleanly in
+// app.slint and the Icon component + asset paths are validated.
+
+import { Theme } from "../styling.slint";
+import { WifiState } from "../state/wifi-state.slint";
+import { PopupState } from "../state/popup-state.slint";
+import { StyledButton } from "../components/styled-button.slint";
+import { Icon } from "../components/icon.slint";
+
+export component WifiPopup inherits Rectangle {
+    in property <bool> popup-visible;
+
+    visible: popup-visible;
+    // Full-window dim overlay; clicking outside the card dismisses.
+    background: #000000c0;
+
+    // Dismiss-on-outside-click. The inner card has its own TouchArea
+    // that stops event propagation so clicks inside don't dismiss.
+    backdrop-ta := TouchArea {
+        clicked => { WifiState.close(); }
+    }
+
+    // Centered card
+    card := Rectangle {
+        width: min(520px, parent.width - 64px);
+        height: min(560px, parent.height - 64px);
+        background: Theme.c.base;
+        border-radius: Theme.radius-lg;
+        border-width: 1px;
+        border-color: Theme.c.surface0;
+        clip: true;
+
+        // Swallow clicks so the backdrop-ta does not see them.
+        card-ta := TouchArea { }
+
+        VerticalLayout {
+            padding: Theme.spacing-lg;
+            spacing: Theme.spacing-md;
+
+            // ── Header ──
+            HorizontalLayout {
+                spacing: Theme.spacing-sm;
+                alignment: start;
+
+                Icon {
+                    source: @image-url("../../assets/icons/wifi.svg");
+                    size: 22px;
+                    tint: Theme.c.blue;
+                }
+
+                Text {
+                    text: "Network";
+                    color: Theme.c.text;
+                    font-size: Theme.font-xl;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+
+                StyledButton {
+                    label: "Close";
+                    style: Theme.button-ghost;
+                    clicked => { WifiState.close(); }
+                }
+            }
+
+            // Placeholder body — replaced in task #8 with the real
+            // phase-driven content (list / auth / spinner / error).
+            Rectangle {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+
+                Text {
+                    text: "WiFi UI placeholder";
+                    color: Theme.c.overlay0;
+                    font-size: Theme.font-sm;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

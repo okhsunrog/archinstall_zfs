@@ -77,3 +77,50 @@ export struct DownloadInfo {
     state: int,
 }
 
+// ── WiFi types ──────────────────────────────────────────────────────────────
+
+// Security mode of a discovered or known network. Mirrors the Rust
+// `core::system::wifi::Security` enum one-for-one; the Rust→Slint
+// controller translates with a straightforward match.
+export enum WifiSecurity {
+    open,
+    wep,
+    psk,
+    // 802.1x enterprise — shown in the scan list but connect is disabled.
+    enterprise,
+}
+
+// High-level phase the wifi popup is in. Controller drives transitions;
+// the popup component picks different content per phase.
+//
+//   idle       — popup just opened or no action in progress
+//   scanning   — scan in progress, show spinner + status
+//   picking    — scan finished, user picks from the list
+//   auth       — user is typing a password for a secured network
+//   connecting — Network.Connect() in flight
+//   verifying  — connect returned success, waiting for DHCP / internet
+//   connected  — fully online, popup shows success and auto-dismisses
+//   error      — something failed, show error text + retry actions
+export enum WifiPhase {
+    idle,
+    scanning,
+    picking,
+    auth,
+    connecting,
+    verifying,
+    connected,
+    error,
+}
+
+// One row in the wifi popup's network list. Rebuilt by the Rust
+// controller after every scan.
+export struct WifiNetworkUi {
+    ssid: string,
+    // Normalized 0-100.
+    signal-percent: int,
+    security: WifiSecurity,
+    // True if iwd has a saved profile — the UI skips the password prompt
+    // and shows a "Known" badge.
+    known: bool,
+}
+

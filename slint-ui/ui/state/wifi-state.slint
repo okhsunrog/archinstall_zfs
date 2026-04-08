@@ -1,0 +1,110 @@
+// WiFi management state shared between the Rust controller and the
+// wifi popup / welcome-screen corner widget.
+//
+// The Rust controller (`slint-ui/src/controllers/wifi.rs`) owns the
+// async work — scanning, connecting, waiting for DHCP, subscribing to
+// iwd's `PropertiesChanged` signals — and pushes results here via
+// `upgrade_in_event_loop`. The Slint side only reads state and emits
+// user-intent callbacks.
+//
+// Phase transitions (driven entirely by the controller):
+//
+//   idle ──open()──▶ scanning ──scan-done──▶ picking
+//   picking ──pick(psk,unknown)──▶ auth
+//   picking ──pick(psk,known)──▶ connecting
+//   picking ──pick(open)──▶ connecting
+//   auth ──submit-password──▶ connecting
+//   auth ──cancel-pick──▶ picking
+//   connecting ──iwd-ok──▶ verifying
+//   verifying ──online──▶ connected
+//   * ──error──▶ error
+//   * ──close()──▶ idle  (controller aborts in-flight tasks)
+//
+// Tasks #8-#10 fill in the consumers. Task #7 only establishes the
+// surface.
+
+import { WifiNetworkUi, WifiPhase } from "../types.slint";
+
+export global WifiState {
+    // ── Availability gates ──────────────────────────────────────────────
+    // Set once at startup by the Rust welcome controller. `has-hardware`
+    // reflects /sys/class/net detection (any wireless NIC?), `iwd-running`
+    // reflects `Session::new().is_ok()`. Both must be true for the wifi
+    // popup to be usable; the corner widget uses the pair to choose
+    // between "no wifi", "iwd unavailable", and "ready" states.
+    in property <bool> has-hardware: false;
+    in property <bool> iwd-running: false;
+
+    // ── Popup lifecycle ─────────────────────────────────────────────────
+    in-out property <bool> visible: false;
+
+    // ── Phase + content ────────────────────────────────────────────────
+    in property <WifiPhase> phase: WifiPhase.idle;
+
+    // The last completed scan, sorted strongest-first by the controller.
+    in property <[WifiNetworkUi]> networks;
+
+    // Index into `networks` — set by the popup when the user clicks a
+    // row, read by the controller in its `pick(int)` callback handler.
+    // -1 means no selection.
+    in-out property <int> selected-index: -1;
+
+    // ── Authentication input ───────────────────────────────────────────
+    in-out property <string> password;
+    in-out property <bool> show-password: false;
+
+    // ── Status / feedback ──────────────────────────────────────────────
+    // Free-form status line shown during scanning / connecting /
+    // verifying. Short, e.g. "Scanning on wlan0…" or "Waiting for DHCP…".
+    in property <string> status-text;
+
+    // Non-empty when phase == error. The popup shows this inline.
+    in property <string> error-text;
+
+    // ── Live connection info ───────────────────────────────────────────
+    // Empty string if not currently associated with any wifi network.
+    // Populated from iwd's `ConnectedNetwork` property and kept in sync
+    // via `watch_station_state` subscription in the controller.
+    in property <string> current-ssid;
+
+    // Snapshot of wired-network state, populated from /sys/class/net +
+    // `ip addr` by the welcome controller. Read by both the corner
+    // widget and the popup's ethernet row.
+    in property <bool> ethernet-connected: false;
+    in property <string> ethernet-ipv4;
+
+    // ── Callbacks (Slint → Rust) ───────────────────────────────────────
+    // Open the popup. Controller flips `visible` to true and kicks off
+    // the first scan automatically.
+    callback open();
+
+    // Close the popup and abort any in-flight scan/connect/verify task.
+    callback close();
+
+    // User wants fresh scan results. Valid in picking / error phases.
+    callback rescan();
+
+    // User tapped a network row. Controller inspects `selected-index`
+    // + the matching `networks[idx]` to decide the next phase:
+    // open / known → connecting, secured+unknown → auth.
+    callback pick(int);
+
+    // Back out of the password-entry screen to the network list.
+    callback cancel-pick();
+
+    // User submitted the password for the currently-selected network.
+    // The controller reads `password` from state rather than taking it
+    // as an argument, so the Slint side can freely toggle show-password
+    // without racing.
+    callback submit-password();
+
+    // Forget a known network by its position in `networks`.
+    callback forget(int);
+
+    // Disconnect from the currently-associated network, if any.
+    callback disconnect();
+
+    // Manually-entered hidden SSID — `connect-hidden(ssid, password)`.
+    // The popup's hidden-network entry form calls this directly.
+    callback connect-hidden(string, string);
+}
