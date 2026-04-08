@@ -3,6 +3,10 @@ name = "archinstall-zfs-tui"
 version = "0.4.1"
 edition = "2024"
 
+[[bin]]
+name = "azfs-tui"
+path = "src/main.rs"
+
 [dependencies]
 archinstall-zfs-core = { path = "../core" }
 clap.workspace = true

@@ -7,8 +7,8 @@ ISO_OUT := "gen_iso/out"
 DISK_IMAGE := "gen_iso/arch.qcow2"
 UEFI_VARS := "gen_iso/my_vars.fd"
 QEMU_SCRIPT := "gen_iso/run-qemu.sh"
-BINARY := "target/release/archinstall-zfs-tui"
-BINARY_SLINT := "target/release/archinstall-zfs-slint"
+BINARY := "target/release/azfs-tui"
+BINARY_SLINT := "target/release/azfs"
 
 # ─── Build ──────────────────────────────────────────────
 
@@ -49,9 +49,9 @@ _render-profile MODE="precompiled" KERNEL="linux-lts" FAST="":
 # Internal: copy installer binaries into rendered profile
 _prepare-binary:
     @mkdir -p {{PROFILE_OUT}}/airootfs/usr/local/bin/
-    install -m 0755 {{BINARY}} {{PROFILE_OUT}}/airootfs/usr/local/bin/archinstall-zfs-tui
+    install -m 0755 {{BINARY}} {{PROFILE_OUT}}/airootfs/usr/local/bin/azfs-tui
     @if [ -f {{BINARY_SLINT}} ]; then \
-        install -m 0755 {{BINARY_SLINT}} {{PROFILE_OUT}}/airootfs/usr/local/bin/archinstall-zfs-slint; \
+        install -m 0755 {{BINARY_SLINT}} {{PROFILE_OUT}}/airootfs/usr/local/bin/azfs; \
     fi
 
 # Build production ISO
@@ -148,10 +148,10 @@ ssh:
 # Upload latest binaries to running QEMU VM
 upload:
     scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P 2222 \
-        {{BINARY}} root@localhost:/usr/local/bin/archinstall-zfs-tui
+        {{BINARY}} root@localhost:/usr/local/bin/azfs-tui
     @if [ -f {{BINARY_SLINT}} ]; then \
         scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P 2222 \
-            {{BINARY_SLINT}} root@localhost:/usr/local/bin/archinstall-zfs-slint; \
+            {{BINARY_SLINT}} root@localhost:/usr/local/bin/azfs; \
     fi
     @echo "Uploaded to QEMU VM"
 

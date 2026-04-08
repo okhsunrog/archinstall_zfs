@@ -55,8 +55,8 @@ jobs:
       with:
         name: binaries
         path: |
-          target/release/archinstall-zfs-tui
-          target/release/archinstall-zfs-slint
+          target/release/azfs-tui
+          target/release/azfs
           target/release/xtask
 
   iso-linux:
@@ -82,9 +82,7 @@ jobs:
         path: target/release/
 
     - name: Fix binary permissions
-      run: chmod +x target/release/archinstall-zfs-tui target/release/archinstall-zfs-slint target/release/xtask
-
-    - name: Build ISO with linux kernel
+      run: chmod +x target/release/azfs-tui target/release/azfs target/release/xtask
       continue-on-error: true
       run: |
         target/release/xtask render-profile \
@@ -131,7 +129,7 @@ jobs:
         path: target/release/
 
     - name: Fix binary permissions
-      run: chmod +x target/release/archinstall-zfs-tui target/release/archinstall-zfs-slint target/release/xtask
+      run: chmod +x target/release/azfs-tui target/release/azfs target/release/xtask
 
     - name: Build ISO with linux-lts kernel
       run: |

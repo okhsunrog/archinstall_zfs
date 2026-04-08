@@ -97,7 +97,7 @@ struct TestOpts {
     config: PathBuf,
 
     /// Path to installer binary
-    #[arg(long, default_value = "target/release/archinstall-zfs-tui")]
+    #[arg(long, default_value = "target/release/azfs-tui")]
     binary: PathBuf,
 
     /// Path to qcow2 disk image (overridden by --tmpfs)

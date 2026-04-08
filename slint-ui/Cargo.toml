@@ -4,6 +4,10 @@ version = "0.4.1"
 edition = "2024"
 build = "build.rs"
 
+[[bin]]
+name = "azfs"
+path = "src/main.rs"
+
 [features]
 default = ["linuxkms"]
 linuxkms = ["slint/backend-linuxkms-noseat", "slint/renderer-skia-software"]

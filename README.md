@@ -52,10 +52,10 @@ Key improvements over the Python version:
 
 ```bash
 # Graphical UI (Slint, renders directly via Linux KMS — no X11/Wayland needed)
-archinstall-zfs-slint
+azfs
 
 # or Terminal UI (ratatui)
-archinstall-zfs-tui
+azfs-tui
 ```
 
 > Why recommended: the ISO already contains ZFS components and both installers, so startup is faster and avoids on-the-fly package installation.
@@ -65,22 +65,22 @@ archinstall-zfs-tui
 # Boot the official Arch ISO and connect to the network
 
 # Download binaries from the latest release
-curl -LO https://github.com/okhsunrog/archinstall_zfs/releases/latest/download/archinstall-zfs-tui
-curl -LO https://github.com/okhsunrog/archinstall_zfs/releases/latest/download/archinstall-zfs-slint
-chmod +x archinstall-zfs-tui archinstall-zfs-slint
+curl -LO https://github.com/okhsunrog/archinstall_zfs/releases/latest/download/azfs-tui
+curl -LO https://github.com/okhsunrog/archinstall_zfs/releases/latest/download/azfs
+chmod +x azfs-tui azfs
 
 # For the GUI, install runtime dependencies first:
 pacman -Sy libxkbcommon libinput freetype2 fontconfig ttf-dejavu
 
 # Run
-./archinstall-zfs-slint  # or ./archinstall-zfs-tui
+./azfs  # or ./azfs-tui
 ```
 
 > Note: This path installs ZFS components during the run, so it usually takes longer than Option A.
 
 ### Silent mode (for automation)
 ```bash
-archinstall-zfs-tui --config config.json --silent
+azfs-tui --config config.json --silent
 ```
 
 ---
