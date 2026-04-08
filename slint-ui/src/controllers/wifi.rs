@@ -22,7 +22,7 @@ use archinstall_zfs_core::system::{
     wifi::{self, Security, WifiError, WifiNetwork},
 };
 
-use crate::ui::{App, PopupState, WifiNetworkUi, WifiPhase, WifiSecurity, WifiState};
+use crate::ui::{App, PopupState, WelcomeState, WifiNetworkUi, WifiPhase, WifiSecurity, WifiState};
 
 /// Shared cancellation handle for the currently-running scan / connect
 /// task. Any new task takes a fresh token; closing the popup or starting
@@ -345,6 +345,13 @@ async fn drive_post_connect(
                     s.set_phase(WifiPhase::Connected);
                     s.set_current_ssid(SharedString::from(ssid_final));
                     s.set_status_text(SharedString::default());
+
+                    // Trigger the welcome-screen's existing check-internet
+                    // handler so `net_ok` flips to true and the ZFS init /
+                    // kernel scan paths (both gated behind net_ok) kick
+                    // off automatically. The welcome controller already
+                    // owns that logic; we just invoke its callback.
+                    app.global::<WelcomeState>().invoke_check_internet();
                 });
             } else {
                 let _ = weak.upgrade_in_event_loop(|app| {

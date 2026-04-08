@@ -1,12 +1,73 @@
 // Welcome screen — three system-check status cards (network / UEFI / ZFS)
-// and a Get-Started button gated by all checks passing.
+// and a Get-Started button gated by all checks passing. Absolutely-
+// positioned connectivity widget in the bottom-right corner opens the
+// WiFi management popup (if any wifi hardware is present).
 
 import { Theme } from "../styling.slint";
 import { WelcomeState } from "../state/welcome-state.slint";
 import { WizardState } from "../state/wizard-state.slint";
+import { WifiState } from "../state/wifi-state.slint";
+import { Icon } from "../components/icon.slint";
+import { SignalBars } from "../components/signal-bars.slint";
 
 export component WelcomeView inherits Rectangle {
     background: Theme.c.base;
+
+    // ── Bottom-right connectivity widget ───────────────────────────────
+    // Absolutely-positioned pill in the corner — canonical spot for a
+    // connectivity indicator. Gated on `WifiState.has-hardware` so it
+    // stays hidden on machines that genuinely have no wireless NIC;
+    // when hardware exists but iwd isn't running, the widget still
+    // shows and explains the situation on click (via the popup's
+    // iwd-unavailable path, which just leaves the network list empty).
+    if WifiState.has-hardware: Rectangle {
+        x: root.width - self.width - 16px;
+        y: root.height - self.height - 16px;
+        width: 172px;
+        height: 40px;
+        background: corner-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
+        border-radius: 20px;
+        border-width: 1px;
+        border-color: Theme.c.surface1;
+
+        corner-ta := TouchArea {
+            clicked => { WifiState.open(); }
+            mouse-cursor: pointer;
+        }
+
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 14px;
+            spacing: 8px;
+
+            // Icon — colored by state: green for connected wifi, blue
+            // for "iwd running but not associated", muted for "iwd not
+            // running or no connection at all".
+            Icon {
+                source: WifiState.current-ssid != ""
+                    ? @image-url("../../assets/icons/wifi.svg")
+                    : @image-url("../../assets/icons/wifi-off.svg");
+                size: 18px;
+                tint: WifiState.current-ssid != "" ? Theme.c.green
+                    : WifiState.iwd-running ? Theme.c.blue
+                    : Theme.c.overlay0;
+            }
+
+            // Label — SSID when connected, "Not connected" otherwise,
+            // "WiFi unavailable" when iwd isn't running at all.
+            Text {
+                text: WifiState.current-ssid != ""
+                    ? WifiState.current-ssid
+                    : (WifiState.iwd-running ? "Not connected" : "WiFi unavailable");
+                color: WifiState.current-ssid != ""
+                    ? Theme.c.text : Theme.c.subtext0;
+                font-size: Theme.font-sm;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+        }
+    }
 
     VerticalLayout {
         alignment: center;
