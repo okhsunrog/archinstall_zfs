@@ -1,0 +1,75 @@
+// 4-bar wifi signal strength indicator. Independent of the icon set —
+// the four vertical rectangles are drawn directly so they can be
+// tinted, resized, and animated without touching SVG assets.
+//
+// Visual mapping (matches the TUI and standard terminal indicators):
+//   0-24   → 1 bar lit, 3 dim
+//   25-49  → 2 bars lit, 2 dim
+//   50-74  → 3 bars lit, 1 dim
+//   75-100 → all 4 lit
+//
+// Bars grow in height from left to right.
+
+import { Theme } from "../styling.slint";
+
+export component SignalBars inherits Rectangle {
+    in property <int> percent: 0;
+    // Accent color for filled bars. Defaults to text so it blends with
+    // a row label; callers tint to green for "connected", red for
+    // "error", etc.
+    in property <brush> lit: Theme.c.text;
+    in property <brush> dim: Theme.c.surface1;
+
+    // Total width of the four-bar cluster. The 4 bars + 3 gaps
+    // divide this horizontally.
+    width: 24px;
+    height: 16px;
+
+    // Precomputed number of lit bars from percent.
+    property <int> lit-count:
+        percent >= 75 ? 4
+      : percent >= 50 ? 3
+      : percent >= 25 ? 2
+      : 1;
+
+    HorizontalLayout {
+        spacing: 2px;
+        alignment: end;
+
+        // Bar 1 — shortest
+        Rectangle {
+            width: 4px;
+            height: 25%;
+            background: root.lit-count >= 1 ? root.lit : root.dim;
+            border-radius: 1px;
+            y: parent.height - self.height;
+        }
+
+        // Bar 2
+        Rectangle {
+            width: 4px;
+            height: 50%;
+            background: root.lit-count >= 2 ? root.lit : root.dim;
+            border-radius: 1px;
+            y: parent.height - self.height;
+        }
+
+        // Bar 3
+        Rectangle {
+            width: 4px;
+            height: 75%;
+            background: root.lit-count >= 3 ? root.lit : root.dim;
+            border-radius: 1px;
+            y: parent.height - self.height;
+        }
+
+        // Bar 4 — tallest
+        Rectangle {
+            width: 4px;
+            height: 100%;
+            background: root.lit-count >= 4 ? root.lit : root.dim;
+            border-radius: 1px;
+            y: parent.height - self.height;
+        }
+    }
+}
