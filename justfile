@@ -14,7 +14,7 @@ BINARY_SLINT := "target/release/azfs"
 
 # Build installer binaries (release)
 build:
-    cargo build --release -p archinstall-zfs-tui -p archinstall-zfs-slint
+    cargo build --release --bin azfs --bin azfs-tui
 
 # Run cargo tests
 test:
