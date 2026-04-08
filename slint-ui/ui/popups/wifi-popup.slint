@@ -43,9 +43,84 @@ export component WifiPopup inherits Rectangle {
     visible: popup-visible;
     background: #000000c0;
 
+    // Grab keyboard focus every time the popup becomes visible, so
+    // arrow/Enter/Esc work immediately without the user clicking
+    // anywhere first. `changed popup-visible` fires on every flip,
+    // unlike `init` which runs only once.
+    changed popup-visible => {
+        if popup-visible {
+            focus-scope.focus();
+        }
+    }
+
     // Dismiss-on-outside-click.
     TouchArea {
         clicked => { WifiState.close(); }
+    }
+
+    // Wifi-popup-local keyboard navigation:
+    //
+    //   Esc            → close popup (from any phase)
+    //   Arrow Up / k   → move selected-index up in the network list
+    //   Arrow Down / j → move selected-index down
+    //   Enter          → pick current selection (picking), submit
+    //                    password (auth — StyledTextInput.accepted
+    //                    already handles it so we don't double-fire)
+    //   r              → rescan (picking phase only)
+    //
+    // Enabled only while the popup itself is visible; the App-root
+    // FocusScope is already gated !PopupState.wifi-visible so the
+    // two can never fight.
+    focus-scope := FocusScope {
+        enabled: popup-visible;
+
+        key-pressed(ev) => {
+            if ev.text == Key.Escape {
+                if WifiState.phase == WifiPhase.auth {
+                    WifiState.cancel-pick();
+                } else {
+                    WifiState.close();
+                }
+                return accept;
+            }
+
+            // Below here: only relevant in the picking phase (list
+            // navigation). Auth phase delegates Enter to the text
+            // input itself so show-password toggles and normal text
+            // editing keep working.
+            if WifiState.phase != WifiPhase.picking {
+                return reject;
+            }
+
+            if ev.text == Key.DownArrow || ev.text == "j" {
+                if WifiState.networks.length > 0 {
+                    WifiState.selected-index =
+                        min(WifiState.networks.length - 1, WifiState.selected-index + 1);
+                    if WifiState.selected-index < 0 {
+                        WifiState.selected-index = 0;
+                    }
+                }
+                return accept;
+            }
+            if ev.text == Key.UpArrow || ev.text == "k" {
+                if WifiState.selected-index > 0 {
+                    WifiState.selected-index = WifiState.selected-index - 1;
+                }
+                return accept;
+            }
+            if ev.text == Key.Return {
+                if WifiState.selected-index >= 0
+                    && WifiState.selected-index < WifiState.networks.length {
+                    WifiState.pick(WifiState.selected-index);
+                }
+                return accept;
+            }
+            if ev.text == "r" {
+                WifiState.rescan();
+                return accept;
+            }
+            return reject;
+        }
     }
 
     // Centered card
@@ -195,11 +270,32 @@ export component WifiPopup inherits Rectangle {
 
                         for net[idx] in WifiState.networks: Rectangle {
                             height: Theme.control-height-lg;
-                            background: row-ta.has-hover
-                                ? Theme.c.surface1 : Theme.c.surface0;
+                            // Background priority: keyboard-focused row wins,
+                            // then hover, then resting surface color.
+                            background: (idx == WifiState.selected-index)
+                                ? Theme.c.surface1
+                                : row-ta.has-hover
+                                    ? Theme.c.surface1
+                                    : Theme.c.surface0;
                             border-radius: Theme.radius-md;
-                            border-width: (net.ssid == WifiState.current-ssid) ? 1px : 0px;
-                            border-color: Theme.c.green;
+                            // Green outline for the currently-connected SSID,
+                            // blue outline for the keyboard-focused row so
+                            // users can tell which one will activate on Enter.
+                            border-width: (net.ssid == WifiState.current-ssid
+                                || idx == WifiState.selected-index) ? 1px : 0px;
+                            border-color: (net.ssid == WifiState.current-ssid)
+                                ? Theme.c.green
+                                : Theme.c.blue;
+
+                            accessible-role: list-item;
+                            accessible-label: net.ssid + ", "
+                                + net.signal-percent + " percent signal, "
+                                + (net.security == WifiSecurity.open
+                                    ? "open"
+                                    : net.security == WifiSecurity.enterprise
+                                        ? "enterprise"
+                                        : "secured")
+                                + (net.known ? ", known" : "");
 
                             row-ta := TouchArea {
                                 clicked => {

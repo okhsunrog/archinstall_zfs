@@ -271,11 +271,16 @@ fn start_scan(app: &App, in_flight: InFlight) {
                 // Sort strongest-first.
                 networks.sort_by(|a, b| b.signal_percent.cmp(&a.signal_percent));
                 let ui = networks.into_iter().map(to_ui).collect::<Vec<_>>();
+                let had_any = !ui.is_empty();
                 let _ = weak.upgrade_in_event_loop(move |app| {
                     let s = app.global::<WifiState>();
                     s.set_networks(ModelRc::new(VecModel::from(ui)));
                     s.set_phase(WifiPhase::Picking);
                     s.set_status_text(SharedString::default());
+                    // Pre-select the first (strongest) row so Enter
+                    // works immediately without the user pressing
+                    // Down first.
+                    s.set_selected_index(if had_any { 0 } else { -1 });
                 });
             }
             Err(e) => {
