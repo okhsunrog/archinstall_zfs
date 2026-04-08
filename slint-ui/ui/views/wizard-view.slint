@@ -7,6 +7,7 @@ import { WizardState } from "../state/wizard-state.slint";
 import { PopupState } from "../state/popup-state.slint";
 import { SidebarItem } from "../components/sidebar-item.slint";
 import { ConfigItemRow } from "../components/config-item.slint";
+import { StyledButton } from "../components/styled-button.slint";
 
 export component WizardView inherits Rectangle {
     callback item-activated(string);
@@ -178,43 +179,17 @@ export component WizardView inherits Rectangle {
             alignment: center;
 
             // Quit button
-            Rectangle {
-                width: 60px;
-                height: 32px;
-                background: quit-nav-ta.has-hover ? Theme.c.surface1 : transparent;
-                border-radius: 4px;
-
-                quit-nav-ta := TouchArea {
-                    clicked => { root.quit-requested(); }
-                }
-
-                Text {
-                    text: "Quit";
-                    color: Theme.c.overlay0;
-                    font-size: 13px;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
+            StyledButton {
+                label: "Quit";
+                style: Theme.button-ghost;
+                clicked => { root.quit-requested(); }
             }
 
             // Back button (not on first wizard step)
-            if WizardState.current-step > 1: Rectangle {
-                width: 80px;
-                height: 32px;
-                background: back-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
-                border-radius: 4px;
-
-                back-ta := TouchArea {
-                    clicked => { WizardState.back(); }
-                }
-
-                Text {
-                    text: "\u{25c2} Back";
-                    color: Theme.c.subtext0;
-                    font-size: 13px;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
+            if WizardState.current-step > 1: StyledButton {
+                label: "\u{25c2} Back";
+                style: Theme.button-default;
+                clicked => { WizardState.back(); }
             }
 
             // Status text
@@ -227,25 +202,19 @@ export component WizardView inherits Rectangle {
                 horizontal-stretch: 1;
             }
 
-            // Next button
-            if WizardState.current-step < WizardState.total-steps - 1: Rectangle {
-                width: 80px;
-                height: 32px;
-                background: next-ta.has-hover ? Theme.c.sky : Theme.c.blue;
-                border-radius: 4px;
+            // Next button (all steps except the final Review step)
+            if WizardState.current-step < WizardState.total-steps - 1: StyledButton {
+                label: "Next \u{25b8}";
+                style: Theme.button-primary;
+                clicked => { WizardState.next(); }
+            }
 
-                next-ta := TouchArea {
-                    clicked => { WizardState.next(); }
-                }
-
-                Text {
-                    text: "Next \u{25b8}";
-                    color: Theme.c.base;
-                    font-size: 13px;
-                    font-weight: FontWeight.semi-bold;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
+            // Install button (Review step only) — takes the Next slot so the
+            // user never needs to scroll the content card to start the install.
+            if WizardState.current-step == WizardState.total-steps - 1: StyledButton {
+                label: "Install \u{25b8}";
+                style: Theme.button-primary;
+                clicked => { root.install-requested(); }
             }
         }
     }

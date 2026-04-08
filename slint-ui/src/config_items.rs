@@ -542,20 +542,6 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         }
     }
 
-    items.push(sep());
-    items.push(ConfigItem {
-        key: "install".into(),
-        label: "Install".into(),
-        item_type: ItemType::Action,
-        ..Default::default()
-    });
-    items.push(ConfigItem {
-        key: "quit".into(),
-        label: "Quit".into(),
-        item_type: ItemType::Action,
-        ..Default::default()
-    });
-
     items
 }
 
@@ -569,6 +555,7 @@ fn ci(key: &str, label: &str, value: &str, item_type: ItemType) -> ConfigItem {
     }
 }
 
+#[cfg(test)]
 fn sep() -> ConfigItem {
     ConfigItem {
         item_type: ItemType::Separator,
