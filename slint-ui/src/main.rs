@@ -96,6 +96,7 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
     controllers::lists::setup(&app, &config, &models);
     controllers::wizard::setup(&app, &config, &kernel_scan);
     controllers::install::setup(&app, &config);
+    controllers::wifi::setup(&app);
     controllers::quit::setup(&app);
 
     app.run()?;
