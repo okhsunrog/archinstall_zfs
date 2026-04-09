@@ -43,6 +43,11 @@ mod iwd;
 #[cfg(feature = "wifi-iwd")]
 pub use iwd::*;
 
+#[cfg(feature = "wifi-mock")]
+mod mock;
+#[cfg(feature = "wifi-mock")]
+pub use mock::*;
+
 // ─── Common types ────────────────────────────────────────────────────────
 
 /// A wifi network, as seen by a scan.
@@ -144,26 +149,6 @@ pub fn detect_wifi_interfaces() -> Vec<String> {
         .collect()
 }
 
-/// Map a raw signal strength in `dBm * 100` units to a 0-100 percentage.
-///
-/// Used by both the iwd backend (iwd reports `i16` in hundredths of a
-/// dBm) and the upcoming NM backend wherever it converts NM's own
-/// `Strength u8` to a unit test point. The classic mapping:
-///
-/// * `≥ -50 dBm` → 100
-/// * `≤ -100 dBm` → 0
-/// * linear interpolation in between
-pub(crate) fn signal_to_percent(dbm_times_100: i16) -> u8 {
-    let dbm = dbm_times_100 as i32 / 100;
-    if dbm >= -50 {
-        100
-    } else if dbm <= -100 {
-        0
-    } else {
-        ((dbm + 100) * 2).clamp(0, 100) as u8
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,24 +157,5 @@ mod tests {
     fn test_detect_wifi_interfaces_does_not_panic() {
         // Just verify it doesn't panic — result depends on the host machine.
         let _ = detect_wifi_interfaces();
-    }
-
-    #[test]
-    fn test_signal_to_percent_strong() {
-        assert_eq!(signal_to_percent(-4000), 100); // -40 dBm, saturates at -50
-        assert_eq!(signal_to_percent(-5000), 100); // -50 dBm
-    }
-
-    #[test]
-    fn test_signal_to_percent_weak() {
-        assert_eq!(signal_to_percent(-10000), 0); // -100 dBm, zero
-        assert_eq!(signal_to_percent(-11000), 0); // -110 dBm, clamped
-    }
-
-    #[test]
-    fn test_signal_to_percent_mid() {
-        assert_eq!(signal_to_percent(-7500), 50); // -75 dBm
-        assert_eq!(signal_to_percent(-6000), 80); // -60 dBm
-        assert_eq!(signal_to_percent(-9000), 20); // -90 dBm
     }
 }

@@ -42,8 +42,11 @@ zbus = { version = "5.14.0", default-features = false, features = ["tokio"] }
 # against iwd (the installer ISO's wifi daemon).
 default = ["wifi-iwd"]
 wifi-iwd = ["dep:iwdrs"]
-wifi-nm = []   # populated in a follow-up commit with nmrs
-wifi-mock = [] # populated in a follow-up commit
+wifi-nm = []      # populated in a follow-up commit with nmrs
+# Mock backend: in-memory canned data. No external deps beyond what
+# core already pulls in (futures, tokio) so enabling it is zero-cost
+# from a compile-time perspective.
+wifi-mock = []
 
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["async_tokio"] }
