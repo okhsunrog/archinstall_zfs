@@ -2,6 +2,20 @@
 members = ["core", "tui", "slint-ui", "xtask"]
 resolver = "3"
 
+# Patch nmrs to our fork until upstream merges the Send-bound fix on
+# `for_each_access_point`. Without this, building core with the
+# wifi-nm feature produces `dyn Future<...> cannot be sent between
+# threads safely` errors at tokio::spawn sites in the slint-ui wifi
+# controller — nmrs's internal helper types the callback future as
+# a bare `Box<dyn Future + 'a>` without `+ Send`, which transitively
+# poisons every nmrs call chain.
+#
+# Fork branch: okhsunrog/nmrs#fix/send-bounds-for-each-ap
+# Remove this patch once the upstream PR lands and a new nmrs version
+# is released with the fix.
+[patch.crates-io]
+nmrs = { git = "https://github.com/okhsunrog/nmrs.git", branch = "fix/send-bounds-for-each-ap" }
+
 [workspace.dependencies]
 clap = { version = "4.6.0", features = ["derive"] }
 color-eyre = "0.6.5"
@@ -10,7 +24,7 @@ nix = { version = "0.31.2", features = ["fs"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 sublime_fuzzy = "0.7.0"
-tokio = { version = "1.51.0", features = ["rt", "rt-multi-thread", "macros"] }
+tokio = { version = "1.51.1", features = ["rt", "rt-multi-thread", "macros"] }
 tokio-util = { version = "0.7.18", features = ["rt"] }
 tracing = "0.1.44"
 tracing-appender = "0.2.4"

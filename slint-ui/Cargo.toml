@@ -9,12 +9,37 @@ name = "azfs"
 path = "src/main.rs"
 
 [features]
+# Default (linuxkms) is what the installer ISO ships with: KMS backend,
+# software Skia renderer, core talks to iwd directly via the wifi-iwd
+# feature. `desktop` is the developer loop: winit/hardware Skia for
+# running on a normal laptop, core talks to NetworkManager via the
+# wifi-nm feature so the GUI can be iterated against live wifi
+# without booting the ISO. `desktop-mock` swaps the wifi backend for
+# canned data (useful in CI and on hosts without a wifi stack).
 default = ["linuxkms"]
-linuxkms = ["slint/backend-linuxkms-noseat", "slint/renderer-skia-software"]
-desktop = ["slint/backend-winit", "slint/renderer-skia"]
+linuxkms = [
+    "slint/backend-linuxkms-noseat",
+    "slint/renderer-skia-software",
+    "archinstall-zfs-core/wifi-iwd",
+]
+desktop = [
+    "slint/backend-winit",
+    "slint/renderer-skia",
+    "archinstall-zfs-core/wifi-nm",
+]
+desktop-mock = [
+    "slint/backend-winit",
+    "slint/renderer-skia",
+    "archinstall-zfs-core/wifi-mock",
+]
 
 [dependencies]
-archinstall-zfs-core = { path = "../core" }
+# default-features = false so the core wifi backend is picked
+# exclusively by one of the slint-ui features above — otherwise
+# core's default (wifi-iwd) would stack on top of wifi-nm when
+# --features desktop is used, and the compile_error guards in
+# core::system::wifi::mod would fire.
+archinstall-zfs-core = { path = "../core", default-features = false }
 clap.workspace = true
 color-eyre.workspace = true
 crossbeam-channel = "0.5"
