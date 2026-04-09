@@ -3730,7 +3730,7 @@ dependencies = [
 [[package]]
 name = "nmrs"
 version = "2.2.0"
-source = "git+https://github.com/okhsunrog/nmrs.git?branch=fix%2Fsend-bounds-for-each-ap#eb2e247ede9c4e15170eaa7801c642515d436433"
+source = "git+https://github.com/cachebag/nmrs.git?rev=352f57e#352f57e5c8a203758afd5cac7fbcf71d2524798f"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
