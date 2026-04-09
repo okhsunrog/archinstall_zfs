@@ -43,6 +43,11 @@ mod iwd;
 #[cfg(feature = "wifi-iwd")]
 pub use iwd::*;
 
+#[cfg(feature = "wifi-nm")]
+mod nm;
+#[cfg(feature = "wifi-nm")]
+pub use nm::*;
+
 #[cfg(feature = "wifi-mock")]
 mod mock;
 #[cfg(feature = "wifi-mock")]

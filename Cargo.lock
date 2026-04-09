@@ -247,6 +247,7 @@ dependencies = [
  "iwdrs",
  "lzma-rs",
  "nix 0.31.2",
+ "nmrs",
  "pacmanconf",
  "raur",
  "regex",
@@ -2165,6 +2166,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "037711b3d59c33004d3856fbdc83b99d4ff37a24768fa1be9ce3538a1cde4393"
 
 [[package]]
+name = "futures-timer"
+version = "3.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f288b0a4f20f9a56b5d1da57e2227c661b7b16168e2f72365f57b63326e29b24"
+
+[[package]]
 name = "futures-util"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3718,6 +3725,25 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
+]
+
+[[package]]
+name = "nmrs"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed9329f57ca933085dbd5c4787e9117a5a0456b2554c54e6ae59128fdf292f63"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "futures",
+ "futures-timer",
+ "log",
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+ "zbus",
+ "zvariant",
 ]
 
 [[package]]
@@ -5474,6 +5500,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6802,6 +6834,7 @@ dependencies = [
  "getrandom 0.4.2",
  "js-sys",
  "serde_core",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 

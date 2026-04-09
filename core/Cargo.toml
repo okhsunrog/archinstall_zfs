@@ -16,6 +16,7 @@ hex = "0.4.3"
 iwdrs = { version = "0.2.6", default-features = false, features = ["tokio"], optional = true }
 lzma-rs = "0.3.0"
 nix = { workspace = true, features = ["fs", "mount", "process", "signal"] }
+nmrs = { version = "2.2.0", optional = true }
 pacmanconf = "3.1.0"
 raur = { version = "7", default-features = false, features = ["async", "reqwest"] }
 regex = "1.12.3"
@@ -42,7 +43,7 @@ zbus = { version = "5.14.0", default-features = false, features = ["tokio"] }
 # against iwd (the installer ISO's wifi daemon).
 default = ["wifi-iwd"]
 wifi-iwd = ["dep:iwdrs"]
-wifi-nm = []      # populated in a follow-up commit with nmrs
+wifi-nm = ["dep:nmrs"]
 # Mock backend: in-memory canned data. No external deps beyond what
 # core already pulls in (futures, tokio) so enabling it is zero-cost
 # from a compile-time perspective.
