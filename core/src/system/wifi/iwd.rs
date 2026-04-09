@@ -1,14 +1,14 @@
-//! WiFi management via iwd over D-Bus.
+//! iwd-backed wifi implementation.
 //!
-//! All operations here go through the `iwdrs` crate, which wraps iwd's
-//! `net.connman.iwd` system-bus interface. No subprocess spawning, no text
-//! parsing, no stringly-typed output.
+//! All operations go through the `iwdrs` crate, which wraps iwd's
+//! `net.connman.iwd` system-bus interface. No subprocess spawning, no
+//! text parsing, no stringly-typed output.
 //!
 //! # Multi-interface
 //!
-//! For now, every operation acts on the **first** station iwd exposes.
-//! Machines with more than one wireless adapter are extremely rare in
-//! installer scenarios, so we deliberately skip the interface picker.
+//! Every operation acts on the **first** station iwd exposes. Machines
+//! with more than one wireless adapter are extremely rare in installer
+//! scenarios, so we deliberately skip the interface picker.
 //! TODO: expose a `station_by_name(&str)` variant if users actually
 //! request it.
 //!
@@ -17,9 +17,9 @@
 //! iwd doesn't take passphrases as method arguments. It requires clients
 //! to register a D-Bus agent object, then call `Network::connect()`,
 //! at which point iwd calls back into the agent to ask for the passphrase.
-//! Our [`connect`] function constructs a one-shot [`PasswordAgent`]
-//! holding the user's passphrase, registers it for the duration of the
-//! connect call, and drops it when the Session goes out of scope.
+//! [`connect`] constructs a one-shot [`PasswordAgent`] holding the
+//! user's passphrase, registers it for the duration of the connect
+//! call, and drops it when the Session goes out of scope.
 //!
 //! # Profile persistence
 //!
@@ -28,11 +28,7 @@
 //! installer picks that file up and copies it to the target so the
 //! installed system reconnects without re-prompting for credentials.
 
-use std::path::Path;
-
-use std::pin::Pin;
-
-use futures::Stream;
+use futures::StreamExt;
 use iwdrs::{
     agent::Agent,
     error::{IWDError, agent::Canceled, network::ConnectError},
@@ -40,47 +36,13 @@ use iwdrs::{
     session::Session,
     station::{State as IwdState, Station},
 };
-use thiserror::Error;
 
-/// A wifi network, as seen by a scan.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WifiNetwork {
-    pub ssid: String,
-    /// Signal strength normalized to 0-100.
-    pub signal_percent: u8,
-    pub security: Security,
-    /// True if iwd has a saved profile for this network (so we can skip
-    /// the passphrase prompt when reconnecting).
-    pub known: bool,
-}
+use super::{
+    KnownNetworkInfo, Security, StationState, StationStateStream, WifiError, WifiNetwork,
+    signal_to_percent,
+};
 
-/// A persisted iwd profile — a network the user previously connected to.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KnownNetworkInfo {
-    pub ssid: String,
-    pub security: Security,
-    pub hidden: bool,
-}
-
-/// Wifi security mode exposed in the UI. Collapses iwd's `NetworkType`
-/// into the four cases we actually care about.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Security {
-    Open,
-    Wep,
-    Psk,
-    /// 802.1x / EAP enterprise networks. We scan and display them but
-    /// the installer does not currently implement the connection flow
-    /// (EAP methods, certs, usernames) — the UI should disable the
-    /// connect action for these.
-    Enterprise,
-}
-
-impl Security {
-    pub fn requires_passphrase(self) -> bool {
-        matches!(self, Security::Wep | Security::Psk)
-    }
-}
+// ─── type conversions ───────────────────────────────────────────────────
 
 impl From<NetworkType> for Security {
     fn from(nt: NetworkType) -> Self {
@@ -93,31 +55,21 @@ impl From<NetworkType> for Security {
     }
 }
 
-/// Re-export iwd's station state so GUI/TUI callers don't need to pull in
-/// iwdrs directly.
-pub use iwdrs::station::State as StationState;
-
-#[derive(Debug, Error)]
-pub enum WifiError {
-    #[error("iwd is not available on the system bus")]
-    NotAvailable,
-    #[error("no wireless adapter found")]
-    NoAdapter,
-    #[error("no station exposed by iwd (adapter may be powered off)")]
-    NoStation,
-    #[error("network {0:?} not found in scan results")]
-    NetworkNotFound(String),
-    #[error("passphrase required for secured network {0:?}")]
-    PassphraseRequired(String),
-    #[error("connect failed: {0}")]
-    ConnectFailed(String),
-    #[error("scan failed")]
-    ScanFailed,
-    #[error("d-bus error: {0}")]
-    Dbus(#[from] zbus::Error),
+impl From<IwdState> for StationState {
+    fn from(s: IwdState) -> Self {
+        match s {
+            IwdState::Connected => StationState::Connected,
+            IwdState::Disconnected => StationState::Disconnected,
+            IwdState::Connecting => StationState::Connecting,
+            IwdState::Disconnecting => StationState::Disconnecting,
+            IwdState::Roaming => StationState::Roaming,
+        }
+    }
 }
 
-/// Convert `iwdrs::error::IWDError<ConnectError>` into our error type.
+/// Convert `iwdrs::error::IWDError<ConnectError>` into our backend-
+/// agnostic error type. `OperationError` carries an iwd-specific
+/// `ConnectError` enum whose `Display` impl we reuse for the message.
 impl From<IWDError<ConnectError>> for WifiError {
     fn from(err: IWDError<ConnectError>) -> Self {
         match err {
@@ -127,38 +79,28 @@ impl From<IWDError<ConnectError>> for WifiError {
     }
 }
 
+// ─── public API (re-exported as `wifi::*` from mod.rs) ──────────────────
+
 /// Fast probe: is iwd running and reachable on the system bus?
 ///
-/// Returns `false` on a system where iwd is not installed (our `--fast`
+/// Returns `false` on a system where iwd is not installed (the `--fast`
 /// test ISO), where the daemon is masked, or where the D-Bus connection
 /// otherwise fails. This is the gate the GUI corner widget uses to
 /// decide whether to enable the rich wifi-management popup.
-pub async fn iwd_available() -> bool {
+pub async fn backend_available() -> bool {
     Session::new().await.is_ok()
 }
 
-/// Find all wireless network interface names present in `/sys/class/net`.
-///
-/// Kept as a sync helper — `/sys` reads are cheap and this is useful
-/// before we've even confirmed iwd is running (e.g. to decide whether
-/// to show "no wifi hardware" vs "iwd not running").
-pub fn detect_wifi_interfaces() -> Vec<String> {
-    let net_path = Path::new("/sys/class/net");
-    let Ok(entries) = std::fs::read_dir(net_path) else {
-        return Vec::new();
-    };
-    entries
-        .flatten()
-        .filter(|e| e.path().join("wireless").is_dir())
-        .filter_map(|e| e.file_name().into_string().ok())
-        .collect()
-}
+/// Compatibility alias. The welcome-view controller uses the generic
+/// name `iwd_available` in log messages and state property names;
+/// kept as an alias so the slint-ui layer doesn't need to change when
+/// the backend is swapped.
+pub use backend_available as iwd_available;
 
-/// Trigger a scan on the first station and return all discovered networks.
-///
-/// The returned list is ordered by iwd's own ranking (roughly strongest
-/// first). Networks already in iwd's known-network database are flagged
-/// with `known: true`.
+/// Trigger a scan on the first station and return all discovered
+/// networks, sorted roughly strongest-first by iwd itself. Networks
+/// already in iwd's known-network database are flagged with
+/// `known: true`.
 pub async fn scan_networks() -> Result<Vec<WifiNetwork>, WifiError> {
     let session = Session::new().await.map_err(|_| WifiError::NotAvailable)?;
     let station = first_station(&session).await?;
@@ -214,9 +156,9 @@ pub async fn scan_networks() -> Result<Vec<WifiNetwork>, WifiError> {
 /// `passphrase` must be `Some(...)`; omitting it returns
 /// `WifiError::PassphraseRequired`.
 ///
-/// This returns once iwd reports the connect call complete — success
-/// means the station reached the Connected state at layer 2. Callers
-/// that need to verify internet connectivity should follow up with
+/// Returns once iwd reports the connect call complete — success means
+/// the station reached the Connected state at layer 2. Callers that
+/// need to verify internet connectivity should follow up with
 /// `crate::system::net::check_internet`.
 pub async fn connect(ssid: &str, passphrase: Option<String>) -> Result<(), WifiError> {
     let session = Session::new().await.map_err(|_| WifiError::NotAvailable)?;
@@ -286,13 +228,14 @@ pub async fn disconnect() -> Result<(), WifiError> {
 pub async fn station_state() -> Result<StationState, WifiError> {
     let session = Session::new().await.map_err(|_| WifiError::NotAvailable)?;
     let station = first_station(&session).await?;
-    station.state().await.map_err(WifiError::Dbus)
+    let state = station.state().await.map_err(WifiError::Dbus)?;
+    Ok(state.into())
 }
 
 /// `true` if the station is in the Connected state. Quick layer-2 check;
 /// for "can reach the internet" use `system::net::check_internet`.
 pub async fn check_connected() -> Result<bool, WifiError> {
-    Ok(matches!(station_state().await?, IwdState::Connected))
+    Ok(matches!(station_state().await?, StationState::Connected))
 }
 
 /// Return the SSID of the currently-connected network, if any.
@@ -309,18 +252,19 @@ pub async fn current_ssid() -> Result<Option<String>, WifiError> {
 /// emits `PropertiesChanged` on the `State` property, starting with the
 /// current value. Used by the GUI to keep the corner widget in sync
 /// without polling.
-/// Boxed stream alias used by [`watch_station_state`] to work around the
-/// 2024-edition `impl Trait` capture rules: iwdrs's `state_stream` return
-/// type is declared `+ 'static` but the new capture rules still pull in
-/// the borrow of `&station` from the `.await` call. Boxing into a
-/// `dyn Stream` with an explicit `'static` bound strips those borrows.
-pub type StationStateStream =
-    Pin<Box<dyn Stream<Item = zbus::Result<StationState>> + Send + 'static>>;
-
 pub async fn watch_station_state() -> Result<StationStateStream, WifiError> {
     let session = Session::new().await.map_err(|_| WifiError::NotAvailable)?;
     let station = first_station(&session).await?;
     let stream = station.state_stream().await.map_err(WifiError::Dbus)?;
+
+    // Map iwdrs's `Item = zbus::Result<IwdState>` onto our common
+    // `Item = Result<StationState, WifiError>` so callers don't need to
+    // care which backend produced the stream.
+    let mapped = stream.map(|r| match r {
+        Ok(s) => Ok(StationState::from(s)),
+        Err(e) => Err(WifiError::Dbus(e)),
+    });
+
     // The underlying Proxy inside the stream already holds its own
     // Connection clone, so dropping `session`/`station` is safe at the
     // D-Bus level. We leak them anyway because the 2024 capture rules
@@ -328,7 +272,7 @@ pub async fn watch_station_state() -> Result<StationStateStream, WifiError> {
     // Arc-ish handles per subscriber (the GUI opens at most one).
     std::mem::forget(station);
     std::mem::forget(session);
-    Ok(Box::pin(stream))
+    Ok(Box::pin(mapped))
 }
 
 /// Enumerate saved networks in iwd's known-network database.
@@ -376,7 +320,7 @@ pub async fn forget_network(ssid: &str) -> Result<(), WifiError> {
     Ok(())
 }
 
-// ─── internal helpers ───────────────────────────────────────────────────────
+// ─── internal helpers ───────────────────────────────────────────────────
 
 /// Return the first station exposed by iwd.
 ///
@@ -407,27 +351,6 @@ async fn find_network_by_ssid(station: &Station, ssid: &str) -> Result<Option<Ne
         }
     }
     Ok(None)
-}
-
-/// Map iwd's dBm*100 signal strength to a 0-100 percentage.
-///
-/// iwd reports signal strength in hundredths of a dBm, i.e. `-5000`
-/// means `-50 dBm`. The classic mapping (also used by NetworkManager's
-/// `nm_wifi_utils_level_to_quality`) is:
-///
-/// * `≥ -50 dBm` → 100
-/// * `≤ -100 dBm` → 0
-/// * linear interpolation in between
-fn signal_to_percent(dbm_times_100: i16) -> u8 {
-    let dbm = dbm_times_100 as i32 / 100;
-    if dbm >= -50 {
-        100
-    } else if dbm <= -100 {
-        0
-    } else {
-        // dbm in (-100, -50) → 2 * (dbm + 100)
-        ((dbm + 100) * 2).clamp(0, 100) as u8
-    }
 }
 
 /// One-shot passphrase agent: holds a single passphrase and returns it
@@ -476,35 +399,5 @@ impl Agent for PasswordAgent {
         _user_name: Option<&String>,
     ) -> impl std::future::Future<Output = Result<String, Canceled>> + Send {
         std::future::ready(Err(Canceled {}))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_detect_wifi_interfaces_does_not_panic() {
-        // Just verify it doesn't panic — result depends on the host machine.
-        let _ = detect_wifi_interfaces();
-    }
-
-    #[test]
-    fn test_signal_to_percent_strong() {
-        assert_eq!(signal_to_percent(-4000), 100); // -40 dBm, saturates at -50
-        assert_eq!(signal_to_percent(-5000), 100); // -50 dBm
-    }
-
-    #[test]
-    fn test_signal_to_percent_weak() {
-        assert_eq!(signal_to_percent(-10000), 0); // -100 dBm, zero
-        assert_eq!(signal_to_percent(-11000), 0); // -110 dBm, clamped
-    }
-
-    #[test]
-    fn test_signal_to_percent_mid() {
-        assert_eq!(signal_to_percent(-7500), 50); // -75 dBm
-        assert_eq!(signal_to_percent(-6000), 80); // -60 dBm
-        assert_eq!(signal_to_percent(-9000), 20); // -90 dBm
     }
 }

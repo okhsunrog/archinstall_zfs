@@ -13,7 +13,7 @@ color-eyre.workspace = true
 fs_extra = "1.3.0"
 futures.workspace = true
 hex = "0.4.3"
-iwdrs = { version = "0.2.6", default-features = false, features = ["tokio"] }
+iwdrs = { version = "0.2.6", default-features = false, features = ["tokio"], optional = true }
 lzma-rs = "0.3.0"
 nix = { workspace = true, features = ["fs", "mount", "process", "signal"] }
 pacmanconf = "3.1.0"
@@ -33,6 +33,17 @@ tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 zbus = { version = "5.14.0", default-features = false, features = ["tokio"] }
+
+[features]
+# Exactly one wifi backend must be enabled. Consumers (slint-ui, tui)
+# wire the appropriate one via their own feature flags; the `wifi-iwd`
+# default here keeps `cargo test -p archinstall-zfs-core` and any
+# consumer that doesn't pass --no-default-features building cleanly
+# against iwd (the installer ISO's wifi daemon).
+default = ["wifi-iwd"]
+wifi-iwd = ["dep:iwdrs"]
+wifi-nm = []   # populated in a follow-up commit with nmrs
+wifi-mock = [] # populated in a follow-up commit
 
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["async_tokio"] }
