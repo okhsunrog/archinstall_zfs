@@ -2,20 +2,12 @@
 members = ["core", "tui", "slint-ui", "xtask"]
 resolver = "3"
 
-# Pin nmrs to upstream master until a crates.io release ships with
-# the Send-bound fix for `for_each_access_point` (cachebag/nmrs#330)
-# and the stale nmrs-aur gitlink removal. Both are merged to master;
-# the latest crates.io release (2.2.0) predates them. Remove this
-# patch block and bump core's nmrs version constraint once a new
-# release is cut.
-[patch.crates-io]
-nmrs = { git = "https://github.com/cachebag/nmrs.git", rev = "352f57e" }
-
 [workspace.dependencies]
 clap = { version = "4.6.0", features = ["derive"] }
 color-eyre = "0.6.5"
 futures = "0.3.32"
 nix = { version = "0.31.2", features = ["fs"] }
+nmrs = "2.3.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 sublime_fuzzy = "0.7.0"
