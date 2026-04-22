@@ -251,6 +251,20 @@ pub async fn run_install(
 
                     archinstall_zfs_core::zfs::pool::export_pool(&*r, &pool_name)?;
                     archinstall_zfs_core::zfs::pool::import_pool_no_mount(&*r, &pool_name, &mountpoint)?;
+                    match encryption {
+                        ZfsEncryptionMode::Pool => {
+                            archinstall_zfs_core::zfs::encryption::load_key(
+                                &*r, &pool_name, &key_path,
+                            )?;
+                        }
+                        ZfsEncryptionMode::Dataset => {
+                            let base = format!("{pool_name}/{prefix}");
+                            archinstall_zfs_core::zfs::encryption::load_key(
+                                &*r, &base, &key_path,
+                            )?;
+                        }
+                        ZfsEncryptionMode::None => {}
+                    }
                 }
                 InstallationMode::ExistingPool => {
                     archinstall_zfs_core::zfs::pool::import_pool_no_mount(&*r, &pool_name, &mountpoint)?;
