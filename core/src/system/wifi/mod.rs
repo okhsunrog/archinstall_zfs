@@ -4,12 +4,12 @@
 //! Cargo feature:
 //!
 //!   * `wifi-iwd`  — talk to `iwd` over D-Bus via the `iwdrs` crate.
-//!                   Used on the installer ISO where iwd is the wifi daemon.
+//!     Used on the installer ISO where iwd is the wifi daemon.
 //!   * `wifi-nm`   — talk to NetworkManager over D-Bus via `nmrs`.
-//!                   Used during desktop development (most Arch desktops
-//!                   run NetworkManager, not iwd directly).
+//!     Used during desktop development (most Arch desktops
+//!     run NetworkManager, not iwd directly).
 //!   * `wifi-mock` — canned data with simulated delays. Used in tests/CI
-//!                   and on hosts that have no wifi stack at all.
+//!     and on hosts that have no wifi stack at all.
 //!
 //! The public free-function API is identical across backends. Whichever
 //! module is gated on the active feature is re-exported with `pub use`,
