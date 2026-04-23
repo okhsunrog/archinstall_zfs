@@ -62,7 +62,9 @@ build-main MODE="precompiled" KERNEL="linux-lts":
     just _render-profile {{MODE}} {{KERNEL}}
     just _prepare-binary
     @echo "Building ISO..."
+    sudo rm -rf gen_iso/workdir
     sudo mkarchiso -v -w "gen_iso/workdir" -o {{ISO_OUT}} {{PROFILE_OUT}}
+    sudo chown -R "$(id -u):$(id -g)" {{ISO_OUT}} gen_iso/workdir
     @echo "ISO built in {{ISO_OUT}}"
 
 # Build testing ISO (fast, minimal packages, serial+SSH enabled).
@@ -74,7 +76,9 @@ build-test MODE="precompiled" KERNEL="linux-lts":
     just _render-profile {{MODE}} {{KERNEL}} "--fast"
     just _prepare-binary
     @echo "Building ISO..."
+    sudo rm -rf gen_iso/workdir
     sudo mkarchiso -v -w "gen_iso/workdir" -o {{ISO_OUT}} {{PROFILE_OUT}}
+    sudo chown -R "$(id -u):$(id -g)" {{ISO_OUT}} gen_iso/workdir
     @echo "Testing ISO built in {{ISO_OUT}}"
 
 # Build full-featured ISO locally (same package set as CI releases, includes
@@ -88,7 +92,9 @@ build-test-full MODE="precompiled" KERNEL="linux-lts":
     just _render-profile {{MODE}} {{KERNEL}}
     just _prepare-binary
     @echo "Building ISO..."
+    sudo rm -rf gen_iso/workdir
     sudo mkarchiso -v -w "gen_iso/workdir" -o {{ISO_OUT}} {{PROFILE_OUT}}
+    sudo chown -R "$(id -u):$(id -g)" {{ISO_OUT}} gen_iso/workdir
     @echo "Full testing ISO built in {{ISO_OUT}}"
 
 # List available ISOs
