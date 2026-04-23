@@ -8,7 +8,7 @@ using the xtask QEMU harness with a KDE Plasma profile (574 packages, ~1.3 GB).
 ```sh
 cargo build --release
 cargo xtask bench-downloads \
-    --config xtask/configs/qemu_full_disk_kde.json \
+    --profile kde \
     --concurrency 3,5,10,20 \
     --samples 3 \
     --out-dir bench-results-kde \

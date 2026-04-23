@@ -182,6 +182,14 @@ test-install *ARGS:
 test-boot *ARGS:
     cargo xtask test-boot {{ARGS}}
 
+# Install with pool-level ZFS encryption; regression cover for load-key-after-reimport
+test-install-encrypted-pool *ARGS:
+    just test-install --encryption pool --zfs-mode dkms {{ARGS}}
+
+# Install with dataset-level ZFS encryption; regression cover for load-key-after-reimport
+test-install-encrypted-dataset *ARGS:
+    just test-install --encryption dataset --zfs-mode dkms {{ARGS}}
+
 # ─── Cleanup ───────────────────────────────────────────
 
 # Clean all build artifacts

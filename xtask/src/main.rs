@@ -1,13 +1,34 @@
 mod iso;
 mod qemu;
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+use serde_json::{Value, json};
 
 use qemu::QemuVm;
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum ZfsModeOpt {
+    Precompiled,
+    Dkms,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum EncryptionOpt {
+    None,
+    Pool,
+    Dataset,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum InitOpt {
+    Dracut,
+    Mkinitcpio,
+}
 
 #[derive(Parser)]
 #[command(name = "xtask", about = "Development tasks for archinstall-zfs-rs")]
@@ -92,8 +113,8 @@ enum Commands {
 
 #[derive(Parser, Clone)]
 struct TestOpts {
-    /// Path to JSON config file
-    #[arg(long, default_value = "xtask/configs/qemu_full_disk.json")]
+    /// Path to base JSON config file (overrides layered on top)
+    #[arg(long, default_value = "xtask/configs/default.json")]
     config: PathBuf,
 
     /// Path to installer binary
@@ -127,6 +148,31 @@ struct TestOpts {
     /// SSH/boot timeout in seconds
     #[arg(long, default_value_t = 120)]
     timeout: u64,
+
+    // ── Config overrides (layered on --config) ──────────
+    /// Override zfs_module_mode
+    #[arg(long, value_enum)]
+    zfs_mode: Option<ZfsModeOpt>,
+
+    /// Override zfs_encryption_mode
+    #[arg(long, value_enum)]
+    encryption: Option<EncryptionOpt>,
+
+    /// Passphrase for --encryption pool|dataset (hardcoded test default)
+    #[arg(long, default_value = "test12345")]
+    encryption_password: String,
+
+    /// Override init_system
+    #[arg(long, value_enum)]
+    init_system: Option<InitOpt>,
+
+    /// Replace aur_packages (comma-separated)
+    #[arg(long, value_delimiter = ',')]
+    aur_packages: Option<Vec<String>>,
+
+    /// Set profile_selection.profile (e.g. "kde")
+    #[arg(long)]
+    profile: Option<String>,
 }
 
 fn apply_tmpfs(mut opts: TestOpts) -> TestOpts {
@@ -142,18 +188,98 @@ fn apply_tmpfs(mut opts: TestOpts) -> TestOpts {
     opts
 }
 
+/// Apply CLI overrides to the base config, write the merged JSON to a temp
+/// file, and point opts.config at it. Downstream code then reads the merged
+/// config transparently (including detect_init_system and scp_to).
+fn materialize_config(mut opts: TestOpts) -> Result<TestOpts, String> {
+    let content = fs::read_to_string(&opts.config)
+        .map_err(|e| format!("read {}: {e}", opts.config.display()))?;
+    let mut json: Value = serde_json::from_str(&content)
+        .map_err(|e| format!("parse {}: {e}", opts.config.display()))?;
+    let obj = json
+        .as_object_mut()
+        .ok_or_else(|| "config JSON must be an object".to_string())?;
+
+    let mut changed = false;
+    if let Some(m) = opts.zfs_mode {
+        obj.insert(
+            "zfs_module_mode".into(),
+            json!(match m {
+                ZfsModeOpt::Precompiled => "precompiled",
+                ZfsModeOpt::Dkms => "dkms",
+            }),
+        );
+        changed = true;
+    }
+    if let Some(e) = opts.encryption {
+        let mode = match e {
+            EncryptionOpt::None => "none",
+            EncryptionOpt::Pool => "pool",
+            EncryptionOpt::Dataset => "dataset",
+        };
+        obj.insert("zfs_encryption_mode".into(), json!(mode));
+        if e != EncryptionOpt::None {
+            obj.insert(
+                "zfs_encryption_password".into(),
+                json!(opts.encryption_password),
+            );
+        }
+        changed = true;
+    }
+    if let Some(i) = opts.init_system {
+        obj.insert(
+            "init_system".into(),
+            json!(match i {
+                InitOpt::Dracut => "dracut",
+                InitOpt::Mkinitcpio => "mkinitcpio",
+            }),
+        );
+        changed = true;
+    }
+    if let Some(ref pkgs) = opts.aur_packages {
+        obj.insert("aur_packages".into(), json!(pkgs));
+        changed = true;
+    }
+    if let Some(ref p) = opts.profile {
+        obj.insert(
+            "profile_selection".into(),
+            json!({
+                "profile": p,
+                "optional_packages": [],
+                "display_manager_override": null,
+            }),
+        );
+        changed = true;
+    }
+
+    if changed {
+        let tmp = std::env::temp_dir().join("archzfs-xtask-merged.json");
+        fs::write(&tmp, serde_json::to_string_pretty(&json).unwrap())
+            .map_err(|e| format!("write merged config: {e}"))?;
+        eprintln!("Merged config written to {}", tmp.display());
+        opts.config = tmp;
+    }
+
+    Ok(opts)
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
-        Commands::TestVm { opts } => cmd_test_vm(apply_tmpfs(opts)),
-        Commands::TestInstall { opts } => cmd_test_install(apply_tmpfs(opts)),
-        Commands::TestBoot { opts } => cmd_test_boot(apply_tmpfs(opts)),
+        Commands::TestVm { opts } => materialize_config(apply_tmpfs(opts)).and_then(cmd_test_vm),
+        Commands::TestInstall { opts } => {
+            materialize_config(apply_tmpfs(opts)).and_then(cmd_test_install)
+        }
+        Commands::TestBoot { opts } => {
+            materialize_config(apply_tmpfs(opts)).and_then(cmd_test_boot)
+        }
         Commands::BenchDownloads {
             opts,
             concurrency,
             out_dir,
             samples,
-        } => cmd_bench_downloads(apply_tmpfs(opts), &concurrency, &out_dir, samples),
+        } => materialize_config(apply_tmpfs(opts))
+            .and_then(|o| cmd_bench_downloads(o, &concurrency, &out_dir, samples)),
         Commands::AnalyzeMetrics { dir } => cmd_analyze_metrics(&dir),
         Commands::RenderProfile {
             profile_dir,
