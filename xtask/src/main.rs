@@ -207,7 +207,7 @@ fn cmd_test_install(opts: TestOpts) -> Result<(), String> {
 
     // Boot ISO
     eprintln!("[2/4] Booting ISO VM on port {}", opts.iso_port);
-    let iso = qemu::find_latest_testing_iso();
+    let iso = qemu::find_latest_iso();
     let mut vm = QemuVm::boot_iso(&opts.disk, &opts.vars, &iso, opts.iso_port);
     if !vm.wait_for_ssh(timeout) {
         return Err(format!("ISO VM not SSH-accessible within {timeout:?}"));

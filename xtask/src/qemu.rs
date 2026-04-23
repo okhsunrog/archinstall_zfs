@@ -309,20 +309,27 @@ fn find_ovmf_vars_template() -> PathBuf {
     panic!("OVMF_VARS.4m.fd not found. Install edk2-ovmf.");
 }
 
-pub fn find_latest_testing_iso() -> PathBuf {
+pub fn find_latest_iso() -> PathBuf {
     let out_dir = PathBuf::from("gen_iso/out");
-    let mut isos: Vec<PathBuf> = std::fs::read_dir(&out_dir)
-        .unwrap_or_else(|_| panic!("gen_iso/out not found. Run 'just build-test' first."))
+    let mut isos: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(&out_dir)
+        .unwrap_or_else(|_| panic!("gen_iso/out not found. Run 'just iso-test' first."))
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| {
-            p.extension().is_some_and(|e| e == "iso") && p.to_string_lossy().contains("testing")
+            p.extension().is_some_and(|e| e == "iso")
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("archzfs-"))
+        })
+        .filter_map(|p| {
+            let mtime = std::fs::metadata(&p).ok()?.modified().ok()?;
+            Some((mtime, p))
         })
         .collect();
-    isos.sort();
-    isos.last()
-        .cloned()
-        .expect("No testing ISO found. Run 'just build-test' first.")
+    isos.sort_by_key(|(mtime, _)| *mtime);
+    isos.pop()
+        .map(|(_, p)| p)
+        .expect("No ISO found in gen_iso/out. Run 'just iso-test' or 'just iso-full' first.")
 }
 
 pub fn create_fresh_disk(path: &Path) {

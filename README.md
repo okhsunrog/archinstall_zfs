@@ -243,12 +243,13 @@ The only remaining shell calls are:
 
 ### Common commands
 ```bash
-just build          # Build release binaries
-just test           # Run cargo tests
+just cargo-build    # Build release binaries
+just cargo-test     # Run cargo unit tests
 just lint           # Run clippy
 just fmt            # Format code
 
-just build-test     # Build testing ISO
+just iso-test       # Build minimal testing ISO (fast, QEMU-oriented)
+just iso-full       # Build full-featured ISO (bare-metal testing)
 just test-vm        # Full cycle: fresh disk, install, boot, verify (13 checks)
 just test-install   # Install only
 just test-boot      # Boot and verify existing installation

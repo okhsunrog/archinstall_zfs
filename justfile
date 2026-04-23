@@ -10,14 +10,14 @@ QEMU_SCRIPT := "gen_iso/run-qemu.sh"
 BINARY := "target/release/azfs-tui"
 BINARY_SLINT := "target/release/azfs"
 
-# ─── Build ──────────────────────────────────────────────
+# ─── Cargo ──────────────────────────────────────────────
 
 # Build installer binaries (release)
-build:
+cargo-build:
     cargo build --release --bin azfs --bin azfs-tui
 
-# Run cargo tests
-test:
+# Run cargo unit tests
+cargo-test:
     cargo test --workspace
 
 # Run clippy
@@ -33,7 +33,7 @@ fmt:
     cargo fmt --all
 
 # All checks
-check: fmt-check lint test
+check: fmt-check lint cargo-test
 
 # ─── ISO Building ──────────────────────────────────────
 
@@ -54,25 +54,14 @@ _prepare-binary:
         install -m 0755 {{BINARY_SLINT}} {{PROFILE_OUT}}/airootfs/usr/local/bin/azfs; \
     fi
 
-# Build production ISO
-# Usage: just build-main [pre|dkms] [linux|linux-lts|linux-zen]
-build-main MODE="precompiled" KERNEL="linux-lts":
-    @echo "Building production ISO (mode={{MODE}}, kernel={{KERNEL}})"
-    just build
-    just _render-profile {{MODE}} {{KERNEL}}
-    just _prepare-binary
-    @echo "Building ISO..."
-    sudo rm -rf gen_iso/workdir
-    sudo mkarchiso -v -w "gen_iso/workdir" -o {{ISO_OUT}} {{PROFILE_OUT}}
-    sudo chown -R "$(id -u):$(id -g)" {{ISO_OUT}} gen_iso/workdir
-    @echo "ISO built in {{ISO_OUT}}"
-
-# Build testing ISO (fast, minimal packages, serial+SSH enabled).
-# Good for QEMU iteration and CI. Skips wifi/bluetooth/firmware to stay small.
-# Usage: just build-test [pre|dkms] [linux|linux-lts|linux-zen]
-build-test MODE="precompiled" KERNEL="linux-lts":
+# Fast, minimal packages, serial+SSH enabled. Skips wifi/bluetooth/firmware.
+# For QEMU iteration and CI.
+# Usage: just iso-test [--mode precompiled|dkms] [--kernel linux|linux-lts|linux-zen]
+[arg("MODE", long="mode")]
+[arg("KERNEL", long="kernel")]
+iso-test MODE="precompiled" KERNEL="linux-lts":
     @echo "Building testing ISO (mode={{MODE}}, kernel={{KERNEL}})"
-    just build
+    just cargo-build
     just _render-profile {{MODE}} {{KERNEL}} "--fast"
     just _prepare-binary
     @echo "Building ISO..."
@@ -81,28 +70,29 @@ build-test MODE="precompiled" KERNEL="linux-lts":
     sudo chown -R "$(id -u):$(id -g)" {{ISO_OUT}} gen_iso/workdir
     @echo "Testing ISO built in {{ISO_OUT}}"
 
-# Build full-featured ISO locally (same package set as CI releases, includes
-# iwd/wireless-regdb/linux-firmware/etc). Use this for bare-metal testing of
-# features that QEMU cannot exercise — wifi, specific GPU drivers, etc.
-# Slower than build-test: larger squashfs, more packages to pacstrap.
-# Usage: just build-test-full [pre|dkms] [linux|linux-lts|linux-zen]
-build-test-full MODE="precompiled" KERNEL="linux-lts":
-    @echo "Building full testing ISO (mode={{MODE}}, kernel={{KERNEL}})"
-    just build
+# Same package set as CI releases (iwd, wireless-regdb, linux-firmware, etc).
+# Slower than iso-test: larger squashfs, more packages to pacstrap.
+# For bare-metal testing of features QEMU can't exercise.
+# Usage: just iso-full [--mode precompiled|dkms] [--kernel linux|linux-lts|linux-zen]
+[arg("MODE", long="mode")]
+[arg("KERNEL", long="kernel")]
+iso-full MODE="precompiled" KERNEL="linux-lts":
+    @echo "Building full ISO (mode={{MODE}}, kernel={{KERNEL}})"
+    just cargo-build
     just _render-profile {{MODE}} {{KERNEL}}
     just _prepare-binary
     @echo "Building ISO..."
     sudo rm -rf gen_iso/workdir
     sudo mkarchiso -v -w "gen_iso/workdir" -o {{ISO_OUT}} {{PROFILE_OUT}}
     sudo chown -R "$(id -u):$(id -g)" {{ISO_OUT}} gen_iso/workdir
-    @echo "Full testing ISO built in {{ISO_OUT}}"
+    @echo "Full ISO built in {{ISO_OUT}}"
 
 # List available ISOs
-list-isos:
-    @ls -lht {{ISO_OUT}}/*.iso 2>/dev/null || echo "No ISOs found. Run 'just build-test' first."
+iso-list:
+    @ls -lht {{ISO_OUT}}/*.iso 2>/dev/null || echo "No ISOs found. Run 'just iso-test' first."
 
 # Clean ISO build artifacts
-clean-iso:
+iso-clean:
     rm -rf {{PROFILE_OUT}} gen_iso/workdir
     @echo "ISO build artifacts cleaned"
 
@@ -132,22 +122,22 @@ qemu-refresh:
 
 # ─── QEMU Execution ───────────────────────────────────
 
-# Boot latest testing ISO in QEMU with GUI
+# Boot latest ISO in QEMU with GUI
 qemu-install:
     #!/usr/bin/env bash
     if [[ ! -f {{DISK_IMAGE}} ]]; then just qemu-create-disk; fi
     if [[ ! -f {{UEFI_VARS}} ]]; then just qemu-setup-uefi; fi
-    ISO=$(ls -1t {{ISO_OUT}}/archzfs-*-testing-*.iso 2>/dev/null | head -n1)
-    if [[ -z "$ISO" ]]; then echo "No testing ISO found. Run 'just build-test'."; exit 1; fi
+    ISO=$(ls -1t {{ISO_OUT}}/archzfs-*.iso 2>/dev/null | head -n1)
+    if [[ -z "$ISO" ]]; then echo "No ISO found. Run 'just iso-test' or 'just iso-full'."; exit 1; fi
     bash {{QEMU_SCRIPT}} -i "$ISO" -D {{DISK_IMAGE}} -U {{UEFI_VARS}}
 
-# Boot latest testing ISO in QEMU with serial console
+# Boot latest ISO in QEMU with serial console
 qemu-install-serial:
     #!/usr/bin/env bash
     if [[ ! -f {{DISK_IMAGE}} ]]; then just qemu-create-disk; fi
     if [[ ! -f {{UEFI_VARS}} ]]; then just qemu-setup-uefi; fi
-    ISO=$(ls -1t {{ISO_OUT}}/archzfs-*-testing-*.iso 2>/dev/null | head -n1)
-    if [[ -z "$ISO" ]]; then echo "No testing ISO found. Run 'just build-test'."; exit 1; fi
+    ISO=$(ls -1t {{ISO_OUT}}/archzfs-*.iso 2>/dev/null | head -n1)
+    if [[ -z "$ISO" ]]; then echo "No ISO found. Run 'just iso-test' or 'just iso-full'."; exit 1; fi
     bash {{QEMU_SCRIPT}} -i "$ISO" -D {{DISK_IMAGE}} -U {{UEFI_VARS}} -S
 
 # Boot existing installation in QEMU with GUI
@@ -180,12 +170,12 @@ upload:
 
 # Full cycle: fresh disk, install, boot, verify
 test-vm *ARGS:
-    just build
+    just cargo-build
     cargo xtask test-vm {{ARGS}}
 
 # Install only: fresh disk, run installer, verify exit code
 test-install *ARGS:
-    just build
+    just cargo-build
     cargo xtask test-install {{ARGS}}
 
 # Boot only: boot existing disk, verify system health
@@ -195,6 +185,6 @@ test-boot *ARGS:
 # ─── Cleanup ───────────────────────────────────────────
 
 # Clean all build artifacts
-clean: clean-iso
+clean: iso-clean
     cargo clean
     rm -f {{DISK_IMAGE}} {{UEFI_VARS}}
