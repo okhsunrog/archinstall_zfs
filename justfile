@@ -30,7 +30,7 @@ cargo-build-container:
         -e CARGO_TARGET_DIR=/cargo-target \
         -e HOST_UID="$(id -u)" \
         -e HOST_GID="$(id -g)" \
-        -v "{{justfile_directory()}}:/work" \
+        -v "{{justfile_directory()}}:/work:z" \
         -v "{{CARGO_TARGET_VOLUME}}:/cargo-target" \
         -v "{{CARGO_REGISTRY_VOLUME}}:/cargo-registry" \
         -w /work \
@@ -183,9 +183,9 @@ _mkarchiso-container:
         --privileged \
         -e HOST_UID="$(id -u)" \
         -e HOST_GID="$(id -g)" \
-        -v "{{justfile_directory()}}/{{PROFILE_OUT}}:/profile:ro" \
-        -v "{{justfile_directory()}}/gen_iso/workdir:/workdir" \
-        -v "{{justfile_directory()}}/{{ISO_OUT}}:/out" \
+        -v "{{justfile_directory()}}/{{PROFILE_OUT}}:/profile:ro,z" \
+        -v "{{justfile_directory()}}/gen_iso/workdir:/workdir:z" \
+        -v "{{justfile_directory()}}/{{ISO_OUT}}:/out:z" \
         -v "{{PACMAN_CACHE_VOLUME}}:/var/cache/pacman/pkg" \
         {{CONTAINER_IMAGE}} \
         bash -c 'mkarchiso -v -w /workdir -o /out /profile && chown -R "$HOST_UID:$HOST_GID" /workdir /out'
