@@ -39,7 +39,7 @@ pub fn dataset_encryption_properties(key_path: &Path) -> Vec<(&'static str, Stri
 }
 
 pub fn load_key(runner: &dyn CommandRunner, pool: &str, key_path: &Path) -> Result<()> {
-    let key_loc = format!("keylocation=file://{}", key_path.display());
+    let key_loc = format!("file://{}", key_path.display());
     let output = run_zfs(runner, &["load-key", "-L", &key_loc, pool])?;
     check_exit(&output, &format!("zfs load-key {pool}"))?;
     Ok(())
