@@ -98,12 +98,19 @@ run_image() {
     fi
 
     if [[ "$boot_type" == 'uefi' ]]; then
-        # Handle UEFI Code file
+        # Handle UEFI Code file. Arch ships OVMF_CODE.4m.fd; Fedora/Debian
+        # ship OVMF_CODE.fd (no 4m suffix) — fall back to the bare name.
         if [[ -z "${uefi_code_file}" ]]; then
             if [[ "${secure_boot}" == 'on' ]]; then
                 uefi_code_file=$(find_ovmf_file "OVMF_CODE.secboot.4m.fd")
+                if [[ ! -f "${uefi_code_file}" ]]; then
+                    uefi_code_file=$(find_ovmf_file "OVMF_CODE.secboot.fd")
+                fi
             else
                 uefi_code_file=$(find_ovmf_file "OVMF_CODE.4m.fd")
+                if [[ ! -f "${uefi_code_file}" ]]; then
+                    uefi_code_file=$(find_ovmf_file "OVMF_CODE.fd")
+                fi
             fi
         fi
 

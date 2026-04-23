@@ -5,3 +5,8 @@ gen_iso/arch.qcow2
 gen_iso/my_vars.fd
 gen_iso/profile_rendered/
 test-install.log
+
+# Local direnv / nix-direnv state (opt-in per user via
+# `echo 'use flake' > .envrc && direnv allow`; not a project convention).
+.envrc
+.direnv/

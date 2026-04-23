@@ -11,12 +11,34 @@ BINARY := "target/release/azfs-tui"
 BINARY_SLINT := "target/release/azfs"
 CONTAINER_IMAGE := "ghcr.io/okhsunrog/archinstall_zfs/ci:latest"
 PACMAN_CACHE_VOLUME := "archzfs-pacman-cache"
+CARGO_TARGET_VOLUME := "archzfs-cargo-target"
+CARGO_REGISTRY_VOLUME := "archzfs-cargo-registry"
 
 # ─── Cargo ──────────────────────────────────────────────
 
-# Build installer binaries (release)
+# Requires libalpm on the host (Arch, or any distro inside `nix develop`).
+# Native release build of azfs + azfs-tui + xtask.
 cargo-build:
-    cargo build --release --bin azfs --bin azfs-tui
+    cargo build --release --bin azfs --bin azfs-tui --bin xtask
+
+# For non-Arch hosts without native libalpm. Target tree and cargo registry
+# persist across runs via named volumes.
+# Release build of azfs + azfs-tui + xtask inside the CI container (Arch-glibc).
+cargo-build-container:
+    sudo podman run --rm \
+        -e CARGO_HOME=/cargo-registry \
+        -e CARGO_TARGET_DIR=/cargo-target \
+        -e HOST_UID="$(id -u)" \
+        -e HOST_GID="$(id -g)" \
+        -v "$(pwd):/work" \
+        -v "{{CARGO_TARGET_VOLUME}}:/cargo-target" \
+        -v "{{CARGO_REGISTRY_VOLUME}}:/cargo-registry" \
+        -w /work \
+        {{CONTAINER_IMAGE}} \
+        bash -c 'cargo build --release --bin azfs --bin azfs-tui --bin xtask && \
+                 mkdir -p target/release && \
+                 cp /cargo-target/release/azfs /cargo-target/release/azfs-tui /cargo-target/release/xtask target/release/ && \
+                 chown "$HOST_UID:$HOST_GID" target/release/azfs target/release/azfs-tui target/release/xtask'
 
 # Run cargo unit tests
 cargo-test:
@@ -39,9 +61,10 @@ check: fmt-check lint cargo-test
 
 # ─── ISO Building ──────────────────────────────────────
 
-# Internal: render profile templates
+# Internal: render profile templates using the prebuilt xtask binary.
+# Requires cargo-build or cargo-build-container to have run first.
 _render-profile MODE="precompiled" KERNEL="linux-lts" FAST="":
-    cargo xtask render-profile \
+    ./target/release/xtask render-profile \
         --profile-dir {{PROFILE_DIR}} \
         --out-dir {{PROFILE_OUT}} \
         --kernel {{KERNEL}} \
@@ -104,50 +127,50 @@ iso-clean:
 builder-pull:
     sudo podman pull {{CONTAINER_IMAGE}}
 
-# Inspect podman-side state (image tag/size, pacman cache size)
+# Inspect podman-side state (image + all volumes: pacman cache, cargo target, cargo registry)
 builder-info:
     #!/usr/bin/env bash
     set -eu
     sudo podman image ls --filter reference={{CONTAINER_IMAGE}} --format 'image:  {{"{{.Repository}}:{{.Tag}}"}}  size: {{"{{.Size}}"}}'
-    if sudo podman volume exists {{PACMAN_CACHE_VOLUME}}; then
-        mp=$(sudo podman volume inspect {{PACMAN_CACHE_VOLUME}} --format '{{"{{.Mountpoint}}"}}')
-        echo "volume: {{PACMAN_CACHE_VOLUME}}  mountpoint: $mp"
-        if sudo test -d "$mp"; then
-            size=$(sudo du -sh "$mp" | awk '{print $1}')
-            count=$(sudo find "$mp" -maxdepth 1 -name '*.pkg.tar.*' ! -name '*.sig' | wc -l)
-            echo "cache:  ${size} on disk, ${count} cached packages"
+    for vol in {{PACMAN_CACHE_VOLUME}} {{CARGO_TARGET_VOLUME}} {{CARGO_REGISTRY_VOLUME}}; do
+        if sudo podman volume exists "$vol"; then
+            mp=$(sudo podman volume inspect "$vol" --format '{{"{{.Mountpoint}}"}}')
+            if sudo test -d "$mp"; then
+                size=$(sudo du -sh "$mp" | awk '{print $1}')
+                echo "volume: $vol  size: $size"
+            else
+                echo "volume: $vol  (metadata only; on-disk dir not yet materialized)"
+            fi
         else
-            echo "cache:  (volume created but on-disk dir not yet materialized)"
+            echo "volume: $vol  (not yet created)"
         fi
-    else
-        echo "volume: {{PACMAN_CACHE_VOLUME}} (not yet created; will be on first iso-*-podman run)"
-    fi
+    done
 
-# Remove the image and the pacman cache volume
+# Remove the image and all named volumes (pacman cache, cargo target, cargo registry)
 builder-clean:
     -sudo podman image rm {{CONTAINER_IMAGE}}
-    -sudo podman volume rm {{PACMAN_CACHE_VOLUME}}
+    -sudo podman volume rm {{PACMAN_CACHE_VOLUME}} {{CARGO_TARGET_VOLUME}} {{CARGO_REGISTRY_VOLUME}}
 
-# Testing ISO, container-backed mkarchiso. Cargo/render-profile/prepare-binary
-# run natively on the host (need libalpm — available on Arch or in `nix develop`),
-# only mkarchiso itself runs in the container (needs archiso + privileged mounts).
+# Testing ISO fully inside the CI container: cargo, xtask render, mkarchiso.
+# Produces Arch-glibc binaries that work both on the host and inside the ISO.
+# For non-Arch hosts (Fedora/Debian/…). Only requires podman + qemu on the host.
 # Usage: just iso-test-podman [--mode precompiled|dkms] [--kernel linux|linux-lts|linux-zen]
 [arg("MODE", long="mode")]
 [arg("KERNEL", long="kernel")]
 iso-test-podman MODE="precompiled" KERNEL="linux-lts":
     @echo "Building testing ISO via podman (mode={{MODE}}, kernel={{KERNEL}})"
-    just cargo-build
+    just cargo-build-container
     just _render-profile {{MODE}} {{KERNEL}} "--fast"
     just _prepare-binary
     just _mkarchiso-container
 
-# Full ISO, container-backed mkarchiso. See iso-test-podman for host requirements.
+# Full ISO via podman. Same build path as iso-test-podman, full package set.
 # Usage: just iso-full-podman [--mode precompiled|dkms] [--kernel linux|linux-lts|linux-zen]
 [arg("MODE", long="mode")]
 [arg("KERNEL", long="kernel")]
 iso-full-podman MODE="precompiled" KERNEL="linux-lts":
     @echo "Building full ISO via podman (mode={{MODE}}, kernel={{KERNEL}})"
-    just cargo-build
+    just cargo-build-container
     just _render-profile {{MODE}} {{KERNEL}}
     just _prepare-binary
     just _mkarchiso-container
@@ -174,13 +197,19 @@ _mkarchiso-container:
 qemu-create-disk:
     qemu-img create -f qcow2 {{DISK_IMAGE}} 20G
 
-# Copy OVMF UEFI variables file
+# Arch ships OVMF_VARS.4m.fd; Fedora/Debian ship OVMF_VARS.fd (no 4m suffix).
+# Search for the 4m variant first, fall back to the bare name. Skip secboot.
+# Copy OVMF UEFI variables template into the workspace.
 qemu-setup-uefi:
     #!/usr/bin/env bash
-    OVMF_VARS=$(find /usr/share/edk2 /usr/share/edk2-ovmf /usr/share/OVMF -name "OVMF_VARS*.4m.fd" ! -name "*secboot*" -print -quit 2>/dev/null)
-    if [[ -z "$OVMF_VARS" ]]; then echo "ERROR: OVMF_VARS.fd not found. Install edk2-ovmf."; exit 1; fi
+    OVMF_ROOTS=(/usr/share/edk2 /usr/share/edk2-ovmf /usr/share/OVMF)
+    OVMF_VARS=$(find "${OVMF_ROOTS[@]}" -name "OVMF_VARS*.4m.fd" ! -name "*secboot*" -print -quit 2>/dev/null)
+    if [[ -z "$OVMF_VARS" ]]; then
+        OVMF_VARS=$(find "${OVMF_ROOTS[@]}" -name "OVMF_VARS.fd" -print -quit 2>/dev/null)
+    fi
+    if [[ -z "$OVMF_VARS" ]]; then echo "ERROR: OVMF_VARS{,.4m}.fd not found. Install edk2-ovmf."; exit 1; fi
     cp "$OVMF_VARS" {{UEFI_VARS}}
-    echo "UEFI vars file created at {{UEFI_VARS}}"
+    echo "UEFI vars file created at {{UEFI_VARS}} (source: $OVMF_VARS)"
 
 # Full QEMU setup (disk + UEFI vars)
 qemu-setup: qemu-create-disk qemu-setup-uefi
@@ -240,19 +269,20 @@ upload:
 
 # ─── Integration Tests ─────────────────────────────────
 
-# Full cycle: fresh disk, install, boot, verify
+# Requires cargo-build or cargo-build-container first.
+# Full cycle: fresh disk, install, boot, verify.
 test-vm *ARGS:
-    just cargo-build
-    cargo xtask test-vm {{ARGS}}
+    ./target/release/xtask test-vm {{ARGS}}
 
-# Install only: fresh disk, run installer, verify exit code
+# Requires cargo-build or cargo-build-container first.
+# Install only: fresh disk, run installer, verify exit code.
 test-install *ARGS:
-    just cargo-build
-    cargo xtask test-install {{ARGS}}
+    ./target/release/xtask test-install {{ARGS}}
 
-# Boot only: boot existing disk, verify system health
+# Requires cargo-build or cargo-build-container first.
+# Boot only: boot existing disk, verify system health.
 test-boot *ARGS:
-    cargo xtask test-boot {{ARGS}}
+    ./target/release/xtask test-boot {{ARGS}}
 
 # Install with pool-level ZFS encryption; regression cover for load-key-after-reimport
 test-install-encrypted-pool *ARGS:

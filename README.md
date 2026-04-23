@@ -236,27 +236,64 @@ The only remaining shell calls are:
 
 ## Development
 
-### Prerequisites
-- Arch Linux (for libalpm headers)
-- Rust 2024 edition
-- `just` (task runner)
+Two supported workflows depending on the host distro. Pick one.
 
-### Common commands
+### Option 1 — Arch native
+
+Everything runs directly on the host. No containers needed for builds.
+
 ```bash
-just cargo-build    # Build release binaries
-just cargo-test     # Run cargo unit tests
+# one-time setup
+sudo pacman -S --needed \
+    rust pacman pkgconf clang base-devel just \
+    libxkbcommon libinput libdrm freetype2 fontconfig ttf-dejavu \
+    archiso pacman-contrib qemu-base qemu-img edk2-ovmf
+
+# daily
+just cargo-build          # native cargo build, produces target/release/{azfs,azfs-tui,xtask}
+just cargo-test
+just iso-test             # native mkarchiso (sudo)
+just iso-full
+just test-install         # QEMU regression test (requires cargo-build first)
+just qemu-install         # interactive boot of latest ISO
+```
+
+### Option 2 — Any other distro via podman
+
+Builds run inside the CI container image, which has all the Arch-specific
+deps (`libalpm`, `archiso`, …) pre-installed. Everything produces
+Arch-glibc binaries, so artifacts are portable to the ISO.
+
+```bash
+# one-time setup (Fedora example; use the equivalent on other distros)
+sudo dnf install -y nix nix-daemon podman qemu-system-x86 qemu-img edk2-ovmf
+sudo systemctl enable --now nix-daemon
+just builder-pull         # pull the CI image (~2 GB, one-time)
+
+# Optional: auto-enter nix dev shell on cd (recommended for editor LSP)
+# Requires `direnv` + `nix-direnv` installed.
+echo 'use flake' > .envrc && direnv allow
+
+# daily
+# Inside the nix shell (auto-entered by direnv, or run `nix develop`):
+cargo check / cargo test / cargo run     # fast native iteration, rust-analyzer-friendly
+
+# For artifacts (binaries or ISOs):
+just cargo-build-container   # Arch-glibc target/release/{azfs,azfs-tui,xtask}
+just iso-test-podman         # container-backed mkarchiso
+just iso-full-podman
+just test-install            # QEMU regression test (requires cargo-build-container first)
+just qemu-install            # qemu runs on host either way
+```
+
+### Common to both workflows
+```bash
 just lint           # Run clippy
 just fmt            # Format code
-
-just iso-test       # Build minimal testing ISO (fast, QEMU-oriented)
-just iso-full       # Build full-featured ISO (bare-metal testing)
-just test-vm        # Full cycle: fresh disk, install, boot, verify (13 checks)
-just test-install   # Install only
-just test-boot      # Boot and verify existing installation
-
-just qemu-install   # Boot ISO in QEMU with GUI
 just ssh            # SSH into running QEMU VM
 just upload         # Upload binaries to running VM
+just builder-info   # Inspect podman image + cache volumes (option 2)
+just builder-clean  # Remove podman image and cache volumes
 ```
 
 ### Testing
