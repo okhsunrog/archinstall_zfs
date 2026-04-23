@@ -281,32 +281,33 @@ impl Drop for QemuVm {
 
 // --- Environment helpers ---
 
-pub fn find_ovmf_code() -> PathBuf {
-    for dir in [
+/// Locate an OVMF firmware file by trying distro-specific layouts.
+/// Arch ships `<name>.4m.fd`; Fedora/Debian ship `<name>.fd` (no 4m).
+fn find_ovmf(base: &str) -> PathBuf {
+    let dirs = [
         "/usr/share/edk2/x64",
         "/usr/share/edk2-ovmf/x64",
+        "/usr/share/edk2/ovmf",
         "/usr/share/OVMF",
-    ] {
-        let path = PathBuf::from(dir).join("OVMF_CODE.4m.fd");
-        if path.exists() {
-            return path;
+    ];
+    // Try the Arch-style 4m suffix first (smaller, newer), fall back to bare.
+    for name in [format!("{base}.4m.fd"), format!("{base}.fd")] {
+        for dir in dirs {
+            let path = PathBuf::from(dir).join(&name);
+            if path.exists() {
+                return path;
+            }
         }
     }
-    panic!("OVMF_CODE.4m.fd not found. Install edk2-ovmf.");
+    panic!("{base}{{,.4m}}.fd not found. Install edk2-ovmf.");
+}
+
+pub fn find_ovmf_code() -> PathBuf {
+    find_ovmf("OVMF_CODE")
 }
 
 fn find_ovmf_vars_template() -> PathBuf {
-    for dir in [
-        "/usr/share/edk2/x64",
-        "/usr/share/edk2-ovmf/x64",
-        "/usr/share/OVMF",
-    ] {
-        let path = PathBuf::from(dir).join("OVMF_VARS.4m.fd");
-        if path.exists() {
-            return path;
-        }
-    }
-    panic!("OVMF_VARS.4m.fd not found. Install edk2-ovmf.");
+    find_ovmf("OVMF_VARS")
 }
 
 pub fn find_latest_iso() -> PathBuf {
