@@ -9,7 +9,7 @@ UEFI_VARS := "gen_iso/my_vars.fd"
 QEMU_SCRIPT := "gen_iso/run-qemu.sh"
 BINARY := "target/release/azfs-tui"
 BINARY_SLINT := "target/release/azfs"
-CONTAINER_IMAGE := "archzfs-builder:latest"
+CONTAINER_IMAGE := "ghcr.io/okhsunrog/archinstall_zfs/ci:latest"
 PACMAN_CACHE_VOLUME := "archzfs-pacman-cache"
 
 # ─── Cargo ──────────────────────────────────────────────
@@ -98,13 +98,13 @@ iso-clean:
     rm -rf {{PROFILE_OUT}} gen_iso/workdir
     @echo "ISO build artifacts cleaned"
 
-# ─── ISO Building via podman (cross-distro) ────────────
+# ─── Container-based mkarchiso (cross-distro, for non-Arch hosts) ──
 
-# Build the archiso builder container image used by iso-*-podman recipes (run once, reused)
-builder-image:
-    sudo podman build -t {{CONTAINER_IMAGE}} -f gen_iso/Containerfile gen_iso
+# Pull the prebuilt CI image from ghcr.io (same image CI uses for build + check)
+builder-pull:
+    sudo podman pull {{CONTAINER_IMAGE}}
 
-# Inspect podman-side state (builder image + pacman cache volume size)
+# Inspect podman-side state (image tag/size, pacman cache size)
 builder-info:
     #!/usr/bin/env bash
     set -eu
@@ -123,13 +123,14 @@ builder-info:
         echo "volume: {{PACMAN_CACHE_VOLUME}} (not yet created; will be on first iso-*-podman run)"
     fi
 
-# Remove the podman builder image and pacman cache volume
+# Remove the image and the pacman cache volume
 builder-clean:
     -sudo podman image rm {{CONTAINER_IMAGE}}
     -sudo podman volume rm {{PACMAN_CACHE_VOLUME}}
 
-# Testing ISO via podman — works on any distro with podman. Rootful so sudo
-# is required, but output files are chowned back to the invoking user.
+# Testing ISO, container-backed mkarchiso. Cargo/render-profile/prepare-binary
+# run natively on the host (need libalpm — available on Arch or in `nix develop`),
+# only mkarchiso itself runs in the container (needs archiso + privileged mounts).
 # Usage: just iso-test-podman [--mode precompiled|dkms] [--kernel linux|linux-lts|linux-zen]
 [arg("MODE", long="mode")]
 [arg("KERNEL", long="kernel")]
@@ -138,22 +139,9 @@ iso-test-podman MODE="precompiled" KERNEL="linux-lts":
     just cargo-build
     just _render-profile {{MODE}} {{KERNEL}} "--fast"
     just _prepare-binary
-    @echo "Building ISO in container..."
-    sudo rm -rf gen_iso/workdir
-    mkdir -p gen_iso/workdir {{ISO_OUT}}
-    sudo podman run --rm \
-        --privileged \
-        -e HOST_UID="$(id -u)" \
-        -e HOST_GID="$(id -g)" \
-        -v "$(pwd)/{{PROFILE_OUT}}:/profile:ro" \
-        -v "$(pwd)/gen_iso/workdir:/workdir" \
-        -v "$(pwd)/{{ISO_OUT}}:/out" \
-        -v "{{PACMAN_CACHE_VOLUME}}:/var/cache/pacman/pkg" \
-        {{CONTAINER_IMAGE}} \
-        bash -c 'mkarchiso -v -w /workdir -o /out /profile && chown -R "$HOST_UID:$HOST_GID" /workdir /out'
-    @echo "Testing ISO built in {{ISO_OUT}}"
+    just _mkarchiso-container
 
-# Full ISO via podman. Same package set as CI releases.
+# Full ISO, container-backed mkarchiso. See iso-test-podman for host requirements.
 # Usage: just iso-full-podman [--mode precompiled|dkms] [--kernel linux|linux-lts|linux-zen]
 [arg("MODE", long="mode")]
 [arg("KERNEL", long="kernel")]
@@ -162,7 +150,10 @@ iso-full-podman MODE="precompiled" KERNEL="linux-lts":
     just cargo-build
     just _render-profile {{MODE}} {{KERNEL}}
     just _prepare-binary
-    @echo "Building ISO in container..."
+    just _mkarchiso-container
+
+# Internal: invoke mkarchiso inside the container with correct mounts + chown.
+_mkarchiso-container:
     sudo rm -rf gen_iso/workdir
     mkdir -p gen_iso/workdir {{ISO_OUT}}
     sudo podman run --rm \
@@ -175,7 +166,7 @@ iso-full-podman MODE="precompiled" KERNEL="linux-lts":
         -v "{{PACMAN_CACHE_VOLUME}}:/var/cache/pacman/pkg" \
         {{CONTAINER_IMAGE}} \
         bash -c 'mkarchiso -v -w /workdir -o /out /profile && chown -R "$HOST_UID:$HOST_GID" /workdir /out'
-    @echo "Full ISO built in {{ISO_OUT}}"
+    @echo "ISO built in {{ISO_OUT}}"
 
 # ─── QEMU Setup ────────────────────────────────────────
 
