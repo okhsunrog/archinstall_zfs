@@ -3,13 +3,26 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # NixOS/nixpkgs#457569 bumps pacman to 7.1.0 (for libalpm 16, which
+    # alpm-sys requires). Pulled here as a minimal overlay until merged.
+    # TODO: drop when the PR lands in nixos-unstable.
+    nixpkgs-pacman.url = "github:SamLukeYes/nixpkgs/pacman";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, nixpkgs-pacman, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = nixpkgs.legacyPackages.${system};
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [
+            (_final: _prev: {
+              # Just the pacman package from the PR branch; everything else
+              # comes from nixos-unstable.
+              pacman = nixpkgs-pacman.legacyPackages.${system}.pacman;
+            })
+          ];
+        };
       in {
         devShells.default = pkgs.mkShell {
           # Rust toolchain + build tools
