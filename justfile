@@ -9,6 +9,8 @@ UEFI_VARS := "gen_iso/my_vars.fd"
 QEMU_SCRIPT := "gen_iso/run-qemu.sh"
 BINARY := "target/release/azfs-tui"
 BINARY_SLINT := "target/release/azfs"
+CONTAINER_IMAGE := "archzfs-builder:latest"
+PACMAN_CACHE_VOLUME := "archzfs-pacman-cache"
 
 # ─── Cargo ──────────────────────────────────────────────
 
@@ -95,6 +97,85 @@ iso-list:
 iso-clean:
     rm -rf {{PROFILE_OUT}} gen_iso/workdir
     @echo "ISO build artifacts cleaned"
+
+# ─── ISO Building via podman (cross-distro) ────────────
+
+# Build the archiso builder container image used by iso-*-podman recipes (run once, reused)
+builder-image:
+    sudo podman build -t {{CONTAINER_IMAGE}} -f gen_iso/Containerfile gen_iso
+
+# Inspect podman-side state (builder image + pacman cache volume size)
+builder-info:
+    #!/usr/bin/env bash
+    set -eu
+    sudo podman image ls --filter reference={{CONTAINER_IMAGE}} --format 'image:  {{"{{.Repository}}:{{.Tag}}"}}  size: {{"{{.Size}}"}}'
+    if sudo podman volume exists {{PACMAN_CACHE_VOLUME}}; then
+        mp=$(sudo podman volume inspect {{PACMAN_CACHE_VOLUME}} --format '{{"{{.Mountpoint}}"}}')
+        echo "volume: {{PACMAN_CACHE_VOLUME}}  mountpoint: $mp"
+        if sudo test -d "$mp"; then
+            size=$(sudo du -sh "$mp" | awk '{print $1}')
+            count=$(sudo find "$mp" -maxdepth 1 -name '*.pkg.tar.*' ! -name '*.sig' | wc -l)
+            echo "cache:  ${size} on disk, ${count} cached packages"
+        else
+            echo "cache:  (volume created but on-disk dir not yet materialized)"
+        fi
+    else
+        echo "volume: {{PACMAN_CACHE_VOLUME}} (not yet created; will be on first iso-*-podman run)"
+    fi
+
+# Remove the podman builder image and pacman cache volume
+builder-clean:
+    -sudo podman image rm {{CONTAINER_IMAGE}}
+    -sudo podman volume rm {{PACMAN_CACHE_VOLUME}}
+
+# Testing ISO via podman — works on any distro with podman. Rootful so sudo
+# is required, but output files are chowned back to the invoking user.
+# Usage: just iso-test-podman [--mode precompiled|dkms] [--kernel linux|linux-lts|linux-zen]
+[arg("MODE", long="mode")]
+[arg("KERNEL", long="kernel")]
+iso-test-podman MODE="precompiled" KERNEL="linux-lts":
+    @echo "Building testing ISO via podman (mode={{MODE}}, kernel={{KERNEL}})"
+    just cargo-build
+    just _render-profile {{MODE}} {{KERNEL}} "--fast"
+    just _prepare-binary
+    @echo "Building ISO in container..."
+    sudo rm -rf gen_iso/workdir
+    mkdir -p gen_iso/workdir {{ISO_OUT}}
+    sudo podman run --rm \
+        --privileged \
+        -e HOST_UID="$(id -u)" \
+        -e HOST_GID="$(id -g)" \
+        -v "$(pwd)/{{PROFILE_OUT}}:/profile:ro" \
+        -v "$(pwd)/gen_iso/workdir:/workdir" \
+        -v "$(pwd)/{{ISO_OUT}}:/out" \
+        -v "{{PACMAN_CACHE_VOLUME}}:/var/cache/pacman/pkg" \
+        {{CONTAINER_IMAGE}} \
+        bash -c 'mkarchiso -v -w /workdir -o /out /profile && chown -R "$HOST_UID:$HOST_GID" /workdir /out'
+    @echo "Testing ISO built in {{ISO_OUT}}"
+
+# Full ISO via podman. Same package set as CI releases.
+# Usage: just iso-full-podman [--mode precompiled|dkms] [--kernel linux|linux-lts|linux-zen]
+[arg("MODE", long="mode")]
+[arg("KERNEL", long="kernel")]
+iso-full-podman MODE="precompiled" KERNEL="linux-lts":
+    @echo "Building full ISO via podman (mode={{MODE}}, kernel={{KERNEL}})"
+    just cargo-build
+    just _render-profile {{MODE}} {{KERNEL}}
+    just _prepare-binary
+    @echo "Building ISO in container..."
+    sudo rm -rf gen_iso/workdir
+    mkdir -p gen_iso/workdir {{ISO_OUT}}
+    sudo podman run --rm \
+        --privileged \
+        -e HOST_UID="$(id -u)" \
+        -e HOST_GID="$(id -g)" \
+        -v "$(pwd)/{{PROFILE_OUT}}:/profile:ro" \
+        -v "$(pwd)/gen_iso/workdir:/workdir" \
+        -v "$(pwd)/{{ISO_OUT}}:/out" \
+        -v "{{PACMAN_CACHE_VOLUME}}:/var/cache/pacman/pkg" \
+        {{CONTAINER_IMAGE}} \
+        bash -c 'mkarchiso -v -w /workdir -o /out /profile && chown -R "$HOST_UID:$HOST_GID" /workdir /out'
+    @echo "Full ISO built in {{ISO_OUT}}"
 
 # ─── QEMU Setup ────────────────────────────────────────
 
