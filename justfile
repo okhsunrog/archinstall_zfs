@@ -26,6 +26,7 @@ cargo-build:
 # Release build of azfs + azfs-tui + xtask inside the CI container (Arch-glibc).
 cargo-build-container:
     sudo podman run --rm \
+        --network=host \
         -e CARGO_HOME=/cargo-registry \
         -e CARGO_TARGET_DIR=/cargo-target \
         -e HOST_UID="$(id -u)" \
@@ -181,6 +182,7 @@ _mkarchiso-container:
     mkdir -p gen_iso/workdir {{ISO_OUT}}
     sudo podman run --rm \
         --privileged \
+        --network=host \
         -e HOST_UID="$(id -u)" \
         -e HOST_GID="$(id -g)" \
         -v "{{justfile_directory()}}/{{PROFILE_OUT}}:/profile:ro,z" \
