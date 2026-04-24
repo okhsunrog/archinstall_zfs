@@ -667,10 +667,8 @@ pub fn apply_text(config: &mut GlobalConfig, key: &str, val: &str) {
     };
     match key {
         "pool_name" => config.pool_name = val_opt,
-        "dataset_prefix" => {
-            if !val.is_empty() {
-                config.dataset_prefix = val.to_string();
-            }
+        "dataset_prefix" if !val.is_empty() => {
+            config.dataset_prefix = val.to_string();
         }
         "hostname" => config.hostname = val_opt,
         "locale" => config.locale = val_opt,

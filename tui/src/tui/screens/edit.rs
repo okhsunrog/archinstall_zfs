@@ -44,12 +44,10 @@ pub fn run_edit(
                         value.insert(byte_pos, c);
                         cursor += 1;
                     }
-                    (KeyCode::Backspace, _) => {
-                        if cursor > 0 {
-                            cursor -= 1;
-                            let byte_pos = char_to_byte(&value, cursor);
-                            value.remove(byte_pos);
-                        }
+                    (KeyCode::Backspace, _) if cursor > 0 => {
+                        cursor -= 1;
+                        let byte_pos = char_to_byte(&value, cursor);
+                        value.remove(byte_pos);
                     }
                     (KeyCode::Delete, _) => {
                         let char_count = value.chars().count();

@@ -94,36 +94,33 @@ pub async fn run_package_picker(
                         }
                     }
                     // Tab: search AUR instead
-                    (Focus::Search, KeyCode::Tab, _) => {
-                        if !search_text.is_empty() {
-                            status_msg = "Searching AUR...".to_string();
-                            // Render the status before blocking on HTTP
-                            terminal.draw(|frame| {
-                                render_picker(
-                                    frame,
-                                    &search_text,
-                                    &results,
-                                    &mut list_state,
-                                    &all_selected,
-                                    &focus,
-                                    true,
-                                    &status_msg,
-                                );
-                            })?;
-                            match archinstall_zfs_core::packages::search_aur(&search_text, 20).await
-                            {
-                                Ok(aur_results) => {
-                                    results = aur_results;
-                                    searching_aur = true;
-                                    status_msg.clear();
-                                }
-                                Err(e) => {
-                                    status_msg = format!("AUR error: {e}");
-                                    results.clear();
-                                }
+                    (Focus::Search, KeyCode::Tab, _) if !search_text.is_empty() => {
+                        status_msg = "Searching AUR...".to_string();
+                        // Render the status before blocking on HTTP
+                        terminal.draw(|frame| {
+                            render_picker(
+                                frame,
+                                &search_text,
+                                &results,
+                                &mut list_state,
+                                &all_selected,
+                                &focus,
+                                true,
+                                &status_msg,
+                            );
+                        })?;
+                        match archinstall_zfs_core::packages::search_aur(&search_text, 20).await {
+                            Ok(aur_results) => {
+                                results = aur_results;
+                                searching_aur = true;
+                                status_msg.clear();
                             }
-                            list_state.select(if results.is_empty() { None } else { Some(0) });
+                            Err(e) => {
+                                status_msg = format!("AUR error: {e}");
+                                results.clear();
+                            }
                         }
+                        list_state.select(if results.is_empty() { None } else { Some(0) });
                     }
                     // Down arrow: move to results
                     (Focus::Search, KeyCode::Down, _) if !results.is_empty() => {
@@ -133,18 +130,16 @@ pub async fn run_package_picker(
                         }
                     }
                     // Enter in search: add typed text directly as package
-                    (Focus::Search, KeyCode::Enter, _) => {
-                        if !search_text.is_empty() {
-                            // If there are results and top one matches, add it
-                            if let Some(0) = list_state.selected()
-                                && let Some(pkg) = results.first()
-                            {
-                                add_package(pkg, &mut selected_repo, &mut selected_aur);
-                                search_text.clear();
-                                results.clear();
-                                list_state.select(None);
-                                continue;
-                            }
+                    (Focus::Search, KeyCode::Enter, _) if !search_text.is_empty() => {
+                        // If there are results and top one matches, add it
+                        if let Some(0) = list_state.selected()
+                            && let Some(pkg) = results.first()
+                        {
+                            add_package(pkg, &mut selected_repo, &mut selected_aur);
+                            search_text.clear();
+                            results.clear();
+                            list_state.select(None);
+                            continue;
                         }
                     }
                     // Ctrl+D: done
@@ -183,14 +178,14 @@ pub async fn run_package_picker(
                     }
 
                     // Delete selected packages with Ctrl+X
-                    (_, KeyCode::Char('x'), KeyModifiers::CONTROL) => {
-                        if !selected_repo.is_empty() || !selected_aur.is_empty() {
-                            // Remove last added
-                            if !selected_aur.is_empty() {
-                                selected_aur.pop();
-                            } else {
-                                selected_repo.pop();
-                            }
+                    (_, KeyCode::Char('x'), KeyModifiers::CONTROL)
+                        if !selected_repo.is_empty() || !selected_aur.is_empty() =>
+                    {
+                        // Remove last added
+                        if !selected_aur.is_empty() {
+                            selected_aur.pop();
+                        } else {
+                            selected_repo.pop();
                         }
                     }
 

@@ -269,7 +269,7 @@ fn start_scan(app: &App, in_flight: InFlight) {
         match scan {
             Ok(mut networks) => {
                 // Sort strongest-first.
-                networks.sort_by(|a, b| b.signal_percent.cmp(&a.signal_percent));
+                networks.sort_by_key(|n| std::cmp::Reverse(n.signal_percent));
                 let ui = networks.into_iter().map(to_ui).collect::<Vec<_>>();
                 let had_any = !ui.is_empty();
                 let _ = weak.upgrade_in_event_loop(move |app| {

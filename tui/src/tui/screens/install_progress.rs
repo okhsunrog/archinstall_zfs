@@ -118,16 +118,14 @@ impl InstallProgress {
     pub fn handle_event(&mut self, ev: Event) -> bool {
         if let Event::Key(key) = ev {
             match (key.code, key.modifiers) {
-                (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-                    if self.is_done() {
-                        return true;
-                    }
+                (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL)
+                    if self.is_done() =>
+                {
+                    return true;
                 }
-                (KeyCode::Esc, _) => {
-                    if !self.is_done() {
-                        tracing::warn!("cancellation requested by user");
-                        self.cancel.cancel();
-                    }
+                (KeyCode::Esc, _) if !self.is_done() => {
+                    tracing::warn!("cancellation requested by user");
+                    self.cancel.cancel();
                 }
                 (KeyCode::Enter, _) if self.is_done() => return true,
                 (KeyCode::Up | KeyCode::Char('k'), _) => {

@@ -83,7 +83,7 @@ pub async fn run_wifi_setup(
         }
 
         // Sort strongest-first
-        networks.sort_by(|a, b| b.signal_percent.cmp(&a.signal_percent));
+        networks.sort_by_key(|n| std::cmp::Reverse(n.signal_percent));
 
         // Build menu options
         let mut options: Vec<String> = networks

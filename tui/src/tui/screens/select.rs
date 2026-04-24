@@ -74,10 +74,8 @@ pub fn run_multiselect(
                         };
                         list_state.select(Some(i));
                     }
-                    (KeyCode::Char(' '), _) => {
-                        if selected < checked.len() {
-                            checked[selected] = !checked[selected];
-                        }
+                    (KeyCode::Char(' '), _) if selected < checked.len() => {
+                        checked[selected] = !checked[selected];
                     }
                     (KeyCode::Char('a'), KeyModifiers::NONE) => {
                         checked.iter_mut().for_each(|c| *c = true);
@@ -344,7 +342,7 @@ fn update_fuzzy_filter<'a>(
             .iter()
             .filter_map(|s| sublime_fuzzy::best_match(filter, s).map(|m| (m.score(), *s)))
             .collect();
-        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.sort_by_key(|s| std::cmp::Reverse(s.0));
         *filtered = scored.into_iter().map(|(_, s)| s).collect();
     }
     state.select(if filtered.is_empty() { None } else { Some(0) });

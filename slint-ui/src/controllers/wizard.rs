@@ -311,7 +311,7 @@ fn fuzzy_filter(items: &[String], filter: &str) -> Vec<SelectOption> {
         .iter()
         .filter_map(|s| sublime_fuzzy::best_match(filter, s).map(|m| (m.score(), s)))
         .collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by_key(|s| std::cmp::Reverse(s.0));
     scored
         .into_iter()
         .map(|(_, s)| SelectOption {
