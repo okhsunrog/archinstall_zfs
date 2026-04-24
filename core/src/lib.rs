@@ -4,6 +4,7 @@ pub mod installer;
 pub mod kernel;
 pub mod metrics;
 pub mod packages;
+pub mod prepare;
 pub mod profile;
 pub mod swap;
 pub mod system;
