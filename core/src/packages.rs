@@ -55,7 +55,7 @@ fn search_repo_sync(query: &str, limit: usize) -> Result<Vec<PackageInfo>> {
             (score, pkg)
         })
         .collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by_key(|s| std::cmp::Reverse(s.0));
 
     Ok(scored.into_iter().map(|(_, pkg)| pkg).take(limit).collect())
 }
@@ -89,7 +89,7 @@ pub async fn search_aur(query: &str, limit: usize) -> Result<Vec<PackageInfo>> {
             (score, pkg)
         })
         .collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by_key(|s| std::cmp::Reverse(s.0));
 
     Ok(scored.into_iter().map(|(_, pkg)| pkg).take(limit).collect())
 }

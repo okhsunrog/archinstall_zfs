@@ -310,7 +310,7 @@ async fn run_downloads(
 
     // Sort by size descending — start large packages first
     let mut indexed_tasks: Vec<(usize, DownloadTask)> = tasks.into_iter().enumerate().collect();
-    indexed_tasks.sort_by(|a, b| b.1.size.cmp(&a.1.size));
+    indexed_tasks.sort_by_key(|t| std::cmp::Reverse(t.1.size));
 
     let results: Vec<Result<()>> = stream::iter(indexed_tasks)
         .map(|(index, task)| {
@@ -419,11 +419,7 @@ async fn download_single(
                         },
                     );
                     let duration_ms = download_started.elapsed().as_millis() as u64;
-                    let speed_bps = if duration_ms > 0 {
-                        total_size * 1000 / duration_ms
-                    } else {
-                        0
-                    };
+                    let speed_bps = (total_size * 1000).checked_div(duration_ms).unwrap_or(0);
                     tracing::info!(
                         target: "metrics",
                         event = "pkg_download",
