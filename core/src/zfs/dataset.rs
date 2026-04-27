@@ -3,6 +3,7 @@ use color_eyre::eyre::Result;
 use super::cli::{run_zfs, run_zfs_json};
 use super::models::{ZfsGetOutput, ZfsListOutput, ZfsMountOutput};
 use crate::system::cmd::{CommandRunner, check_exit};
+use palimpsest::dataset::{ListOptions, ZfsListEntry as PalimpsestZfsListEntry};
 
 pub struct DatasetConfig {
     pub name: String,
@@ -77,8 +78,11 @@ pub fn umount_dataset(runner: &dyn CommandRunner, dataset: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn list_datasets(runner: &dyn CommandRunner) -> Result<ZfsListOutput> {
-    run_zfs_json(runner, &["list"])
+pub async fn list_datasets(
+    runner: &dyn palimpsest::CommandRunner,
+) -> Result<Vec<PalimpsestZfsListEntry>> {
+    let opts = ListOptions::default();
+    Ok(palimpsest::dataset::list(runner, &opts).await?)
 }
 
 pub fn list_all_datasets(runner: &dyn CommandRunner) -> Result<ZfsListOutput> {
