@@ -71,20 +71,28 @@ pub fn verify_passphrase(runner: &dyn CommandRunner, pool: &str, password: &str)
 /// Imports the pool with `-fN` (force, no mount), checks the encryption
 /// property, then always attempts to unload-key and export (best-effort
 /// cleanup). Returns `true` if encryption is present and not "off".
-pub fn detect_pool_encryption(runner: &dyn CommandRunner, pool: &str) -> bool {
-    // Import pool ephemerally
-    let import_output = runner.run("zpool", &["import", "-fN", pool]);
-    if import_output.is_err() || !import_output.as_ref().unwrap().success() {
+pub async fn detect_pool_encryption(runner: &dyn palimpsest::CommandRunner, pool: &str) -> bool {
+    let import_opts = palimpsest::pool::ImportOptions {
+        force: true,
+        no_mount: true,
+        ..Default::default()
+    };
+    if palimpsest::pool::import(runner, pool, &import_opts)
+        .await
+        .is_err()
+    {
         tracing::debug!(pool, "ephemeral import failed for encryption detection");
         return false;
     }
 
-    // Check encryption property
-    let encrypted = detect_encryption(runner, pool).unwrap_or(false);
+    let encrypted = match palimpsest::dataset::get_property(runner, pool, "encryption").await {
+        Ok(p) => p.value != "off" && !p.value.is_empty(),
+        Err(_) => false,
+    };
 
-    // Best-effort cleanup: unload key + export
-    let _ = runner.run("zfs", &["unload-key", pool]);
-    let _ = runner.run("zpool", &["export", pool]);
+    let _ = palimpsest::encryption::unload_key(runner, pool).await;
+    let _ =
+        palimpsest::pool::export(runner, pool, &palimpsest::pool::ExportOptions::default()).await;
 
     tracing::info!(pool, encrypted, "detected pool encryption state");
     encrypted
@@ -175,53 +183,70 @@ mod tests {
         assert!(!detect_encryption(&runner, "testpool").unwrap());
     }
 
-    #[test]
-    fn test_detect_pool_encryption_encrypted() {
-        let runner = RecordingRunner::new(vec![
-            CannedResponse::default(), // zpool import -fN
-            CannedResponse {
-                stdout: "aes-256-gcm\n".into(),
-                ..Default::default()
-            }, // zfs get encryption
-            CannedResponse::default(), // zfs unload-key
-            CannedResponse::default(), // zpool export
-        ]);
-        assert!(detect_pool_encryption(&runner, "testpool"));
-
-        let calls = runner.calls();
-        assert_eq!(calls[0].program, "zpool");
-        assert!(calls[0].args.contains(&"import".to_string()));
-        assert!(calls[0].args.contains(&"-fN".to_string()));
-        // Cleanup: unload-key + export
-        assert_eq!(calls[2].program, "zfs");
-        assert!(calls[2].args.contains(&"unload-key".to_string()));
-        assert_eq!(calls[3].program, "zpool");
-        assert!(calls[3].args.contains(&"export".to_string()));
+    fn get_property_json(pool: &str, value: &str, source_kind: &str) -> Vec<u8> {
+        format!(
+            "{{\"output_version\":{{\"command\":\"zfs get\",\"vers_major\":0,\"vers_minor\":1}},\
+             \"datasets\":{{\"{pool}\":{{\"name\":\"{pool}\",\"type\":\"FILESYSTEM\",\
+             \"pool\":\"{pool}\",\"createtxg\":\"1\",\"properties\":{{\"encryption\":\
+             {{\"value\":\"{value}\",\"source\":{{\"type\":\"{source_kind}\",\"data\":\"-\"}}}}}}}}}}}}"
+        )
+        .into_bytes()
     }
 
-    #[test]
-    fn test_detect_pool_encryption_not_encrypted() {
-        let runner = RecordingRunner::new(vec![
-            CannedResponse::default(), // zpool import -fN
-            CannedResponse {
-                stdout: "off\n".into(),
-                ..Default::default()
-            }, // zfs get encryption
-            CannedResponse::default(), // zfs unload-key
-            CannedResponse::default(), // zpool export
-        ]);
-        assert!(!detect_pool_encryption(&runner, "testpool"));
+    #[tokio::test]
+    async fn test_detect_pool_encryption_encrypted() {
+        let runner = palimpsest::RecordingRunner::new()
+            .record(
+                "zpool",
+                &["import", "-f", "-N", "testpool"],
+                vec![],
+                vec![],
+                0,
+            )
+            .record(
+                "zfs",
+                &["get", "-j", "-p", "encryption", "testpool"],
+                get_property_json("testpool", "aes-256-gcm", "LOCAL"),
+                vec![],
+                0,
+            )
+            .record("zfs", &["unload-key", "testpool"], vec![], vec![], 0)
+            .record("zpool", &["export", "testpool"], vec![], vec![], 0);
+        assert!(detect_pool_encryption(&runner, "testpool").await);
     }
 
-    #[test]
-    fn test_detect_pool_encryption_import_fails() {
-        let runner = RecordingRunner::new(vec![
-            CannedResponse {
-                exit_code: 1,
-                ..Default::default()
-            }, // zpool import fails
-        ]);
-        assert!(!detect_pool_encryption(&runner, "badpool"));
+    #[tokio::test]
+    async fn test_detect_pool_encryption_not_encrypted() {
+        let runner = palimpsest::RecordingRunner::new()
+            .record(
+                "zpool",
+                &["import", "-f", "-N", "testpool"],
+                vec![],
+                vec![],
+                0,
+            )
+            .record(
+                "zfs",
+                &["get", "-j", "-p", "encryption", "testpool"],
+                get_property_json("testpool", "off", "DEFAULT"),
+                vec![],
+                0,
+            )
+            .record("zfs", &["unload-key", "testpool"], vec![], vec![], 0)
+            .record("zpool", &["export", "testpool"], vec![], vec![], 0);
+        assert!(!detect_pool_encryption(&runner, "testpool").await);
+    }
+
+    #[tokio::test]
+    async fn test_detect_pool_encryption_import_fails() {
+        let runner = palimpsest::RecordingRunner::new().record(
+            "zpool",
+            &["import", "-f", "-N", "badpool"],
+            vec![],
+            b"cannot import 'badpool': no such pool available\n".to_vec(),
+            1,
+        );
+        assert!(!detect_pool_encryption(&runner, "badpool").await);
     }
 
     #[test]

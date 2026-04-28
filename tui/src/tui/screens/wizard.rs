@@ -312,7 +312,7 @@ impl Wizard {
                     }
                 }
                 "pool_name" => {
-                    pickers::pick_existing_pool(&mut self.config, terminal)?;
+                    pickers::pick_existing_pool(&mut self.config, terminal).await?;
                 }
                 _ => {}
             },

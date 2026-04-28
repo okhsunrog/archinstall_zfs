@@ -96,7 +96,7 @@ pub fn pick_partition(
     }
 }
 
-pub fn pick_existing_pool(
+pub async fn pick_existing_pool(
     config: &mut GlobalConfig,
     terminal: &mut ratatui::DefaultTerminal,
 ) -> Result<()> {
@@ -104,6 +104,7 @@ pub fn pick_existing_pool(
     use archinstall_zfs_core::zfs::{encryption, pool};
 
     let runner = RealRunner;
+    let palimpsest_runner = palimpsest::RealRunner;
 
     let pool_name = loop {
         let mut pools = pool::discover_importable_pools(&runner);
@@ -138,7 +139,7 @@ pub fn pick_existing_pool(
 
     config.pool_name = Some(pool_name.clone());
 
-    if encryption::detect_pool_encryption(&runner, &pool_name) {
+    if encryption::detect_pool_encryption(&palimpsest_runner, &pool_name).await {
         loop {
             let result = run_edit(terminal, "Enter pool passphrase", "", true)?;
             let Some(pw) = result.value else {
