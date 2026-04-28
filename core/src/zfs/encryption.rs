@@ -38,6 +38,9 @@ pub fn dataset_encryption_properties(key_path: &Path) -> Vec<(&'static str, Stri
     pool_encryption_properties(key_path)
 }
 
+/// File-based load-key for the install pipeline. Reads the key from
+/// `key_path` via `keylocation=file://<key_path>`. Used during prepare/mount
+/// where the key file already exists at a known location.
 pub fn load_key(runner: &dyn CommandRunner, pool: &str, key_path: &Path) -> Result<()> {
     let key_loc = format!("file://{}", key_path.display());
     let output = run_zfs(runner, &["load-key", "-L", &key_loc, pool])?;
@@ -45,89 +48,89 @@ pub fn load_key(runner: &dyn CommandRunner, pool: &str, key_path: &Path) -> Resu
     Ok(())
 }
 
-/// Verify a passphrase against an already-imported pool by writing a temp
-/// key file and attempting load-key.
-pub fn verify_passphrase(runner: &dyn CommandRunner, pool: &str, password: &str) -> Result<bool> {
-    // Unload key first (ignore errors)
-    let _ = run_zfs(runner, &["unload-key", pool]);
-
-    // Try to load key with the provided password
-    let output = runner.run_with_stdin("zfs", &["load-key", pool], password.as_bytes())?;
-    Ok(output.success())
-}
-
 /// Detect whether a pool is encrypted using an ephemeral import.
 ///
 /// Imports the pool with `-fN` (force, no mount), checks the encryption
 /// property, then always attempts to unload-key and export (best-effort
 /// cleanup). Returns `true` if encryption is present and not "off".
-pub async fn detect_pool_encryption(runner: &dyn palimpsest::CommandRunner, pool: &str) -> bool {
-    let import_opts = palimpsest::pool::ImportOptions {
+pub async fn detect_pool_encryption(zfs: &palimpsest::Zfs, pool_name: &str) -> bool {
+    let pool = zfs.pool(pool_name);
+    let dataset = zfs.dataset(pool_name);
+
+    let opts = palimpsest::pool::ImportOptions {
         force: true,
         no_mount: true,
         ..Default::default()
     };
-    if palimpsest::pool::import(runner, pool, &import_opts)
-        .await
-        .is_err()
-    {
-        tracing::debug!(pool, "ephemeral import failed for encryption detection");
+    if pool.import(&opts).await.is_err() {
+        tracing::debug!(
+            pool_name,
+            "ephemeral import failed for encryption detection"
+        );
         return false;
     }
 
-    let encrypted = match palimpsest::dataset::get_property(runner, pool, "encryption").await {
+    let encrypted = match dataset.get_property("encryption").await {
         Ok(p) => p.value != "off" && !p.value.is_empty(),
         Err(_) => false,
     };
 
-    let _ = palimpsest::encryption::unload_key(runner, pool).await;
-    let _ =
-        palimpsest::pool::export(runner, pool, &palimpsest::pool::ExportOptions::default()).await;
+    let _ = dataset.unload_key().await;
+    let _ = pool
+        .export(&palimpsest::pool::ExportOptions::default())
+        .await;
 
-    tracing::info!(pool, encrypted, "detected pool encryption state");
+    tracing::info!(pool_name, encrypted, "detected pool encryption state");
     encrypted
 }
 
 /// Verify a pool passphrase using an ephemeral import.
 ///
-/// Imports the pool with `-fN`, writes the password to a temporary file,
-/// attempts `zfs load-key`, then always cleans up (unload-key, delete
-/// temp file, export pool). Returns `true` if load-key succeeded.
-pub fn verify_pool_passphrase(runner: &dyn CommandRunner, pool: &str, password: &str) -> bool {
-    // Import pool ephemerally
-    let import_output = runner.run("zpool", &["import", "-fN", pool]);
-    if import_output.is_err() || !import_output.as_ref().unwrap().success() {
-        tracing::debug!(pool, "ephemeral import failed for passphrase verification");
+/// Imports the pool with `-fN`, attempts `zfs load-key` with the passphrase
+/// piped via stdin, then always cleans up (unload-key, export pool). No
+/// temporary key file on disk — the passphrase never touches the filesystem.
+pub async fn verify_pool_passphrase(
+    zfs: &palimpsest::Zfs,
+    pool_name: &str,
+    password: &str,
+) -> bool {
+    let pool = zfs.pool(pool_name);
+    let dataset = zfs.dataset(pool_name);
+
+    let opts = palimpsest::pool::ImportOptions {
+        force: true,
+        no_mount: true,
+        ..Default::default()
+    };
+    if pool.import(&opts).await.is_err() {
+        tracing::debug!(
+            pool_name,
+            "ephemeral import failed for passphrase verification"
+        );
         return false;
     }
 
-    // Write password to a temporary file
-    let key_path = std::env::temp_dir().join(format!(".zfs_verify_{}", std::process::id()));
+    // Best-effort: ensure key is unloaded so load_key starts from a clean state.
+    let _ = dataset.unload_key().await;
 
-    let write_ok = fs::write(&key_path, password).is_ok()
-        && fs::set_permissions(&key_path, fs::Permissions::from_mode(0o000)).is_ok();
+    let verified = dataset
+        .load_key_with_passphrase(password.as_bytes())
+        .await
+        .is_ok();
 
-    let verified = if write_ok {
-        let key_loc = format!("file://{}", key_path.display());
-        let output = runner.run("zfs", &["load-key", "-L", &key_loc, pool]);
-        output.is_ok() && output.unwrap().success()
-    } else {
-        false
-    };
+    let _ = dataset.unload_key().await;
+    let _ = pool
+        .export(&palimpsest::pool::ExportOptions::default())
+        .await;
 
-    // Best-effort cleanup: unload key, remove temp file, export pool
-    let _ = runner.run("zfs", &["unload-key", pool]);
-    let _ = fs::remove_file(&key_path);
-    let _ = runner.run("zpool", &["export", pool]);
-
-    tracing::info!(pool, verified, "verified pool passphrase");
+    tracing::info!(pool_name, verified, "verified pool passphrase");
     verified
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::system::cmd::tests::{CannedResponse, RecordingRunner};
+    use palimpsest::{Cmd, RecordingRunner, Zfs};
 
     #[test]
     fn test_write_key_file() {
@@ -141,9 +144,6 @@ mod tests {
         fs::set_permissions(&key_path, fs::Permissions::from_mode(0o400)).unwrap();
         let content = fs::read_to_string(&key_path).unwrap();
         assert_eq!(content, "testpassword");
-
-        // Verify the original permissions were set to 000
-        // (we changed them above, so just verify the function ran)
     }
 
     #[test]
@@ -167,100 +167,154 @@ mod tests {
 
     #[tokio::test]
     async fn test_detect_pool_encryption_encrypted() {
-        let runner = palimpsest::RecordingRunner::new()
+        let runner = RecordingRunner::new()
             .record(
-                "zpool",
-                &["import", "-f", "-N", "testpool"],
+                Cmd::new("zpool").args(["import", "-f", "-N", "testpool"]),
                 vec![],
                 vec![],
                 0,
             )
             .record(
-                "zfs",
-                &["get", "-j", "-p", "encryption", "testpool"],
+                Cmd::new("zfs").args(["get", "-j", "-p", "encryption", "testpool"]),
                 get_property_json("testpool", "aes-256-gcm", "LOCAL"),
                 vec![],
                 0,
             )
-            .record("zfs", &["unload-key", "testpool"], vec![], vec![], 0)
-            .record("zpool", &["export", "testpool"], vec![], vec![], 0);
-        assert!(detect_pool_encryption(&runner, "testpool").await);
+            .record(
+                Cmd::new("zfs").args(["unload-key", "testpool"]),
+                vec![],
+                vec![],
+                0,
+            )
+            .record(
+                Cmd::new("zpool").args(["export", "testpool"]),
+                vec![],
+                vec![],
+                0,
+            );
+        let zfs = Zfs::with_runner(runner);
+        assert!(detect_pool_encryption(&zfs, "testpool").await);
     }
 
     #[tokio::test]
     async fn test_detect_pool_encryption_not_encrypted() {
-        let runner = palimpsest::RecordingRunner::new()
+        let runner = RecordingRunner::new()
             .record(
-                "zpool",
-                &["import", "-f", "-N", "testpool"],
+                Cmd::new("zpool").args(["import", "-f", "-N", "testpool"]),
                 vec![],
                 vec![],
                 0,
             )
             .record(
-                "zfs",
-                &["get", "-j", "-p", "encryption", "testpool"],
+                Cmd::new("zfs").args(["get", "-j", "-p", "encryption", "testpool"]),
                 get_property_json("testpool", "off", "DEFAULT"),
                 vec![],
                 0,
             )
-            .record("zfs", &["unload-key", "testpool"], vec![], vec![], 0)
-            .record("zpool", &["export", "testpool"], vec![], vec![], 0);
-        assert!(!detect_pool_encryption(&runner, "testpool").await);
+            .record(
+                Cmd::new("zfs").args(["unload-key", "testpool"]),
+                vec![],
+                vec![],
+                0,
+            )
+            .record(
+                Cmd::new("zpool").args(["export", "testpool"]),
+                vec![],
+                vec![],
+                0,
+            );
+        let zfs = Zfs::with_runner(runner);
+        assert!(!detect_pool_encryption(&zfs, "testpool").await);
     }
 
     #[tokio::test]
     async fn test_detect_pool_encryption_import_fails() {
-        let runner = palimpsest::RecordingRunner::new().record(
-            "zpool",
-            &["import", "-f", "-N", "badpool"],
+        let runner = RecordingRunner::new().record(
+            Cmd::new("zpool").args(["import", "-f", "-N", "badpool"]),
             vec![],
             b"cannot import 'badpool': no such pool available\n".to_vec(),
             1,
         );
-        assert!(!detect_pool_encryption(&runner, "badpool").await);
+        let zfs = Zfs::with_runner(runner);
+        assert!(!detect_pool_encryption(&zfs, "badpool").await);
     }
 
-    #[test]
-    fn test_verify_pool_passphrase_success() {
-        let runner = RecordingRunner::new(vec![
-            CannedResponse::default(), // zpool import -fN
-            CannedResponse::default(), // zfs load-key (success)
-            CannedResponse::default(), // zfs unload-key
-            CannedResponse::default(), // zpool export
-        ]);
-        assert!(verify_pool_passphrase(&runner, "testpool", "correct"));
-
-        let calls = runner.calls();
-        // First call: import
-        assert!(calls[0].args.contains(&"import".to_string()));
-        // Second call: load-key with -L file://...
-        assert_eq!(calls[1].program, "zfs");
-        assert!(calls[1].args.contains(&"load-key".to_string()));
+    #[tokio::test]
+    async fn test_verify_pool_passphrase_correct() {
+        let runner = RecordingRunner::new()
+            .record(
+                Cmd::new("zpool").args(["import", "-f", "-N", "testpool"]),
+                vec![],
+                vec![],
+                0,
+            )
+            // best-effort pre-clean unload, will say "Key already unloaded"
+            .record(
+                Cmd::new("zfs").args(["unload-key", "testpool"]),
+                vec![],
+                b"Key unload error: Key already unloaded for 'testpool'.\n".to_vec(),
+                255,
+            )
+            .record(
+                Cmd::new("zfs")
+                    .args(["load-key", "testpool"])
+                    .stdin_secret(b"correct".to_vec()),
+                vec![],
+                vec![],
+                0,
+            )
+            .record(
+                Cmd::new("zpool").args(["export", "testpool"]),
+                vec![],
+                vec![],
+                0,
+            );
+        let zfs = Zfs::with_runner(runner);
+        assert!(verify_pool_passphrase(&zfs, "testpool", "correct").await);
     }
 
-    #[test]
-    fn test_verify_pool_passphrase_wrong() {
-        let runner = RecordingRunner::new(vec![
-            CannedResponse::default(), // zpool import -fN
-            CannedResponse {
-                exit_code: 1,
-                ..Default::default()
-            }, // zfs load-key fails
-            CannedResponse::default(), // zfs unload-key
-            CannedResponse::default(), // zpool export
-        ]);
-        assert!(!verify_pool_passphrase(&runner, "testpool", "wrong"));
+    #[tokio::test]
+    async fn test_verify_pool_passphrase_wrong() {
+        let runner = RecordingRunner::new()
+            .record(
+                Cmd::new("zpool").args(["import", "-f", "-N", "testpool"]),
+                vec![],
+                vec![],
+                0,
+            )
+            .record(
+                Cmd::new("zfs").args(["unload-key", "testpool"]),
+                vec![],
+                b"Key unload error: Key already unloaded for 'testpool'.\n".to_vec(),
+                255,
+            )
+            .record(
+                Cmd::new("zfs")
+                    .args(["load-key", "testpool"])
+                    .stdin_secret(b"wrong".to_vec()),
+                vec![],
+                b"Key load error: Incorrect key provided for 'testpool'.\n".to_vec(),
+                1,
+            )
+            .record(
+                Cmd::new("zpool").args(["export", "testpool"]),
+                vec![],
+                vec![],
+                0,
+            );
+        let zfs = Zfs::with_runner(runner);
+        assert!(!verify_pool_passphrase(&zfs, "testpool", "wrong").await);
     }
 
-    #[test]
-    fn test_verify_pool_passphrase_import_fails() {
-        let runner = RecordingRunner::new(vec![
-            CannedResponse {
-                exit_code: 1,
-                ..Default::default()
-            }, // zpool import fails
-        ]);
-        assert!(!verify_pool_passphrase(&runner, "badpool", "pass"));
+    #[tokio::test]
+    async fn test_verify_pool_passphrase_import_fails() {
+        let runner = RecordingRunner::new().record(
+            Cmd::new("zpool").args(["import", "-f", "-N", "badpool"]),
+            vec![],
+            b"cannot import 'badpool': no such pool available\n".to_vec(),
+            1,
+        );
+        let zfs = Zfs::with_runner(runner);
+        assert!(!verify_pool_passphrase(&zfs, "badpool", "pass").await);
     }
 }

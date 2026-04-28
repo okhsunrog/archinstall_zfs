@@ -104,7 +104,7 @@ pub async fn pick_existing_pool(
     use archinstall_zfs_core::zfs::{encryption, pool};
 
     let runner = RealRunner;
-    let palimpsest_runner = palimpsest::RealRunner;
+    let zfs = palimpsest::Zfs::new();
 
     let pool_name = loop {
         let mut pools = pool::discover_importable_pools(&runner);
@@ -139,7 +139,7 @@ pub async fn pick_existing_pool(
 
     config.pool_name = Some(pool_name.clone());
 
-    if encryption::detect_pool_encryption(&palimpsest_runner, &pool_name).await {
+    if encryption::detect_pool_encryption(&zfs, &pool_name).await {
         loop {
             let result = run_edit(terminal, "Enter pool passphrase", "", true)?;
             let Some(pw) = result.value else {
@@ -149,7 +149,7 @@ pub async fn pick_existing_pool(
                 break;
             }
 
-            if encryption::verify_pool_passphrase(&runner, &pool_name, &pw) {
+            if encryption::verify_pool_passphrase(&zfs, &pool_name, &pw).await {
                 config.zfs_encryption_mode = ZfsEncryptionMode::Pool;
                 config.zfs_encryption_password = Some(pw);
                 break;
