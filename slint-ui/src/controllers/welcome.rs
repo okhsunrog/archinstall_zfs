@@ -67,11 +67,11 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_scan: &Kernel
 fn run_initial_checks(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_scan: &KernelScan) {
     let net = archinstall_zfs_core::system::net::check_internet();
     let uefi = archinstall_zfs_core::system::sysinfo::has_uefi();
-    let zfs_mod = archinstall_zfs_core::zfs::kmod::check_zfs_module(
+    let zfs_mod = archinstall_zfs_core::zfs_setup::check_zfs_module(
         &archinstall_zfs_core::system::cmd::RealRunner,
     )
     .unwrap_or(false);
-    let zfs_utils = archinstall_zfs_core::zfs::kmod::check_zfs_utils(
+    let zfs_utils = archinstall_zfs_core::zfs_setup::check_zfs_utils(
         &archinstall_zfs_core::system::cmd::RealRunner,
     )
     .unwrap_or(false);
@@ -110,8 +110,8 @@ fn start_zfs_init(app: &App, config: &GlobalConfig) {
                 .set_zfs_install_status(SharedString::from("Checking reflector..."));
         });
 
-        archinstall_zfs_core::zfs::kmod::ensure_reflector_finished_and_stopped(&*runner).ok();
-        archinstall_zfs_core::zfs::kmod::refresh_mirrors_if_stale(&*runner).ok();
+        archinstall_zfs_core::zfs_setup::ensure_reflector_finished_and_stopped(&*runner).ok();
+        archinstall_zfs_core::zfs_setup::refresh_mirrors_if_stale(&*runner).ok();
 
         let w = weak.clone();
         let _ = w.upgrade_in_event_loop(|app| {
@@ -120,7 +120,7 @@ fn start_zfs_init(app: &App, config: &GlobalConfig) {
             app.global::<WelcomeState>().set_zfs_install_pct(30);
         });
 
-        let result = archinstall_zfs_core::zfs::kmod::initialize_zfs(
+        let result = archinstall_zfs_core::zfs_setup::initialize_zfs(
             &*runner,
             &kernel,
             zfs_mode,

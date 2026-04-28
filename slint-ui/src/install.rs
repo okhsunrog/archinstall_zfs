@@ -65,26 +65,24 @@ pub fn run_install(
         config.swap_mode,
         SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
     );
-    rt.block_on(archinstall_zfs_core::zfs::bootmenu::set_zbm_properties(
+    rt.block_on(archinstall_zfs_core::bootmenu::set_zbm_properties(
         pool_name,
         prefix,
         config.init_system,
         zswap_on,
         config.set_bootfs,
     ))?;
-    rt.block_on(
-        archinstall_zfs_core::zfs::bootmenu::install_and_generate_zbm(
-            runner.clone(),
-            &mountpoint,
-            config.init_system,
-            &cancel,
-            archinstall_zfs_core::system::async_download::DownloadConfig {
-                concurrency: config.parallel_downloads as usize,
-                ..Default::default()
-            },
-        ),
-    )?;
-    archinstall_zfs_core::zfs::bootmenu::create_efi_entries(&*runner, &efi_partition)?;
+    rt.block_on(archinstall_zfs_core::bootmenu::install_and_generate_zbm(
+        runner.clone(),
+        &mountpoint,
+        config.init_system,
+        &cancel,
+        archinstall_zfs_core::system::async_download::DownloadConfig {
+            concurrency: config.parallel_downloads as usize,
+            ..Default::default()
+        },
+    ))?;
+    archinstall_zfs_core::bootmenu::create_efi_entries(&*runner, &efi_partition)?;
 
     tracing::info!("Phase 14: Cleanup");
     tracing::info!(target: "metrics", event = "phase_start", num = 14u32, name = "Cleanup");
@@ -93,7 +91,7 @@ pub fn run_install(
     archinstall_zfs_core::disk::partition::umount_efi(&*runner, &mountpoint)?;
 
     rt.block_on(
-        archinstall_zfs_core::zfs::cleanup::cleanup_pool_after_install(pool_name, &root_ds_full),
+        archinstall_zfs_core::zfs_cleanup::cleanup_pool_after_install(pool_name, &root_ds_full),
     )?;
 
     tracing::info!("Installation complete!");

@@ -3,14 +3,13 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
+use crate::bootmenu::HOSTID_VALUE;
 use crate::system::cmd::{CommandRunner, check_exit, chroot_cmd};
-
-use super::bootmenu::HOSTID_VALUE;
 
 /// Custom ZED hook that filters zfs-list.cache to only include datasets from
 /// the currently booted boot environment. Prevents cross-BE mount issues.
 /// Installed as immutable to prevent ZFS package updates from overwriting it.
-const ZED_HISTORY_CACHER: &str = include_str!("../../../assets/history_event-zfs-list-cacher.sh");
+const ZED_HISTORY_CACHER: &str = include_str!("../../assets/history_event-zfs-list-cacher.sh");
 
 pub fn create_hostid(runner: &dyn CommandRunner) -> Result<()> {
     let output = runner.run("zgenhostid", &["-f", HOSTID_VALUE])?;

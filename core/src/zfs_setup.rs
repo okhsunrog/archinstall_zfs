@@ -7,6 +7,14 @@ use crate::system::alpm_pacman::AlpmContext;
 use crate::system::async_download::DownloadConfig;
 use crate::system::cmd::CommandRunner;
 
+pub const ZFS_SERVICES: &[&str] = &[
+    "zfs.target",
+    "zfs-import.target",
+    "zfs-volumes.target",
+    "zfs-import-scan.service",
+    "zfs-zed.service",
+];
+
 pub fn load_zfs_module(runner: &dyn CommandRunner) -> Result<bool> {
     let output = runner.run("modprobe", &["zfs"])?;
     Ok(output.success())

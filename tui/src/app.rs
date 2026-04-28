@@ -99,7 +99,7 @@ pub async fn run_install(
             ..Default::default()
         };
         tokio::task::spawn_blocking(move || {
-            archinstall_zfs_core::zfs::kmod::initialize_zfs(&*r, &k, zfs_mode, &c, dl_config)
+            archinstall_zfs_core::zfs_setup::initialize_zfs(&*r, &k, zfs_mode, &c, dl_config)
         })
         .await??;
     }
@@ -172,7 +172,7 @@ pub async fn run_install(
         config.swap_mode,
         SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
     );
-    archinstall_zfs_core::zfs::bootmenu::set_zbm_properties(
+    archinstall_zfs_core::bootmenu::set_zbm_properties(
         &pool_name,
         &prefix,
         config.init_system,
@@ -181,7 +181,7 @@ pub async fn run_install(
     )
     .await?;
 
-    archinstall_zfs_core::zfs::bootmenu::install_and_generate_zbm(
+    archinstall_zfs_core::bootmenu::install_and_generate_zbm(
         runner.clone(),
         &mountpoint,
         config.init_system,
@@ -198,7 +198,7 @@ pub async fn run_install(
         let r = runner.clone();
         let efi = efi_partition.clone();
         tokio::task::spawn_blocking(move || {
-            archinstall_zfs_core::zfs::bootmenu::create_efi_entries(&*r, &efi)
+            archinstall_zfs_core::bootmenu::create_efi_entries(&*r, &efi)
         })
         .await??;
     }
@@ -220,7 +220,7 @@ pub async fn run_install(
         .await??;
     }
 
-    archinstall_zfs_core::zfs::cleanup::cleanup_pool_after_install(&pool_name, &root_ds_full)
+    archinstall_zfs_core::zfs_cleanup::cleanup_pool_after_install(&pool_name, &root_ds_full)
         .await?;
 
     tracing::info!("Installation complete!");

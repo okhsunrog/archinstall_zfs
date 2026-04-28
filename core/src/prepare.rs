@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::{Result, eyre};
+use palimpsest::pool::{ExportOptions, ImportOptions, PoolCreateOptions, Vdev};
 
 use crate::config::types::{GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode};
 use crate::system::cmd::CommandRunner;
@@ -118,16 +119,16 @@ pub async fn prepare_zfs(
 
     let zfs = palimpsest::Zfs::new();
 
-    crate::zfs::cache::create_hostid(runner)?;
-    crate::zfs::cache::prepare_zfs_cache(Path::new("/"), pool_name)?;
+    crate::zfs_target_files::create_hostid(runner)?;
+    crate::zfs_target_files::prepare_zfs_cache(Path::new("/"), pool_name)?;
     let _ = runner.run("systemctl", &["enable", "--now", "zfs-zed.service"]);
 
     if encryption != ZfsEncryptionMode::None
         && let Some(pw) = config.zfs_encryption_password.as_deref()
     {
-        crate::zfs::encryption::write_key_file(Path::new("/"), pw)?;
+        crate::zfs_keyfile::write_key_file(Path::new("/"), pw)?;
     }
-    let key_path = crate::zfs::encryption::key_file_path(Path::new("/"));
+    let key_path = crate::zfs_keyfile::key_file_path(Path::new("/"));
 
     match mode {
         InstallationMode::FullDisk | InstallationMode::NewPool => {
@@ -136,14 +137,14 @@ pub async fn prepare_zfs(
 
             let enc_props: Vec<(&str, String)> = match encryption {
                 ZfsEncryptionMode::Pool => {
-                    crate::zfs::encryption::pool_encryption_properties(&key_path)
+                    crate::zfs_keyfile::pool_encryption_properties(&key_path)
                 }
                 _ => Vec::new(),
             };
             let enc_refs: Vec<(&str, &str)> =
                 enc_props.iter().map(|(k, v)| (*k, v.as_str())).collect();
 
-            crate::zfs::pool::create_pool(
+            create_pool(
                 &zfs,
                 pool_name,
                 zfs_partition,
@@ -161,15 +162,16 @@ pub async fn prepare_zfs(
             let base_refs = base_dataset_props(encryption, &key_path, &compression);
             let base_refs_view: Vec<(&str, &str)> =
                 base_refs.iter().map(|(k, v)| (*k, v.as_str())).collect();
-            crate::zfs::dataset::create_base_dataset(&zfs, pool_name, prefix, &base_refs_view)
+            crate::dataset_layout::create_base_dataset(&zfs, pool_name, prefix, &base_refs_view)
                 .await?;
 
-            let datasets = crate::zfs::dataset::default_datasets();
-            crate::zfs::dataset::create_child_datasets(&zfs, pool_name, prefix, &datasets).await?;
+            let datasets = crate::dataset_layout::default_datasets();
+            crate::dataset_layout::create_child_datasets(&zfs, pool_name, prefix, &datasets)
+                .await?;
             tracing::info!("Created datasets");
 
-            crate::zfs::pool::export_pool(&zfs, pool_name).await?;
-            crate::zfs::pool::import_pool_no_mount(&zfs, pool_name, mountpoint).await?;
+            export_pool(&zfs, pool_name).await?;
+            import_pool_no_mount(&zfs, pool_name, mountpoint).await?;
             let key_loc = format!("file://{}", key_path.display());
             match encryption {
                 ZfsEncryptionMode::Pool => {
@@ -187,7 +189,7 @@ pub async fn prepare_zfs(
             }
         }
         InstallationMode::ExistingPool => {
-            crate::zfs::pool::import_pool_no_mount(&zfs, pool_name, mountpoint).await?;
+            import_pool_no_mount(&zfs, pool_name, mountpoint).await?;
 
             // Pool-level encryption: load the pool key so the new BE can be
             // created as an encrypted child. Dataset-level encryption applies
@@ -202,17 +204,18 @@ pub async fn prepare_zfs(
             let base_refs = base_dataset_props(encryption, &key_path, &compression);
             let base_refs_view: Vec<(&str, &str)> =
                 base_refs.iter().map(|(k, v)| (*k, v.as_str())).collect();
-            crate::zfs::dataset::create_base_dataset(&zfs, pool_name, prefix, &base_refs_view)
+            crate::dataset_layout::create_base_dataset(&zfs, pool_name, prefix, &base_refs_view)
                 .await?;
 
-            let datasets = crate::zfs::dataset::default_datasets();
-            crate::zfs::dataset::create_child_datasets(&zfs, pool_name, prefix, &datasets).await?;
+            let datasets = crate::dataset_layout::default_datasets();
+            crate::dataset_layout::create_child_datasets(&zfs, pool_name, prefix, &datasets)
+                .await?;
             tracing::info!("Created new BE in existing pool");
         }
     }
 
-    let datasets = crate::zfs::dataset::default_datasets();
-    crate::zfs::dataset::mount_datasets_ordered(&zfs, pool_name, prefix, &datasets).await?;
+    let datasets = crate::dataset_layout::default_datasets();
+    crate::dataset_layout::mount_datasets_ordered(&zfs, pool_name, prefix, &datasets).await?;
     tracing::info!("Datasets mounted");
 
     Ok(())
@@ -225,7 +228,7 @@ fn base_dataset_props(
 ) -> Vec<(&'static str, String)> {
     match encryption {
         ZfsEncryptionMode::Dataset => {
-            let mut p = crate::zfs::encryption::dataset_encryption_properties(key_path);
+            let mut p = crate::zfs_keyfile::dataset_encryption_properties(key_path);
             p.push(("mountpoint", "none".to_string()));
             p.push(("compression", compression.to_string()));
             p
@@ -235,4 +238,59 @@ fn base_dataset_props(
             ("compression", compression.to_string()),
         ],
     }
+}
+
+/// Defaults applied at every `zpool create`. `autotrim` is intentionally
+/// absent — it is set dynamically post-create based on storage type
+/// (NVMe / SATA SSD / HDD) by `Installer::configure_zfs_trim`.
+fn apply_default_pool_options(opts: PoolCreateOptions) -> PoolCreateOptions {
+    opts.pool_property("ashift", "12")
+        .fs_property("acltype", "posixacl")
+        .fs_property("relatime", "on")
+        .fs_property("xattr", "sa")
+        .fs_property("dnodesize", "auto")
+        .fs_property("normalization", "formD")
+        .fs_property("devices", "off")
+        .mountpoint("none")
+}
+
+async fn create_pool(
+    zfs: &palimpsest::Zfs,
+    name: &str,
+    device: &Path,
+    mountpoint: &Path,
+    compression: &str,
+    extra_props: &[(&str, &str)],
+) -> Result<()> {
+    let mut opts = apply_default_pool_options(PoolCreateOptions::new(name))
+        .force()
+        .altroot(mountpoint)
+        .fs_property("compression", compression);
+    for (k, v) in extra_props {
+        opts = opts.fs_property(*k, *v);
+    }
+    opts = opts.vdev(Vdev::Stripe(vec![PathBuf::from(device)]));
+
+    zfs.create_pool(&opts).await?;
+    Ok(())
+}
+
+async fn import_pool_no_mount(zfs: &palimpsest::Zfs, name: &str, mountpoint: &Path) -> Result<()> {
+    let opts = ImportOptions {
+        no_mount: true,
+        altroot: Some(mountpoint.to_path_buf()),
+        ..Default::default()
+    };
+    zfs.pool(name).import(&opts).await?;
+    Ok(())
+}
+
+async fn export_pool(zfs: &palimpsest::Zfs, name: &str) -> Result<()> {
+    nix::unistd::sync();
+    // Best-effort umount-all first; ignore errors. palimpsest's unmount_all
+    // returns Err on real failures (e.g., a stuck mountpoint), but the
+    // subsequent zpool export will surface the same condition more clearly.
+    let _ = zfs.unmount_all(false).await;
+    zfs.pool(name).export(&ExportOptions::default()).await?;
+    Ok(())
 }

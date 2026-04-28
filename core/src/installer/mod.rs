@@ -609,7 +609,7 @@ impl Installer {
         let prefix = &self.config.dataset_prefix;
 
         // Enable ZFS services
-        for service in crate::zfs::ZFS_SERVICES {
+        for service in crate::zfs_setup::ZFS_SERVICES {
             services::enable_service(&*self.runner, &self.target, service)?;
         }
 
@@ -622,7 +622,7 @@ impl Installer {
         fstab::generate_fstab(&*self.runner, &self.target, pool_name, prefix)?;
 
         // Copy misc files (hostid, zfs cache)
-        crate::zfs::cache::copy_misc_files(
+        crate::zfs_target_files::copy_misc_files(
             &*self.runner,
             &self.target,
             pool_name,
@@ -631,8 +631,8 @@ impl Installer {
 
         // Copy encryption key if needed
         if self.config.encryption_enabled() {
-            let key_src = crate::zfs::encryption::key_file_path(Path::new("/"));
-            let key_dst = crate::zfs::encryption::key_file_path(&self.target);
+            let key_src = crate::zfs_keyfile::key_file_path(Path::new("/"));
+            let key_dst = crate::zfs_keyfile::key_file_path(&self.target);
             if key_src.exists() {
                 if let Some(parent) = key_dst.parent() {
                     std::fs::create_dir_all(parent)?;

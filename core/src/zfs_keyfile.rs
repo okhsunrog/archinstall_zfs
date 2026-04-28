@@ -1,3 +1,10 @@
+//! Encryption key file lifecycle on the install target.
+//!
+//! Owns the path convention (`/etc/zfs/zroot.key`), the permission policy
+//! (mode 000 once written — only loaded via the keyfile, not opened by
+//! anything else), and the property bundles that pin a pool/dataset to
+//! that file via `keylocation=file://...`.
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -33,30 +40,6 @@ pub fn pool_encryption_properties(key_path: &Path) -> Vec<(&'static str, String)
 
 pub fn dataset_encryption_properties(key_path: &Path) -> Vec<(&'static str, String)> {
     pool_encryption_properties(key_path)
-}
-
-/// Detect whether a pool is encrypted using an ephemeral import. Hides
-/// palimpsest from UI crates and collapses any failure to `false` (the
-/// installer flow treats "can't tell" the same as "not encrypted" — the
-/// passphrase prompt simply isn't shown).
-pub async fn detect_pool_encryption(pool_name: &str) -> bool {
-    palimpsest::Zfs::new()
-        .pool(pool_name)
-        .is_encrypted()
-        .await
-        .unwrap_or(false)
-}
-
-/// Verify a pool passphrase using an ephemeral import. Same wrapper
-/// rationale as [`detect_pool_encryption`]: import errors collapse to
-/// `false` so callers don't have to distinguish between "wrong password"
-/// and "couldn't import".
-pub async fn verify_pool_passphrase(pool_name: &str, password: &str) -> bool {
-    palimpsest::Zfs::new()
-        .pool(pool_name)
-        .verify_passphrase(password.as_bytes())
-        .await
-        .unwrap_or(false)
 }
 
 #[cfg(test)]
