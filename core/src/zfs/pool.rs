@@ -113,29 +113,6 @@ pub fn pool_exists(runner: &dyn CommandRunner, name: &str) -> Result<bool> {
     Ok(output.success())
 }
 
-/// Discover ZFS pools available for import by parsing `zpool import` output.
-/// Returns a list of pool names that can be imported.
-pub fn discover_importable_pools(runner: &dyn CommandRunner) -> Vec<String> {
-    let output = match runner.run("zpool", &["import"]) {
-        Ok(o) => o,
-        Err(_) => return Vec::new(),
-    };
-    // zpool import prints to stderr when listing pools, and may exit non-zero
-    // when no pools are found. Parse both stdout and stderr.
-    let text = format!("{}{}", output.stdout, output.stderr);
-    let mut pools = Vec::new();
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if let Some(name) = trimmed.strip_prefix("pool: ") {
-            let name = name.trim();
-            if !name.is_empty() {
-                pools.push(name.to_string());
-            }
-        }
-    }
-    pools
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,27 +187,5 @@ mod tests {
         assert_eq!(calls[1].program, "zpool");
         assert!(calls[1].args.contains(&"export".to_string()));
         assert!(calls[1].args.contains(&"mypool".to_string()));
-    }
-
-    #[test]
-    fn test_discover_importable_pools() {
-        let output = "   pool: mypool\n     id: 12345\n  state: ONLINE\n\n   pool: backup\n     id: 67890\n  state: ONLINE\n";
-        let runner = RecordingRunner::new(vec![CannedResponse {
-            stdout: output.into(),
-            ..Default::default()
-        }]);
-        let pools = discover_importable_pools(&runner);
-        assert_eq!(pools, vec!["mypool", "backup"]);
-    }
-
-    #[test]
-    fn test_discover_importable_pools_empty() {
-        let runner = RecordingRunner::new(vec![CannedResponse {
-            stdout: "no pools available to import\n".into(),
-            exit_code: 1,
-            ..Default::default()
-        }]);
-        let pools = discover_importable_pools(&runner);
-        assert!(pools.is_empty());
     }
 }

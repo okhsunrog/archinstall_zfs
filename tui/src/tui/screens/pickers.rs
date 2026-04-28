@@ -100,14 +100,16 @@ pub async fn pick_existing_pool(
     config: &mut GlobalConfig,
     terminal: &mut ratatui::DefaultTerminal,
 ) -> Result<()> {
-    use archinstall_zfs_core::system::cmd::RealRunner;
-    use archinstall_zfs_core::zfs::{encryption, pool};
+    use archinstall_zfs_core::zfs::encryption;
 
-    let runner = RealRunner;
     let zfs = palimpsest::Zfs::new();
 
     let pool_name = loop {
-        let mut pools = pool::discover_importable_pools(&runner);
+        let mut pools: Vec<String> = zfs
+            .discover_importable_pools()
+            .await
+            .map(|ps| ps.into_iter().map(|p| p.name).collect())
+            .unwrap_or_default();
         let mut options: Vec<String> = pools.to_vec();
         options.push("Refresh".into());
         options.push("Enter manually".into());
