@@ -154,7 +154,9 @@ pub async fn prepare_zfs(
             .await?;
             tracing::info!("Created pool: {pool_name}");
 
-            crate::zfs::pool::set_pool_property(&zfs, pool_name, "cachefile", "none").await?;
+            zfs.pool(pool_name)
+                .set_property("cachefile", "none")
+                .await?;
 
             let base_refs = base_dataset_props(encryption, &key_path, &compression);
             let base_refs_view: Vec<(&str, &str)> =
@@ -168,13 +170,18 @@ pub async fn prepare_zfs(
 
             crate::zfs::pool::export_pool(&zfs, pool_name).await?;
             crate::zfs::pool::import_pool_no_mount(&zfs, pool_name, mountpoint).await?;
+            let key_loc = format!("file://{}", key_path.display());
             match encryption {
                 ZfsEncryptionMode::Pool => {
-                    crate::zfs::encryption::load_key(&zfs, pool_name, &key_path).await?;
+                    zfs.dataset(pool_name)
+                        .load_key_with_keylocation(&key_loc)
+                        .await?;
                 }
                 ZfsEncryptionMode::Dataset => {
                     let base = format!("{pool_name}/{prefix}");
-                    crate::zfs::encryption::load_key(&zfs, &base, &key_path).await?;
+                    zfs.dataset(&base)
+                        .load_key_with_keylocation(&key_loc)
+                        .await?;
                 }
                 ZfsEncryptionMode::None => {}
             }
@@ -186,7 +193,10 @@ pub async fn prepare_zfs(
             // created as an encrypted child. Dataset-level encryption applies
             // only to the new base dataset; the pool itself is not encrypted.
             if encryption == ZfsEncryptionMode::Pool {
-                crate::zfs::encryption::load_key(&zfs, pool_name, &key_path).await?;
+                let key_loc = format!("file://{}", key_path.display());
+                zfs.dataset(pool_name)
+                    .load_key_with_keylocation(&key_loc)
+                    .await?;
             }
 
             let base_refs = base_dataset_props(encryption, &key_path, &compression);

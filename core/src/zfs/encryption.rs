@@ -35,18 +35,6 @@ pub fn dataset_encryption_properties(key_path: &Path) -> Vec<(&'static str, Stri
     pool_encryption_properties(key_path)
 }
 
-/// File-based load-key for the install pipeline. Loads from `key_path` via
-/// `-L file://<key_path>`, overriding whatever the dataset's stored
-/// `keylocation` property is. Used during prepare/mount where we know the
-/// key file's path explicitly.
-pub async fn load_key(zfs: &palimpsest::Zfs, dataset: &str, key_path: &Path) -> Result<()> {
-    let key_loc = format!("file://{}", key_path.display());
-    zfs.dataset(dataset)
-        .load_key_with_keylocation(&key_loc)
-        .await?;
-    Ok(())
-}
-
 /// Detect whether a pool is encrypted using an ephemeral import. Hides
 /// palimpsest from UI crates and collapses any failure to `false` (the
 /// installer flow treats "can't tell" the same as "not encrypted" — the

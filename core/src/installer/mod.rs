@@ -584,9 +584,8 @@ impl Installer {
                 // Installer runs in spawn_blocking context (Alpm !Send). Bridge
                 // back into async to call the palimpsest-backed setter.
                 let zfs = palimpsest::Zfs::new();
-                tokio::runtime::Handle::current().block_on(crate::zfs::pool::set_pool_property(
-                    &zfs, pool_name, "autotrim", "on",
-                ))?;
+                tokio::runtime::Handle::current()
+                    .block_on(zfs.pool(pool_name).set_property("autotrim", "on"))?;
             }
             StorageType::SataSsd => {
                 let timer = format!("zfs-trim-weekly@{pool_name}.timer");

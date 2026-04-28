@@ -1,5 +1,5 @@
 use color_eyre::eyre::{Result, bail};
-use palimpsest::dataset::{CreateOptions, ListOptions, MountOptions, UnmountOptions};
+use palimpsest::dataset::{CreateOptions, MountOptions};
 
 pub struct DatasetConfig {
     pub name: String,
@@ -42,37 +42,6 @@ pub async fn create_dataset(
     zfs.create_dataset(full_name, &properties_to_opts(properties))
         .await?;
     Ok(())
-}
-
-pub async fn set_property(
-    zfs: &palimpsest::Zfs,
-    dataset: &str,
-    property: &str,
-    value: &str,
-) -> Result<()> {
-    zfs.dataset(dataset).set_property(property, value).await?;
-    Ok(())
-}
-
-pub async fn mount_dataset(zfs: &palimpsest::Zfs, dataset: &str) -> Result<()> {
-    zfs.dataset(dataset).mount(&MountOptions::default()).await?;
-    Ok(())
-}
-
-pub async fn umount_dataset(zfs: &palimpsest::Zfs, dataset: &str) -> Result<()> {
-    // Best-effort: ignore errors. palimpsest's unmount is already idempotent
-    // on "not currently mounted", so this only swallows pathological cases.
-    let _ = zfs
-        .dataset(dataset)
-        .unmount(&UnmountOptions::default())
-        .await;
-    Ok(())
-}
-
-pub async fn list_datasets(
-    zfs: &palimpsest::Zfs,
-) -> Result<Vec<palimpsest::dataset::ZfsListEntry>> {
-    Ok(zfs.list_datasets(&ListOptions::default()).await?)
 }
 
 /// Check if a dataset exists.
@@ -140,7 +109,9 @@ pub async fn mount_datasets_ordered(
 ) -> Result<()> {
     // Mount root dataset first (canmount=noauto)
     let root_ds = format!("{pool_name}/{prefix}/root");
-    mount_dataset(zfs, &root_ds).await?;
+    zfs.dataset(&root_ds)
+        .mount(&MountOptions::default())
+        .await?;
 
     // Recursively mount all child datasets; fall back to mount -a if -R fails
     // (older or stripped-down ZFS builds occasionally lack -R).

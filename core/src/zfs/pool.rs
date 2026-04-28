@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::Result;
-use palimpsest::models::{ZpoolListEntry, ZpoolStatusEntry};
 use palimpsest::pool::{ExportOptions, ImportOptions, PoolCreateOptions, Vdev};
 
 /// Default pool/filesystem properties used at `zpool create` time.
@@ -41,16 +40,6 @@ pub async fn create_pool(
     Ok(())
 }
 
-pub async fn import_pool(zfs: &palimpsest::Zfs, name: &str, mountpoint: &Path) -> Result<()> {
-    let opts = ImportOptions {
-        force: true,
-        altroot: Some(mountpoint.to_path_buf()),
-        ..Default::default()
-    };
-    zfs.pool(name).import(&opts).await?;
-    Ok(())
-}
-
 pub async fn import_pool_no_mount(
     zfs: &palimpsest::Zfs,
     name: &str,
@@ -73,28 +62,6 @@ pub async fn export_pool(zfs: &palimpsest::Zfs, name: &str) -> Result<()> {
     let _ = zfs.unmount_all(false).await;
     zfs.pool(name).export(&ExportOptions::default()).await?;
     Ok(())
-}
-
-pub async fn set_pool_property(
-    zfs: &palimpsest::Zfs,
-    pool: &str,
-    property: &str,
-    value: &str,
-) -> Result<()> {
-    zfs.pool(pool).set_property(property, value).await?;
-    Ok(())
-}
-
-pub async fn list_pools(zfs: &palimpsest::Zfs) -> Result<Vec<ZpoolListEntry>> {
-    Ok(zfs.list_pools(&Default::default()).await?)
-}
-
-pub async fn pool_status(zfs: &palimpsest::Zfs, pool: &str) -> Result<ZpoolStatusEntry> {
-    Ok(zfs.pool(pool).status().await?)
-}
-
-pub async fn pool_exists(zfs: &palimpsest::Zfs, name: &str) -> bool {
-    zfs.pool(name).exists().await
 }
 
 /// Public wrapper for the TUI/slint pickers — discover importable pools by
