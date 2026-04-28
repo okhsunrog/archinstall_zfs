@@ -90,26 +90,45 @@ pub fn run_install(
     tracing::info!("Phase 14: Cleanup");
     tracing::info!(target: "metrics", event = "phase_start", num = 14u32, name = "Cleanup");
     nix::unistd::sync();
-    let root_ds = format!("{pool_name}/{prefix}/root");
+    let root_ds_full = format!("{pool_name}/{prefix}/root");
     archinstall_zfs_core::disk::partition::umount_efi(&*runner, &mountpoint)?;
 
-    for attempt in 1..=4 {
-        let _result = match attempt {
-            1 => runner.run("zfs", &["umount", "-a"]),
-            2 => runner.run("zfs", &["unmount", &root_ds]),
-            3 => runner.run("zfs", &["umount", "-af"]),
-            4 => runner.run("zfs", &["unmount", "-f", &root_ds]),
-            _ => unreachable!(),
-        };
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        nix::unistd::sync();
-    }
+    rt.block_on(async {
+        let zfs = palimpsest::Zfs::new();
+        let root_ds = zfs.dataset(&root_ds_full);
 
-    let output = runner.run("zpool", &["export", pool_name])?;
-    if !output.success() {
-        tracing::warn!("zpool export failed, trying force");
-        let _ = runner.run("zpool", &["export", "-f", pool_name]);
-    }
+        for attempt in 1..=4 {
+            let _ = match attempt {
+                1 => zfs.unmount_all(false).await,
+                2 => {
+                    root_ds
+                        .unmount(&palimpsest::dataset::UnmountOptions::default())
+                        .await
+                }
+                3 => zfs.unmount_all(true).await,
+                4 => {
+                    root_ds
+                        .unmount(&palimpsest::dataset::UnmountOptions { force: true })
+                        .await
+                }
+                _ => unreachable!(),
+            };
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            nix::unistd::sync();
+        }
+
+        let pool = zfs.pool(pool_name);
+        if pool
+            .export(&palimpsest::pool::ExportOptions::default())
+            .await
+            .is_err()
+        {
+            tracing::warn!("zpool export failed, trying force");
+            let _ = pool
+                .export(&palimpsest::pool::ExportOptions { force: true })
+                .await;
+        }
+    });
 
     tracing::info!("Installation complete!");
     Ok(())

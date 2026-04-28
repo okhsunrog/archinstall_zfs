@@ -278,6 +278,7 @@ dependencies = [
  "color-eyre",
  "crossbeam-channel",
  "nix 0.31.2",
+ "palimpsest",
  "slint",
  "slint-build",
  "sublime_fuzzy",

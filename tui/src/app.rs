@@ -215,36 +215,60 @@ pub async fn run_install(
         .await??;
     }
 
-    // ── Phase 14: Cleanup (sync) ──────────────────────────────
+    // ── Phase 14: Cleanup ──────────────────────────────────────
     tracing::info!("Phase 14: Cleanup");
-    tokio::task::spawn_blocking(move || -> Result<()> {
-        nix::unistd::sync();
+    let zfs = palimpsest::Zfs::new();
+    let root_ds_full = format!("{pool_name}/{prefix}/root");
 
-        let root_ds = format!("{pool_name}/{prefix}/root");
-        archinstall_zfs_core::disk::partition::umount_efi(&*runner, &mountpoint)?;
-
-        for attempt in 1..=4 {
-            let _result = match attempt {
-                1 => runner.run("zfs", &["umount", "-a"]),
-                2 => runner.run("zfs", &["unmount", &root_ds]),
-                3 => runner.run("zfs", &["umount", "-af"]),
-                4 => runner.run("zfs", &["unmount", "-f", &root_ds]),
-                _ => unreachable!(),
-            };
-            std::thread::sleep(std::time::Duration::from_secs(1));
+    // sync(2) + umount_efi are sync but quick. Wrap in spawn_blocking so we
+    // don't block the tokio worker on the FFI/subprocess.
+    {
+        let r = runner.clone();
+        let mp = mountpoint.clone();
+        tokio::task::spawn_blocking(move || -> Result<()> {
             nix::unistd::sync();
-        }
+            archinstall_zfs_core::disk::partition::umount_efi(&*r, &mp)?;
+            Ok(())
+        })
+        .await??;
+    }
 
-        let output = runner.run("zpool", &["export", &pool_name])?;
-        if !output.success() {
-            tracing::warn!("zpool export failed, trying force");
-            let _ = runner.run("zpool", &["export", "-f", &pool_name]);
-        }
+    // Unmount filesystems with escalating force. Each attempt is best-effort;
+    // palimpsest's unmount is idempotent on "not currently mounted" so the
+    // second pass after a successful first pass returns Ok without noise.
+    let root_ds = zfs.dataset(&root_ds_full);
+    for attempt in 1..=4 {
+        let _ = match attempt {
+            1 => zfs.unmount_all(false).await,
+            2 => {
+                root_ds
+                    .unmount(&palimpsest::dataset::UnmountOptions::default())
+                    .await
+            }
+            3 => zfs.unmount_all(true).await,
+            4 => {
+                root_ds
+                    .unmount(&palimpsest::dataset::UnmountOptions { force: true })
+                    .await
+            }
+            _ => unreachable!(),
+        };
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let _ = tokio::task::spawn_blocking(nix::unistd::sync).await;
+    }
 
-        tracing::info!("Installation complete!");
-        Ok(())
-    })
-    .await??;
+    let pool = zfs.pool(pool_name.as_str());
+    if pool
+        .export(&palimpsest::pool::ExportOptions::default())
+        .await
+        .is_err()
+    {
+        tracing::warn!("zpool export failed, trying force");
+        let _ = pool
+            .export(&palimpsest::pool::ExportOptions { force: true })
+            .await;
+    }
 
+    tracing::info!("Installation complete!");
     Ok(())
 }
