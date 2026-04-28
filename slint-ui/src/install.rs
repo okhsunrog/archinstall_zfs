@@ -59,6 +59,14 @@ pub fn run_install(
     }
     installer.perform_installation()?;
 
+    // TRIM strategy: post-install ZFS-side configuration (no Alpm involved).
+    rt.block_on(archinstall_zfs_core::zfs_trim::configure_zfs_trim(
+        &*runner,
+        &mountpoint,
+        pool_name,
+        config,
+    ))?;
+
     tracing::info!("Phase 13: Setting up ZFSBootMenu");
     tracing::info!(target: "metrics", event = "phase_start", num = 13u32, name = "Setting up ZFSBootMenu");
     let zswap_on = matches!(

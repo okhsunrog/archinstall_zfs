@@ -15,4 +15,5 @@ pub mod zfs_cleanup;
 pub mod zfs_keyfile;
 pub mod zfs_setup;
 pub mod zfs_target_files;
+pub mod zfs_trim;
 pub mod zrepl;

@@ -165,6 +165,12 @@ pub async fn run_install(
         .await??;
     }
 
+    // TRIM strategy: post-install ZFS-side configuration (no Alpm involved).
+    // Called outside Installer so the palimpsest setter can be a regular
+    // .await rather than a block_on bridge.
+    archinstall_zfs_core::zfs_trim::configure_zfs_trim(&*runner, &mountpoint, &pool_name, &config)
+        .await?;
+
     // ── Phase 13: ZFSBootMenu ──────────────────────────────────
     tracing::info!("Phase 13: Setting up ZFSBootMenu");
 

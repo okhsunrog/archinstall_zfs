@@ -550,60 +550,6 @@ impl Installer {
             .or(self.config.swap_partition_by_id.as_deref())
     }
 
-    /// Set the right TRIM strategy for the pool based on the storage type.
-    ///
-    /// - NVMe  → `autotrim=on`:  ZFS issues TRIM continuously as blocks are
-    ///   freed; NVMe's deep command queue absorbs this with no I/O penalty.
-    /// - SATA SSD → `zfs-trim-weekly@<pool>.timer`: periodic `zpool trim`
-    ///   avoids the SATA bus latency spikes caused by concurrent TRIM on
-    ///   consumer drives.
-    /// - HDD  → nothing: rotational media doesn't support TRIM.
-    ///
-    /// `fstrim.timer` is intentionally never enabled — it is a VFS-level tool
-    /// unaware of ZFS internals and silently skips ZFS pools on every run.
-    fn configure_zfs_trim(&self, pool_name: &str) -> Result<()> {
-        use crate::config::types::InstallationMode;
-        use crate::system::sysinfo::{StorageType, detect_storage_type};
-
-        // Only configure TRIM when we created (or know) the disk.
-        // ExistingPool mode leaves the pool's autotrim property untouched.
-        let disk_path = match self.config.installation_mode {
-            Some(InstallationMode::FullDisk) => self.config.disk_by_id.as_deref(),
-            Some(InstallationMode::NewPool) => self.config.zfs_partition_by_id.as_deref(),
-            _ => None,
-        };
-
-        let Some(disk_path) = disk_path else {
-            tracing::debug!("no disk path available for TRIM detection, skipping");
-            return Ok(());
-        };
-
-        match detect_storage_type(disk_path) {
-            StorageType::Nvme => {
-                tracing::info!(pool = pool_name, "NVMe detected — enabling autotrim");
-                // Installer runs in spawn_blocking context (Alpm !Send). Bridge
-                // back into async to call the palimpsest-backed setter.
-                let zfs = palimpsest::Zfs::new();
-                tokio::runtime::Handle::current()
-                    .block_on(zfs.pool(pool_name).set_property("autotrim", "on"))?;
-            }
-            StorageType::SataSsd => {
-                let timer = format!("zfs-trim-weekly@{pool_name}.timer");
-                tracing::info!(
-                    pool = pool_name,
-                    timer,
-                    "SATA SSD detected — enabling periodic zpool trim timer"
-                );
-                services::enable_service(&*self.runner, &self.target, &timer)?;
-            }
-            StorageType::Hdd => {
-                tracing::debug!(pool = pool_name, "HDD detected — no TRIM configured");
-            }
-        }
-
-        Ok(())
-    }
-
     fn finalize_zfs(&self) -> Result<()> {
         let pool_name = self.config.pool_name.as_deref().unwrap_or("zroot");
         let prefix = &self.config.dataset_prefix;
@@ -613,10 +559,9 @@ impl Installer {
             services::enable_service(&*self.runner, &self.target, service)?;
         }
 
-        // Configure TRIM strategy based on detected storage type.
-        // fstrim/fstrim.timer is NOT used — it cannot reach ZFS pools.
-        // See StorageType docs in sysinfo.rs for full rationale.
-        self.configure_zfs_trim(pool_name)?;
+        // TRIM strategy is configured outside Installer — it doesn't depend
+        // on Alpm and is async (palimpsest set_property). See
+        // crate::zfs_trim::configure_zfs_trim, called from run_install.
 
         // genfstab
         fstab::generate_fstab(&*self.runner, &self.target, pool_name, prefix)?;
