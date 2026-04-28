@@ -45,16 +45,6 @@ pub fn load_key(runner: &dyn CommandRunner, pool: &str, key_path: &Path) -> Resu
     Ok(())
 }
 
-/// Check whether an already-imported pool has encryption enabled.
-pub fn detect_encryption(runner: &dyn CommandRunner, pool: &str) -> Result<bool> {
-    let output = run_zfs(runner, &["get", "-H", "-o", "value", "encryption", pool])?;
-    if !output.success() {
-        return Ok(false);
-    }
-    let value = output.stdout.trim();
-    Ok(value != "off" && !value.is_empty())
-}
-
 /// Verify a passphrase against an already-imported pool by writing a temp
 /// key file and attempting load-key.
 pub fn verify_passphrase(runner: &dyn CommandRunner, pool: &str, password: &str) -> Result<bool> {
@@ -163,24 +153,6 @@ mod tests {
         assert_eq!(props[0], ("encryption", "aes-256-gcm".to_string()));
         assert_eq!(props[1], ("keyformat", "passphrase".to_string()));
         assert!(props[2].1.contains("/etc/zfs/zroot.key"));
-    }
-
-    #[test]
-    fn test_detect_encryption_on() {
-        let runner = RecordingRunner::new(vec![CannedResponse {
-            stdout: "aes-256-gcm\n".into(),
-            ..Default::default()
-        }]);
-        assert!(detect_encryption(&runner, "testpool").unwrap());
-    }
-
-    #[test]
-    fn test_detect_encryption_off() {
-        let runner = RecordingRunner::new(vec![CannedResponse {
-            stdout: "off\n".into(),
-            ..Default::default()
-        }]);
-        assert!(!detect_encryption(&runner, "testpool").unwrap());
     }
 
     fn get_property_json(pool: &str, value: &str, source_kind: &str) -> Vec<u8> {

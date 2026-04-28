@@ -1,7 +1,6 @@
 use color_eyre::eyre::Result;
 
-use super::cli::{run_zfs, run_zfs_json};
-use super::models::{ZfsGetOutput, ZfsListOutput, ZfsMountOutput};
+use super::cli::run_zfs;
 use crate::system::cmd::{CommandRunner, check_exit};
 use palimpsest::dataset::{ListOptions, ZfsListEntry as PalimpsestZfsListEntry};
 
@@ -83,22 +82,6 @@ pub async fn list_datasets(
 ) -> Result<Vec<PalimpsestZfsListEntry>> {
     let opts = ListOptions::default();
     Ok(palimpsest::dataset::list(runner, &opts).await?)
-}
-
-pub fn list_all_datasets(runner: &dyn CommandRunner) -> Result<ZfsListOutput> {
-    run_zfs_json(runner, &["list", "-t", "all"])
-}
-
-pub fn get_property(
-    runner: &dyn CommandRunner,
-    dataset: &str,
-    property: &str,
-) -> Result<ZfsGetOutput> {
-    run_zfs_json(runner, &["get", property, dataset])
-}
-
-pub fn list_mounts(runner: &dyn CommandRunner) -> Result<ZfsMountOutput> {
-    run_zfs_json(runner, &["mount"])
 }
 
 /// Check if a dataset exists.
