@@ -18,7 +18,6 @@ color-eyre.workspace = true
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 futures.workspace = true
 nix.workspace = true
-palimpsest = { version = "0.1.0", path = "../../palimpsest" }
 ratatui = "0.30.0"
 ratatui-macros = "0.7.0"
 ratatui-themes = "0.2.0"

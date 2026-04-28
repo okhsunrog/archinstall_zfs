@@ -581,7 +581,12 @@ impl Installer {
         match detect_storage_type(disk_path) {
             StorageType::Nvme => {
                 tracing::info!(pool = pool_name, "NVMe detected — enabling autotrim");
-                crate::zfs::pool::set_pool_property(&*self.runner, pool_name, "autotrim", "on")?;
+                // Installer runs in spawn_blocking context (Alpm !Send). Bridge
+                // back into async to call the palimpsest-backed setter.
+                let zfs = palimpsest::Zfs::new();
+                tokio::runtime::Handle::current().block_on(crate::zfs::pool::set_pool_property(
+                    &zfs, pool_name, "autotrim", "on",
+                ))?;
             }
             StorageType::SataSsd => {
                 let timer = format!("zfs-trim-weekly@{pool_name}.timer");

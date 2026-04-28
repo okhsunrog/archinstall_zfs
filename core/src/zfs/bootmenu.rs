@@ -228,39 +228,45 @@ pub fn create_efi_entries(runner: &dyn CommandRunner, efi_partition: &Path) -> R
 ///
 /// org.zfsbootmenu:commandline does NOT include root= -- ZBM adds it.
 /// It only contains: spl.spl_hostid, zswap, rw
-pub fn set_zbm_properties(
-    runner: &dyn CommandRunner,
+/// Compose the value of `org.zfsbootmenu:commandline`. ZBM injects `root=`
+/// itself; we only contribute hostid + zswap toggle + rw.
+fn build_zbm_cmdline(zswap_enabled: bool) -> String {
+    let zswap = if zswap_enabled {
+        "zswap.enabled=1"
+    } else {
+        "zswap.enabled=0"
+    };
+    format!("spl.spl_hostid={HOSTID_VALUE} {zswap} rw")
+}
+
+/// Map init system to ZBM's `rootprefix` property value (the prefix prepended
+/// to the dataset name for the kernel cmdline).
+fn rootprefix_for(init_system: InitSystem) -> &'static str {
+    match init_system {
+        InitSystem::Dracut => "root=ZFS=",
+        InitSystem::Mkinitcpio => "zfs=",
+    }
+}
+
+pub async fn set_zbm_properties(
     pool_name: &str,
     prefix: &str,
     init_system: InitSystem,
     zswap_enabled: bool,
     set_bootfs: bool,
 ) -> Result<()> {
+    let zfs = palimpsest::Zfs::new();
     let root_ds = format!("{pool_name}/{prefix}/root");
+    let cmdline = build_zbm_cmdline(zswap_enabled);
+    let rootprefix = rootprefix_for(init_system);
 
-    // Build commandline: do NOT include root= -- ZBM injects it automatically
-    let mut cmdline_parts = vec![format!("spl.spl_hostid={HOSTID_VALUE}")];
-    cmdline_parts.push(if zswap_enabled {
-        "zswap.enabled=1".to_string()
-    } else {
-        "zswap.enabled=0".to_string()
-    });
-    cmdline_parts.push("rw".to_string());
-    let cmdline = cmdline_parts.join(" ");
-
-    // Set commandline
-    let prop = format!("org.zfsbootmenu:commandline={cmdline}");
-    let output = runner.run("zfs", &["set", &prop, &root_ds])?;
-    check_exit(&output, "set ZBM commandline")?;
-
-    // Set rootprefix based on init system
-    let rootprefix = match init_system {
-        InitSystem::Dracut => "root=ZFS=",
-        InitSystem::Mkinitcpio => "zfs=",
-    };
-    let prop = format!("org.zfsbootmenu:rootprefix={rootprefix}");
-    let output = runner.run("zfs", &["set", &prop, &root_ds])?;
-    check_exit(&output, "set ZBM rootprefix")?;
+    let root_handle = zfs.dataset(&root_ds);
+    root_handle
+        .set_property("org.zfsbootmenu:commandline", &cmdline)
+        .await?;
+    root_handle
+        .set_property("org.zfsbootmenu:rootprefix", rootprefix)
+        .await?;
 
     if set_bootfs {
         // Set bootfs so ZBM knows which BE to auto-boot after the timeout.
@@ -268,8 +274,7 @@ pub fn set_zbm_properties(
         // 10-second countdown then boots the bootfs dataset. Users can press
         // any key during the countdown to browse/select other BEs.
         // Without bootfs, ZBM ignores zbm.timeout and always waits for input.
-        let output = runner.run("zpool", &["set", &format!("bootfs={root_ds}"), pool_name])?;
-        check_exit(&output, "set pool bootfs")?;
+        zfs.pool(pool_name).set_property("bootfs", &root_ds).await?;
         tracing::info!(
             cmdline,
             rootprefix,
@@ -315,6 +320,24 @@ mod tests {
     }
 
     #[test]
+    fn test_build_zbm_cmdline() {
+        assert_eq!(
+            build_zbm_cmdline(false),
+            "spl.spl_hostid=0x00bab10c zswap.enabled=0 rw"
+        );
+        assert_eq!(
+            build_zbm_cmdline(true),
+            "spl.spl_hostid=0x00bab10c zswap.enabled=1 rw"
+        );
+    }
+
+    #[test]
+    fn test_rootprefix_for() {
+        assert_eq!(rootprefix_for(InitSystem::Dracut), "root=ZFS=");
+        assert_eq!(rootprefix_for(InitSystem::Mkinitcpio), "zfs=");
+    }
+
+    #[test]
     fn test_install_zbm_pacman_hook() {
         let dir = tempfile::tempdir().unwrap();
         install_zbm_pacman_hook(dir.path()).unwrap();
@@ -325,62 +348,6 @@ mod tests {
         assert!(content.contains("generate-zbm"));
         assert!(content.contains("zfs.ko"));
         assert!(content.contains("pkgbase"));
-    }
-
-    #[test]
-    fn test_set_zbm_properties_dracut_with_bootfs() {
-        let runner = RecordingRunner::new(vec![
-            CannedResponse::default(), // set commandline
-            CannedResponse::default(), // set rootprefix
-            CannedResponse::default(), // set bootfs
-        ]);
-        set_zbm_properties(&runner, "mypool", "arch0", InitSystem::Dracut, false, true).unwrap();
-
-        let calls = runner.calls();
-        assert_eq!(calls.len(), 3);
-
-        let cmdline_args = calls[0].args.join(" ");
-        assert!(cmdline_args.contains("org.zfsbootmenu:commandline="));
-        assert!(!cmdline_args.contains("root="));
-        assert!(cmdline_args.contains("spl.spl_hostid=0x00bab10c"));
-        assert!(cmdline_args.contains("zswap.enabled=0"));
-        assert!(cmdline_args.contains(" rw"));
-
-        let rootprefix_args = calls[1].args.join(" ");
-        assert!(rootprefix_args.contains("root=ZFS="));
-
-        let bootfs_args = calls[2].args.join(" ");
-        assert!(bootfs_args.contains("bootfs=mypool/arch0/root"));
-    }
-
-    #[test]
-    fn test_set_zbm_properties_without_bootfs() {
-        let runner = RecordingRunner::new(vec![
-            CannedResponse::default(), // set commandline
-            CannedResponse::default(), // set rootprefix
-                                       // no bootfs call
-        ]);
-        set_zbm_properties(&runner, "mypool", "arch0", InitSystem::Dracut, false, false).unwrap();
-
-        let calls = runner.calls();
-        assert_eq!(calls.len(), 2, "should not set bootfs when disabled");
-    }
-
-    #[test]
-    fn test_set_zbm_properties_mkinitcpio_zswap() {
-        let runner = RecordingRunner::new(vec![
-            CannedResponse::default(), // set commandline
-            CannedResponse::default(), // set rootprefix
-            CannedResponse::default(), // set bootfs
-        ]);
-        set_zbm_properties(&runner, "pool", "arch1", InitSystem::Mkinitcpio, true, true).unwrap();
-
-        let calls = runner.calls();
-        assert_eq!(calls.len(), 3);
-        let cmdline_args = calls[0].args.join(" ");
-        assert!(cmdline_args.contains("zswap.enabled=1"));
-        let rootprefix_args = calls[1].args.join(" ");
-        assert!(rootprefix_args.contains("rootprefix=zfs="));
     }
 
     #[test]

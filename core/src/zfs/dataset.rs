@@ -1,8 +1,5 @@
-use color_eyre::eyre::Result;
-
-use super::cli::run_zfs;
-use crate::system::cmd::{CommandRunner, check_exit};
-use palimpsest::dataset::{ListOptions, ZfsListEntry as PalimpsestZfsListEntry};
+use color_eyre::eyre::{Result, bail};
+use palimpsest::dataset::{CreateOptions, ListOptions, MountOptions, UnmountOptions};
 
 pub struct DatasetConfig {
     pub name: String,
@@ -33,80 +30,74 @@ pub fn default_datasets() -> Vec<DatasetConfig> {
     ]
 }
 
-pub fn create_dataset(
-    runner: &dyn CommandRunner,
+fn properties_to_opts(props: &[(&str, &str)]) -> CreateOptions {
+    CreateOptions::new().properties(props.iter().map(|(k, v)| (k.to_string(), v.to_string())))
+}
+
+pub async fn create_dataset(
+    zfs: &palimpsest::Zfs,
     full_name: &str,
     properties: &[(&str, &str)],
 ) -> Result<()> {
-    let mut args: Vec<&str> = vec!["create"];
-
-    let owned: Vec<String> = properties
-        .iter()
-        .flat_map(|(k, v)| vec!["-o".to_string(), format!("{k}={v}")])
-        .collect();
-    let refs: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
-    args.extend_from_slice(&refs);
-
-    args.push(full_name);
-
-    let output = run_zfs(runner, &args)?;
-    check_exit(&output, &format!("zfs create {full_name}"))?;
+    zfs.create_dataset(full_name, &properties_to_opts(properties))
+        .await?;
     Ok(())
 }
 
-pub fn set_property(
-    runner: &dyn CommandRunner,
+pub async fn set_property(
+    zfs: &palimpsest::Zfs,
     dataset: &str,
     property: &str,
     value: &str,
 ) -> Result<()> {
-    let prop_val = format!("{property}={value}");
-    let output = run_zfs(runner, &["set", &prop_val, dataset])?;
-    check_exit(&output, &format!("zfs set {prop_val} {dataset}"))?;
+    zfs.dataset(dataset).set_property(property, value).await?;
     Ok(())
 }
 
-pub fn mount_dataset(runner: &dyn CommandRunner, dataset: &str) -> Result<()> {
-    let output = run_zfs(runner, &["mount", dataset])?;
-    check_exit(&output, &format!("zfs mount {dataset}"))?;
+pub async fn mount_dataset(zfs: &palimpsest::Zfs, dataset: &str) -> Result<()> {
+    zfs.dataset(dataset).mount(&MountOptions::default()).await?;
     Ok(())
 }
 
-pub fn umount_dataset(runner: &dyn CommandRunner, dataset: &str) -> Result<()> {
-    let _ = run_zfs(runner, &["umount", dataset]);
+pub async fn umount_dataset(zfs: &palimpsest::Zfs, dataset: &str) -> Result<()> {
+    // Best-effort: ignore errors. palimpsest's unmount is already idempotent
+    // on "not currently mounted", so this only swallows pathological cases.
+    let _ = zfs
+        .dataset(dataset)
+        .unmount(&UnmountOptions::default())
+        .await;
     Ok(())
 }
 
 pub async fn list_datasets(
-    runner: &dyn palimpsest::CommandRunner,
-) -> Result<Vec<PalimpsestZfsListEntry>> {
-    let opts = ListOptions::default();
-    Ok(palimpsest::dataset::list(runner, &opts).await?)
+    zfs: &palimpsest::Zfs,
+) -> Result<Vec<palimpsest::dataset::ZfsListEntry>> {
+    Ok(zfs.list_datasets(&ListOptions::default()).await?)
 }
 
 /// Check if a dataset exists.
-pub fn dataset_exists(runner: &dyn CommandRunner, name: &str) -> bool {
-    run_zfs(runner, &["list", "-H", name]).is_ok_and(|output| output.success())
+pub async fn dataset_exists(zfs: &palimpsest::Zfs, name: &str) -> bool {
+    zfs.dataset(name).exists().await
 }
 
-pub fn create_base_dataset(
-    runner: &dyn CommandRunner,
+pub async fn create_base_dataset(
+    zfs: &palimpsest::Zfs,
     pool_name: &str,
     prefix: &str,
     encryption_props: &[(&str, &str)],
 ) -> Result<()> {
     let base_name = format!("{pool_name}/{prefix}");
-    if dataset_exists(runner, &base_name) {
-        color_eyre::eyre::bail!(
+    if dataset_exists(zfs, &base_name).await {
+        bail!(
             "Dataset '{base_name}' already exists. \
              Choose a different dataset prefix or use Existing Pool mode."
         );
     }
-    create_dataset(runner, &base_name, encryption_props)
+    create_dataset(zfs, &base_name, encryption_props).await
 }
 
-pub fn create_child_datasets(
-    runner: &dyn CommandRunner,
+pub async fn create_child_datasets(
+    zfs: &palimpsest::Zfs,
     pool_name: &str,
     prefix: &str,
     datasets: &[DatasetConfig],
@@ -124,7 +115,7 @@ pub fn create_child_datasets(
             let parent = parts[..parts.len() - 1].join("/");
             let parent_full = format!("{pool_name}/{prefix}/{parent}");
             if !created.contains(&parent_full) {
-                create_dataset(runner, &parent_full, &[("mountpoint", "none")])?;
+                create_dataset(zfs, &parent_full, &[("mountpoint", "none")]).await?;
                 created.insert(parent_full);
             }
         }
@@ -135,28 +126,28 @@ pub fn create_child_datasets(
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
-        create_dataset(runner, &full_name, &props)?;
+        create_dataset(zfs, &full_name, &props).await?;
         created.insert(full_name);
     }
     Ok(())
 }
 
-pub fn mount_datasets_ordered(
-    runner: &dyn CommandRunner,
+pub async fn mount_datasets_ordered(
+    zfs: &palimpsest::Zfs,
     pool_name: &str,
     prefix: &str,
     _datasets: &[DatasetConfig],
 ) -> Result<()> {
     // Mount root dataset first (canmount=noauto)
     let root_ds = format!("{pool_name}/{prefix}/root");
-    mount_dataset(runner, &root_ds)?;
+    mount_dataset(zfs, &root_ds).await?;
 
-    // Recursively mount all child datasets
+    // Recursively mount all child datasets; fall back to mount -a if -R fails
+    // (older or stripped-down ZFS builds occasionally lack -R).
     let base_ds = format!("{pool_name}/{prefix}");
-    let output = run_zfs(runner, &["mount", "-R", &base_ds]);
-    // -R may not be supported on all versions; fall back to mount -a
-    if output.is_err() || !output.as_ref().unwrap().success() {
-        let _ = run_zfs(runner, &["mount", "-a"]);
+    let recursive = MountOptions { recursive: true };
+    if zfs.dataset(&base_ds).mount(&recursive).await.is_err() {
+        let _ = zfs.mount_all().await;
     }
 
     Ok(())
@@ -165,28 +156,24 @@ pub fn mount_datasets_ordered(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::system::cmd::tests::{CannedResponse, RecordingRunner};
+    use palimpsest::{Cmd, RecordingRunner, Zfs};
 
     #[test]
-    fn test_create_dataset_with_properties() {
-        let runner = RecordingRunner::new(vec![CannedResponse::default()]);
-        create_dataset(
-            &runner,
-            "pool/arch0/root",
-            &[("mountpoint", "/"), ("canmount", "noauto")],
-        )
-        .unwrap();
-
-        let calls = runner.calls();
-        let args = &calls[0].args;
-        assert!(args.contains(&"create".to_string()));
-        assert!(args.contains(&"pool/arch0/root".to_string()));
-        assert!(args.contains(&"mountpoint=/".to_string()));
-        assert!(args.contains(&"canmount=noauto".to_string()));
+    fn test_default_datasets() {
+        let ds = default_datasets();
+        assert_eq!(ds.len(), 4);
+        assert_eq!(ds[0].name, "root");
+        assert_eq!(ds[1].name, "data/home");
+        assert_eq!(ds[2].name, "data/root");
+        assert_eq!(ds[3].name, "vm");
     }
 
-    #[test]
-    fn test_create_child_datasets_sorts_by_depth() {
+    #[tokio::test]
+    async fn test_create_child_datasets_sorts_by_depth_and_auto_parents() {
+        // Three datasets: "data/home", "root", "data/root". After depth sort
+        // we expect "root" first (0 slashes), then the auto-created "data"
+        // parent, then "data/home" and "data/root". RecordingRunner keys on
+        // the full Cmd, so we record exactly the four create calls we expect.
         let datasets = vec![
             DatasetConfig {
                 name: "data/home".to_string(),
@@ -204,28 +191,42 @@ mod tests {
                 properties: vec![("mountpoint".to_string(), "/root".to_string())],
             },
         ];
+        let runner = RecordingRunner::new()
+            .record(
+                Cmd::new("zfs").args([
+                    "create",
+                    "-o",
+                    "mountpoint=/",
+                    "-o",
+                    "canmount=noauto",
+                    "pool/arch0/root",
+                ]),
+                vec![],
+                vec![],
+                0,
+            )
+            .record(
+                Cmd::new("zfs").args(["create", "-o", "mountpoint=none", "pool/arch0/data"]),
+                vec![],
+                vec![],
+                0,
+            )
+            .record(
+                Cmd::new("zfs").args(["create", "-o", "mountpoint=/home", "pool/arch0/data/home"]),
+                vec![],
+                vec![],
+                0,
+            )
+            .record(
+                Cmd::new("zfs").args(["create", "-o", "mountpoint=/root", "pool/arch0/data/root"]),
+                vec![],
+                vec![],
+                0,
+            );
 
-        // 3 datasets + 1 auto-created parent "data"
-        let responses: Vec<CannedResponse> = (0..4).map(|_| CannedResponse::default()).collect();
-        let runner = RecordingRunner::new(responses);
-        create_child_datasets(&runner, "pool", "arch0", &datasets).unwrap();
-
-        let calls = runner.calls();
-        assert_eq!(calls.len(), 4);
-        // "root" has 0 slashes, should come first
-        assert!(calls[0].args.contains(&"pool/arch0/root".to_string()));
-        // "data" auto-created as parent
-        assert!(calls[1].args.contains(&"pool/arch0/data".to_string()));
-        // Then data/home and data/root
-    }
-
-    #[test]
-    fn test_default_datasets() {
-        let ds = default_datasets();
-        assert_eq!(ds.len(), 4);
-        assert_eq!(ds[0].name, "root");
-        assert_eq!(ds[1].name, "data/home");
-        assert_eq!(ds[2].name, "data/root");
-        assert_eq!(ds[3].name, "vm");
+        let zfs = Zfs::with_runner(runner);
+        create_child_datasets(&zfs, "pool", "arch0", &datasets)
+            .await
+            .expect("create_child_datasets succeeds");
     }
 }

@@ -4,9 +4,6 @@ use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::{Context, Result};
 
-use super::cli::run_zfs;
-use crate::system::cmd::{CommandRunner, check_exit};
-
 const KEY_FILE_PATH: &str = "etc/zfs/zroot.key";
 
 pub fn key_file_path(target: &Path) -> PathBuf {
@@ -38,22 +35,36 @@ pub fn dataset_encryption_properties(key_path: &Path) -> Vec<(&'static str, Stri
     pool_encryption_properties(key_path)
 }
 
-/// File-based load-key for the install pipeline. Reads the key from
-/// `key_path` via `keylocation=file://<key_path>`. Used during prepare/mount
-/// where the key file already exists at a known location.
-pub fn load_key(runner: &dyn CommandRunner, pool: &str, key_path: &Path) -> Result<()> {
+/// File-based load-key for the install pipeline. Loads from `key_path` via
+/// `-L file://<key_path>`, overriding whatever the dataset's stored
+/// `keylocation` property is. Used during prepare/mount where we know the
+/// key file's path explicitly.
+pub async fn load_key(zfs: &palimpsest::Zfs, dataset: &str, key_path: &Path) -> Result<()> {
     let key_loc = format!("file://{}", key_path.display());
-    let output = run_zfs(runner, &["load-key", "-L", &key_loc, pool])?;
-    check_exit(&output, &format!("zfs load-key {pool}"))?;
+    zfs.dataset(dataset)
+        .load_key_with_keylocation(&key_loc)
+        .await?;
     Ok(())
 }
 
-/// Detect whether a pool is encrypted using an ephemeral import.
+/// Detect whether a pool is encrypted using an ephemeral import. Public
+/// wrapper that hides palimpsest from callers — UI crates call this with
+/// just a pool name.
+pub async fn detect_pool_encryption(pool_name: &str) -> bool {
+    detect_pool_encryption_with_zfs(&palimpsest::Zfs::new(), pool_name).await
+}
+
+/// Inner orchestrator with an injectable `Zfs` handle. `pub(crate)` because
+/// the only caller outside this file is the test module; production callers
+/// go through `detect_pool_encryption(name)`.
 ///
 /// Imports the pool with `-fN` (force, no mount), checks the encryption
 /// property, then always attempts to unload-key and export (best-effort
 /// cleanup). Returns `true` if encryption is present and not "off".
-pub async fn detect_pool_encryption(zfs: &palimpsest::Zfs, pool_name: &str) -> bool {
+pub(crate) async fn detect_pool_encryption_with_zfs(
+    zfs: &palimpsest::Zfs,
+    pool_name: &str,
+) -> bool {
     let pool = zfs.pool(pool_name);
     let dataset = zfs.dataset(pool_name);
 
@@ -84,12 +95,17 @@ pub async fn detect_pool_encryption(zfs: &palimpsest::Zfs, pool_name: &str) -> b
     encrypted
 }
 
-/// Verify a pool passphrase using an ephemeral import.
+/// Verify a pool passphrase using an ephemeral import. Public wrapper.
+pub async fn verify_pool_passphrase(pool_name: &str, password: &str) -> bool {
+    verify_pool_passphrase_with_zfs(&palimpsest::Zfs::new(), pool_name, password).await
+}
+
+/// Inner orchestrator with injectable Zfs handle for testing.
 ///
 /// Imports the pool with `-fN`, attempts `zfs load-key` with the passphrase
 /// piped via stdin, then always cleans up (unload-key, export pool). No
 /// temporary key file on disk — the passphrase never touches the filesystem.
-pub async fn verify_pool_passphrase(
+pub(crate) async fn verify_pool_passphrase_with_zfs(
     zfs: &palimpsest::Zfs,
     pool_name: &str,
     password: &str,
@@ -193,7 +209,7 @@ mod tests {
                 0,
             );
         let zfs = Zfs::with_runner(runner);
-        assert!(detect_pool_encryption(&zfs, "testpool").await);
+        assert!(detect_pool_encryption_with_zfs(&zfs, "testpool").await);
     }
 
     #[tokio::test]
@@ -224,7 +240,7 @@ mod tests {
                 0,
             );
         let zfs = Zfs::with_runner(runner);
-        assert!(!detect_pool_encryption(&zfs, "testpool").await);
+        assert!(!detect_pool_encryption_with_zfs(&zfs, "testpool").await);
     }
 
     #[tokio::test]
@@ -236,7 +252,7 @@ mod tests {
             1,
         );
         let zfs = Zfs::with_runner(runner);
-        assert!(!detect_pool_encryption(&zfs, "badpool").await);
+        assert!(!detect_pool_encryption_with_zfs(&zfs, "badpool").await);
     }
 
     #[tokio::test]
@@ -270,7 +286,7 @@ mod tests {
                 0,
             );
         let zfs = Zfs::with_runner(runner);
-        assert!(verify_pool_passphrase(&zfs, "testpool", "correct").await);
+        assert!(verify_pool_passphrase_with_zfs(&zfs, "testpool", "correct").await);
     }
 
     #[tokio::test]
@@ -303,7 +319,7 @@ mod tests {
                 0,
             );
         let zfs = Zfs::with_runner(runner);
-        assert!(!verify_pool_passphrase(&zfs, "testpool", "wrong").await);
+        assert!(!verify_pool_passphrase_with_zfs(&zfs, "testpool", "wrong").await);
     }
 
     #[tokio::test]
@@ -315,6 +331,6 @@ mod tests {
             1,
         );
         let zfs = Zfs::with_runner(runner);
-        assert!(!verify_pool_passphrase(&zfs, "badpool", "pass").await);
+        assert!(!verify_pool_passphrase_with_zfs(&zfs, "badpool", "pass").await);
     }
 }

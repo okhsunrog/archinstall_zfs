@@ -1,191 +1,109 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::Result;
+use palimpsest::models::{ZpoolListEntry, ZpoolStatusEntry};
+use palimpsest::pool::{ExportOptions, ImportOptions, PoolCreateOptions, Vdev};
 
-use super::cli::{run_zpool, run_zpool_json};
-use super::models::{ZpoolListOutput, ZpoolStatusOutput};
-use crate::system::cmd::{CommandRunner, check_exit};
+/// Default pool/filesystem properties used at `zpool create` time.
+///
+/// `autotrim` is intentionally absent — it is set dynamically after pool
+/// creation based on the detected storage type (NVMe vs SATA SSD vs HDD).
+/// See `crate::system::sysinfo::StorageType` for the rationale.
+fn apply_default_options(opts: PoolCreateOptions) -> PoolCreateOptions {
+    opts.pool_property("ashift", "12")
+        .fs_property("acltype", "posixacl")
+        .fs_property("relatime", "on")
+        .fs_property("xattr", "sa")
+        .fs_property("dnodesize", "auto")
+        .fs_property("normalization", "formD")
+        .fs_property("devices", "off")
+        .mountpoint("none")
+}
 
-// autotrim is intentionally absent here — it is set dynamically after pool
-// creation based on the detected storage type (NVMe vs SATA SSD vs HDD).
-// See `crate::system::sysinfo::StorageType` for the rationale.
-pub const DEFAULT_POOL_OPTIONS: &[&str] = &[
-    "-o",
-    "ashift=12",
-    "-O",
-    "acltype=posixacl",
-    "-O",
-    "relatime=on",
-    "-O",
-    "xattr=sa",
-    "-O",
-    "dnodesize=auto",
-    "-O",
-    "normalization=formD",
-    "-O",
-    "devices=off",
-    "-m",
-    "none",
-];
-
-pub fn create_pool(
-    runner: &dyn CommandRunner,
+pub async fn create_pool(
+    zfs: &palimpsest::Zfs,
     name: &str,
     device: &Path,
     mountpoint: &Path,
     compression: &str,
     extra_props: &[(&str, &str)],
 ) -> Result<()> {
-    let device_str = device.to_string_lossy();
-    let mount_str = mountpoint.to_string_lossy();
+    let mut opts = apply_default_options(PoolCreateOptions::new(name))
+        .force()
+        .altroot(mountpoint)
+        .fs_property("compression", compression);
+    for (k, v) in extra_props {
+        opts = opts.fs_property(*k, *v);
+    }
+    opts = opts.vdev(Vdev::Stripe(vec![PathBuf::from(device)]));
 
-    let mut args: Vec<&str> = vec!["create", "-f"];
-    args.extend_from_slice(DEFAULT_POOL_OPTIONS);
-    args.extend_from_slice(&["-R", &mount_str]);
-    let compression_opt = format!("compression={compression}");
-    args.extend_from_slice(&["-O", &compression_opt]);
-
-    // leak-safe: we only build short-lived owned strings and keep refs to them
-    let owned_props: Vec<String> = extra_props
-        .iter()
-        .flat_map(|(k, v)| vec![format!("-O"), format!("{k}={v}")])
-        .collect();
-    let prop_refs: Vec<&str> = owned_props.iter().map(|s| s.as_str()).collect();
-    args.extend_from_slice(&prop_refs);
-
-    args.push(name);
-    args.push(&device_str);
-
-    let output = run_zpool(runner, &args)?;
-    check_exit(&output, "zpool create")?;
+    zfs.create_pool(&opts).await?;
     Ok(())
 }
 
-pub fn import_pool(runner: &dyn CommandRunner, name: &str, mountpoint: &Path) -> Result<()> {
-    let mount_str = mountpoint.to_string_lossy();
-    let output = run_zpool(runner, &["import", "-f", "-R", &mount_str, name])?;
-    check_exit(&output, "zpool import")?;
+pub async fn import_pool(zfs: &palimpsest::Zfs, name: &str, mountpoint: &Path) -> Result<()> {
+    let opts = ImportOptions {
+        force: true,
+        altroot: Some(mountpoint.to_path_buf()),
+        ..Default::default()
+    };
+    zfs.pool(name).import(&opts).await?;
     Ok(())
 }
 
-pub fn import_pool_no_mount(
-    runner: &dyn CommandRunner,
+pub async fn import_pool_no_mount(
+    zfs: &palimpsest::Zfs,
     name: &str,
     mountpoint: &Path,
 ) -> Result<()> {
-    let mount_str = mountpoint.to_string_lossy();
-    let output = run_zpool(runner, &["import", "-N", "-R", &mount_str, name])?;
-    check_exit(&output, "zpool import -N")?;
+    let opts = ImportOptions {
+        no_mount: true,
+        altroot: Some(mountpoint.to_path_buf()),
+        ..Default::default()
+    };
+    zfs.pool(name).import(&opts).await?;
     Ok(())
 }
 
-pub fn export_pool(runner: &dyn CommandRunner, name: &str) -> Result<()> {
+pub async fn export_pool(zfs: &palimpsest::Zfs, name: &str) -> Result<()> {
     nix::unistd::sync();
-    // Try umount all first
-    let _ = super::cli::run_zfs(runner, &["umount", "-a"]);
-    let output = run_zpool(runner, &["export", name])?;
-    check_exit(&output, "zpool export")?;
+    // Best-effort umount-all first; ignore errors. palimpsest's unmount_all
+    // returns Err on real failures (e.g., a stuck mountpoint), but the
+    // subsequent zpool export will surface the same condition more clearly.
+    let _ = zfs.unmount_all(false).await;
+    zfs.pool(name).export(&ExportOptions::default()).await?;
     Ok(())
 }
 
-pub fn set_pool_property(
-    runner: &dyn CommandRunner,
+pub async fn set_pool_property(
+    zfs: &palimpsest::Zfs,
     pool: &str,
     property: &str,
     value: &str,
 ) -> Result<()> {
-    let prop_val = format!("{property}={value}");
-    let output = run_zpool(runner, &["set", &prop_val, pool])?;
-    check_exit(&output, &format!("zpool set {prop_val}"))?;
+    zfs.pool(pool).set_property(property, value).await?;
     Ok(())
 }
 
-pub fn list_pools(runner: &dyn CommandRunner) -> Result<ZpoolListOutput> {
-    run_zpool_json(runner, &["list"])
+pub async fn list_pools(zfs: &palimpsest::Zfs) -> Result<Vec<ZpoolListEntry>> {
+    Ok(zfs.list_pools(&Default::default()).await?)
 }
 
-pub fn pool_status(runner: &dyn CommandRunner, pool: &str) -> Result<ZpoolStatusOutput> {
-    run_zpool_json(runner, &["status", pool])
+pub async fn pool_status(zfs: &palimpsest::Zfs, pool: &str) -> Result<ZpoolStatusEntry> {
+    Ok(zfs.pool(pool).status().await?)
 }
 
-pub fn pool_exists(runner: &dyn CommandRunner, name: &str) -> Result<bool> {
-    let output = run_zpool(runner, &["list", name])?;
-    Ok(output.success())
+pub async fn pool_exists(zfs: &palimpsest::Zfs, name: &str) -> bool {
+    zfs.pool(name).exists().await
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::system::cmd::tests::{CannedResponse, RecordingRunner};
-
-    #[test]
-    fn test_create_pool_command() {
-        let runner = RecordingRunner::new(vec![CannedResponse::default()]);
-        create_pool(
-            &runner,
-            "testpool",
-            Path::new("/dev/disk/by-id/test-part2"),
-            Path::new("/mnt"),
-            "lz4",
-            &[],
-        )
-        .unwrap();
-
-        let calls = runner.calls();
-        assert_eq!(calls[0].program, "zpool");
-        assert!(calls[0].args.contains(&"create".to_string()));
-        assert!(calls[0].args.contains(&"testpool".to_string()));
-        assert!(calls[0].args.contains(&"ashift=12".to_string()));
-    }
-
-    #[test]
-    fn test_create_pool_with_encryption_props() {
-        let runner = RecordingRunner::new(vec![CannedResponse::default()]);
-        create_pool(
-            &runner,
-            "encpool",
-            Path::new("/dev/disk/by-id/test-part2"),
-            Path::new("/mnt"),
-            "zstd",
-            &[
-                ("encryption", "aes-256-gcm"),
-                ("keyformat", "passphrase"),
-                ("keylocation", "file:///etc/zfs/zroot.key"),
-            ],
-        )
-        .unwrap();
-
-        let calls = runner.calls();
-        let args_str = calls[0].args.join(" ");
-        assert!(args_str.contains("encryption=aes-256-gcm"));
-        assert!(args_str.contains("keyformat=passphrase"));
-    }
-
-    #[test]
-    fn test_import_pool_command() {
-        let runner = RecordingRunner::new(vec![CannedResponse::default()]);
-        import_pool(&runner, "mypool", Path::new("/mnt")).unwrap();
-
-        let calls = runner.calls();
-        assert!(calls[0].args.contains(&"import".to_string()));
-        assert!(calls[0].args.contains(&"mypool".to_string()));
-        assert!(calls[0].args.contains(&"-f".to_string()));
-    }
-
-    #[test]
-    fn test_export_pool_command() {
-        let runner = RecordingRunner::new(vec![
-            CannedResponse::default(), // zfs umount -a
-            CannedResponse::default(), // zpool export
-        ]);
-        export_pool(&runner, "mypool").unwrap();
-
-        let calls = runner.calls();
-        // First call: zfs umount -a
-        assert_eq!(calls[0].program, "zfs");
-        // Second call: zpool export
-        assert_eq!(calls[1].program, "zpool");
-        assert!(calls[1].args.contains(&"export".to_string()));
-        assert!(calls[1].args.contains(&"mypool".to_string()));
-    }
+/// Public wrapper for the TUI/slint pickers — discover importable pools by
+/// name. Hides palimpsest's `DiscoveredPool` struct (with id/state/status)
+/// because the picker only needs names. On any error returns an empty Vec.
+pub async fn discover_importable_pools() -> Vec<String> {
+    palimpsest::Zfs::new()
+        .discover_importable_pools()
+        .await
+        .map(|ps| ps.into_iter().map(|p| p.name).collect())
+        .unwrap_or_default()
 }

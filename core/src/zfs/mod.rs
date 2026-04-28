@@ -1,10 +1,9 @@
 pub mod bootmenu;
 pub mod cache;
-pub mod cli;
+pub mod cleanup;
 pub mod dataset;
 pub mod encryption;
 pub mod kmod;
-pub mod models;
 pub mod pool;
 
 pub const ZFS_SERVICES: &[&str] = &[

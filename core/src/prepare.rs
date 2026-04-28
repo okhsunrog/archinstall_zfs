@@ -95,7 +95,11 @@ pub fn prepare_disk(
 /// (base dataset + children) inside the existing pool, mirroring the Python
 /// installer's semantics. `create_base_dataset` errors if `pool/prefix`
 /// already exists, so the user must pick a new prefix.
-pub fn prepare_zfs(
+///
+/// Sync `runner` is used only for non-ZFS commands (systemctl, hostid, cache
+/// file management). All ZFS operations route through palimpsest, with a
+/// `Zfs::new()` handle constructed locally.
+pub async fn prepare_zfs(
     runner: &dyn CommandRunner,
     config: &GlobalConfig,
     zfs_partition: Option<&Path>,
@@ -111,6 +115,8 @@ pub fn prepare_zfs(
     let prefix = config.dataset_prefix.as_str();
     let compression = config.compression.to_string();
     let encryption = config.zfs_encryption_mode;
+
+    let zfs = palimpsest::Zfs::new();
 
     crate::zfs::cache::create_hostid(runner)?;
     crate::zfs::cache::prepare_zfs_cache(Path::new("/"), pool_name)?;
@@ -138,62 +144,65 @@ pub fn prepare_zfs(
                 enc_props.iter().map(|(k, v)| (*k, v.as_str())).collect();
 
             crate::zfs::pool::create_pool(
-                runner,
+                &zfs,
                 pool_name,
                 zfs_partition,
                 mountpoint,
                 &compression,
                 &enc_refs,
-            )?;
+            )
+            .await?;
             tracing::info!("Created pool: {pool_name}");
 
-            crate::zfs::pool::set_pool_property(runner, pool_name, "cachefile", "none")?;
+            crate::zfs::pool::set_pool_property(&zfs, pool_name, "cachefile", "none").await?;
 
             let base_refs = base_dataset_props(encryption, &key_path, &compression);
             let base_refs_view: Vec<(&str, &str)> =
                 base_refs.iter().map(|(k, v)| (*k, v.as_str())).collect();
-            crate::zfs::dataset::create_base_dataset(runner, pool_name, prefix, &base_refs_view)?;
+            crate::zfs::dataset::create_base_dataset(&zfs, pool_name, prefix, &base_refs_view)
+                .await?;
 
             let datasets = crate::zfs::dataset::default_datasets();
-            crate::zfs::dataset::create_child_datasets(runner, pool_name, prefix, &datasets)?;
+            crate::zfs::dataset::create_child_datasets(&zfs, pool_name, prefix, &datasets).await?;
             tracing::info!("Created datasets");
 
-            crate::zfs::pool::export_pool(runner, pool_name)?;
-            crate::zfs::pool::import_pool_no_mount(runner, pool_name, mountpoint)?;
+            crate::zfs::pool::export_pool(&zfs, pool_name).await?;
+            crate::zfs::pool::import_pool_no_mount(&zfs, pool_name, mountpoint).await?;
             match encryption {
                 ZfsEncryptionMode::Pool => {
-                    crate::zfs::encryption::load_key(runner, pool_name, &key_path)?;
+                    crate::zfs::encryption::load_key(&zfs, pool_name, &key_path).await?;
                 }
                 ZfsEncryptionMode::Dataset => {
                     let base = format!("{pool_name}/{prefix}");
-                    crate::zfs::encryption::load_key(runner, &base, &key_path)?;
+                    crate::zfs::encryption::load_key(&zfs, &base, &key_path).await?;
                 }
                 ZfsEncryptionMode::None => {}
             }
         }
         InstallationMode::ExistingPool => {
-            crate::zfs::pool::import_pool_no_mount(runner, pool_name, mountpoint)?;
+            crate::zfs::pool::import_pool_no_mount(&zfs, pool_name, mountpoint).await?;
 
             // Pool-level encryption: load the pool key so the new BE can be
             // created as an encrypted child. Dataset-level encryption applies
             // only to the new base dataset; the pool itself is not encrypted.
             if encryption == ZfsEncryptionMode::Pool {
-                crate::zfs::encryption::load_key(runner, pool_name, &key_path)?;
+                crate::zfs::encryption::load_key(&zfs, pool_name, &key_path).await?;
             }
 
             let base_refs = base_dataset_props(encryption, &key_path, &compression);
             let base_refs_view: Vec<(&str, &str)> =
                 base_refs.iter().map(|(k, v)| (*k, v.as_str())).collect();
-            crate::zfs::dataset::create_base_dataset(runner, pool_name, prefix, &base_refs_view)?;
+            crate::zfs::dataset::create_base_dataset(&zfs, pool_name, prefix, &base_refs_view)
+                .await?;
 
             let datasets = crate::zfs::dataset::default_datasets();
-            crate::zfs::dataset::create_child_datasets(runner, pool_name, prefix, &datasets)?;
+            crate::zfs::dataset::create_child_datasets(&zfs, pool_name, prefix, &datasets).await?;
             tracing::info!("Created new BE in existing pool");
         }
     }
 
     let datasets = crate::zfs::dataset::default_datasets();
-    crate::zfs::dataset::mount_datasets_ordered(runner, pool_name, prefix, &datasets)?;
+    crate::zfs::dataset::mount_datasets_ordered(&zfs, pool_name, prefix, &datasets).await?;
     tracing::info!("Datasets mounted");
 
     Ok(())

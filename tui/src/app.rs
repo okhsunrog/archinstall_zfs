@@ -117,27 +117,25 @@ pub async fn run_install(
         .await??
     };
 
-    // ── Phase 2: ZFS pool + datasets + encryption (sync) ──────
+    // ── Phase 2: ZFS pool + datasets + encryption ─────────────
+    // ZFS ops are async (via palimpsest), so they run directly on the
+    // current task. mount_efi is sync (subprocess) and stays in spawn_blocking.
     tracing::info!("Phase 2: ZFS pool and datasets");
+    archinstall_zfs_core::prepare::prepare_zfs(
+        &*runner,
+        &config,
+        zfs_partition.as_deref(),
+        &mountpoint,
+    )
+    .await?;
+
+    tracing::info!("Phase 3: Mounting EFI partition");
     {
         let r = runner.clone();
-        let zfs_partition = zfs_partition.clone();
-        let efi_partition = efi_partition.clone();
-        let mountpoint = mountpoint.clone();
-        let config = config.clone();
+        let efi = efi_partition.clone();
+        let mp = mountpoint.clone();
         tokio::task::spawn_blocking(move || -> Result<()> {
-            archinstall_zfs_core::prepare::prepare_zfs(
-                &*r,
-                &config,
-                zfs_partition.as_deref(),
-                &mountpoint,
-            )?;
-
-            // ── Phase 3: Mount EFI ─────────────────────────────────────
-            tracing::info!("Phase 3: Mounting EFI partition");
-            archinstall_zfs_core::disk::partition::mount_efi(&*r, &efi_partition, &mountpoint)?;
-
-            Ok(())
+            archinstall_zfs_core::disk::partition::mount_efi(&*r, &efi, &mp)
         })
         .await??;
     }
@@ -174,24 +172,14 @@ pub async fn run_install(
         config.swap_mode,
         SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
     );
-    {
-        let r = runner.clone();
-        let pool_name = pool_name.clone();
-        let prefix = prefix.clone();
-        let init_system = config.init_system;
-        let set_bootfs = config.set_bootfs;
-        tokio::task::spawn_blocking(move || {
-            archinstall_zfs_core::zfs::bootmenu::set_zbm_properties(
-                &*r,
-                &pool_name,
-                &prefix,
-                init_system,
-                zswap_on,
-                set_bootfs,
-            )
-        })
-        .await??;
-    }
+    archinstall_zfs_core::zfs::bootmenu::set_zbm_properties(
+        &pool_name,
+        &prefix,
+        config.init_system,
+        zswap_on,
+        config.set_bootfs,
+    )
+    .await?;
 
     archinstall_zfs_core::zfs::bootmenu::install_and_generate_zbm(
         runner.clone(),
@@ -217,7 +205,6 @@ pub async fn run_install(
 
     // ── Phase 14: Cleanup ──────────────────────────────────────
     tracing::info!("Phase 14: Cleanup");
-    let zfs = palimpsest::Zfs::new();
     let root_ds_full = format!("{pool_name}/{prefix}/root");
 
     // sync(2) + umount_efi are sync but quick. Wrap in spawn_blocking so we
@@ -233,41 +220,8 @@ pub async fn run_install(
         .await??;
     }
 
-    // Unmount filesystems with escalating force. Each attempt is best-effort;
-    // palimpsest's unmount is idempotent on "not currently mounted" so the
-    // second pass after a successful first pass returns Ok without noise.
-    let root_ds = zfs.dataset(&root_ds_full);
-    for attempt in 1..=4 {
-        let _ = match attempt {
-            1 => zfs.unmount_all(false).await,
-            2 => {
-                root_ds
-                    .unmount(&palimpsest::dataset::UnmountOptions::default())
-                    .await
-            }
-            3 => zfs.unmount_all(true).await,
-            4 => {
-                root_ds
-                    .unmount(&palimpsest::dataset::UnmountOptions { force: true })
-                    .await
-            }
-            _ => unreachable!(),
-        };
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        let _ = tokio::task::spawn_blocking(nix::unistd::sync).await;
-    }
-
-    let pool = zfs.pool(pool_name.as_str());
-    if pool
-        .export(&palimpsest::pool::ExportOptions::default())
-        .await
-        .is_err()
-    {
-        tracing::warn!("zpool export failed, trying force");
-        let _ = pool
-            .export(&palimpsest::pool::ExportOptions { force: true })
-            .await;
-    }
+    archinstall_zfs_core::zfs::cleanup::cleanup_pool_after_install(&pool_name, &root_ds_full)
+        .await?;
 
     tracing::info!("Installation complete!");
     Ok(())

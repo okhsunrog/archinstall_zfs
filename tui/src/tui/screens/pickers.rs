@@ -100,16 +100,10 @@ pub async fn pick_existing_pool(
     config: &mut GlobalConfig,
     terminal: &mut ratatui::DefaultTerminal,
 ) -> Result<()> {
-    use archinstall_zfs_core::zfs::encryption;
-
-    let zfs = palimpsest::Zfs::new();
+    use archinstall_zfs_core::zfs::{encryption, pool};
 
     let pool_name = loop {
-        let mut pools: Vec<String> = zfs
-            .discover_importable_pools()
-            .await
-            .map(|ps| ps.into_iter().map(|p| p.name).collect())
-            .unwrap_or_default();
+        let mut pools = pool::discover_importable_pools().await;
         let mut options: Vec<String> = pools.to_vec();
         options.push("Refresh".into());
         options.push("Enter manually".into());
@@ -141,7 +135,7 @@ pub async fn pick_existing_pool(
 
     config.pool_name = Some(pool_name.clone());
 
-    if encryption::detect_pool_encryption(&zfs, &pool_name).await {
+    if encryption::detect_pool_encryption(&pool_name).await {
         loop {
             let result = run_edit(terminal, "Enter pool passphrase", "", true)?;
             let Some(pw) = result.value else {
@@ -151,7 +145,7 @@ pub async fn pick_existing_pool(
                 break;
             }
 
-            if encryption::verify_pool_passphrase(&zfs, &pool_name, &pw).await {
+            if encryption::verify_pool_passphrase(&pool_name, &pw).await {
                 config.zfs_encryption_mode = ZfsEncryptionMode::Pool;
                 config.zfs_encryption_password = Some(pw);
                 break;
