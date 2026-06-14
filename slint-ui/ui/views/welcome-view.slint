@@ -218,6 +218,12 @@ export component WelcomeView inherits Rectangle {
                                     font-size: 18px;
                                     vertical-alignment: center;
                                     width: 24px;
+                                    // Spin only while installing; the
+                                    // ↻ glyph is set by the `installing`
+                                    // state below.
+                                    transform-rotation: WelcomeState.zfs-installing
+                                        ? 360deg * mod(animation-tick(), 1.2s) / 1.2s
+                                        : 0deg;
                                 }
 
                                 Text {

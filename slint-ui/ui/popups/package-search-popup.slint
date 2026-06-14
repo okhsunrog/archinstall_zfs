@@ -22,7 +22,10 @@ export component PackageSearchPopup inherits Rectangle {
         background: #00000080;
         width: 100%; height: 100%;
 
-        TouchArea { clicked => { closed(); } }
+        TouchArea {
+            clicked => { closed(); }
+            scroll-event(e) => { return accept; }
+        }
 
         Rectangle {
             x: (parent.width - self.width) / 2;
@@ -147,7 +150,6 @@ export component PackageSearchPopup inherits Rectangle {
 
                 if root.selected-packages.length > 0: VerticalLayout {
                     spacing: Theme.spacing-xs;
-                    height: min(self.preferred-height, 100px);
 
                     Text {
                         text: "Selected";
@@ -157,39 +159,40 @@ export component PackageSearchPopup inherits Rectangle {
                         height: Theme.spacing-lg;
                     }
 
-                    Flickable {
-                        HorizontalLayout {
-                            spacing: Theme.spacing-xs + 2px;
-                            alignment: start;
+                    // Wrapping chip cloud — FlexboxLayout flows chips onto
+                    // multiple lines instead of a single overflowing row.
+                    chips-flow := FlexboxLayout {
+                        flex-direction: row;
+                        flex-wrap: wrap;
+                        spacing: Theme.spacing-xs + 2px;
 
-                            for pkg[index] in root.selected-packages: Rectangle {
-                                width: pkg-chip-layout.preferred-width;
-                                height: Theme.control-height-sm - 4px;
-                                background: pkg-del-ta.has-hover ? Theme.c.red : Theme.c.surface0;
-                                border-radius: Theme.radius-sm;
+                        for pkg[index] in root.selected-packages: Rectangle {
+                            width: pkg-chip-layout.preferred-width;
+                            height: Theme.control-height-sm - 4px;
+                            background: pkg-del-ta.has-hover ? Theme.c.red : Theme.c.surface0;
+                            border-radius: Theme.radius-sm;
 
-                                pkg-del-ta := TouchArea {
-                                    clicked => { root.package-removed(index); }
+                            pkg-del-ta := TouchArea {
+                                clicked => { root.package-removed(index); }
+                            }
+
+                            pkg-chip-layout := HorizontalLayout {
+                                padding-left: Theme.spacing-sm;
+                                padding-right: Theme.spacing-sm;
+                                spacing: Theme.spacing-xs;
+
+                                Text {
+                                    text: pkg.name;
+                                    color: pkg-del-ta.has-hover ? Theme.c.base : Theme.c.text;
+                                    font-size: Theme.font-sm;
+                                    vertical-alignment: center;
                                 }
 
-                                pkg-chip-layout := HorizontalLayout {
-                                    padding-left: Theme.spacing-sm;
-                                    padding-right: Theme.spacing-sm;
-                                    spacing: Theme.spacing-xs;
-
-                                    Text {
-                                        text: pkg.name;
-                                        color: pkg-del-ta.has-hover ? Theme.c.base : Theme.c.text;
-                                        font-size: Theme.font-sm;
-                                        vertical-alignment: center;
-                                    }
-
-                                    Text {
-                                        text: pkg.repo == "aur" ? "[aur]" : "[repo]";
-                                        color: pkg-del-ta.has-hover ? Theme.c.base : Theme.c.overlay0;
-                                        font-size: 10px;
-                                        vertical-alignment: center;
-                                    }
+                                Text {
+                                    text: pkg.repo == "aur" ? "[aur]" : "[repo]";
+                                    color: pkg-del-ta.has-hover ? Theme.c.base : Theme.c.overlay0;
+                                    font-size: 10px;
+                                    vertical-alignment: center;
                                 }
                             }
                         }

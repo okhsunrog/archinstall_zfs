@@ -266,6 +266,8 @@ export global Theme {
         foreground: Palette.destructive-foreground,
     };
     out property <ButtonStyle> button-ghost: {
+        // `transparent` keyword isn't accepted inside struct literals,
+        // so use the hex form for the fully-transparent fill.
         background: #00000000,
         foreground: Catppuccin.current.subtext_0,
     };

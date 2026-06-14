@@ -34,9 +34,13 @@ export component InstallView inherits VerticalLayout {
         }
     }
 
+    // Auto-pin to the bottom whenever a new log line lands. Computed from
+    // the live viewport height so it stays correct when the log overflows
+    // the visible area; clamped to 0 so a short log doesn't push above
+    // the top.
     property <int> scroll-trigger: InstallState.log-messages.length;
     changed scroll-trigger => {
-        log-view.viewport-y = -100000px;
+        log-view.viewport-y = -max(0px, log-view.viewport-height - log-view.height);
     }
 
     // Progress card (always visible during install)

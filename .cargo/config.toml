@@ -1,2 +1,6 @@
 [alias]
 xtask = "run --package xtask --"
+
+[env]
+# Enables FlexboxLayout in slint-ui (used by the package-search chip strip).
+SLINT_ENABLE_EXPERIMENTAL_FEATURES = "1"

@@ -38,7 +38,7 @@ export component StyledTextInput inherits Rectangle {
         x: 8px;
         width: parent.width - 16px;
         text: (input.text == "" && input.preedit-text == "") ? root.placeholder : "";
-        color: Theme.c.overlay0;
+        color: Palette.placeholder-foreground;
         font-size: root.font-size;
         vertical-alignment: center;
         accessible-role: none;
