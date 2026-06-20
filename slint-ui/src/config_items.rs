@@ -54,13 +54,13 @@ fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     );
 
     if matches!(mode, Some(InstallationMode::FullDisk) | None) {
-        let disks = archinstall_zfs_core::disk::by_id::list_disks_by_id().unwrap_or_default();
-        let disk_strs: Vec<String> = disks.iter().map(|p| p.display().to_string()).collect();
+        let disks = disk_choices();
+        let disk_strs: Vec<String> = disks.iter().map(|(_, label)| label.clone()).collect();
         let disk_refs: Vec<&str> = disk_strs.iter().map(|s| s.as_str()).collect();
         let selected = c
             .disk_by_id
             .as_ref()
-            .and_then(|sel| disks.iter().position(|d| d == sel))
+            .and_then(|sel| disks.iter().position(|(path, _)| path == sel))
             .map(|i| i as i32)
             .unwrap_or(-1);
         items.extend(radio_group("disk_by_id", "Disk", &disk_refs, selected));
@@ -678,9 +678,8 @@ pub fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
             config.installation_mode = Some(new_mode);
         }
         "disk_by_id" => {
-            if let Ok(disks) = archinstall_zfs_core::disk::by_id::list_disks_by_id()
-                && let Some(path) = disks.get(idx as usize)
-            {
+            let disks = disk_choices();
+            if let Some((path, _)) = disks.get(idx as usize) {
                 config.disk_by_id = Some(path.clone());
             }
         }
@@ -766,6 +765,26 @@ pub fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
         }
         _ => {}
     }
+}
+
+fn disk_choices() -> Vec<(std::path::PathBuf, String)> {
+    archinstall_zfs_core::disk::device::list_block_devices()
+        .map(|devices| {
+            devices
+                .into_iter()
+                .map(|device| (device.preferred_path().path, device.selection_label()))
+                .collect()
+        })
+        .unwrap_or_else(|_| {
+            archinstall_zfs_core::disk::by_id::list_disks_by_id()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|path| {
+                    let label = path.display().to_string();
+                    (path, label)
+                })
+                .collect()
+        })
 }
 
 pub fn apply_text(config: &mut GlobalConfig, key: &str, val: &str) {

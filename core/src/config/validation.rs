@@ -329,11 +329,27 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_by_id_path() {
+    fn test_valid_by_path_disk_path() {
         let mut cfg = valid_full_disk_config();
-        cfg.disk_by_id = Some(PathBuf::from("/dev/sda"));
+        cfg.disk_by_id = Some(PathBuf::from("/dev/disk/by-path/pci-0000:00:04.0"));
         let errors = cfg.validate_for_install();
-        assert!(errors.iter().any(|e| e.contains("/dev/disk/by-id/")));
+        assert!(errors.is_empty(), "Expected no errors, got: {errors:?}");
+    }
+
+    #[test]
+    fn test_valid_virtio_devnode_disk_path() {
+        let mut cfg = valid_full_disk_config();
+        cfg.disk_by_id = Some(PathBuf::from("/dev/vda"));
+        let errors = cfg.validate_for_install();
+        assert!(errors.is_empty(), "Expected no errors, got: {errors:?}");
+    }
+
+    #[test]
+    fn test_invalid_device_path() {
+        let mut cfg = valid_full_disk_config();
+        cfg.disk_by_id = Some(PathBuf::from("/tmp/not-a-disk"));
+        let errors = cfg.validate_for_install();
+        assert!(errors.iter().any(|e| e.contains("supported /dev node")));
     }
 
     #[test]
