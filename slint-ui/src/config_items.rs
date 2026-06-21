@@ -66,30 +66,6 @@ impl From<DeviceChoice> for ChoiceRow {
 }
 
 impl ChoiceRow {
-    fn path_only(path: PathBuf) -> Self {
-        let label = path.display().to_string();
-        Self {
-            path,
-            label,
-            icon: "hard-drive".to_string(),
-            model: String::new(),
-            serial: String::new(),
-            size: String::new(),
-            transport: String::new(),
-            media: String::new(),
-            removable: false,
-            persistent_path: String::new(),
-            persistent_kind: String::new(),
-            group_label: String::new(),
-            group_model: String::new(),
-            group_serial: String::new(),
-            group_size: String::new(),
-            group_transport: String::new(),
-            group_media: String::new(),
-            group_removable: false,
-        }
-    }
-
     fn group_key(&self) -> &str {
         if self.group_label.is_empty() {
             self.label.as_str()
@@ -1038,25 +1014,13 @@ pub fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
 fn disk_choices() -> Vec<ChoiceRow> {
     archinstall_zfs_core::disk::device::disk_choices()
         .map(|choices| choices.into_iter().map(ChoiceRow::from).collect())
-        .unwrap_or_else(|_| {
-            archinstall_zfs_core::disk::by_id::list_disks_by_id()
-                .unwrap_or_default()
-                .into_iter()
-                .map(ChoiceRow::path_only)
-                .collect()
-        })
+        .unwrap_or_default()
 }
 
 fn partition_choices() -> Vec<ChoiceRow> {
     archinstall_zfs_core::disk::device::partition_choices()
         .map(|choices| choices.into_iter().map(ChoiceRow::from).collect())
-        .unwrap_or_else(|_| {
-            archinstall_zfs_core::disk::by_id::list_partitions_by_id()
-                .unwrap_or_default()
-                .into_iter()
-                .map(ChoiceRow::path_only)
-                .collect()
-        })
+        .unwrap_or_default()
 }
 
 pub fn apply_text(config: &mut GlobalConfig, key: &str, val: &str) {
