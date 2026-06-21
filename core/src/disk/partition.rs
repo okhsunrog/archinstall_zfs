@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::{Context, Result};
 
@@ -123,16 +123,17 @@ pub fn create_partitions(
     let _ = runner.run("udevadm", &["settle"]);
 
     // Wait for by-id symlinks to appear
-    let efi_dev = format!("{disk_str}-part{}", layout.efi_part_num);
+    let efi_dev = partition_path(disk, layout.efi_part_num);
+    let efi_dev_str = efi_dev.to_string_lossy();
     for _ in 0..50 {
-        if std::path::Path::new(&efi_dev).exists() {
+        if efi_dev.exists() {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
 
     // Format EFI partition
-    let output = runner.run("mkfs.fat", &["-I", "-F32", &efi_dev])?;
+    let output = runner.run("mkfs.fat", &["-I", "-F32", &efi_dev_str])?;
     check_exit(&output, "mkfs.fat EFI")?;
 
     Ok(layout)
@@ -140,18 +141,16 @@ pub fn create_partitions(
 
 /// Wait for /dev/disk/by-id partition symlinks to appear after partitioning.
 pub fn wait_for_by_id_partitions(disk: &Path, layout: &PartitionLayout) -> Vec<std::path::PathBuf> {
-    let disk_str = disk.to_string_lossy();
     let mut parts = vec![
-        format!("{disk_str}-part{}", layout.efi_part_num),
-        format!("{disk_str}-part{}", layout.zfs_part_num),
+        partition_path(disk, layout.efi_part_num),
+        partition_path(disk, layout.zfs_part_num),
     ];
     if let Some(swap) = layout.swap_part_num {
-        parts.push(format!("{disk_str}-part{swap}"));
+        parts.push(partition_path(disk, swap));
     }
 
     let mut result = Vec::new();
-    for part in &parts {
-        let path = std::path::PathBuf::from(part);
+    for path in parts {
         for _ in 0..50 {
             if path.exists() {
                 break;
@@ -161,6 +160,23 @@ pub fn wait_for_by_id_partitions(disk: &Path, layout: &PartitionLayout) -> Vec<s
         result.push(path);
     }
     result
+}
+
+pub fn partition_path(disk: &Path, part_num: u32) -> PathBuf {
+    let disk_str = disk.to_string_lossy();
+    let separator = if disk_str.starts_with("/dev/disk/") {
+        "-part"
+    } else if disk_str
+        .chars()
+        .next_back()
+        .is_some_and(|ch| ch.is_ascii_digit())
+    {
+        "p"
+    } else {
+        ""
+    };
+
+    PathBuf::from(format!("{disk_str}{separator}{part_num}"))
 }
 
 pub fn mount_efi(
@@ -244,5 +260,29 @@ mod tests {
         assert_eq!(layout.efi_part_num, 1);
         assert_eq!(layout.zfs_part_num, 2);
         assert_eq!(layout.swap_part_num, Some(3));
+    }
+
+    #[test]
+    fn test_partition_path_by_id() {
+        assert_eq!(
+            partition_path(Path::new("/dev/disk/by-id/test-disk"), 1),
+            PathBuf::from("/dev/disk/by-id/test-disk-part1")
+        );
+    }
+
+    #[test]
+    fn test_partition_path_virtio_devnode() {
+        assert_eq!(
+            partition_path(Path::new("/dev/vda"), 1),
+            PathBuf::from("/dev/vda1")
+        );
+    }
+
+    #[test]
+    fn test_partition_path_nvme_devnode() {
+        assert_eq!(
+            partition_path(Path::new("/dev/nvme0n1"), 1),
+            PathBuf::from("/dev/nvme0n1p1")
+        );
     }
 }

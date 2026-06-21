@@ -426,8 +426,21 @@ fn is_valid_dataset_prefix(prefix: &str) -> bool {
             .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
 }
 
-fn is_by_id_path(path: &std::path::Path) -> bool {
-    path.starts_with("/dev/disk/by-id/")
+fn is_supported_device_path(path: &std::path::Path) -> bool {
+    if path.starts_with("/dev/disk/by-id/") || path.starts_with("/dev/disk/by-path/") {
+        return true;
+    }
+
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+
+    path.starts_with("/dev/")
+        && (name.starts_with("sd")
+            || name.starts_with("vd")
+            || name.starts_with("xvd")
+            || name.starts_with("nvme")
+            || name.starts_with("mmcblk"))
 }
 
 /// Validates the config and returns a list of error messages.
@@ -459,34 +472,34 @@ impl GlobalConfig {
     pub fn validate_by_id_paths(&self) -> Vec<String> {
         let mut errors = Vec::new();
         if let Some(ref p) = self.disk_by_id
-            && !is_by_id_path(p)
+            && !is_supported_device_path(p)
         {
             errors.push(format!(
-                "disk_by_id must be a /dev/disk/by-id/ path, got: {}",
+                "disk_by_id must be a /dev/disk/by-id/, /dev/disk/by-path/, or supported /dev node path, got: {}",
                 p.display()
             ));
         }
         if let Some(ref p) = self.efi_partition_by_id
-            && !is_by_id_path(p)
+            && !is_supported_device_path(p)
         {
             errors.push(format!(
-                "efi_partition_by_id must be a /dev/disk/by-id/ path, got: {}",
+                "efi_partition_by_id must be a /dev/disk/by-id/, /dev/disk/by-path/, or supported /dev node path, got: {}",
                 p.display()
             ));
         }
         if let Some(ref p) = self.zfs_partition_by_id
-            && !is_by_id_path(p)
+            && !is_supported_device_path(p)
         {
             errors.push(format!(
-                "zfs_partition_by_id must be a /dev/disk/by-id/ path, got: {}",
+                "zfs_partition_by_id must be a /dev/disk/by-id/, /dev/disk/by-path/, or supported /dev node path, got: {}",
                 p.display()
             ));
         }
         if let Some(ref p) = self.swap_partition_by_id
-            && !is_by_id_path(p)
+            && !is_supported_device_path(p)
         {
             errors.push(format!(
-                "swap_partition_by_id must be a /dev/disk/by-id/ path, got: {}",
+                "swap_partition_by_id must be a /dev/disk/by-id/, /dev/disk/by-path/, or supported /dev node path, got: {}",
                 p.display()
             ));
         }

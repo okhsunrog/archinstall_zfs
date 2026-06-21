@@ -66,16 +66,33 @@ pub fn pick_keyboard(
 }
 
 pub fn pick_disk(terminal: &mut ratatui::DefaultTerminal) -> Result<Option<PathBuf>> {
-    let disks = archinstall_zfs_core::disk::by_id::list_disks_by_id()?;
-    if disks.is_empty() {
+    let choices = disk_choices()?;
+    if choices.is_empty() {
         return Ok(None);
     }
-    let disk_strs: Vec<String> = disks.iter().map(|p| p.display().to_string()).collect();
+    let paths: Vec<PathBuf> = choices.iter().map(|(path, _)| path.clone()).collect();
+    let disk_strs: Vec<String> = choices.iter().map(|(_, label)| label.clone()).collect();
     let disk_refs: Vec<&str> = disk_strs.iter().map(|s| s.as_str()).collect();
     let result = run_select(terminal, "Select disk", &disk_refs, 0)?;
     match result.selected {
-        Some(idx) => Ok(Some(disks[idx].clone())),
+        Some(idx) => Ok(Some(paths[idx].clone())),
         None => Ok(None),
+    }
+}
+
+fn disk_choices() -> Result<Vec<(PathBuf, String)>> {
+    match archinstall_zfs_core::disk::device::list_block_devices() {
+        Ok(devices) => Ok(devices
+            .into_iter()
+            .map(|device| (device.preferred_path().path, device.selection_label()))
+            .collect()),
+        Err(_) => Ok(archinstall_zfs_core::disk::by_id::list_disks_by_id()?
+            .into_iter()
+            .map(|path| {
+                let label = path.display().to_string();
+                (path, label)
+            })
+            .collect()),
     }
 }
 
