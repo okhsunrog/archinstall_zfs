@@ -43,14 +43,13 @@ impl GlobalConfig {
         }
         errors.extend(self.validate_pool_name());
         errors.extend(self.validate_dataset_prefix());
-        errors.extend(self.validate_by_id_paths());
+        errors.extend(self.validate_device_paths());
 
         // Mode-dependent validation
         match mode {
             InstallationMode::FullDisk => {
-                if self.disk_by_id.is_none() {
-                    errors
-                        .push("Full disk mode requires a disk selection (disk_by_id)".to_string());
+                if self.disk.is_none() {
+                    errors.push("Full disk mode requires a disk selection (disk)".to_string());
                 }
                 if matches!(
                     self.swap_mode,
@@ -64,41 +63,38 @@ impl GlobalConfig {
                 }
             }
             InstallationMode::NewPool => {
-                if self.efi_partition_by_id.is_none() {
+                if self.efi_partition.is_none() {
                     errors.push(
-                        "New pool mode requires an EFI partition (efi_partition_by_id)".to_string(),
+                        "New pool mode requires an EFI partition (efi_partition)".to_string(),
                     );
                 }
-                if self.zfs_partition_by_id.is_none() {
-                    errors.push(
-                        "New pool mode requires a ZFS partition (zfs_partition_by_id)".to_string(),
-                    );
+                if self.zfs_partition.is_none() {
+                    errors
+                        .push("New pool mode requires a ZFS partition (zfs_partition)".to_string());
                 }
                 if matches!(
                     self.swap_mode,
                     SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-                ) && self.swap_partition_by_id.is_none()
+                ) && self.swap_partition.is_none()
                 {
                     errors.push(
-                        "Swap partition mode requires swap_partition_by_id in new pool mode"
-                            .to_string(),
+                        "Swap partition mode requires swap_partition in new pool mode".to_string(),
                     );
                 }
             }
             InstallationMode::ExistingPool => {
-                if self.efi_partition_by_id.is_none() {
+                if self.efi_partition.is_none() {
                     errors.push(
-                        "Existing pool mode requires an EFI partition (efi_partition_by_id)"
-                            .to_string(),
+                        "Existing pool mode requires an EFI partition (efi_partition)".to_string(),
                     );
                 }
                 if matches!(
                     self.swap_mode,
                     SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-                ) && self.swap_partition_by_id.is_none()
+                ) && self.swap_partition.is_none()
                 {
                     errors.push(
-                        "Swap partition mode requires swap_partition_by_id in existing pool mode"
+                        "Swap partition mode requires swap_partition in existing pool mode"
                             .to_string(),
                     );
                 }
@@ -173,7 +169,7 @@ mod tests {
     fn valid_full_disk_config() -> GlobalConfig {
         GlobalConfig {
             installation_mode: Some(InstallationMode::FullDisk),
-            disk_by_id: Some(PathBuf::from("/dev/disk/by-id/virtio-archzfs-test-disk")),
+            disk: Some(PathBuf::from("/dev/disk/by-id/virtio-archzfs-test-disk")),
             pool_name: Some("testpool".to_string()),
             ..Default::default()
         }
@@ -182,10 +178,10 @@ mod tests {
     fn valid_new_pool_config() -> GlobalConfig {
         GlobalConfig {
             installation_mode: Some(InstallationMode::NewPool),
-            efi_partition_by_id: Some(PathBuf::from(
+            efi_partition: Some(PathBuf::from(
                 "/dev/disk/by-id/virtio-archzfs-test-disk-part1",
             )),
-            zfs_partition_by_id: Some(PathBuf::from(
+            zfs_partition: Some(PathBuf::from(
                 "/dev/disk/by-id/virtio-archzfs-test-disk-part2",
             )),
             pool_name: Some("testpool".to_string()),
@@ -196,7 +192,7 @@ mod tests {
     fn valid_existing_pool_config() -> GlobalConfig {
         GlobalConfig {
             installation_mode: Some(InstallationMode::ExistingPool),
-            efi_partition_by_id: Some(PathBuf::from(
+            efi_partition: Some(PathBuf::from(
                 "/dev/disk/by-id/virtio-archzfs-test-disk-part1",
             )),
             pool_name: Some("testpool".to_string()),
@@ -235,7 +231,7 @@ mod tests {
     #[test]
     fn test_full_disk_missing_disk() {
         let mut cfg = valid_full_disk_config();
-        cfg.disk_by_id = None;
+        cfg.disk = None;
         let errors = cfg.validate_for_install();
         assert!(errors.iter().any(|e| e.contains("disk selection")));
     }
@@ -243,8 +239,8 @@ mod tests {
     #[test]
     fn test_new_pool_missing_partitions() {
         let mut cfg = valid_new_pool_config();
-        cfg.efi_partition_by_id = None;
-        cfg.zfs_partition_by_id = None;
+        cfg.efi_partition = None;
+        cfg.zfs_partition = None;
         let errors = cfg.validate_for_install();
         assert!(errors.iter().any(|e| e.contains("EFI partition")));
         assert!(errors.iter().any(|e| e.contains("ZFS partition")));
@@ -253,7 +249,7 @@ mod tests {
     #[test]
     fn test_existing_pool_missing_efi() {
         let mut cfg = valid_existing_pool_config();
-        cfg.efi_partition_by_id = None;
+        cfg.efi_partition = None;
         let errors = cfg.validate_for_install();
         assert!(errors.iter().any(|e| e.contains("EFI partition")));
     }
@@ -315,9 +311,9 @@ mod tests {
     fn test_new_pool_swap_needs_partition() {
         let mut cfg = valid_new_pool_config();
         cfg.swap_mode = SwapMode::ZswapPartitionEncrypted;
-        cfg.swap_partition_by_id = None;
+        cfg.swap_partition = None;
         let errors = cfg.validate_for_install();
-        assert!(errors.iter().any(|e| e.contains("swap_partition_by_id")));
+        assert!(errors.iter().any(|e| e.contains("swap_partition")));
     }
 
     #[test]
@@ -331,7 +327,7 @@ mod tests {
     #[test]
     fn test_valid_by_path_disk_path() {
         let mut cfg = valid_full_disk_config();
-        cfg.disk_by_id = Some(PathBuf::from("/dev/disk/by-path/pci-0000:00:04.0"));
+        cfg.disk = Some(PathBuf::from("/dev/disk/by-path/pci-0000:00:04.0"));
         let errors = cfg.validate_for_install();
         assert!(errors.is_empty(), "Expected no errors, got: {errors:?}");
     }
@@ -339,7 +335,7 @@ mod tests {
     #[test]
     fn test_valid_virtio_devnode_disk_path() {
         let mut cfg = valid_full_disk_config();
-        cfg.disk_by_id = Some(PathBuf::from("/dev/vda"));
+        cfg.disk = Some(PathBuf::from("/dev/vda"));
         let errors = cfg.validate_for_install();
         assert!(errors.is_empty(), "Expected no errors, got: {errors:?}");
     }
@@ -347,7 +343,7 @@ mod tests {
     #[test]
     fn test_invalid_device_path() {
         let mut cfg = valid_full_disk_config();
-        cfg.disk_by_id = Some(PathBuf::from("/tmp/not-a-disk"));
+        cfg.disk = Some(PathBuf::from("/tmp/not-a-disk"));
         let errors = cfg.validate_for_install();
         assert!(errors.iter().any(|e| e.contains("supported /dev node")));
     }
@@ -468,7 +464,7 @@ mod tests {
     fn test_serde_roundtrip_full_config() {
         let cfg = GlobalConfig {
             installation_mode: Some(InstallationMode::FullDisk),
-            disk_by_id: Some(PathBuf::from("/dev/disk/by-id/virtio-archzfs-test-disk")),
+            disk: Some(PathBuf::from("/dev/disk/by-id/virtio-archzfs-test-disk")),
             pool_name: Some("mypool".to_string()),
             dataset_prefix: "arch0".to_string(),
             compression: CompressionAlgo::Zstd5,
@@ -485,5 +481,35 @@ mod tests {
         assert_eq!(back.compression, CompressionAlgo::Zstd5);
         assert_eq!(back.swap_mode, SwapMode::Zram);
         assert_eq!(back.pool_name.as_deref(), Some("mypool"));
+    }
+
+    #[test]
+    fn test_serde_accepts_legacy_device_field_names() {
+        let json = r#"{
+            "installation_mode": "new_pool",
+            "disk_by_id": "/dev/disk/by-id/legacy-disk",
+            "efi_partition_by_id": "/dev/disk/by-id/legacy-disk-part1",
+            "zfs_partition_by_id": "/dev/disk/by-id/legacy-disk-part2",
+            "swap_partition_by_id": "/dev/disk/by-id/legacy-disk-part3",
+            "pool_name": "testpool"
+        }"#;
+
+        let cfg: GlobalConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            cfg.disk.as_deref(),
+            Some(std::path::Path::new("/dev/disk/by-id/legacy-disk"))
+        );
+        assert_eq!(
+            cfg.efi_partition.as_deref(),
+            Some(std::path::Path::new("/dev/disk/by-id/legacy-disk-part1"))
+        );
+        assert_eq!(
+            cfg.zfs_partition.as_deref(),
+            Some(std::path::Path::new("/dev/disk/by-id/legacy-disk-part2"))
+        );
+        assert_eq!(
+            cfg.swap_partition.as_deref(),
+            Some(std::path::Path::new("/dev/disk/by-id/legacy-disk-part3"))
+        );
     }
 }

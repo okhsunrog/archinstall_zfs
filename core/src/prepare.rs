@@ -36,7 +36,7 @@ pub fn prepare_disk(
     match mode {
         InstallationMode::FullDisk => {
             let disk = config
-                .disk_by_id
+                .disk
                 .as_ref()
                 .ok_or_else(|| eyre!("disk not selected for full disk mode"))?;
             crate::disk::partition::zap_disk(runner, disk)?;
@@ -48,7 +48,7 @@ pub fn prepare_disk(
                 _ => None,
             };
             let layout = crate::disk::partition::create_partitions(runner, disk, swap_size)?;
-            let parts = crate::disk::partition::wait_for_by_id_partitions(disk, &layout);
+            let parts = crate::disk::partition::wait_for_partitions(disk, &layout);
             let efi = parts[0].clone();
             let zfs = parts[1].clone();
             let swap = parts.get(2).cloned();
@@ -60,14 +60,14 @@ pub fn prepare_disk(
         }
         InstallationMode::NewPool => {
             let efi = config
-                .efi_partition_by_id
+                .efi_partition
                 .clone()
                 .ok_or_else(|| eyre!("EFI partition not selected"))?;
             let zfs = config
-                .zfs_partition_by_id
+                .zfs_partition
                 .clone()
                 .ok_or_else(|| eyre!("ZFS partition not selected"))?;
-            let swap = config.swap_partition_by_id.clone();
+            let swap = config.swap_partition.clone();
             Ok(PreparedPartitions {
                 efi,
                 zfs: Some(zfs),
@@ -76,10 +76,10 @@ pub fn prepare_disk(
         }
         InstallationMode::ExistingPool => {
             let efi = config
-                .efi_partition_by_id
+                .efi_partition
                 .clone()
                 .ok_or_else(|| eyre!("EFI partition not selected"))?;
-            let swap = config.swap_partition_by_id.clone();
+            let swap = config.swap_partition.clone();
             Ok(PreparedPartitions {
                 efi,
                 zfs: None,

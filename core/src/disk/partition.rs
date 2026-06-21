@@ -122,7 +122,7 @@ pub fn create_partitions(
     let _ = runner.run("partprobe", &[&*disk_str]);
     let _ = runner.run("udevadm", &["settle"]);
 
-    // Wait for by-id symlinks to appear
+    // Wait for the newly created EFI partition path to appear.
     let efi_dev = partition_path(disk, layout.efi_part_num);
     let efi_dev_str = efi_dev.to_string_lossy();
     for _ in 0..50 {
@@ -139,8 +139,8 @@ pub fn create_partitions(
     Ok(layout)
 }
 
-/// Wait for /dev/disk/by-id partition symlinks to appear after partitioning.
-pub fn wait_for_by_id_partitions(disk: &Path, layout: &PartitionLayout) -> Vec<std::path::PathBuf> {
+/// Wait for partition paths to appear after partitioning.
+pub fn wait_for_partitions(disk: &Path, layout: &PartitionLayout) -> Vec<std::path::PathBuf> {
     let mut parts = vec![
         partition_path(disk, layout.efi_part_num),
         partition_path(disk, layout.zfs_part_num),

@@ -4,11 +4,8 @@ use std::path::{Path, PathBuf};
 use color_eyre::eyre::{Context, Result};
 
 pub fn list_disks_by_id() -> Result<Vec<PathBuf>> {
-    if let Ok(devices) = crate::disk::device::list_block_devices() {
-        return Ok(devices
-            .into_iter()
-            .map(|device| device.preferred_path().path)
-            .collect());
+    if let Ok(choices) = crate::disk::device::disk_choices() {
+        return Ok(choices.into_iter().map(|choice| choice.path).collect());
     }
 
     list_disks_by_id_legacy()
@@ -38,6 +35,14 @@ fn list_disks_by_id_legacy() -> Result<Vec<PathBuf>> {
 }
 
 pub fn list_partitions_by_id() -> Result<Vec<PathBuf>> {
+    if let Ok(choices) = crate::disk::device::partition_choices() {
+        return Ok(choices.into_iter().map(|choice| choice.path).collect());
+    }
+
+    list_partitions_by_id_legacy()
+}
+
+fn list_partitions_by_id_legacy() -> Result<Vec<PathBuf>> {
     let by_id = Path::new("/dev/disk/by-id");
     if !by_id.exists() {
         return Ok(Vec::new());

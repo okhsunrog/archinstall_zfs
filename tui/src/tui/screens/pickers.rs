@@ -81,10 +81,10 @@ pub fn pick_disk(terminal: &mut ratatui::DefaultTerminal) -> Result<Option<PathB
 }
 
 fn disk_choices() -> Result<Vec<(PathBuf, String)>> {
-    match archinstall_zfs_core::disk::device::list_block_devices() {
-        Ok(devices) => Ok(devices
+    match archinstall_zfs_core::disk::device::disk_choices() {
+        Ok(choices) => Ok(choices
             .into_iter()
-            .map(|device| (device.preferred_path().path, device.selection_label()))
+            .map(|choice| (choice.path, choice.label))
             .collect()),
         Err(_) => Ok(archinstall_zfs_core::disk::by_id::list_disks_by_id()?
             .into_iter()
@@ -100,16 +100,29 @@ pub fn pick_partition(
     terminal: &mut ratatui::DefaultTerminal,
     title: &str,
 ) -> Result<Option<PathBuf>> {
-    let parts = archinstall_zfs_core::disk::by_id::list_partitions_by_id()?;
+    let parts = partition_choices()?;
     if parts.is_empty() {
         return Ok(None);
     }
-    let part_strs: Vec<String> = parts.iter().map(|p| p.display().to_string()).collect();
+    let part_strs: Vec<String> = parts.iter().map(|part| part.label.clone()).collect();
     let part_refs: Vec<&str> = part_strs.iter().map(|s| s.as_str()).collect();
     let result = run_select(terminal, title, &part_refs, 0)?;
     match result.selected {
-        Some(idx) => Ok(Some(parts[idx].clone())),
+        Some(idx) => Ok(Some(parts[idx].path.clone())),
         None => Ok(None),
+    }
+}
+
+fn partition_choices() -> Result<Vec<archinstall_zfs_core::disk::device::DeviceChoice>> {
+    match archinstall_zfs_core::disk::device::partition_choices() {
+        Ok(choices) => Ok(choices),
+        Err(_) => Ok(archinstall_zfs_core::disk::by_id::list_partitions_by_id()?
+            .into_iter()
+            .map(|path| archinstall_zfs_core::disk::device::DeviceChoice {
+                label: path.display().to_string(),
+                path,
+            })
+            .collect()),
     }
 }
 
@@ -594,10 +607,10 @@ pub fn apply_select(
                 _ => return Ok(()),
             };
             if config.installation_mode != Some(new_mode) {
-                config.disk_by_id = None;
-                config.efi_partition_by_id = None;
-                config.zfs_partition_by_id = None;
-                config.swap_partition_by_id = None;
+                config.disk = None;
+                config.efi_partition = None;
+                config.zfs_partition = None;
+                config.swap_partition = None;
             }
             config.installation_mode = Some(new_mode);
         }
