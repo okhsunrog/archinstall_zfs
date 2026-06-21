@@ -148,10 +148,10 @@ mod tests {
     fn test_patch_conf_array_adds_zfs() {
         let input = "MODULES=()\nHOOKS=(base udev autodetect modconf block filesystems fsck)\n";
         let result = patch_conf_array(input, "HOOKS", |hooks| {
-            if !hooks.contains(&"zfs".to_string()) {
-                if let Some(pos) = hooks.iter().position(|h| h == "filesystems") {
-                    hooks.insert(pos, "zfs".to_string());
-                }
+            if !hooks.contains(&"zfs".to_string())
+                && let Some(pos) = hooks.iter().position(|h| h == "filesystems")
+            {
+                hooks.insert(pos, "zfs".to_string());
             }
         });
         assert!(result.contains("zfs filesystems"));

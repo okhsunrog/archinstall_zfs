@@ -17,6 +17,7 @@ export enum ItemType {
     // The review screen collapses (radio-header + N radio-options) into a
     // single readonly summary row.
     radio-header,
+    radio-subheader,
     radio-option,
 }
 
@@ -24,6 +25,23 @@ export struct ConfigItem {
     key: string,
     label: string,
     value: string,
+    description: string,
+    icon: string,
+    detail-model: string,
+    detail-serial: string,
+    detail-size: string,
+    detail-transport: string,
+    detail-media: string,
+    is-removable: bool,
+    persistent-path: string,
+    persistent-kind: string,
+    group-label: string,
+    group-model: string,
+    group-serial: string,
+    group-size: string,
+    group-transport: string,
+    group-media: string,
+    group-removable: bool,
     item-type: ItemType,
     // True if this row is the first field row inside its section (i.e. the
     // previous item in the list is a SectionHeader). Used by ConfigItemRow
@@ -128,4 +146,3 @@ export struct WifiNetworkUi {
     // and shows a "Known" badge.
     known: bool,
 }
-
