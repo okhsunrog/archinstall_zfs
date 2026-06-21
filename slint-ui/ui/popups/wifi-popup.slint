@@ -221,6 +221,7 @@ export component WifiPopup inherits Rectangle {
                 horizontal-stretch: 1;
                 vertical-stretch: 1;
                 background: transparent;
+                clip: true;
 
                 // — scanning / idle — centered spinner —
                 if WifiState.phase == WifiPhase.scanning
@@ -228,13 +229,18 @@ export component WifiPopup inherits Rectangle {
                     alignment: center;
                     spacing: Theme.spacing-md;
 
-                    Icon {
-                        source: @image-url("../../assets/icons/refresh-cw.svg");
-                        size: 28px;
-                        tint: Theme.c.blue;
-                        // Drives the rotation off `animation-tick()` so the
-                        // icon spins continuously while this branch is live.
-                        transform-rotation: 360deg * mod(animation-tick(), 1.2s) / 1.2s;
+                    HorizontalLayout {
+                        height: 28px;
+                        alignment: center;
+
+                        Icon {
+                            source: @image-url("../../assets/icons/refresh-cw.svg");
+                            size: 28px;
+                            tint: Theme.c.blue;
+                            // Drives the rotation off `animation-tick()` so the
+                            // icon spins continuously while this branch is live.
+                            transform-rotation: 360deg * mod(animation-tick(), 1.2s) / 1.2s;
+                        }
                     }
 
                     Text {
@@ -249,7 +255,8 @@ export component WifiPopup inherits Rectangle {
 
                 // — picking — scrollable network list —
                 if WifiState.phase == WifiPhase.picking: ScrollView {
-                    preferred-height: networks-list.preferred-height;
+                    width: 100%;
+                    height: 100%;
                     vertical-stretch: 1;
 
                     networks-list := VerticalLayout {
@@ -500,11 +507,16 @@ export component WifiPopup inherits Rectangle {
                     alignment: center;
                     spacing: Theme.spacing-md;
 
-                    Icon {
-                        source: @image-url("../../assets/icons/refresh-cw.svg");
-                        size: 28px;
-                        tint: Theme.c.blue;
-                        transform-rotation: 360deg * mod(animation-tick(), 1.2s) / 1.2s;
+                    HorizontalLayout {
+                        height: 28px;
+                        alignment: center;
+
+                        Icon {
+                            source: @image-url("../../assets/icons/refresh-cw.svg");
+                            size: 28px;
+                            tint: Theme.c.blue;
+                            transform-rotation: 360deg * mod(animation-tick(), 1.2s) / 1.2s;
+                        }
                     }
 
                     Text {
@@ -524,10 +536,15 @@ export component WifiPopup inherits Rectangle {
                     alignment: center;
                     spacing: Theme.spacing-md;
 
-                    Icon {
-                        source: @image-url("../../assets/icons/check.svg");
-                        size: 36px;
-                        tint: Theme.c.green;
+                    HorizontalLayout {
+                        height: 36px;
+                        alignment: center;
+
+                        Icon {
+                            source: @image-url("../../assets/icons/check.svg");
+                            size: 36px;
+                            tint: Theme.c.green;
+                        }
                     }
 
                     Text {
@@ -551,10 +568,15 @@ export component WifiPopup inherits Rectangle {
                     alignment: center;
                     spacing: Theme.spacing-md;
 
-                    Icon {
-                        source: @image-url("../../assets/icons/x.svg");
-                        size: 36px;
-                        tint: Theme.c.red;
+                    HorizontalLayout {
+                        height: 36px;
+                        alignment: center;
+
+                        Icon {
+                            source: @image-url("../../assets/icons/x.svg");
+                            size: 36px;
+                            tint: Theme.c.red;
+                        }
                     }
 
                     Text {
@@ -577,9 +599,12 @@ export component WifiPopup inherits Rectangle {
             }
 
             // ───────────────── FOOTER (phase-driven buttons) ─────────────────
-            HorizontalLayout {
-                alignment: end;
-                spacing: Theme.spacing-sm;
+            if WifiState.phase == WifiPhase.auth
+                || WifiState.phase == WifiPhase.error
+                || WifiState.phase == WifiPhase.connected: HorizontalLayout {
+                    height: Theme.control-height;
+                    alignment: end;
+                    spacing: Theme.spacing-sm;
 
                 // Auth phase: Cancel + Connect
                 if WifiState.phase == WifiPhase.auth: StyledButton {
@@ -594,10 +619,15 @@ export component WifiPopup inherits Rectangle {
                     clicked => { WifiState.submit-password(); }
                 }
 
-                // Error phase: Back to list + Retry
+                // Error phase: Back to the last list, or run a fresh scan.
                 if WifiState.phase == WifiPhase.error: StyledButton {
                     label: "Back";
                     style: Theme.button-default;
+                    clicked => { WifiState.cancel-pick(); }
+                }
+                if WifiState.phase == WifiPhase.error: StyledButton {
+                    label: "Rescan";
+                    style: Theme.button-primary;
                     clicked => { WifiState.rescan(); }
                 }
 
