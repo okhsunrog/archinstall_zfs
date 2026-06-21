@@ -81,22 +81,13 @@ pub fn pick_disk(terminal: &mut ratatui::DefaultTerminal) -> Result<Option<PathB
 }
 
 fn disk_choices() -> Result<Vec<(PathBuf, String)>> {
-    match archinstall_zfs_core::disk::device::disk_choices() {
-        Ok(choices) => Ok(choices
-            .into_iter()
-            .map(|choice| {
-                let label = choice.display_label();
-                (choice.path, label)
-            })
-            .collect()),
-        Err(_) => Ok(archinstall_zfs_core::disk::by_id::list_disks_by_id()?
-            .into_iter()
-            .map(|path| {
-                let label = path.display().to_string();
-                (path, label)
-            })
-            .collect()),
-    }
+    Ok(archinstall_zfs_core::disk::device::disk_choices()?
+        .into_iter()
+        .map(|choice| {
+            let label = choice.display_label();
+            (choice.path, label)
+        })
+        .collect())
 }
 
 pub fn pick_partition(
@@ -117,22 +108,13 @@ pub fn pick_partition(
 }
 
 fn partition_choices() -> Result<Vec<(PathBuf, String)>> {
-    match archinstall_zfs_core::disk::device::partition_choices() {
-        Ok(choices) => Ok(choices
-            .into_iter()
-            .map(|choice| {
-                let label = choice.display_label();
-                (choice.path, label)
-            })
-            .collect()),
-        Err(_) => Ok(archinstall_zfs_core::disk::by_id::list_partitions_by_id()?
-            .into_iter()
-            .map(|path| {
-                let label = path.display().to_string();
-                (path, label)
-            })
-            .collect()),
-    }
+    Ok(archinstall_zfs_core::disk::device::partition_choices()?
+        .into_iter()
+        .map(|choice| {
+            let label = choice.display_label();
+            (choice.path, label)
+        })
+        .collect())
 }
 
 pub async fn pick_existing_pool(
