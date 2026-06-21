@@ -172,21 +172,6 @@ pub async fn prepare_zfs(
 
             export_pool(&zfs, pool_name).await?;
             import_pool_no_mount(&zfs, pool_name, mountpoint).await?;
-            let key_loc = format!("file://{}", key_path.display());
-            match encryption {
-                ZfsEncryptionMode::Pool => {
-                    zfs.dataset(pool_name)
-                        .load_key_with_keylocation(&key_loc)
-                        .await?;
-                }
-                ZfsEncryptionMode::Dataset => {
-                    let base = format!("{pool_name}/{prefix}");
-                    zfs.dataset(&base)
-                        .load_key_with_keylocation(&key_loc)
-                        .await?;
-                }
-                ZfsEncryptionMode::None => {}
-            }
         }
         InstallationMode::ExistingPool => {
             import_pool_no_mount(&zfs, pool_name, mountpoint).await?;
@@ -214,6 +199,8 @@ pub async fn prepare_zfs(
         }
     }
 
+    load_install_encryption_key(&zfs, pool_name, prefix, encryption, &key_path).await?;
+
     let datasets = crate::dataset_layout::default_datasets();
     crate::dataset_layout::mount_datasets_ordered(&zfs, pool_name, prefix, &datasets).await?;
     tracing::info!("Datasets mounted");
@@ -238,6 +225,30 @@ fn base_dataset_props(
             ("compression", compression.to_string()),
         ],
     }
+}
+
+async fn load_install_encryption_key(
+    zfs: &palimpsest::Zfs,
+    pool_name: &str,
+    prefix: &str,
+    encryption: ZfsEncryptionMode,
+    key_path: &Path,
+) -> Result<()> {
+    let key_dataset = match encryption {
+        ZfsEncryptionMode::Pool => pool_name.to_string(),
+        ZfsEncryptionMode::Dataset => format!("{pool_name}/{prefix}"),
+        ZfsEncryptionMode::None => return Ok(()),
+    };
+    let key_loc = format!("file://{}", key_path.display());
+    tracing::info!(
+        dataset = %key_dataset,
+        keylocation = %key_loc,
+        "Loading ZFS encryption key"
+    );
+    zfs.dataset(&key_dataset)
+        .load_key_with_keylocation(&key_loc)
+        .await?;
+    Ok(())
 }
 
 /// Defaults applied at every `zpool create`. `autotrim` is intentionally
@@ -293,4 +304,70 @@ async fn export_pool(zfs: &palimpsest::Zfs, name: &str) -> Result<()> {
     let _ = zfs.unmount_all(false).await;
     zfs.pool(name).export(&ExportOptions::default()).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use palimpsest::{Cmd, RecordingRunner, Zfs};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn pool_encryption_loads_pool_key_before_mount() {
+        let runner = RecordingRunner::new().record(
+            Cmd::new("zfs").args(["load-key", "-L", "file:///etc/zfs/zroot.key", "zroot"]),
+            vec![],
+            vec![],
+            0,
+        );
+        let zfs = Zfs::with_runner(runner);
+
+        load_install_encryption_key(
+            &zfs,
+            "zroot",
+            "arch0",
+            ZfsEncryptionMode::Pool,
+            Path::new("/etc/zfs/zroot.key"),
+        )
+        .await
+        .expect("pool key loads");
+    }
+
+    #[tokio::test]
+    async fn dataset_encryption_loads_base_dataset_key_before_mount() {
+        let runner = RecordingRunner::new().record(
+            Cmd::new("zfs").args(["load-key", "-L", "file:///etc/zfs/zroot.key", "zroot/arch0"]),
+            vec![],
+            vec![],
+            0,
+        );
+        let zfs = Zfs::with_runner(runner);
+
+        load_install_encryption_key(
+            &zfs,
+            "zroot",
+            "arch0",
+            ZfsEncryptionMode::Dataset,
+            Path::new("/etc/zfs/zroot.key"),
+        )
+        .await
+        .expect("dataset key loads");
+    }
+
+    #[tokio::test]
+    async fn encryption_disabled_does_not_load_key() {
+        let zfs = Zfs::with_runner(RecordingRunner::new());
+
+        load_install_encryption_key(
+            &zfs,
+            "zroot",
+            "arch0",
+            ZfsEncryptionMode::None,
+            Path::new("/etc/zfs/zroot.key"),
+        )
+        .await
+        .expect("no key load is needed");
+    }
 }
