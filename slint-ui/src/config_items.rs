@@ -58,26 +58,26 @@ fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         let disk_strs: Vec<String> = disks.iter().map(|(_, label)| label.clone()).collect();
         let disk_refs: Vec<&str> = disk_strs.iter().map(|s| s.as_str()).collect();
         let selected = c
-            .disk_by_id
+            .disk
             .as_ref()
             .and_then(|sel| disks.iter().position(|(path, _)| path == sel))
             .map(|i| i as i32)
             .unwrap_or(-1);
-        items.extend(radio_group("disk_by_id", "Disk", &disk_refs, selected));
+        items.extend(radio_group("disk", "Disk", &disk_refs, selected));
     }
 
     if matches!(
         mode,
         Some(InstallationMode::NewPool) | Some(InstallationMode::ExistingPool)
     ) {
-        let parts = archinstall_zfs_core::disk::by_id::list_partitions_by_id().unwrap_or_default();
-        let part_strs: Vec<String> = parts.iter().map(|p| p.display().to_string()).collect();
+        let parts = partition_choices();
+        let part_strs: Vec<String> = parts.iter().map(|(_, label)| label.clone()).collect();
         let part_refs: Vec<&str> = part_strs.iter().map(|s| s.as_str()).collect();
 
         let efi_selected = c
-            .efi_partition_by_id
+            .efi_partition
             .as_ref()
-            .and_then(|sel| parts.iter().position(|p| p == sel))
+            .and_then(|sel| parts.iter().position(|(path, _)| path == sel))
             .map(|i| i as i32)
             .unwrap_or(-1);
         items.extend(radio_group(
@@ -89,9 +89,9 @@ fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
 
         if matches!(mode, Some(InstallationMode::NewPool)) {
             let zfs_selected = c
-                .zfs_partition_by_id
+                .zfs_partition
                 .as_ref()
-                .and_then(|sel| parts.iter().position(|p| p == sel))
+                .and_then(|sel| parts.iter().position(|(path, _)| path == sel))
                 .map(|i| i as i32)
                 .unwrap_or(-1);
             items.extend(radio_group(
@@ -196,13 +196,13 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         ));
     }
     if !matches!(mode, Some(InstallationMode::FullDisk) | None) && has_swap_partition {
-        let parts = archinstall_zfs_core::disk::by_id::list_partitions_by_id().unwrap_or_default();
-        let part_strs: Vec<String> = parts.iter().map(|p| p.display().to_string()).collect();
+        let parts = partition_choices();
+        let part_strs: Vec<String> = parts.iter().map(|(_, label)| label.clone()).collect();
         let part_refs: Vec<&str> = part_strs.iter().map(|s| s.as_str()).collect();
         let swap_selected = c
-            .swap_partition_by_id
+            .swap_partition
             .as_ref()
-            .and_then(|sel| parts.iter().position(|p| p == sel))
+            .and_then(|sel| parts.iter().position(|(path, _)| path == sel))
             .map(|i| i as i32)
             .unwrap_or(-1);
         items.extend(radio_group(
@@ -670,38 +670,35 @@ pub fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
                 _ => InstallationMode::ExistingPool,
             };
             if config.installation_mode != Some(new_mode) {
-                config.disk_by_id = None;
-                config.efi_partition_by_id = None;
-                config.zfs_partition_by_id = None;
-                config.swap_partition_by_id = None;
+                config.disk = None;
+                config.efi_partition = None;
+                config.zfs_partition = None;
+                config.swap_partition = None;
             }
             config.installation_mode = Some(new_mode);
         }
-        "disk_by_id" => {
+        "disk" => {
             let disks = disk_choices();
             if let Some((path, _)) = disks.get(idx as usize) {
-                config.disk_by_id = Some(path.clone());
+                config.disk = Some(path.clone());
             }
         }
         "efi_partition" => {
-            if let Ok(parts) = archinstall_zfs_core::disk::by_id::list_partitions_by_id()
-                && let Some(path) = parts.get(idx as usize)
-            {
-                config.efi_partition_by_id = Some(path.clone());
+            let parts = partition_choices();
+            if let Some((path, _)) = parts.get(idx as usize) {
+                config.efi_partition = Some(path.clone());
             }
         }
         "zfs_partition" => {
-            if let Ok(parts) = archinstall_zfs_core::disk::by_id::list_partitions_by_id()
-                && let Some(path) = parts.get(idx as usize)
-            {
-                config.zfs_partition_by_id = Some(path.clone());
+            let parts = partition_choices();
+            if let Some((path, _)) = parts.get(idx as usize) {
+                config.zfs_partition = Some(path.clone());
             }
         }
         "swap_partition" => {
-            if let Ok(parts) = archinstall_zfs_core::disk::by_id::list_partitions_by_id()
-                && let Some(path) = parts.get(idx as usize)
-            {
-                config.swap_partition_by_id = Some(path.clone());
+            let parts = partition_choices();
+            if let Some((path, _)) = parts.get(idx as usize) {
+                config.swap_partition = Some(path.clone());
             }
         }
         "compression" => {
@@ -768,15 +765,35 @@ pub fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
 }
 
 fn disk_choices() -> Vec<(std::path::PathBuf, String)> {
-    archinstall_zfs_core::disk::device::list_block_devices()
-        .map(|devices| {
-            devices
+    archinstall_zfs_core::disk::device::disk_choices()
+        .map(|choices| {
+            choices
                 .into_iter()
-                .map(|device| (device.preferred_path().path, device.selection_label()))
+                .map(|choice| (choice.path, choice.label))
                 .collect()
         })
         .unwrap_or_else(|_| {
             archinstall_zfs_core::disk::by_id::list_disks_by_id()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|path| {
+                    let label = path.display().to_string();
+                    (path, label)
+                })
+                .collect()
+        })
+}
+
+fn partition_choices() -> Vec<(std::path::PathBuf, String)> {
+    archinstall_zfs_core::disk::device::partition_choices()
+        .map(|choices| {
+            choices
+                .into_iter()
+                .map(|choice| (choice.path, choice.label))
+                .collect()
+        })
+        .unwrap_or_else(|_| {
+            archinstall_zfs_core::disk::by_id::list_partitions_by_id()
                 .unwrap_or_default()
                 .into_iter()
                 .map(|path| {
@@ -826,28 +843,28 @@ mod tests {
     #[test]
     fn radio_installation_mode_sets_and_clears_dependents() {
         let mut c = cfg();
-        c.disk_by_id = Some("/dev/sda".into());
-        c.efi_partition_by_id = Some("/dev/sda1".into());
+        c.disk = Some("/dev/sda".into());
+        c.efi_partition = Some("/dev/sda1".into());
 
-        // Switching mode should clear all by-id selections
+        // Switching mode should clear all device selections
         apply_radio(&mut c, "installation_mode", 1);
         assert_eq!(c.installation_mode, Some(InstallationMode::NewPool));
-        assert!(c.disk_by_id.is_none());
-        assert!(c.efi_partition_by_id.is_none());
-        assert!(c.zfs_partition_by_id.is_none());
-        assert!(c.swap_partition_by_id.is_none());
+        assert!(c.disk.is_none());
+        assert!(c.efi_partition.is_none());
+        assert!(c.zfs_partition.is_none());
+        assert!(c.swap_partition.is_none());
     }
 
     #[test]
     fn radio_installation_mode_no_clear_when_unchanged() {
         let mut c = cfg();
         c.installation_mode = Some(InstallationMode::FullDisk);
-        c.disk_by_id = Some("/dev/sda".into());
+        c.disk = Some("/dev/sda".into());
 
         apply_radio(&mut c, "installation_mode", 0); // Same mode (FullDisk)
         assert_eq!(c.installation_mode, Some(InstallationMode::FullDisk));
         // Selections should be preserved when mode doesn't actually change
-        assert!(c.disk_by_id.is_some());
+        assert!(c.disk.is_some());
     }
 
     #[test]

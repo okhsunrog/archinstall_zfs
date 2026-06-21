@@ -104,7 +104,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
             key: "swap_partition",
             label: "Swap partition",
             value: config
-                .swap_partition_by_id
+                .swap_partition
                 .as_ref()
                 .map(|p| p.display().to_string())
                 .unwrap_or("Not set".into()),

@@ -9,10 +9,10 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     // Show disk picker for FullDisk mode
     if matches!(mode, Some(InstallationMode::FullDisk) | None) {
         items.push(MenuItem {
-            key: "disk_by_id",
+            key: "disk",
             label: "Disk",
             value: config
-                .disk_by_id
+                .disk
                 .as_ref()
                 .map(|p| p.display().to_string())
                 .unwrap_or("Not set".into()),
@@ -29,7 +29,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
             key: "efi_partition",
             label: "EFI partition",
             value: config
-                .efi_partition_by_id
+                .efi_partition
                 .as_ref()
                 .map(|p| p.display().to_string())
                 .unwrap_or("Not set".into()),
@@ -41,7 +41,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
             key: "zfs_partition",
             label: "ZFS partition",
             value: config
-                .zfs_partition_by_id
+                .zfs_partition
                 .as_ref()
                 .map(|p| p.display().to_string())
                 .unwrap_or("Not set".into()),

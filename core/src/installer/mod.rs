@@ -28,7 +28,7 @@ pub struct Installer {
     cancel: CancellationToken,
     download_progress_tx: Option<Arc<tokio::sync::watch::Sender<DownloadProgress>>>,
     /// Swap partition computed at runtime (e.g. from full-disk partitioning).
-    /// Overrides `config.swap_partition_by_id` when set.
+    /// Overrides `config.swap_partition` when set.
     swap_partition: Option<PathBuf>,
     _target_mounts: Option<TargetMounts>,
     alpm_ctx: Option<AlpmContext>,
@@ -547,7 +547,7 @@ impl Installer {
     fn effective_swap_partition(&self) -> Option<&Path> {
         self.swap_partition
             .as_deref()
-            .or(self.config.swap_partition_by_id.as_deref())
+            .or(self.config.swap_partition.as_deref())
     }
 
     fn finalize_zfs(&self) -> Result<()> {

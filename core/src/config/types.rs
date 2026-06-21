@@ -147,9 +147,12 @@ impl std::fmt::Display for SwapMode {
 pub struct GlobalConfig {
     // Flow control
     pub installation_mode: Option<InstallationMode>,
-    pub disk_by_id: Option<PathBuf>,
-    pub efi_partition_by_id: Option<PathBuf>,
-    pub zfs_partition_by_id: Option<PathBuf>,
+    #[serde(default, alias = "disk_by_id")]
+    pub disk: Option<PathBuf>,
+    #[serde(default, alias = "efi_partition_by_id")]
+    pub efi_partition: Option<PathBuf>,
+    #[serde(default, alias = "zfs_partition_by_id")]
+    pub zfs_partition: Option<PathBuf>,
     pub pool_name: Option<String>,
 
     // ZFS specifics
@@ -169,7 +172,8 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub swap_mode: SwapMode,
     pub swap_partition_size: Option<String>,
-    pub swap_partition_by_id: Option<PathBuf>,
+    #[serde(default, alias = "swap_partition_by_id")]
+    pub swap_partition: Option<PathBuf>,
     #[serde(default = "default_zram_size_expr")]
     pub zram_size_expr: Option<String>,
 
@@ -343,9 +347,9 @@ impl Default for GlobalConfig {
     fn default() -> Self {
         Self {
             installation_mode: None,
-            disk_by_id: None,
-            efi_partition_by_id: None,
-            zfs_partition_by_id: None,
+            disk: None,
+            efi_partition: None,
+            zfs_partition: None,
             pool_name: Some("zroot".to_string()),
             dataset_prefix: default_dataset_prefix(),
             init_system: InitSystem::default(),
@@ -355,7 +359,7 @@ impl Default for GlobalConfig {
             compression: CompressionAlgo::default(),
             swap_mode: SwapMode::default(),
             swap_partition_size: None,
-            swap_partition_by_id: None,
+            swap_partition: None,
             zram_size_expr: default_zram_size_expr(),
             set_bootfs: true,
             zrepl_enabled: false,
@@ -469,37 +473,37 @@ impl GlobalConfig {
         errors
     }
 
-    pub fn validate_by_id_paths(&self) -> Vec<String> {
+    pub fn validate_device_paths(&self) -> Vec<String> {
         let mut errors = Vec::new();
-        if let Some(ref p) = self.disk_by_id
+        if let Some(ref p) = self.disk
             && !is_supported_device_path(p)
         {
             errors.push(format!(
-                "disk_by_id must be a /dev/disk/by-id/, /dev/disk/by-path/, or supported /dev node path, got: {}",
+                "disk must be a /dev/disk/by-id/, /dev/disk/by-path/, or supported /dev node path, got: {}",
                 p.display()
             ));
         }
-        if let Some(ref p) = self.efi_partition_by_id
+        if let Some(ref p) = self.efi_partition
             && !is_supported_device_path(p)
         {
             errors.push(format!(
-                "efi_partition_by_id must be a /dev/disk/by-id/, /dev/disk/by-path/, or supported /dev node path, got: {}",
+                "efi_partition must be a /dev/disk/by-id/, /dev/disk/by-path/, or supported /dev node path, got: {}",
                 p.display()
             ));
         }
-        if let Some(ref p) = self.zfs_partition_by_id
+        if let Some(ref p) = self.zfs_partition
             && !is_supported_device_path(p)
         {
             errors.push(format!(
-                "zfs_partition_by_id must be a /dev/disk/by-id/, /dev/disk/by-path/, or supported /dev node path, got: {}",
+                "zfs_partition must be a /dev/disk/by-id/, /dev/disk/by-path/, or supported /dev node path, got: {}",
                 p.display()
             ));
         }
-        if let Some(ref p) = self.swap_partition_by_id
+        if let Some(ref p) = self.swap_partition
             && !is_supported_device_path(p)
         {
             errors.push(format!(
-                "swap_partition_by_id must be a /dev/disk/by-id/, /dev/disk/by-path/, or supported /dev node path, got: {}",
+                "swap_partition must be a /dev/disk/by-id/, /dev/disk/by-path/, or supported /dev node path, got: {}",
                 p.display()
             ));
         }

@@ -1,6 +1,6 @@
 {
     "installation_mode": "full_disk",
-    "disk_by_id": "/dev/disk/by-id/virtio-archzfs-test-disk",
+    "disk": "/dev/disk/by-id/virtio-archzfs-test-disk",
     "pool_name": "testpool",
     "dataset_prefix": "arch0",
     "init_system": "dracut",

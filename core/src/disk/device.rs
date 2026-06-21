@@ -32,23 +32,22 @@ pub struct BlockDevice {
     pub removable: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockPartition {
+    pub devnode: PathBuf,
+    pub aliases: Vec<DevicePath>,
+    pub size_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceChoice {
+    pub path: PathBuf,
+    pub label: String,
+}
+
 impl BlockDevice {
     pub fn preferred_path(&self) -> DevicePath {
-        self.aliases
-            .iter()
-            .filter(|alias| alias.kind == DevicePathKind::ById)
-            .min_by_key(|alias| alias_preference_key(alias))
-            .or_else(|| {
-                self.aliases
-                    .iter()
-                    .filter(|alias| alias.kind == DevicePathKind::ByPath)
-                    .min_by_key(|alias| alias_preference_key(alias))
-            })
-            .cloned()
-            .unwrap_or_else(|| DevicePath {
-                path: self.devnode.clone(),
-                kind: DevicePathKind::DevNode,
-            })
+        preferred_path_for(&self.aliases, &self.devnode)
     }
 
     pub fn selection_label(&self) -> String {
@@ -76,6 +75,47 @@ impl BlockDevice {
     }
 }
 
+impl BlockPartition {
+    pub fn preferred_path(&self) -> DevicePath {
+        preferred_path_for(&self.aliases, &self.devnode)
+    }
+
+    pub fn selection_label(&self) -> String {
+        let mut parts = vec![self.devnode.display().to_string()];
+
+        if let Some(size) = self.size_bytes {
+            parts.push(format_size(size));
+        }
+
+        let preferred = self.preferred_path();
+        if preferred.path != self.devnode {
+            parts.push(format!("using {}", preferred.path.display()));
+        }
+
+        parts.join(" | ")
+    }
+}
+
+pub fn disk_choices() -> Result<Vec<DeviceChoice>> {
+    Ok(list_block_devices()?
+        .into_iter()
+        .map(|device| DeviceChoice {
+            path: device.preferred_path().path,
+            label: device.selection_label(),
+        })
+        .collect())
+}
+
+pub fn partition_choices() -> Result<Vec<DeviceChoice>> {
+    Ok(list_block_partitions()?
+        .into_iter()
+        .map(|partition| DeviceChoice {
+            path: partition.preferred_path().path,
+            label: partition.selection_label(),
+        })
+        .collect())
+}
+
 #[derive(Debug, Deserialize)]
 struct LsblkOutput {
     blockdevices: Vec<LsblkDevice>,
@@ -97,6 +137,30 @@ struct LsblkDevice {
 }
 
 pub fn list_block_devices() -> Result<Vec<BlockDevice>> {
+    let (parsed, aliases) = inspect_block_devices()?;
+
+    let mut devices = Vec::new();
+    for node in parsed.blockdevices {
+        collect_lsblk_disks(node, &aliases, &mut devices);
+    }
+
+    devices.sort_by(|a, b| a.devnode.cmp(&b.devnode));
+    Ok(devices)
+}
+
+pub fn list_block_partitions() -> Result<Vec<BlockPartition>> {
+    let (parsed, aliases) = inspect_block_devices()?;
+
+    let mut partitions = Vec::new();
+    for node in parsed.blockdevices {
+        collect_lsblk_partitions(node, &aliases, &mut partitions);
+    }
+
+    partitions.sort_by(|a, b| a.devnode.cmp(&b.devnode));
+    Ok(partitions)
+}
+
+fn inspect_block_devices() -> Result<(LsblkOutput, HashMap<PathBuf, Vec<DevicePath>>)> {
     let output = Command::new("lsblk")
         .args([
             "--json",
@@ -116,15 +180,8 @@ pub fn list_block_devices() -> Result<Vec<BlockDevice>> {
 
     let parsed: LsblkOutput =
         serde_json::from_slice(&output.stdout).wrap_err("failed to parse lsblk JSON")?;
-    let aliases = collect_disk_aliases()?;
-
-    let mut devices = Vec::new();
-    for node in parsed.blockdevices {
-        collect_lsblk_disks(node, &aliases, &mut devices);
-    }
-
-    devices.sort_by(|a, b| a.devnode.cmp(&b.devnode));
-    Ok(devices)
+    let aliases = collect_device_aliases()?;
+    Ok((parsed, aliases))
 }
 
 fn collect_lsblk_disks(
@@ -157,6 +214,30 @@ fn collect_lsblk_disks(
     }
 }
 
+fn collect_lsblk_partitions(
+    node: LsblkDevice,
+    aliases: &HashMap<PathBuf, Vec<DevicePath>>,
+    partitions: &mut Vec<BlockPartition>,
+) {
+    if node.device_type.as_deref() == Some("part")
+        && let Some(devnode) = node.path.clone()
+    {
+        let canonical = fs::canonicalize(&devnode).unwrap_or_else(|_| devnode.clone());
+        let mut partition_aliases = aliases.get(&canonical).cloned().unwrap_or_default();
+        partition_aliases.sort_by_key(alias_preference_key);
+
+        partitions.push(BlockPartition {
+            devnode,
+            aliases: partition_aliases,
+            size_bytes: node.size.as_ref().and_then(value_as_u64),
+        });
+    }
+
+    for child in node.children {
+        collect_lsblk_partitions(child, aliases, partitions);
+    }
+}
+
 fn is_installable_devnode(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return false;
@@ -165,7 +246,7 @@ fn is_installable_devnode(path: &Path) -> bool {
     !(name.starts_with("loop") || name.starts_with("zram") || name.starts_with("sr"))
 }
 
-fn collect_disk_aliases() -> Result<HashMap<PathBuf, Vec<DevicePath>>> {
+fn collect_device_aliases() -> Result<HashMap<PathBuf, Vec<DevicePath>>> {
     let mut aliases: HashMap<PathBuf, Vec<DevicePath>> = HashMap::new();
     collect_alias_dir(
         Path::new("/dev/disk/by-id"),
@@ -219,6 +300,24 @@ fn alias_preference_key(alias: &DevicePath) -> (u8, String) {
     };
 
     (rank, alias.path.display().to_string())
+}
+
+fn preferred_path_for(aliases: &[DevicePath], devnode: &Path) -> DevicePath {
+    aliases
+        .iter()
+        .filter(|alias| alias.kind == DevicePathKind::ById)
+        .min_by_key(|alias| alias_preference_key(alias))
+        .or_else(|| {
+            aliases
+                .iter()
+                .filter(|alias| alias.kind == DevicePathKind::ByPath)
+                .min_by_key(|alias| alias_preference_key(alias))
+        })
+        .cloned()
+        .unwrap_or_else(|| DevicePath {
+            path: devnode.to_path_buf(),
+            kind: DevicePathKind::DevNode,
+        })
 }
 
 fn by_id_rank(name: &str) -> u8 {
@@ -372,6 +471,33 @@ mod tests {
         assert_eq!(
             device.selection_label(),
             "/dev/vda | VirtIO Block Device | 64 GiB | virtio | using /dev/disk/by-path/pci-0000:00:04.0"
+        );
+    }
+
+    #[test]
+    fn partition_selection_prefers_persistent_aliases() {
+        let partition = BlockPartition {
+            devnode: PathBuf::from("/dev/vda1"),
+            aliases: vec![
+                DevicePath {
+                    path: PathBuf::from("/dev/disk/by-path/pci-0000:00:04.0-part1"),
+                    kind: DevicePathKind::ByPath,
+                },
+                DevicePath {
+                    path: PathBuf::from("/dev/disk/by-id/virtio-test-disk-part1"),
+                    kind: DevicePathKind::ById,
+                },
+            ],
+            size_bytes: Some(512 * 1024 * 1024),
+        };
+
+        assert_eq!(
+            partition.preferred_path().path,
+            PathBuf::from("/dev/disk/by-id/virtio-test-disk-part1")
+        );
+        assert_eq!(
+            partition.selection_label(),
+            "/dev/vda1 | 512 MiB | using /dev/disk/by-id/virtio-test-disk-part1"
         );
     }
 }

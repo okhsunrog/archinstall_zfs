@@ -240,24 +240,24 @@ impl Wizard {
                         self.config.keyboard_layout = km;
                     }
                 }
-                "disk_by_id" => {
+                "disk" => {
                     if let Some(disk) = pickers::pick_disk(terminal)? {
-                        self.config.disk_by_id = Some(disk);
+                        self.config.disk = Some(disk);
                     }
                 }
                 "efi_partition" => {
                     if let Some(part) = pickers::pick_partition(terminal, "EFI partition")? {
-                        self.config.efi_partition_by_id = Some(part);
+                        self.config.efi_partition = Some(part);
                     }
                 }
                 "zfs_partition" => {
                     if let Some(part) = pickers::pick_partition(terminal, "ZFS partition")? {
-                        self.config.zfs_partition_by_id = Some(part);
+                        self.config.zfs_partition = Some(part);
                     }
                 }
                 "swap_partition" => {
                     if let Some(part) = pickers::pick_partition(terminal, "Swap partition")? {
-                        self.config.swap_partition_by_id = Some(part);
+                        self.config.swap_partition = Some(part);
                     }
                 }
                 "kernel" => {
