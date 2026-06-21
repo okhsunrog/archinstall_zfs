@@ -205,7 +205,7 @@ jobs:
         name: ${{ env.RELEASE_NAME }}
         body: ${{ env.BODY || '' }}
         generate_release_notes: ${{ startsWith(github.ref, 'refs/tags/v') }}
-        draft: true
+        draft: false
         files: |
           binaries/*
           isos/*.iso
