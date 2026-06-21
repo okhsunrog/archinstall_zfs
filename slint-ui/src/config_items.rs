@@ -2,11 +2,13 @@
 //! coming back from radio/select/text widgets to the canonical `GlobalConfig`.
 
 use slint::SharedString;
+use std::path::PathBuf;
 
 use archinstall_zfs_core::config::types::{
     AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, ProfileSelection,
     SeatAccess, SwapMode, ZfsEncryptionMode,
 };
+use archinstall_zfs_core::disk::device::DeviceChoice;
 
 use crate::ui::{ConfigItem, ItemType};
 
@@ -15,6 +17,87 @@ pub const TOTAL_STEPS: usize = 7;
 pub const STEP_LABELS: [&str; TOTAL_STEPS] = [
     "Welcome", "Disk", "ZFS", "System", "Users", "Desktop", "Review",
 ];
+
+#[derive(Debug, Clone)]
+struct ChoiceRow {
+    path: PathBuf,
+    label: String,
+    icon: String,
+    model: String,
+    serial: String,
+    size: String,
+    transport: String,
+    media: String,
+    removable: bool,
+    persistent_path: String,
+    persistent_kind: String,
+    group_label: String,
+    group_model: String,
+    group_serial: String,
+    group_size: String,
+    group_transport: String,
+    group_media: String,
+    group_removable: bool,
+}
+
+impl From<DeviceChoice> for ChoiceRow {
+    fn from(choice: DeviceChoice) -> Self {
+        Self {
+            path: choice.path,
+            label: choice.label,
+            icon: choice.icon,
+            model: choice.model,
+            serial: choice.serial,
+            size: choice.size,
+            transport: choice.transport,
+            media: choice.media,
+            removable: choice.removable,
+            persistent_path: choice.persistent_path,
+            persistent_kind: choice.persistent_kind,
+            group_label: choice.group_label,
+            group_model: choice.group_model,
+            group_serial: choice.group_serial,
+            group_size: choice.group_size,
+            group_transport: choice.group_transport,
+            group_media: choice.group_media,
+            group_removable: choice.group_removable,
+        }
+    }
+}
+
+impl ChoiceRow {
+    fn path_only(path: PathBuf) -> Self {
+        let label = path.display().to_string();
+        Self {
+            path,
+            label,
+            icon: "hard-drive".to_string(),
+            model: String::new(),
+            serial: String::new(),
+            size: String::new(),
+            transport: String::new(),
+            media: String::new(),
+            removable: false,
+            persistent_path: String::new(),
+            persistent_kind: String::new(),
+            group_label: String::new(),
+            group_model: String::new(),
+            group_serial: String::new(),
+            group_size: String::new(),
+            group_transport: String::new(),
+            group_media: String::new(),
+            group_removable: false,
+        }
+    }
+
+    fn group_key(&self) -> &str {
+        if self.group_label.is_empty() {
+            self.label.as_str()
+        } else {
+            self.group_label.as_str()
+        }
+    }
+}
 
 // ── Per-step item building ──────────────────────────
 
@@ -49,21 +132,19 @@ fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             Some(InstallationMode::FullDisk) => 0,
             Some(InstallationMode::NewPool) => 1,
             Some(InstallationMode::ExistingPool) => 2,
-            None => -1,
+            None => 0,
         },
     );
 
     if matches!(mode, Some(InstallationMode::FullDisk) | None) {
         let disks = disk_choices();
-        let disk_strs: Vec<String> = disks.iter().map(|(_, label)| label.clone()).collect();
-        let disk_refs: Vec<&str> = disk_strs.iter().map(|s| s.as_str()).collect();
         let selected = c
             .disk
             .as_ref()
-            .and_then(|sel| disks.iter().position(|(path, _)| path == sel))
+            .and_then(|sel| disks.iter().position(|choice| &choice.path == sel))
             .map(|i| i as i32)
             .unwrap_or(-1);
-        items.extend(radio_group("disk", "Disk", &disk_refs, selected));
+        items.extend(radio_choice_group("disk", "Disk", &disks, selected));
     }
 
     if matches!(
@@ -71,19 +152,17 @@ fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         Some(InstallationMode::NewPool) | Some(InstallationMode::ExistingPool)
     ) {
         let parts = partition_choices();
-        let part_strs: Vec<String> = parts.iter().map(|(_, label)| label.clone()).collect();
-        let part_refs: Vec<&str> = part_strs.iter().map(|s| s.as_str()).collect();
 
         let efi_selected = c
             .efi_partition
             .as_ref()
-            .and_then(|sel| parts.iter().position(|(path, _)| path == sel))
+            .and_then(|sel| parts.iter().position(|choice| &choice.path == sel))
             .map(|i| i as i32)
             .unwrap_or(-1);
-        items.extend(radio_group(
+        items.extend(radio_partition_choice_group(
             "efi_partition",
             "EFI partition",
-            &part_refs,
+            &parts,
             efi_selected,
         ));
 
@@ -91,13 +170,13 @@ fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             let zfs_selected = c
                 .zfs_partition
                 .as_ref()
-                .and_then(|sel| parts.iter().position(|(path, _)| path == sel))
+                .and_then(|sel| parts.iter().position(|choice| &choice.path == sel))
                 .map(|i| i as i32)
                 .unwrap_or(-1);
-            items.extend(radio_group(
+            items.extend(radio_partition_choice_group(
                 "zfs_partition",
                 "ZFS partition",
-                &part_refs,
+                &parts,
                 zfs_selected,
             ));
         }
@@ -195,18 +274,16 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     }
     if !matches!(mode, Some(InstallationMode::FullDisk) | None) && has_swap_partition {
         let parts = partition_choices();
-        let part_strs: Vec<String> = parts.iter().map(|(_, label)| label.clone()).collect();
-        let part_refs: Vec<&str> = part_strs.iter().map(|s| s.as_str()).collect();
         let swap_selected = c
             .swap_partition
             .as_ref()
-            .and_then(|sel| parts.iter().position(|(path, _)| path == sel))
+            .and_then(|sel| parts.iter().position(|choice| &choice.path == sel))
             .map(|i| i as i32)
             .unwrap_or(-1);
-        items.extend(radio_group(
+        items.extend(radio_choice_group(
             "swap_partition",
             "Swap partition",
-            &part_refs,
+            &parts,
             swap_selected,
         ));
     }
@@ -492,20 +569,51 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                     // readonly row showing "Group: Selected option".
                     let header_label = item.label.clone();
                     let mut selected_label: SharedString = "Not set".into();
+                    let mut selected_detail_model = SharedString::default();
+                    let mut selected_detail_serial = SharedString::default();
+                    let mut selected_detail_size = SharedString::default();
+                    let mut selected_detail_transport = SharedString::default();
+                    let mut selected_detail_media = SharedString::default();
+                    let mut selected_is_removable = false;
+                    let mut selected_persistent_path = SharedString::default();
+                    let mut selected_persistent_kind = SharedString::default();
                     // Default empty: nothing selected. Overwritten when we
                     // find the selected option, taking its is_empty value.
                     let mut selected_is_empty = true;
                     i += 1;
-                    while i < step_items.len() && step_items[i].item_type == ItemType::RadioOption {
-                        if step_items[i].value == "selected" {
+                    while i < step_items.len()
+                        && matches!(
+                            step_items[i].item_type,
+                            ItemType::RadioOption | ItemType::RadioSubheader
+                        )
+                    {
+                        if step_items[i].item_type == ItemType::RadioOption
+                            && step_items[i].value == "selected"
+                        {
                             selected_label = step_items[i].label.clone();
                             selected_is_empty = step_items[i].is_empty;
+                            selected_detail_model = step_items[i].detail_model.clone();
+                            selected_detail_serial = step_items[i].detail_serial.clone();
+                            selected_detail_size = step_items[i].detail_size.clone();
+                            selected_detail_transport = step_items[i].detail_transport.clone();
+                            selected_detail_media = step_items[i].detail_media.clone();
+                            selected_is_removable = step_items[i].is_removable;
+                            selected_persistent_path = step_items[i].persistent_path.clone();
+                            selected_persistent_kind = step_items[i].persistent_kind.clone();
                         }
                         i += 1;
                     }
                     items.push(ConfigItem {
                         label: header_label,
                         value: selected_label,
+                        detail_model: selected_detail_model,
+                        detail_serial: selected_detail_serial,
+                        detail_size: selected_detail_size,
+                        detail_transport: selected_detail_transport,
+                        detail_media: selected_detail_media,
+                        is_removable: selected_is_removable,
+                        persistent_path: selected_persistent_path,
+                        persistent_kind: selected_persistent_kind,
                         item_type: ItemType::Readonly,
                         is_empty: selected_is_empty,
                         ..Default::default()
@@ -523,6 +631,7 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                         key: item.key.clone(),
                         label: item.label.clone(),
                         value: item.value.clone(),
+                        description: item.description.clone(),
                         item_type: ItemType::Readonly,
                         is_empty: item.is_empty,
                         ..Default::default()
@@ -658,6 +767,105 @@ fn radio_group_inner(
     items
 }
 
+fn radio_choice_group(
+    key: &str,
+    label: &str,
+    options: &[ChoiceRow],
+    selected: i32,
+) -> Vec<ConfigItem> {
+    let mut items = vec![ConfigItem {
+        label: label.into(),
+        item_type: ItemType::RadioHeader,
+        ..Default::default()
+    }];
+    for (i, option) in options.iter().enumerate() {
+        items.push(ConfigItem {
+            key: format!("radio:{key}:{i}").into(),
+            label: option.label.as_str().into(),
+            icon: option.icon.as_str().into(),
+            detail_model: option.model.as_str().into(),
+            detail_serial: option.serial.as_str().into(),
+            detail_size: option.size.as_str().into(),
+            detail_transport: option.transport.as_str().into(),
+            detail_media: option.media.as_str().into(),
+            is_removable: option.removable,
+            persistent_path: option.persistent_path.as_str().into(),
+            persistent_kind: option.persistent_kind.as_str().into(),
+            group_label: option.group_label.as_str().into(),
+            group_model: option.group_model.as_str().into(),
+            group_serial: option.group_serial.as_str().into(),
+            group_size: option.group_size.as_str().into(),
+            group_transport: option.group_transport.as_str().into(),
+            group_media: option.group_media.as_str().into(),
+            group_removable: option.group_removable,
+            value: if i as i32 == selected {
+                "selected".into()
+            } else {
+                SharedString::default()
+            },
+            item_type: ItemType::RadioOption,
+            ..Default::default()
+        });
+    }
+    items
+}
+
+fn radio_partition_choice_group(
+    key: &str,
+    label: &str,
+    options: &[ChoiceRow],
+    selected: i32,
+) -> Vec<ConfigItem> {
+    let mut items = vec![ConfigItem {
+        label: label.into(),
+        item_type: ItemType::RadioHeader,
+        ..Default::default()
+    }];
+    let mut current_group = "";
+
+    for (i, option) in options.iter().enumerate() {
+        let group_key = option.group_key();
+        if group_key != current_group {
+            current_group = group_key;
+            items.push(ConfigItem {
+                label: option.group_key().into(),
+                icon: "hard-drive".into(),
+                detail_model: option.group_model.as_str().into(),
+                detail_serial: option.group_serial.as_str().into(),
+                detail_size: option.group_size.as_str().into(),
+                detail_transport: option.group_transport.as_str().into(),
+                detail_media: option.group_media.as_str().into(),
+                is_removable: option.group_removable,
+                item_type: ItemType::RadioSubheader,
+                ..Default::default()
+            });
+        }
+
+        items.push(ConfigItem {
+            key: format!("radio:{key}:{i}").into(),
+            label: option.label.as_str().into(),
+            detail_size: option.size.as_str().into(),
+            persistent_path: option.persistent_path.as_str().into(),
+            persistent_kind: option.persistent_kind.as_str().into(),
+            group_label: option.group_label.as_str().into(),
+            group_model: option.group_model.as_str().into(),
+            group_serial: option.group_serial.as_str().into(),
+            group_size: option.group_size.as_str().into(),
+            group_transport: option.group_transport.as_str().into(),
+            group_media: option.group_media.as_str().into(),
+            group_removable: option.group_removable,
+            value: if i as i32 == selected {
+                "selected".into()
+            } else {
+                SharedString::default()
+            },
+            item_type: ItemType::RadioOption,
+            ..Default::default()
+        });
+    }
+    items
+}
+
 // ── Section boundary marking ────────────────────────
 
 /// Walk a list of items after it's built and set `is_first_in_section` /
@@ -673,6 +881,7 @@ fn mark_section_boundaries(items: &mut [ConfigItem]) {
                 | ItemType::Select
                 | ItemType::Password
                 | ItemType::Toggle
+                | ItemType::RadioSubheader
                 | ItemType::RadioOption
                 | ItemType::Readonly
         )
@@ -711,6 +920,7 @@ pub fn next_selectable_index(items: &[ConfigItem], current: i32, dir: i32) -> i3
             && t != ItemType::Warning
             && t != ItemType::SectionHeader
             && t != ItemType::RadioHeader
+            && t != ItemType::RadioSubheader
         {
             return idx;
         }
@@ -739,26 +949,27 @@ pub fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
         }
         "disk" => {
             let disks = disk_choices();
-            if let Some((path, _)) = disks.get(idx as usize) {
-                config.disk = Some(path.clone());
+            if let Some(choice) = disks.get(idx as usize) {
+                config.installation_mode = Some(InstallationMode::FullDisk);
+                config.disk = Some(choice.path.clone());
             }
         }
         "efi_partition" => {
             let parts = partition_choices();
-            if let Some((path, _)) = parts.get(idx as usize) {
-                config.efi_partition = Some(path.clone());
+            if let Some(choice) = parts.get(idx as usize) {
+                config.efi_partition = Some(choice.path.clone());
             }
         }
         "zfs_partition" => {
             let parts = partition_choices();
-            if let Some((path, _)) = parts.get(idx as usize) {
-                config.zfs_partition = Some(path.clone());
+            if let Some(choice) = parts.get(idx as usize) {
+                config.zfs_partition = Some(choice.path.clone());
             }
         }
         "swap_partition" => {
             let parts = partition_choices();
-            if let Some((path, _)) = parts.get(idx as usize) {
-                config.swap_partition = Some(path.clone());
+            if let Some(choice) = parts.get(idx as usize) {
+                config.swap_partition = Some(choice.path.clone());
             }
         }
         "compression" => {
@@ -824,42 +1035,26 @@ pub fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
     }
 }
 
-fn disk_choices() -> Vec<(std::path::PathBuf, String)> {
+fn disk_choices() -> Vec<ChoiceRow> {
     archinstall_zfs_core::disk::device::disk_choices()
-        .map(|choices| {
-            choices
-                .into_iter()
-                .map(|choice| (choice.path, choice.label))
-                .collect()
-        })
+        .map(|choices| choices.into_iter().map(ChoiceRow::from).collect())
         .unwrap_or_else(|_| {
             archinstall_zfs_core::disk::by_id::list_disks_by_id()
                 .unwrap_or_default()
                 .into_iter()
-                .map(|path| {
-                    let label = path.display().to_string();
-                    (path, label)
-                })
+                .map(ChoiceRow::path_only)
                 .collect()
         })
 }
 
-fn partition_choices() -> Vec<(std::path::PathBuf, String)> {
+fn partition_choices() -> Vec<ChoiceRow> {
     archinstall_zfs_core::disk::device::partition_choices()
-        .map(|choices| {
-            choices
-                .into_iter()
-                .map(|choice| (choice.path, choice.label))
-                .collect()
-        })
+        .map(|choices| choices.into_iter().map(ChoiceRow::from).collect())
         .unwrap_or_else(|_| {
             archinstall_zfs_core::disk::by_id::list_partitions_by_id()
                 .unwrap_or_default()
                 .into_iter()
-                .map(|path| {
-                    let label = path.display().to_string();
-                    (path, label)
-                })
+                .map(ChoiceRow::path_only)
                 .collect()
         })
 }

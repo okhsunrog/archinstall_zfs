@@ -202,21 +202,11 @@ pub mod tests {
     use std::collections::VecDeque;
     use std::sync::Mutex;
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Default)]
     pub struct CannedResponse {
         pub stdout: String,
         pub stderr: String,
         pub exit_code: i32,
-    }
-
-    impl Default for CannedResponse {
-        fn default() -> Self {
-            Self {
-                stdout: String::new(),
-                stderr: String::new(),
-                exit_code: 0,
-            }
-        }
     }
 
     #[derive(Debug, Clone)]

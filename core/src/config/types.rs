@@ -572,9 +572,11 @@ mod tests {
 
     #[test]
     fn test_all_aur_packages_with_zrepl() {
-        let mut cfg = GlobalConfig::default();
-        cfg.aur_packages = vec!["custom-pkg".to_string()];
-        cfg.zrepl_enabled = true;
+        let cfg = GlobalConfig {
+            aur_packages: vec!["custom-pkg".to_string()],
+            zrepl_enabled: true,
+            ..Default::default()
+        };
 
         let pkgs = cfg.all_aur_packages();
         assert!(pkgs.contains(&"custom-pkg"));

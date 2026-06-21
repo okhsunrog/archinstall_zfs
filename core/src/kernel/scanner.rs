@@ -657,7 +657,7 @@ mod tests {
     #[test]
     fn test_menu_option_generation_logic() {
         // Simulate scan results and verify filtering logic
-        let results = vec![
+        let results = [
             CompatibilityResult {
                 kernel_name: "linux-lts".into(),
                 kernel_version: Some("6.12.41-2".into()),
