@@ -1,13 +1,14 @@
 // Install progress screen — scrolling log + a progress card with the current
-// phase, optional package-download details, and an Exit/Reboot button when
-// done.
+// phase, optional package-download details, and completion actions.
 
 import { ListView } from "std-widgets.slint";
 import { Theme } from "../styling.slint";
 import { InstallState } from "../state/install-state.slint";
+import { StyledButton } from "../components/styled-button.slint";
 
 export component InstallView inherits VerticalLayout {
     callback quit-requested();
+    callback reboot-requested();
 
     padding: 12px;
     spacing: 8px;
@@ -45,7 +46,9 @@ export component InstallView inherits VerticalLayout {
 
     // Progress card (always visible during install)
     Rectangle {
-        height: InstallState.download-active ? 180px : 80px;
+        height: InstallState.download-active ? 180px
+            : InstallState.state >= 2 ? 104px
+            : 80px;
         background: Theme.c.surface0;
         border-radius: 10px;
 
@@ -167,23 +170,22 @@ export component InstallView inherits VerticalLayout {
                 }
             }
 
-            // Exit button
-            if InstallState.state >= 2: Rectangle {
-                height: 36px;
-                background: exit-ta.has-hover ? Theme.c.blue : Theme.c.surface1;
-                border-radius: 8px;
+            // Completion actions
+            if InstallState.state >= 2: HorizontalLayout {
+                height: Theme.control-height;
+                alignment: end;
+                spacing: Theme.spacing-sm;
 
-                exit-ta := TouchArea {
+                StyledButton {
+                    label: InstallState.state == 2 ? "Quit" : "Exit";
+                    style: Theme.button-default;
                     clicked => { root.quit-requested(); }
                 }
 
-                Text {
-                    text: InstallState.state == 2 ? "Reboot" : "Exit";
-                    color: exit-ta.has-hover ? Theme.c.base : Theme.c.text;
-                    font-size: 14px;
-                    font-weight: FontWeight.semi-bold;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+                if InstallState.state == 2: StyledButton {
+                    label: "Reboot";
+                    style: Theme.button-primary;
+                    clicked => { root.reboot-requested(); }
                 }
             }
         }

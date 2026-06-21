@@ -68,6 +68,7 @@ export component App inherits Window {
     callback toggle-activated(string);
     callback install-requested();
     callback quit-requested();
+    callback reboot-requested();
     callback user-added(string, string, bool); // username, password, sudo
     callback user-removed(int);
     callback user-sudo-toggled(int);
@@ -130,6 +131,7 @@ export component App inherits Window {
     // ── Install progress screen ──────────────────────
     if InstallState.state >= 1: InstallView {
         quit-requested() => { quit-requested(); }
+        reboot-requested() => { reboot-requested(); }
     }
 
     // ── Popup overlays ──────────────────────────────────
