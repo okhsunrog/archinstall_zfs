@@ -12,7 +12,7 @@ export component SelectPopup inherits Rectangle {
     // the initial one driven directly by `selected-index`. Earlier
     // versions had an `out property result-index: selected-index;` that
     // got broken by the first click and then leaked across re-opens.
-    in property <int> selected-index;
+    in-out property <int> selected-index;
     in property <bool> popup-visible;
     in property <bool> show-filter: false;
 
@@ -27,6 +27,41 @@ export component SelectPopup inherits Rectangle {
         TouchArea {
             clicked => { closed(); }
             scroll-event(e) => { return accept; }
+        }
+
+        // Keyboard navigation for the option list. Arrow / j / k move
+        // selected-index; Enter accepts; Esc closes. When the filter is
+        // visible the input itself owns text-typing keys, so we only
+        // intercept the navigation set.
+        focus-scope := FocusScope {
+            key-pressed(ev) => {
+                if ev.text == Key.Escape {
+                    root.closed();
+                    return accept;
+                }
+                if ev.text == Key.Return {
+                    if root.selected-index >= 0
+                        && root.selected-index < root.options.length {
+                        root.accepted(root.selected-index);
+                    }
+                    return accept;
+                }
+                if ev.text == Key.DownArrow {
+                    if root.options.length > 0 {
+                        root.selected-index = min(
+                            root.options.length - 1,
+                            max(0, root.selected-index) + 1);
+                    }
+                    return accept;
+                }
+                if ev.text == Key.UpArrow {
+                    if root.selected-index > 0 {
+                        root.selected-index = root.selected-index - 1;
+                    }
+                    return accept;
+                }
+                return reject;
+            }
         }
 
         Rectangle {
@@ -54,16 +89,22 @@ export component SelectPopup inherits Rectangle {
                     height: Theme.spacing-xl;
                 }
 
-                if root.show-filter: StyledTextInput {
+                // Focus the filter input on open if present so the user
+                // can type straight away. The `init` lives on the input
+                // itself because ids inside `if`-conditional elements
+                // aren't reachable from outer-scope handlers.
+                if root.show-filter: filter-input := StyledTextInput {
                     height: Theme.control-height-sm;
                     border-color: Theme.c.blue;
                     edited(text) => { root.filter-changed(text); }
+                    init => { filter-input.focus-input(); }
                 }
 
-                init => {
-                    if root.show-filter {
-                        // Focus handled by StyledTextInput auto-focus on creation
-                    }
+                // No filter → grab the FocusScope so arrow / Enter
+                // navigation is live without an extra click.
+                if !root.show-filter: Rectangle {
+                    height: 0px;
+                    init => { focus-scope.focus(); }
                 }
 
                 ListView {

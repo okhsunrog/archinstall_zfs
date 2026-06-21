@@ -26,7 +26,10 @@ export component UserManagePopup inherits Rectangle {
         background: #00000080;
         width: 100%; height: 100%;
 
-        TouchArea { clicked => { closed(); } }
+        TouchArea {
+            clicked => { closed(); }
+            scroll-event(e) => { return accept; }
+        }
 
         Rectangle {
             x: (parent.width - self.width) / 2;

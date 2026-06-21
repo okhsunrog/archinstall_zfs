@@ -18,7 +18,7 @@
 // is-first-in-section / is-last-in-section flags come from
 // `mark_section_boundaries` in Rust's config_items.rs.
 
-import { Theme } from "../styling.slint";
+import { Theme, Palette } from "../styling.slint";
 import { ConfigItem, ItemType } from "../types.slint";
 import { RadioDot } from "radio-dot.slint";
 
@@ -87,15 +87,15 @@ export component ConfigItemRow inherits Rectangle {
     // Hover / focus highlight overlay (interactive rows only).
     if is-field && !is-readonly: Rectangle {
         visible: row-ta.has-hover || index == focused-index;
-        background: #ffffff10;
+        background: Palette.state-hovered;
         border-top-left-radius: item.is-first-in-section ? 8px : 0px;
         border-top-right-radius: item.is-first-in-section ? 8px : 0px;
         border-bottom-left-radius: item.is-last-in-section ? 8px : 0px;
         border-bottom-right-radius: item.is-last-in-section ? 8px : 0px;
     }
 
-    // ── Separator (just empty vertical space between sections) ──
-    if is-separator: Rectangle { }
+    // Separator rows render as empty space; the row's outer `height`
+    // already provides the gap, no element needed.
 
     // ── Section header (small uppercase label above the connected card) ──
     if is-section-header: HorizontalLayout {
@@ -151,6 +151,8 @@ export component ConfigItemRow inherits Rectangle {
             color: item.value == "selected" ? Theme.c.text : Theme.c.subtext0;
             font-size: 14px;
             vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
         }
     }
 
@@ -161,7 +163,7 @@ export component ConfigItemRow inherits Rectangle {
 
         Rectangle {
             visible: row-ta.has-hover || index == focused-index;
-            background: #ffffff18;
+            background: Palette.state-hovered;
             border-radius: parent.border-radius;
         }
 
@@ -191,9 +193,7 @@ export component ConfigItemRow inherits Rectangle {
 
         Text {
             text: item.value;
-            color: item.value == "Not set" || item.value == "None" || item.value == "Disabled"
-                ? Theme.c.overlay0
-                : Theme.c.green;
+            color: item.is-empty ? Theme.c.overlay0 : Theme.c.green;
             font-size: 13px;
             vertical-alignment: center;
             horizontal-alignment: right;
@@ -236,9 +236,7 @@ export component ConfigItemRow inherits Rectangle {
 
             Text {
                 text: item.value;
-                color: item.value == "Not set" || item.value == "None" || item.value == "Disabled"
-                    ? Theme.c.overlay0
-                    : Theme.c.green;
+                color: item.is-empty ? Theme.c.overlay0 : Theme.c.green;
                 font-size: 14px;
                 vertical-alignment: center;
                 horizontal-alignment: right;

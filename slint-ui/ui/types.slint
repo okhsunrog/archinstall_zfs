@@ -33,6 +33,11 @@ export struct ConfigItem {
     // next item in the list is a SectionHeader, Separator, or end of list).
     // Used to round bottom corners and skip the trailing hairline divider.
     is-last-in-section: bool,
+    // True when `value` represents an unset / off / none state and should
+    // be rendered in muted color. Set by the Rust builder; replaces the
+    // older "Not set" / "None" / "Disabled" string matching that broke as
+    // soon as Rust localized or reworded those sentinels.
+    is-empty: bool,
 }
 
 export struct SelectOption {

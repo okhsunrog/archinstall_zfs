@@ -2,8 +2,8 @@ import { Theme } from "../styling.slint";
 
 export component Badge inherits Rectangle {
     in property <string> label;
-    in property <color> bg: Theme.c.blue;
-    in property <color> fg: Theme.c.base;
+    in property <brush> bg: Theme.c.blue;
+    in property <brush> fg: Theme.c.base;
 
     width: badge-text.preferred-width + 12px;
     height: 20px;

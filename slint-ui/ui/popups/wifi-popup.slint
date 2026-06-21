@@ -40,23 +40,21 @@ import { SignalBars } from "../components/signal-bars.slint";
 export component WifiPopup inherits Rectangle {
     in property <bool> popup-visible;
 
-    visible: popup-visible;
-    background: #000000c0;
+    if popup-visible: Rectangle {
+        background: #000000c0;
+        width: 100%;
+        height: 100%;
 
-    // Grab keyboard focus every time the popup becomes visible, so
-    // arrow/Enter/Esc work immediately without the user clicking
-    // anywhere first. `changed popup-visible` fires on every flip,
-    // unlike `init` which runs only once.
-    changed popup-visible => {
-        if popup-visible {
-            focus-scope.focus();
+        // Dismiss-on-outside-click + scroll-swallow so wheel events
+        // don't leak into the wizard underneath.
+        TouchArea {
+            clicked => { WifiState.close(); }
+            scroll-event(e) => { return accept; }
         }
-    }
 
-    // Dismiss-on-outside-click.
-    TouchArea {
-        clicked => { WifiState.close(); }
-    }
+        // Grab keyboard focus on each open; the `if` subtree is created
+        // fresh every time so this fires once per show.
+        init => { focus-scope.focus(); }
 
     // Wifi-popup-local keyboard navigation:
     //
@@ -68,12 +66,9 @@ export component WifiPopup inherits Rectangle {
     //                    already handles it so we don't double-fire)
     //   r              → rescan (picking phase only)
     //
-    // Enabled only while the popup itself is visible; the App-root
-    // FocusScope is already gated !PopupState.wifi-visible so the
-    // two can never fight.
+    // The whole subtree is gated by `if popup-visible:` above, so this
+    // scope only exists while the popup is open — no enabled gate needed.
     focus-scope := FocusScope {
-        enabled: popup-visible;
-
         key-pressed(ev) => {
             if ev.text == Key.Escape {
                 if WifiState.phase == WifiPhase.auth {
@@ -237,6 +232,9 @@ export component WifiPopup inherits Rectangle {
                         source: @image-url("../../assets/icons/refresh-cw.svg");
                         size: 28px;
                         tint: Theme.c.blue;
+                        // Drives the rotation off `animation-tick()` so the
+                        // icon spins continuously while this branch is live.
+                        transform-rotation: 360deg * mod(animation-tick(), 1.2s) / 1.2s;
                     }
 
                     Text {
@@ -506,6 +504,7 @@ export component WifiPopup inherits Rectangle {
                         source: @image-url("../../assets/icons/refresh-cw.svg");
                         size: 28px;
                         tint: Theme.c.blue;
+                        transform-rotation: 360deg * mod(animation-tick(), 1.2s) / 1.2s;
                     }
 
                     Text {
@@ -610,5 +609,6 @@ export component WifiPopup inherits Rectangle {
                 }
             }
         }
+    }
     }
 }

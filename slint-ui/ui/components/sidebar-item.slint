@@ -10,7 +10,7 @@ export component SidebarItem inherits Rectangle {
     callback clicked <=> touch-area.clicked;
 
     height: 36px;
-    background: state == 1 ? Theme.c.surface0 : #00000000;
+    background: state == 1 ? Theme.c.surface0 : transparent;
     border-radius: Theme.radius-sm;
     forward-focus: touch-area;
     accessible-role: button;

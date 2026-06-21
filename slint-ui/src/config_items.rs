@@ -115,10 +115,10 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
 
     let mut items = vec![
         section_header("Pool"),
-        ci(
+        ci_opt(
             "pool_name",
             "Pool name",
-            &c.pool_name.clone().unwrap_or("Not set".into()),
+            c.pool_name.as_deref(),
             ItemType::Text,
         ),
         ci(
@@ -129,7 +129,7 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         ),
     ];
 
-    items.extend(radio_group(
+    items.extend(radio_group_with_off(
         "compression",
         "Compression",
         &["lz4", "zstd", "zstd-5", "zstd-10", "off"],
@@ -140,6 +140,7 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             CompressionAlgo::Zstd10 => 3,
             CompressionAlgo::Off => 4,
         },
+        4,
     ));
 
     items.extend(radio_group(
@@ -158,19 +159,15 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     ));
 
     if c.zfs_encryption_mode != ZfsEncryptionMode::None {
-        items.push(ci(
+        items.push(ci_opt(
             "encryption_password",
             "Encryption password",
-            if c.zfs_encryption_password.is_some() {
-                "Set"
-            } else {
-                "Not set"
-            },
+            c.zfs_encryption_password.as_ref().map(|_| "Set"),
             ItemType::Password,
         ));
     }
 
-    items.extend(radio_group(
+    items.extend(radio_group_with_off(
         "swap_mode",
         "Swap",
         &[
@@ -185,13 +182,14 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             SwapMode::ZswapPartition => 2,
             SwapMode::ZswapPartitionEncrypted => 3,
         },
+        0,
     ));
 
     if matches!(mode, Some(InstallationMode::FullDisk)) && has_swap_partition {
-        items.push(ci(
+        items.push(ci_opt(
             "swap_partition_size",
             "Swap size",
-            &c.swap_partition_size.clone().unwrap_or("Not set".into()),
+            c.swap_partition_size.as_deref(),
             ItemType::Text,
         ));
     }
@@ -242,18 +240,13 @@ fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             ),
             ItemType::Select,
         ),
-        ci(
+        ci_opt(
             "hostname",
             "Hostname",
-            &c.hostname.clone().unwrap_or("Not set".into()),
+            c.hostname.as_deref(),
             ItemType::Text,
         ),
-        ci(
-            "ntp",
-            "NTP (time sync)",
-            if c.ntp { "Enabled" } else { "Disabled" },
-            ItemType::Toggle,
-        ),
+        ci_toggle("ntp", "NTP (time sync)", c.ntp),
         ci(
             "parallel_downloads",
             "Parallel downloads",
@@ -261,16 +254,11 @@ fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             ItemType::Text,
         ),
         section_header("Locale"),
-        ci(
-            "locale",
-            "Locale",
-            &c.locale.clone().unwrap_or("Not set".into()),
-            ItemType::Select,
-        ),
-        ci(
+        ci_opt("locale", "Locale", c.locale.as_deref(), ItemType::Select),
+        ci_opt(
             "timezone",
             "Timezone",
-            &c.timezone.clone().unwrap_or("Not set".into()),
+            c.timezone.as_deref(),
             ItemType::Select,
         ),
         ci(
@@ -285,36 +273,41 @@ fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
 fn build_users_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     vec![
         section_header("Authentication"),
-        ci(
+        ci_opt(
             "root_password",
             "Root password",
-            if c.root_password.is_some() {
-                "Set"
-            } else {
-                "Not set"
-            },
+            c.root_password.as_ref().map(|_| "Set"),
             ItemType::Password,
         ),
         section_header("Accounts"),
-        ci(
-            "users",
-            "User accounts",
-            &match &c.users {
-                Some(users) if !users.is_empty() => users
-                    .iter()
-                    .map(|u| {
-                        if u.sudo {
-                            format!("{} [sudo]", u.username)
-                        } else {
-                            u.username.clone()
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                _ => "None".into(),
-            },
-            ItemType::Text,
-        ),
+        {
+            let summary = match &c.users {
+                Some(users) if !users.is_empty() => Some(
+                    users
+                        .iter()
+                        .map(|u| {
+                            if u.sudo {
+                                format!("{} [sudo]", u.username)
+                            } else {
+                                u.username.clone()
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ),
+                _ => None,
+            };
+            // ci_opt's None → "Not set"; users semantically wants "None".
+            // Construct directly so we keep the established label.
+            ConfigItem {
+                key: "users".into(),
+                label: "User accounts".into(),
+                value: summary.clone().unwrap_or_else(|| "None".into()).into(),
+                item_type: ItemType::Text,
+                is_empty: summary.is_none(),
+                ..Default::default()
+            }
+        },
     ]
 }
 
@@ -322,17 +315,17 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     let sel = c.profile_selection.as_ref();
     let profile_def = sel.and_then(|s| s.profile_def());
 
+    let profile_name = profile_def.as_ref().map(|p| p.display_name.to_string());
     let mut items = vec![
         section_header("Desktop"),
-        ci(
-            "profile",
-            "Profile",
-            &profile_def
-                .as_ref()
-                .map(|p| p.display_name.to_string())
-                .unwrap_or_else(|| "None".into()),
-            ItemType::Select,
-        ),
+        ConfigItem {
+            key: "profile".into(),
+            label: "Profile".into(),
+            value: profile_name.clone().unwrap_or_else(|| "None".into()).into(),
+            item_type: ItemType::Select,
+            is_empty: profile_name.is_none(),
+            ..Default::default()
+        },
     ];
 
     // ── Profile configuration: only when a desktop profile is active ──
@@ -345,33 +338,38 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         let total = p.optional_packages().len();
         if total > 0 {
             let chosen = sel.optional_packages.len();
-            items.push(ci(
-                "optional_packages",
-                "Optional packages",
-                &format!("{chosen} of {total}"),
-                ItemType::Select,
-            ));
+            items.push(ConfigItem {
+                key: "optional_packages".into(),
+                label: "Optional packages".into(),
+                value: format!("{chosen} of {total}").into(),
+                item_type: ItemType::Select,
+                is_empty: chosen == 0,
+                ..Default::default()
+            });
         }
 
         // Display manager: shows the effective DM with (default) or
         // (override) suffix so the user can tell at a glance whether they
         // diverged from the profile.
-        let value = match (sel.display_manager_override, p.default_display_manager()) {
-            (Some(over), _) => format!("{} (override)", over.display_name()),
-            (None, Some(def)) => format!("{} (default)", def.display_name()),
-            (None, None) => "None".to_string(),
+        let (value, dm_is_empty) = match (sel.display_manager_override, p.default_display_manager())
+        {
+            (Some(over), _) => (format!("{} (override)", over.display_name()), false),
+            (None, Some(def)) => (format!("{} (default)", def.display_name()), false),
+            (None, None) => ("None".to_string(), true),
         };
-        items.push(ci(
-            "display_manager",
-            "Display manager",
-            &value,
-            ItemType::Select,
-        ));
+        items.push(ConfigItem {
+            key: "display_manager".into(),
+            label: "Display manager".into(),
+            value: value.into(),
+            item_type: ItemType::Select,
+            is_empty: dm_is_empty,
+            ..Default::default()
+        });
 
         // Seat access (Wayland compositors). Its own section card via
         // radio_group, like Audio.
         if p.needs_seat_access() {
-            items.extend(radio_group(
+            items.extend(radio_group_with_off(
                 "seat_access",
                 "Seat access",
                 &["None", "seatd", "polkit"],
@@ -380,11 +378,12 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                     Some(SeatAccess::Seatd) => 1,
                     Some(SeatAccess::Polkit) => 2,
                 },
+                0,
             ));
         }
     }
 
-    items.extend(radio_group(
+    items.extend(radio_group_with_off(
         "audio",
         "Audio",
         &["None", "pipewire", "pulseaudio"],
@@ -393,6 +392,7 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             Some(AudioServer::Pipewire) => 1,
             Some(AudioServer::Pulseaudio) => 2,
         },
+        0,
     ));
 
     items.push(section_header("Hardware"));
@@ -403,14 +403,17 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         .as_ref()
         .is_some_and(|p| p.supports_gfx_driver())
     {
-        items.push(ci(
-            "gpu_driver",
-            "GPU driver",
-            &c.gfx_driver
-                .map(|d| d.to_string())
-                .unwrap_or_else(|| "None".into()),
-            ItemType::Select,
-        ));
+        items.push({
+            let driver = c.gfx_driver.map(|d| d.to_string());
+            ConfigItem {
+                key: "gpu_driver".into(),
+                label: "GPU driver".into(),
+                value: driver.clone().unwrap_or_else(|| "None".into()).into(),
+                item_type: ItemType::Select,
+                is_empty: driver.is_none(),
+                ..Default::default()
+            }
+        });
 
         // Inline warning when the proprietary NVIDIA driver is paired with
         // a Wayland-only compositor. The TUI shows a confirmation dialog;
@@ -428,52 +431,46 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             });
         }
     }
-    items.push(ci(
-        "bluetooth",
-        "Bluetooth",
-        if c.bluetooth { "Enabled" } else { "Disabled" },
-        ItemType::Toggle,
-    ));
+    items.push(ci_toggle("bluetooth", "Bluetooth", c.bluetooth));
 
     items.push(section_header("Software"));
-    items.extend([
-        ci(
-            "packages",
-            "Extra packages",
-            &{
-                let total = c.additional_packages.len() + c.aur_packages.len();
-                if total == 0 {
-                    "None".to_string()
-                } else {
-                    let mut parts: Vec<&str> =
-                        c.additional_packages.iter().map(|s| s.as_str()).collect();
-                    parts.extend(c.aur_packages.iter().map(|s| s.as_str()));
-                    parts.join(", ")
-                }
-            },
-            ItemType::Text,
-        ),
-        ci(
-            "extra_services",
-            "Extra services",
-            &if c.extra_services.is_empty() {
-                "None".to_string()
-            } else {
-                c.extra_services.join(", ")
-            },
-            ItemType::Text,
-        ),
-        ci(
-            "zrepl",
-            "zrepl (snapshots)",
-            if c.zrepl_enabled {
-                "Enabled"
-            } else {
-                "Disabled"
-            },
-            ItemType::Toggle,
-        ),
-    ]);
+    items.push({
+        let parts: Vec<&str> = c
+            .additional_packages
+            .iter()
+            .chain(c.aur_packages.iter())
+            .map(|s| s.as_str())
+            .collect();
+        let joined = if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join(", "))
+        };
+        ConfigItem {
+            key: "packages".into(),
+            label: "Extra packages".into(),
+            value: joined.clone().unwrap_or_else(|| "None".into()).into(),
+            item_type: ItemType::Text,
+            is_empty: joined.is_none(),
+            ..Default::default()
+        }
+    });
+    items.push({
+        let joined = if c.extra_services.is_empty() {
+            None
+        } else {
+            Some(c.extra_services.join(", "))
+        };
+        ConfigItem {
+            key: "extra_services".into(),
+            label: "Extra services".into(),
+            value: joined.clone().unwrap_or_else(|| "None".into()).into(),
+            item_type: ItemType::Text,
+            is_empty: joined.is_none(),
+            ..Default::default()
+        }
+    });
+    items.push(ci_toggle("zrepl", "zrepl (snapshots)", c.zrepl_enabled));
 
     items
 }
@@ -495,10 +492,14 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                     // readonly row showing "Group: Selected option".
                     let header_label = item.label.clone();
                     let mut selected_label: SharedString = "Not set".into();
+                    // Default empty: nothing selected. Overwritten when we
+                    // find the selected option, taking its is_empty value.
+                    let mut selected_is_empty = true;
                     i += 1;
                     while i < step_items.len() && step_items[i].item_type == ItemType::RadioOption {
                         if step_items[i].value == "selected" {
                             selected_label = step_items[i].label.clone();
+                            selected_is_empty = step_items[i].is_empty;
                         }
                         i += 1;
                     }
@@ -506,6 +507,7 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                         label: header_label,
                         value: selected_label,
                         item_type: ItemType::Readonly,
+                        is_empty: selected_is_empty,
                         ..Default::default()
                     });
                 }
@@ -522,6 +524,7 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                         label: item.label.clone(),
                         value: item.value.clone(),
                         item_type: ItemType::Readonly,
+                        is_empty: item.is_empty,
                         ..Default::default()
                     });
                     i += 1;
@@ -555,6 +558,38 @@ fn ci(key: &str, label: &str, value: &str, item_type: ItemType) -> ConfigItem {
     }
 }
 
+/// Variant of [`ci`] that takes an `Option<&str>`. `None` is rendered as
+/// "Not set" with `is_empty: true` so the Slint side colors the value muted
+/// without string-matching the sentinel.
+fn ci_opt(key: &str, label: &str, value: Option<&str>, item_type: ItemType) -> ConfigItem {
+    let (display, is_empty) = match value {
+        Some(v) => (v, false),
+        None => ("Not set", true),
+    };
+    ConfigItem {
+        key: key.into(),
+        label: label.into(),
+        value: display.into(),
+        item_type,
+        is_empty,
+        ..Default::default()
+    }
+}
+
+/// Toggle row helper. `enabled=false` is rendered as the "off" state with
+/// `is_empty: true` so the value reads muted, matching how unset fields
+/// look on the rest of the wizard.
+fn ci_toggle(key: &str, label: &str, enabled: bool) -> ConfigItem {
+    ConfigItem {
+        key: key.into(),
+        label: label.into(),
+        value: if enabled { "Enabled" } else { "Disabled" }.into(),
+        item_type: ItemType::Toggle,
+        is_empty: !enabled,
+        ..Default::default()
+    }
+}
+
 #[cfg(test)]
 fn sep() -> ConfigItem {
     ConfigItem {
@@ -577,6 +612,30 @@ fn section_header(label: &str) -> ConfigItem {
 /// summary row, while bare section headers (used as visual dividers) get
 /// dropped in review entirely.
 fn radio_group(key: &str, label: &str, options: &[&str], selected: i32) -> Vec<ConfigItem> {
+    radio_group_inner(key, label, options, selected, None)
+}
+
+/// Variant of [`radio_group`] that marks one option as the semantic "off"
+/// state (e.g. compression "off", audio "None"). The off row's `is_empty`
+/// flag is propagated to the review screen's collapsed Readonly row when
+/// it's the selected option, so it renders muted instead of green.
+fn radio_group_with_off(
+    key: &str,
+    label: &str,
+    options: &[&str],
+    selected: i32,
+    off_index: usize,
+) -> Vec<ConfigItem> {
+    radio_group_inner(key, label, options, selected, Some(off_index))
+}
+
+fn radio_group_inner(
+    key: &str,
+    label: &str,
+    options: &[&str],
+    selected: i32,
+    off_index: Option<usize>,
+) -> Vec<ConfigItem> {
     let mut items = vec![ConfigItem {
         label: label.into(),
         item_type: ItemType::RadioHeader,
@@ -592,6 +651,7 @@ fn radio_group(key: &str, label: &str, options: &[&str], selected: i32) -> Vec<C
                 SharedString::default()
             },
             item_type: ItemType::RadioOption,
+            is_empty: off_index == Some(i),
             ..Default::default()
         });
     }

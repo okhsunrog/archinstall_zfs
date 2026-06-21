@@ -11,7 +11,7 @@ export component TextInputPopup inherits Rectangle {
     in property <int> strength-score: -1;
     in property <string> strength-label;
     in property <string> strength-hint;
-    in property <color> strength-color: Theme.c.overlay0;
+    in property <brush> strength-color: Theme.c.overlay0;
 
     callback confirmed(string);
     callback closed();
@@ -21,7 +21,10 @@ export component TextInputPopup inherits Rectangle {
         background: #00000080;
         width: 100%; height: 100%;
 
-        TouchArea { clicked => { closed(); } }
+        TouchArea {
+            clicked => { closed(); }
+            scroll-event(e) => { return accept; }
+        }
 
         Rectangle {
             x: (parent.width - self.width) / 2;

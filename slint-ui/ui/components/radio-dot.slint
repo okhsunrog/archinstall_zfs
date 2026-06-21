@@ -14,7 +14,7 @@
 
 export component RadioDot inherits Rectangle {
     in property <bool> filled;
-    in property <color> dot-color;
+    in property <brush> dot-color;
     in property <length> dot-size: 12px;
 
     width: 18px;
@@ -26,7 +26,7 @@ export component RadioDot inherits Rectangle {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         border-radius: self.width / 2;
-        background: root.filled ? root.dot-color : #00000000;
+        background: root.filled ? root.dot-color : transparent;
         border-width: root.filled ? 0px : 1.5px;
         border-color: root.dot-color;
     }
