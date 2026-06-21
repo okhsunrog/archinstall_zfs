@@ -84,7 +84,10 @@ fn disk_choices() -> Result<Vec<(PathBuf, String)>> {
     match archinstall_zfs_core::disk::device::disk_choices() {
         Ok(choices) => Ok(choices
             .into_iter()
-            .map(|choice| (choice.path, choice.label))
+            .map(|choice| {
+                let label = choice_label(&choice.label, &choice.description);
+                (choice.path, label)
+            })
             .collect()),
         Err(_) => Ok(archinstall_zfs_core::disk::by_id::list_disks_by_id()?
             .into_iter()
@@ -104,7 +107,10 @@ pub fn pick_partition(
     if parts.is_empty() {
         return Ok(None);
     }
-    let part_strs: Vec<String> = parts.iter().map(|part| part.label.clone()).collect();
+    let part_strs: Vec<String> = parts
+        .iter()
+        .map(|part| choice_label(&part.label, &part.description))
+        .collect();
     let part_refs: Vec<&str> = part_strs.iter().map(|s| s.as_str()).collect();
     let result = run_select(terminal, title, &part_refs, 0)?;
     match result.selected {
@@ -120,9 +126,18 @@ fn partition_choices() -> Result<Vec<archinstall_zfs_core::disk::device::DeviceC
             .into_iter()
             .map(|path| archinstall_zfs_core::disk::device::DeviceChoice {
                 label: path.display().to_string(),
+                description: String::new(),
                 path,
             })
             .collect()),
+    }
+}
+
+fn choice_label(label: &str, description: &str) -> String {
+    if description.is_empty() {
+        label.to_string()
+    } else {
+        format!("{label} | {description}")
     }
 }
 

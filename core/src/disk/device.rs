@@ -43,6 +43,7 @@ pub struct BlockPartition {
 pub struct DeviceChoice {
     pub path: PathBuf,
     pub label: String,
+    pub description: String,
 }
 
 impl BlockDevice {
@@ -52,6 +53,34 @@ impl BlockDevice {
 
     pub fn selection_label(&self) -> String {
         let mut parts = vec![self.devnode.display().to_string()];
+
+        if let Some(model) = self.model.as_deref() {
+            parts.push(model.to_string());
+        }
+        if let Some(size) = self.size_bytes {
+            parts.push(format_size(size));
+        }
+        if let Some(transport) = self.transport.as_deref() {
+            parts.push(transport.to_string());
+        }
+        if self.removable {
+            parts.push("removable".to_string());
+        }
+
+        let preferred = self.preferred_path();
+        if preferred.path != self.devnode {
+            parts.push(format!("using {}", preferred.path.display()));
+        }
+
+        parts.join(" | ")
+    }
+
+    pub fn selection_title(&self) -> String {
+        self.devnode.display().to_string()
+    }
+
+    pub fn selection_description(&self) -> String {
+        let mut parts = Vec::new();
 
         if let Some(model) = self.model.as_deref() {
             parts.push(model.to_string());
@@ -94,6 +123,25 @@ impl BlockPartition {
 
         parts.join(" | ")
     }
+
+    pub fn selection_title(&self) -> String {
+        self.devnode.display().to_string()
+    }
+
+    pub fn selection_description(&self) -> String {
+        let mut parts = Vec::new();
+
+        if let Some(size) = self.size_bytes {
+            parts.push(format_size(size));
+        }
+
+        let preferred = self.preferred_path();
+        if preferred.path != self.devnode {
+            parts.push(format!("using {}", preferred.path.display()));
+        }
+
+        parts.join(" | ")
+    }
 }
 
 pub fn disk_choices() -> Result<Vec<DeviceChoice>> {
@@ -101,7 +149,8 @@ pub fn disk_choices() -> Result<Vec<DeviceChoice>> {
         .into_iter()
         .map(|device| DeviceChoice {
             path: device.preferred_path().path,
-            label: device.selection_label(),
+            label: device.selection_title(),
+            description: device.selection_description(),
         })
         .collect())
 }
@@ -111,7 +160,8 @@ pub fn partition_choices() -> Result<Vec<DeviceChoice>> {
         .into_iter()
         .map(|partition| DeviceChoice {
             path: partition.preferred_path().path,
-            label: partition.selection_label(),
+            label: partition.selection_title(),
+            description: partition.selection_description(),
         })
         .collect())
 }
@@ -472,6 +522,11 @@ mod tests {
             device.selection_label(),
             "/dev/vda | VirtIO Block Device | 64 GiB | virtio | using /dev/disk/by-path/pci-0000:00:04.0"
         );
+        assert_eq!(device.selection_title(), "/dev/vda");
+        assert_eq!(
+            device.selection_description(),
+            "VirtIO Block Device | 64 GiB | virtio | using /dev/disk/by-path/pci-0000:00:04.0"
+        );
     }
 
     #[test]
@@ -498,6 +553,11 @@ mod tests {
         assert_eq!(
             partition.selection_label(),
             "/dev/vda1 | 512 MiB | using /dev/disk/by-id/virtio-test-disk-part1"
+        );
+        assert_eq!(partition.selection_title(), "/dev/vda1");
+        assert_eq!(
+            partition.selection_description(),
+            "512 MiB | using /dev/disk/by-id/virtio-test-disk-part1"
         );
     }
 }

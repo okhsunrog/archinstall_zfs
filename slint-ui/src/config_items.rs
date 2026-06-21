@@ -2,6 +2,7 @@
 //! coming back from radio/select/text widgets to the canonical `GlobalConfig`.
 
 use slint::SharedString;
+use std::path::PathBuf;
 
 use archinstall_zfs_core::config::types::{
     AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, ProfileSelection,
@@ -15,6 +16,13 @@ pub const TOTAL_STEPS: usize = 7;
 pub const STEP_LABELS: [&str; TOTAL_STEPS] = [
     "Welcome", "Disk", "ZFS", "System", "Users", "Desktop", "Review",
 ];
+
+#[derive(Debug, Clone)]
+struct ChoiceRow {
+    path: PathBuf,
+    label: String,
+    description: String,
+}
 
 // ── Per-step item building ──────────────────────────
 
@@ -55,15 +63,13 @@ fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
 
     if matches!(mode, Some(InstallationMode::FullDisk) | None) {
         let disks = disk_choices();
-        let disk_strs: Vec<String> = disks.iter().map(|(_, label)| label.clone()).collect();
-        let disk_refs: Vec<&str> = disk_strs.iter().map(|s| s.as_str()).collect();
         let selected = c
             .disk
             .as_ref()
-            .and_then(|sel| disks.iter().position(|(path, _)| path == sel))
+            .and_then(|sel| disks.iter().position(|choice| &choice.path == sel))
             .map(|i| i as i32)
             .unwrap_or(-1);
-        items.extend(radio_group("disk", "Disk", &disk_refs, selected));
+        items.extend(radio_choice_group("disk", "Disk", &disks, selected));
     }
 
     if matches!(
@@ -71,19 +77,17 @@ fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         Some(InstallationMode::NewPool) | Some(InstallationMode::ExistingPool)
     ) {
         let parts = partition_choices();
-        let part_strs: Vec<String> = parts.iter().map(|(_, label)| label.clone()).collect();
-        let part_refs: Vec<&str> = part_strs.iter().map(|s| s.as_str()).collect();
 
         let efi_selected = c
             .efi_partition
             .as_ref()
-            .and_then(|sel| parts.iter().position(|(path, _)| path == sel))
+            .and_then(|sel| parts.iter().position(|choice| &choice.path == sel))
             .map(|i| i as i32)
             .unwrap_or(-1);
-        items.extend(radio_group(
+        items.extend(radio_choice_group(
             "efi_partition",
             "EFI partition",
-            &part_refs,
+            &parts,
             efi_selected,
         ));
 
@@ -91,13 +95,13 @@ fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             let zfs_selected = c
                 .zfs_partition
                 .as_ref()
-                .and_then(|sel| parts.iter().position(|(path, _)| path == sel))
+                .and_then(|sel| parts.iter().position(|choice| &choice.path == sel))
                 .map(|i| i as i32)
                 .unwrap_or(-1);
-            items.extend(radio_group(
+            items.extend(radio_choice_group(
                 "zfs_partition",
                 "ZFS partition",
-                &part_refs,
+                &parts,
                 zfs_selected,
             ));
         }
@@ -195,18 +199,16 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     }
     if !matches!(mode, Some(InstallationMode::FullDisk) | None) && has_swap_partition {
         let parts = partition_choices();
-        let part_strs: Vec<String> = parts.iter().map(|(_, label)| label.clone()).collect();
-        let part_refs: Vec<&str> = part_strs.iter().map(|s| s.as_str()).collect();
         let swap_selected = c
             .swap_partition
             .as_ref()
-            .and_then(|sel| parts.iter().position(|(path, _)| path == sel))
+            .and_then(|sel| parts.iter().position(|choice| &choice.path == sel))
             .map(|i| i as i32)
             .unwrap_or(-1);
-        items.extend(radio_group(
+        items.extend(radio_choice_group(
             "swap_partition",
             "Swap partition",
-            &part_refs,
+            &parts,
             swap_selected,
         ));
     }
@@ -658,6 +660,34 @@ fn radio_group_inner(
     items
 }
 
+fn radio_choice_group(
+    key: &str,
+    label: &str,
+    options: &[ChoiceRow],
+    selected: i32,
+) -> Vec<ConfigItem> {
+    let mut items = vec![ConfigItem {
+        label: label.into(),
+        item_type: ItemType::RadioHeader,
+        ..Default::default()
+    }];
+    for (i, option) in options.iter().enumerate() {
+        items.push(ConfigItem {
+            key: format!("radio:{key}:{i}").into(),
+            label: option.label.as_str().into(),
+            description: option.description.as_str().into(),
+            value: if i as i32 == selected {
+                "selected".into()
+            } else {
+                SharedString::default()
+            },
+            item_type: ItemType::RadioOption,
+            ..Default::default()
+        });
+    }
+    items
+}
+
 // ── Section boundary marking ────────────────────────
 
 /// Walk a list of items after it's built and set `is_first_in_section` /
@@ -739,26 +769,26 @@ pub fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
         }
         "disk" => {
             let disks = disk_choices();
-            if let Some((path, _)) = disks.get(idx as usize) {
-                config.disk = Some(path.clone());
+            if let Some(choice) = disks.get(idx as usize) {
+                config.disk = Some(choice.path.clone());
             }
         }
         "efi_partition" => {
             let parts = partition_choices();
-            if let Some((path, _)) = parts.get(idx as usize) {
-                config.efi_partition = Some(path.clone());
+            if let Some(choice) = parts.get(idx as usize) {
+                config.efi_partition = Some(choice.path.clone());
             }
         }
         "zfs_partition" => {
             let parts = partition_choices();
-            if let Some((path, _)) = parts.get(idx as usize) {
-                config.zfs_partition = Some(path.clone());
+            if let Some(choice) = parts.get(idx as usize) {
+                config.zfs_partition = Some(choice.path.clone());
             }
         }
         "swap_partition" => {
             let parts = partition_choices();
-            if let Some((path, _)) = parts.get(idx as usize) {
-                config.swap_partition = Some(path.clone());
+            if let Some(choice) = parts.get(idx as usize) {
+                config.swap_partition = Some(choice.path.clone());
             }
         }
         "compression" => {
@@ -824,12 +854,16 @@ pub fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
     }
 }
 
-fn disk_choices() -> Vec<(std::path::PathBuf, String)> {
+fn disk_choices() -> Vec<ChoiceRow> {
     archinstall_zfs_core::disk::device::disk_choices()
         .map(|choices| {
             choices
                 .into_iter()
-                .map(|choice| (choice.path, choice.label))
+                .map(|choice| ChoiceRow {
+                    path: choice.path,
+                    label: choice.label,
+                    description: choice.description,
+                })
                 .collect()
         })
         .unwrap_or_else(|_| {
@@ -838,18 +872,26 @@ fn disk_choices() -> Vec<(std::path::PathBuf, String)> {
                 .into_iter()
                 .map(|path| {
                     let label = path.display().to_string();
-                    (path, label)
+                    ChoiceRow {
+                        path,
+                        label,
+                        description: String::new(),
+                    }
                 })
                 .collect()
         })
 }
 
-fn partition_choices() -> Vec<(std::path::PathBuf, String)> {
+fn partition_choices() -> Vec<ChoiceRow> {
     archinstall_zfs_core::disk::device::partition_choices()
         .map(|choices| {
             choices
                 .into_iter()
-                .map(|choice| (choice.path, choice.label))
+                .map(|choice| ChoiceRow {
+                    path: choice.path,
+                    label: choice.label,
+                    description: choice.description,
+                })
                 .collect()
         })
         .unwrap_or_else(|_| {
@@ -858,7 +900,11 @@ fn partition_choices() -> Vec<(std::path::PathBuf, String)> {
                 .into_iter()
                 .map(|path| {
                     let label = path.display().to_string();
-                    (path, label)
+                    ChoiceRow {
+                        path,
+                        label,
+                        description: String::new(),
+                    }
                 })
                 .collect()
         })

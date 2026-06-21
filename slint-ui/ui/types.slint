@@ -24,6 +24,7 @@ export struct ConfigItem {
     key: string,
     label: string,
     value: string,
+    description: string,
     item-type: ItemType,
     // True if this row is the first field row inside its section (i.e. the
     // previous item in the list is a SectionHeader). Used by ConfigItemRow
@@ -128,4 +129,3 @@ export struct WifiNetworkUi {
     // and shows a "Known" badge.
     known: bool,
 }
-

@@ -56,7 +56,7 @@ export component ConfigItemRow inherits Rectangle {
     height: is-separator ? 8px
           : is-warning ? 32px
           : is-section-header ? 36px
-          : is-radio-option ? 36px
+          : is-radio-option ? (item.description == "" ? 36px : 52px)
           : is-action ? 40px
           : 44px;
 
@@ -146,13 +146,28 @@ export component ConfigItemRow inherits Rectangle {
             dot-color: item.value == "selected" ? Theme.c.green : Theme.c.overlay0;
         }
 
-        Text {
-            text: item.label;
-            color: item.value == "selected" ? Theme.c.text : Theme.c.subtext0;
-            font-size: 14px;
-            vertical-alignment: center;
+        VerticalLayout {
             horizontal-stretch: 1;
-            overflow: elide;
+            alignment: center;
+            spacing: 1px;
+
+            Text {
+                text: item.label;
+                color: item.value == "selected" ? Theme.c.text : Theme.c.subtext0;
+                font-size: 14px;
+                vertical-alignment: item.description == "" ? center : bottom;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+
+            if item.description != "": Text {
+                text: item.description;
+                color: Theme.c.overlay0;
+                font-size: 12px;
+                vertical-alignment: top;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
         }
     }
 
