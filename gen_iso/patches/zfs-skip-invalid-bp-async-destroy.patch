@@ -1,6 +1,6 @@
 --- a/module/zfs/dsl_scan.c
 +++ b/module/zfs/dsl_scan.c
-@@ -3611,6 +3611,13 @@ dsl_scan_free_block_cb(void *arg, const blkptr_t *bp, dmu_tx_t *tx)
+@@ -3612,6 +3612,13 @@
  {
  	dsl_scan_t *scn = arg;
  
@@ -14,3 +14,24 @@
  	if (!scn->scn_is_bptree ||
  	    (BP_GET_LEVEL(bp) == 0 && BP_GET_TYPE(bp) != DMU_OT_OBJSET)) {
  		if (dsl_scan_async_block_should_pause(scn))
+@@ -3849,7 +3856,7 @@
+ 		VERIFY0(zio_wait(scn->scn_zio_root));
+ 		scn->scn_zio_root = NULL;
+ 
+-		if (err == EIO || err == ECKSUM) {
++		if (err == EIO || err == ECKSUM || err == EINVAL) {
+ 			err = 0;
+ 		} else if (err != 0 && err != ERESTART) {
+ 			zfs_panic_recover("error %u from "
+--- a/module/zfs/dmu_traverse.c
++++ b/module/zfs/dmu_traverse.c
+@@ -466,7 +466,8 @@
+ 	if (err == 0 && (td->td_flags & TRAVERSE_POST))
+ 		err = td->td_func(td->td_spa, NULL, bp, zb, dnp, td->td_arg);
+ 
+-	if ((td->td_flags & TRAVERSE_HARD) && (err == EIO || err == ECKSUM)) {
++	if ((td->td_flags & TRAVERSE_HARD) &&
++	    err != 0 && err != ERESTART) {
+ 		/*
+ 		 * Ignore this disk error as requested by the HARD flag,
+ 		 * and continue traversal.
