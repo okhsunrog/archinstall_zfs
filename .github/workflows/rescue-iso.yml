@@ -7,6 +7,11 @@ name: Rescue ISO
 
 on:
   workflow_dispatch:
+  # TEMPORARY: run on pushes to the dev branch so the workflow can be
+  # tested before it lands on the default branch (workflow_dispatch is
+  # only available once the file exists on main). Remove before merge.
+  push:
+    branches: [claude/rescue-iso-zfs-patch-py0j6m]
 
 permissions:
   contents: read
