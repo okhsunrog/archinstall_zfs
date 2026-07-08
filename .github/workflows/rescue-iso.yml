@@ -1,0 +1,134 @@
+name: Rescue ISO
+
+# Builds a linux-lts DKMS ISO with a locally patched zfs-dkms package
+# (gen_iso/patches/zfs-skip-invalid-bp-async-destroy.patch). No fallback
+# to precompiled ZFS: if the patch does not apply or the DKMS build
+# fails, the workflow fails.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  rescue-iso-linux-lts:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository }}/ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --privileged
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Cache cargo
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: cargo-build-${{ hashFiles('Cargo.lock') }}
+        restore-keys: cargo-build-
+
+    - name: Build release binaries
+      run: cargo build --release --workspace
+
+    - name: Prepare patched zfs-dkms
+      run: |
+        set -euo pipefail
+
+        pacman -Sy --noconfirm
+
+        # Fetch pristine zfs-dkms + zfs-utils from the archzfs experimental repo
+        # into a dedicated cache dir (no install, no dependency downloads).
+        cachedir=/srv/zfs-cache
+        mkdir -p "$cachedir" /srv/zfs-db /srv/zfs-patched
+        cat > /tmp/archzfs-fetch.conf <<'EOF'
+        [options]
+        Architecture = auto
+        SigLevel = Never
+
+        [archzfs]
+        Server = https://github.com/archzfs/archzfs/releases/download/experimental
+        EOF
+        pacman --config /tmp/archzfs-fetch.conf --dbpath /srv/zfs-db \
+          --cachedir "$cachedir" -Syw --noconfirm --nodeps --nodeps \
+          zfs-dkms zfs-utils
+
+        dkms_pkgs=("$cachedir"/zfs-dkms-*.pkg.tar.zst)
+        utils_pkgs=("$cachedir"/zfs-utils-*.pkg.tar.zst)
+        [ ${#dkms_pkgs[@]} -eq 1 ]
+        [ -f "${dkms_pkgs[0]}" ]
+        [ ${#utils_pkgs[@]} -eq 1 ]
+        [ -f "${utils_pkgs[0]}" ]
+        dkms_pkg=${dkms_pkgs[0]}
+        utils_pkg=${utils_pkgs[0]}
+
+        # Unpack zfs-dkms, apply the patch to the DKMS source tree.
+        # patch exits non-zero if the patch does not apply -> step fails.
+        tmpdir=$(mktemp -d)
+        bsdtar -C "$tmpdir" -xf "$dkms_pkg"
+        srcdirs=("$tmpdir"/usr/src/zfs-*)
+        [ ${#srcdirs[@]} -eq 1 ]
+        [ -d "${srcdirs[0]}" ]
+        patch -d "${srcdirs[0]}" -p1 --fuzz=0 --no-backup-if-mismatch \
+          < "$GITHUB_WORKSPACE/gen_iso/patches/zfs-skip-invalid-bp-async-destroy.patch"
+
+        # Repack under the same file name. .PKGINFO is kept as-is (must be
+        # the first archive entry); .MTREE is dropped because file checksums
+        # changed and pacman treats it as optional.
+        rm -f "$tmpdir/.MTREE"
+        (
+          cd "$tmpdir"
+          contents=(.PKGINFO)
+          if [ -f .BUILDINFO ]; then contents+=(.BUILDINFO); fi
+          if [ -f .INSTALL ]; then contents+=(.INSTALL); fi
+          if [ -f .CHANGELOG ]; then contents+=(.CHANGELOG); fi
+          for entry in *; do contents+=("$entry"); done
+          LANG=C bsdtar --zstd --uid 0 --gid 0 \
+            -cf "/srv/zfs-patched/$(basename "$dkms_pkg")" "${contents[@]}"
+        )
+        rm -rf "$tmpdir"
+
+        # Local repo: patched zfs-dkms + matching zfs-utils.
+        cp "$utils_pkg" /srv/zfs-patched/
+        repo-add /srv/zfs-patched/zfs-patched.db.tar.gz \
+          /srv/zfs-patched/*.pkg.tar.zst
+        chmod -R a+rX /srv/zfs-patched
+
+        # Sanity check: resolve zfs-dkms from the file:// repo exactly the
+        # way pacstrap will during mkarchiso.
+        cat > /tmp/zfs-patched-check.conf <<'EOF'
+        [options]
+        Architecture = auto
+        SigLevel = Never
+
+        [zfs-patched]
+        Server = file:///srv/zfs-patched
+        EOF
+        mkdir -p /tmp/zfs-patched-check-db
+        pacman --config /tmp/zfs-patched-check.conf \
+          --dbpath /tmp/zfs-patched-check-db -Sy --noconfirm
+        pacman --config /tmp/zfs-patched-check.conf \
+          --dbpath /tmp/zfs-patched-check-db -Si zfs-dkms zfs-utils
+
+    - name: Build rescue ISO (linux-lts, patched zfs-dkms)
+      run: |
+        set -euo pipefail
+        target/release/xtask render-profile \
+          --profile-dir gen_iso/profile --out-dir gen_iso/profile_rendered \
+          --kernel linux-lts --zfs dkms --headers true --zfs-patched-repo
+        just _prepare-binary
+        sudo mkarchiso -v -w "gen_iso/workdir" -o gen_iso/out gen_iso/profile_rendered
+
+    - name: Upload ISO
+      uses: actions/upload-artifact@v4
+      with:
+        name: iso
+        path: gen_iso/out/*.iso
+        if-no-files-found: error

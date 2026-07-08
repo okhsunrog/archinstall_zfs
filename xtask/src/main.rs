@@ -108,6 +108,11 @@ enum Commands {
         /// Fast build mode (minimal packages, erofs)
         #[arg(long)]
         fast: bool,
+
+        /// Enable the local [zfs-patched] repo (file:///srv/zfs-patched)
+        /// above [archzfs] in the rendered pacman.conf
+        #[arg(long)]
+        zfs_patched_repo: bool,
     },
 }
 
@@ -288,7 +293,16 @@ fn main() -> ExitCode {
             zfs,
             headers,
             fast,
-        } => iso::render_profile(&profile_dir, &out_dir, &kernel, &zfs, &headers, fast),
+            zfs_patched_repo,
+        } => iso::render_profile(
+            &profile_dir,
+            &out_dir,
+            &kernel,
+            &zfs,
+            &headers,
+            fast,
+            zfs_patched_repo,
+        ),
     };
     match result {
         Ok(()) => {

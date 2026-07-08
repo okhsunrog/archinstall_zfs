@@ -1,0 +1,9 @@
+PLACEHOLDER — replace this file with the real patch content.
+
+Applied by .github/workflows/rescue-iso.yml with `patch -p1` inside
+usr/src/zfs-*/ of the zfs-dkms package before repackaging it into the
+local [zfs-patched] repository.
+
+While this placeholder is in place, patch(1) exits non-zero ("Only
+garbage was found in the patch input") and the workflow fails — that is
+intentional: the rescue ISO must never be built with unpatched ZFS.

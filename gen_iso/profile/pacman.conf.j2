@@ -47,6 +47,14 @@ Include = /etc/pacman.d/mirrorlist
 [extra]
 Include = /etc/pacman.d/mirrorlist
 
+{% if zfs_patched_repo %}
+# Locally patched ZFS packages built by the rescue-iso workflow.
+# Must stay ABOVE [archzfs] so pacman prefers these packages.
+[zfs-patched]
+SigLevel = Never
+Server = file:///srv/zfs-patched
+
+{% endif %}
 # archzfs repository for ZFS packages (DKMS + utils)
 [archzfs]
 # TODO: Change this to `Required` once it's announced that the signing system is finalized.

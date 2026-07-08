@@ -10,6 +10,7 @@ pub fn render_profile(
     zfs_mode: &str,
     headers: &str,
     fast_build: bool,
+    zfs_patched_repo: bool,
 ) -> Result<(), String> {
     if !profile_dir.exists() {
         return Err(format!(
@@ -51,6 +52,7 @@ pub fn render_profile(
         include_headers => include_headers,
         headers => headers_pkg,
         fast_build => fast_build,
+        zfs_patched_repo => zfs_patched_repo,
     };
 
     // Walk source directory and render/copy
