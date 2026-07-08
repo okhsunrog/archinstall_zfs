@@ -1,9 +1,16 @@
-PLACEHOLDER — replace this file with the real patch content.
-
-Applied by .github/workflows/rescue-iso.yml with `patch -p1` inside
-usr/src/zfs-*/ of the zfs-dkms package before repackaging it into the
-local [zfs-patched] repository.
-
-While this placeholder is in place, patch(1) exits non-zero ("Only
-garbage was found in the patch input") and the workflow fails — that is
-intentional: the rescue ISO must never be built with unpatched ZFS.
+--- a/module/zfs/dsl_scan.c
++++ b/module/zfs/dsl_scan.c
+@@ -3611,6 +3611,13 @@ dsl_scan_free_block_cb(void *arg, const blkptr_t *bp, dmu_tx_t *tx)
+ {
+ 	dsl_scan_t *scn = arg;
+ 
++	if (zfs_blkptr_verify(scn->scn_dp->dp_spa, bp,
++	    BLK_CONFIG_NEEDED, BLK_VERIFY_LOG) != 0) {
++		/* RESCUE: skip corrupt bp in async destroy, leak the block */
++		scn->scn_visited_this_txg++;
++		return (0);
++	}
++
+ 	if (!scn->scn_is_bptree ||
+ 	    (BP_GET_LEVEL(bp) == 0 && BP_GET_TYPE(bp) != DMU_OT_OBJSET)) {
+ 		if (dsl_scan_async_block_should_pause(scn))
