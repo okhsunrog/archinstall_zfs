@@ -5,5 +5,5 @@ edition = "2024"
 
 [dependencies]
 clap.workspace = true
-minijinja = { version = "2.19.0", features = ["builtins"] }
+minijinja = { version = "2.21.0", features = ["builtins"] }
 serde_json.workspace = true

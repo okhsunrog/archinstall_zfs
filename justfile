@@ -19,7 +19,7 @@ CARGO_REGISTRY_VOLUME := "archzfs-cargo-registry"
 # Requires libalpm on the host (Arch, or any distro inside `nix develop`).
 # Native release build of azfs + azfs-tui + xtask.
 cargo-build:
-    cargo build --release --bin azfs --bin azfs-tui --bin xtask
+    cargo build --release --locked --bin azfs --bin azfs-tui --bin xtask
 
 # For non-Arch hosts without native libalpm. Target tree and cargo registry
 # persist across runs via named volumes.
@@ -43,11 +43,11 @@ cargo-build-container:
 
 # Run cargo unit tests
 cargo-test:
-    cargo test --workspace
+    cargo test --workspace --locked
 
 # Run clippy
 lint:
-    cargo clippy --workspace -- -D warnings
+    cargo clippy --workspace --all-targets --locked -- -D warnings
 
 # Format check
 fmt-check:
@@ -57,8 +57,17 @@ fmt-check:
 fmt:
     cargo fmt --all
 
+# Check non-default Wi-Fi/UI feature paths.
+check-features:
+    cargo check -p archinstall-zfs-slint --no-default-features --features desktop-mock --locked
+    cargo clippy -p archinstall-zfs-core --no-default-features --features wifi-nm --all-targets --locked -- -D warnings
+
+# Check RustSec advisories (requires cargo-audit).
+audit:
+    cargo audit
+
 # All checks
-check: fmt-check lint cargo-test
+check: fmt-check lint cargo-test check-features audit
 
 # ─── ISO Building ──────────────────────────────────────
 
