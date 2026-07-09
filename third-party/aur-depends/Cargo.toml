@@ -1,0 +1,37 @@
+[package]
+name = "aur-depends"
+version = "5.0.0"
+authors = ["morganamilo <m?organamilo@gmail.com>"]
+edition = "2024"
+publish = false
+
+description = "A libary for resolving aur dependencies"
+homepage = "https://github.com/Morganamilo/aur-depends"
+repository = "https://github.com/Morganamilo/aur-depends"
+documentation = "https://docs.rs/aur_depends"
+license = "GPL-3.0"
+keywords = ["archlinux", "pkgbuild", "arch", "aur"]
+exclude = ["tests"]
+
+[package.metadata.docs.rs]
+features = [ "docs-rs" ]
+
+[dependencies]
+alpm = "5.0.2"
+alpm-utils = "5.0.0"
+log = "0.4.33"
+raur = { version = "8.0.0", default-features = false, features = ["async"] }
+bitflags = "2.13.0"
+srcinfo = "2.1.0"
+
+[dev-dependencies]
+async-trait = "0.1.89"
+simplelog = "0.12.2"
+tokio = { version = "1.52.3", features = ["macros", "rt"] }
+
+[features]
+git = ["alpm/git", "alpm-utils/git"]
+generate = ["alpm/generate", "alpm-utils/generate"]
+rustls-tls = ["raur/rusttls-tls"]
+docs-rs = ["alpm/docs-rs"]
+default = ["rustls-tls"]

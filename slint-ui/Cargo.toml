@@ -42,9 +42,9 @@ desktop-mock = [
 archinstall-zfs-core = { path = "../core", default-features = false }
 clap.workspace = true
 color-eyre.workspace = true
-crossbeam-channel = "0.5"
+crossbeam-channel = "0.5.16"
 nix.workspace = true
-slint = { git = "https://github.com/okhsunrog/slint.git", branch = "feat/renderer-skia-software-linuxkms", default-features = false, features = [
+slint = { git = "https://github.com/okhsunrog/slint.git", rev = "2d77b093681ca5ed5cce705ace8961877cba9121", default-features = false, features = [
     "std",
     "compat-1-2",
 ] }
@@ -57,4 +57,4 @@ tracing-subscriber.workspace = true
 zxcvbn.workspace = true
 
 [build-dependencies]
-slint-build = { git = "https://github.com/okhsunrog/slint.git", branch = "feat/renderer-skia-software-linuxkms" }
+slint-build = { git = "https://github.com/okhsunrog/slint.git", rev = "2d77b093681ca5ed5cce705ace8961877cba9121" }

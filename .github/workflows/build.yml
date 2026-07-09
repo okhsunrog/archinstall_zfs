@@ -23,7 +23,8 @@ on:
         type: boolean
 
 permissions:
-  contents: write
+  contents: read
+  packages: read
 
 jobs:
   build:
@@ -35,10 +36,10 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Cache cargo
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/registry
@@ -48,10 +49,10 @@ jobs:
         restore-keys: cargo-build-
 
     - name: Build release binaries
-      run: cargo build --release --workspace
+      run: cargo build --release --workspace --locked
 
     - name: Upload binaries
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: binaries
         path: |
@@ -71,10 +72,10 @@ jobs:
       options: --privileged
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Download binaries
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: binaries
         path: target/release/
@@ -83,7 +84,6 @@ jobs:
       run: chmod +x target/release/azfs-tui target/release/azfs target/release/xtask
 
     - name: Build ISO with linux kernel
-      continue-on-error: true
       run: |
         target/release/xtask render-profile \
           --profile-dir gen_iso/profile --out-dir gen_iso/profile_rendered \
@@ -100,11 +100,11 @@ jobs:
         fi
 
     - name: Upload ISO
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: iso-linux
         path: gen_iso/out/*.iso
-        if-no-files-found: warn
+        if-no-files-found: error
 
   iso-linux-lts:
     needs: build
@@ -118,10 +118,10 @@ jobs:
       options: --privileged
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Download binaries
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: binaries
         path: target/release/
@@ -146,7 +146,7 @@ jobs:
         fi
 
     - name: Upload ISO
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: iso-linux-lts
         path: gen_iso/out/*.iso
@@ -155,23 +155,24 @@ jobs:
     needs: [build, iso-linux, iso-linux-lts]
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
 
     steps:
     - name: Download binaries
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: binaries
         path: binaries/
 
     - name: Download linux ISO
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: iso-linux
         path: isos/
-      continue-on-error: true
-
     - name: Download linux-lts ISO
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: iso-linux-lts
         path: isos/
@@ -184,22 +185,37 @@ jobs:
         done
 
     - name: Set release info
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        REF_NAME: ${{ github.ref_name }}
       run: |
-        if [ "${{ github.event_name }}" = "schedule" ]; then
-          echo "TAG_NAME=$(date +'%Y.%m.%d')" >> $GITHUB_ENV
-          echo "RELEASE_NAME=Monthly Release - $(date +'%Y.%m.%d')" >> $GITHUB_ENV
-          echo "BODY=Automated build with latest packages and ZFS modules." >> $GITHUB_ENV
-        elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-          echo "TAG_NAME=manual-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
-          echo "RELEASE_NAME=Manual Release - $(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
-          echo "BODY=Manual build." >> $GITHUB_ENV
-        else
-          echo "TAG_NAME=${{ github.ref_name }}" >> $GITHUB_ENV
-          echo "RELEASE_NAME=Release ${{ github.ref_name }}" >> $GITHUB_ENV
-        fi
+        case "$EVENT_NAME" in
+          schedule)
+            release_date=$(date +'%Y.%m.%d')
+            {
+              printf 'TAG_NAME=%s\n' "$release_date"
+              printf 'RELEASE_NAME=Monthly Release - %s\n' "$release_date"
+              printf 'BODY=%s\n' 'Automated build with latest packages and ZFS modules.'
+            } >> "$GITHUB_ENV"
+            ;;
+          workflow_dispatch)
+            release_date=$(date +'%Y%m%d-%H%M%S')
+            {
+              printf 'TAG_NAME=manual-%s\n' "$release_date"
+              printf 'RELEASE_NAME=Manual Release - %s\n' "$release_date"
+              printf 'BODY=%s\n' 'Manual build.'
+            } >> "$GITHUB_ENV"
+            ;;
+          *)
+            {
+              printf 'TAG_NAME=%s\n' "$REF_NAME"
+              printf 'RELEASE_NAME=Release %s\n' "$REF_NAME"
+            } >> "$GITHUB_ENV"
+            ;;
+        esac
 
     - name: Create GitHub Release
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       with:
         tag_name: ${{ env.TAG_NAME }}
         name: ${{ env.RELEASE_NAME }}
@@ -210,6 +226,6 @@ jobs:
           binaries/*
           isos/*.iso
           isos/*.sha256
-        fail_on_unmatched_files: false
+        fail_on_unmatched_files: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

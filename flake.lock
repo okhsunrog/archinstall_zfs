@@ -20,11 +20,11 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1776548001,
-        "narHash": "sha256-ZSK0NL4a1BwVbbTBoSnWgbJy9HeZFXLYQizjb2DPF24=",
+        "lastModified": 1783224372,
+        "narHash": "sha256-8i/87eeoqiGE4yOTjwSA3Eh/ziJRQEmd/unYU+K27sk=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "b12141ef619e0a9c1c84dc8c684040326f27cdcc",
+        "rev": "d407951447dcd00442e97087bf374aad70c04cea",
         "type": "github"
       },
       "original": {
@@ -34,27 +34,10 @@
         "type": "github"
       }
     },
-    "nixpkgs-pacman": {
-      "locked": {
-        "lastModified": 1769334635,
-        "narHash": "sha256-XZixg+UEuSCRa3KhGQCVGLn2JNghc/Z3NOCQ1xhbDuE=",
-        "owner": "SamLukeYes",
-        "repo": "nixpkgs",
-        "rev": "d7e068f2980f0142f6bc0cfd7babdfb1eab4219a",
-        "type": "github"
-      },
-      "original": {
-        "owner": "SamLukeYes",
-        "ref": "pacman",
-        "repo": "nixpkgs",
-        "type": "github"
-      }
-    },
     "root": {
       "inputs": {
         "flake-utils": "flake-utils",
-        "nixpkgs": "nixpkgs",
-        "nixpkgs-pacman": "nixpkgs-pacman"
+        "nixpkgs": "nixpkgs"
       }
     },
     "systems": {

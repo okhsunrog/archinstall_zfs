@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -14,10 +18,10 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Cache cargo
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/registry
@@ -31,7 +35,19 @@ jobs:
       run: cargo fmt --all -- --check
 
     - name: Run clippy
-      run: cargo clippy --workspace -- -D warnings
+      run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
     - name: Run tests
-      run: cargo test --workspace
+      run: cargo test --workspace --locked
+
+    - name: Check desktop mock UI
+      run: cargo check -p archinstall-zfs-slint --no-default-features --features desktop-mock --locked
+
+    - name: Check NetworkManager backend
+      run: cargo clippy -p archinstall-zfs-core --no-default-features --features wifi-nm --all-targets --locked -- -D warnings
+
+    - name: Install cargo-audit when missing from the builder image
+      run: command -v cargo-audit || cargo install cargo-audit --version 0.22.2 --locked
+
+    - name: Audit dependencies
+      run: cargo audit
