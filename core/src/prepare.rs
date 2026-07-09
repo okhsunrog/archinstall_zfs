@@ -155,7 +155,7 @@ pub async fn prepare_zfs(
             .await?;
             tracing::info!("Created pool: {pool_name}");
 
-            zfs.pool(pool_name)
+            zfs.pool(pool_name)?
                 .set_property("cachefile", "none")
                 .await?;
 
@@ -181,7 +181,7 @@ pub async fn prepare_zfs(
             // only to the new base dataset; the pool itself is not encrypted.
             if encryption == ZfsEncryptionMode::Pool {
                 let key_loc = format!("file://{}", key_path.display());
-                zfs.dataset(pool_name)
+                zfs.dataset(pool_name)?
                     .load_key_with_keylocation(&key_loc)
                     .await?;
             }
@@ -245,7 +245,7 @@ async fn load_install_encryption_key(
         keylocation = %key_loc,
         "Loading ZFS encryption key"
     );
-    zfs.dataset(&key_dataset)
+    zfs.dataset(&key_dataset)?
         .load_key_with_keylocation(&key_loc)
         .await?;
     Ok(())
@@ -292,7 +292,7 @@ async fn import_pool_no_mount(zfs: &zfskit::Zfs, name: &str, mountpoint: &Path) 
         altroot: Some(mountpoint.to_path_buf()),
         ..Default::default()
     };
-    zfs.pool(name).import(&opts).await?;
+    zfs.pool(name)?.import(&opts).await?;
     Ok(())
 }
 
@@ -302,7 +302,7 @@ async fn export_pool(zfs: &zfskit::Zfs, name: &str) -> Result<()> {
     // returns Err on real failures (e.g., a stuck mountpoint), but the
     // subsequent zpool export will surface the same condition more clearly.
     let _ = zfs.unmount_all(false).await;
-    zfs.pool(name).export(&ExportOptions::default()).await?;
+    zfs.pool(name)?.export(&ExportOptions::default()).await?;
     Ok(())
 }
 

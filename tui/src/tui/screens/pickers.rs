@@ -156,7 +156,7 @@ pub async fn pick_existing_pool(
 
     config.pool_name = Some(pool_name.clone());
 
-    if pool_picker::detect_pool_encryption(&pool_name).await {
+    if pool_picker::detect_pool_encryption(&pool_name).await? {
         loop {
             let result = run_edit(terminal, "Enter pool passphrase", "", true)?;
             let Some(pw) = result.value else {
@@ -166,7 +166,7 @@ pub async fn pick_existing_pool(
                 break;
             }
 
-            if pool_picker::verify_pool_passphrase(&pool_name, &pw).await {
+            if pool_picker::verify_pool_passphrase(&pool_name, &pw).await? {
                 config.zfs_encryption_mode = ZfsEncryptionMode::Pool;
                 config.zfs_encryption_password = Some(pw);
                 break;

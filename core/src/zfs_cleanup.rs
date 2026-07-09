@@ -27,7 +27,7 @@ use color_eyre::eyre::Result;
 /// — the kernel sync calls themselves do error-bubble.
 pub async fn cleanup_pool_after_install(pool_name: &str, root_dataset: &str) -> Result<()> {
     let zfs = zfskit::Zfs::new();
-    let root_handle = zfs.dataset(root_dataset);
+    let root_handle = zfs.dataset(root_dataset)?;
 
     for attempt in 1..=4 {
         let _ = match attempt {
@@ -49,7 +49,7 @@ pub async fn cleanup_pool_after_install(pool_name: &str, root_dataset: &str) -> 
         let _ = tokio::task::spawn_blocking(nix::unistd::sync).await;
     }
 
-    let pool = zfs.pool(pool_name);
+    let pool = zfs.pool(pool_name)?;
     if pool
         .export(&zfskit::pool::ExportOptions::default())
         .await

@@ -42,7 +42,7 @@ pub async fn configure_zfs_trim(
         StorageType::Nvme => {
             tracing::info!(pool = pool_name, "NVMe detected — enabling autotrim");
             zfskit::Zfs::new()
-                .pool(pool_name)
+                .pool(pool_name)?
                 .set_property("autotrim", "on")
                 .await?;
         }

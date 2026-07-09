@@ -45,8 +45,8 @@ pub async fn create_dataset(
 }
 
 /// Check if a dataset exists.
-pub async fn dataset_exists(zfs: &zfskit::Zfs, name: &str) -> bool {
-    zfs.dataset(name).exists().await
+pub async fn dataset_exists(zfs: &zfskit::Zfs, name: &str) -> Result<bool> {
+    Ok(zfs.dataset(name)?.exists().await?)
 }
 
 pub async fn create_base_dataset(
@@ -56,7 +56,7 @@ pub async fn create_base_dataset(
     encryption_props: &[(&str, &str)],
 ) -> Result<()> {
     let base_name = format!("{pool_name}/{prefix}");
-    if dataset_exists(zfs, &base_name).await {
+    if dataset_exists(zfs, &base_name).await? {
         bail!(
             "Dataset '{base_name}' already exists. \
              Choose a different dataset prefix or use Existing Pool mode."
@@ -109,7 +109,7 @@ pub async fn mount_datasets_ordered(
 ) -> Result<()> {
     // Mount root dataset first (canmount=noauto)
     let root_ds = format!("{pool_name}/{prefix}/root");
-    zfs.dataset(&root_ds)
+    zfs.dataset(&root_ds)?
         .mount(&MountOptions::default())
         .await?;
 
@@ -117,7 +117,7 @@ pub async fn mount_datasets_ordered(
     // (older or stripped-down ZFS builds occasionally lack -R).
     let base_ds = format!("{pool_name}/{prefix}");
     let recursive = MountOptions { recursive: true };
-    if zfs.dataset(&base_ds).mount(&recursive).await.is_err() {
+    if zfs.dataset(&base_ds)?.mount(&recursive).await.is_err() {
         let _ = zfs.mount_all().await;
     }
 

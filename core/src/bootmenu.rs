@@ -260,7 +260,7 @@ pub async fn set_zbm_properties(
     let cmdline = build_zbm_cmdline(zswap_enabled);
     let rootprefix = rootprefix_for(init_system);
 
-    let root_handle = zfs.dataset(&root_ds);
+    let root_handle = zfs.dataset(&root_ds)?;
     root_handle
         .set_property("org.zfsbootmenu:commandline", &cmdline)
         .await?;
@@ -274,7 +274,9 @@ pub async fn set_zbm_properties(
         // 10-second countdown then boots the bootfs dataset. Users can press
         // any key during the countdown to browse/select other BEs.
         // Without bootfs, ZBM ignores zbm.timeout and always waits for input.
-        zfs.pool(pool_name).set_property("bootfs", &root_ds).await?;
+        zfs.pool(pool_name)?
+            .set_property("bootfs", &root_ds)
+            .await?;
         tracing::info!(
             cmdline,
             rootprefix,

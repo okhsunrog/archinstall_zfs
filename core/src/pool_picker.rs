@@ -14,23 +14,41 @@ pub async fn discover_importable_pools() -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Detect whether a pool is encrypted via an ephemeral import. Collapses
-/// any failure to `false` — the installer flow treats "can't tell" as
-/// "not encrypted" (the passphrase prompt simply isn't shown).
-pub async fn detect_pool_encryption(pool_name: &str) -> bool {
-    zfskit::Zfs::new()
-        .pool(pool_name)
-        .is_encrypted()
-        .await
-        .unwrap_or(false)
+/// Detect whether a pool is encrypted through an explicit no-mount import.
+/// Import, property, and cleanup failures remain visible to the UI.
+pub async fn detect_pool_encryption(pool_name: &str) -> color_eyre::Result<bool> {
+    let zfs = zfskit::Zfs::new();
+    let pool = zfs.pool(pool_name)?;
+    pool.import(&zfskit::pool::ImportOptions {
+        force: true,
+        no_mount: true,
+        ..Default::default()
+    })
+    .await?;
+    let result = pool.root_dataset().get_property("encryption").await;
+    let cleanup = pool.export(&zfskit::pool::ExportOptions::default()).await;
+    let encrypted = result.map(|p| p.value != "off" && !p.value.is_empty())?;
+    cleanup?;
+    Ok(encrypted)
 }
 
-/// Verify a pool passphrase via an ephemeral import. Same collapse-to-false
-/// semantics as [`detect_pool_encryption`].
-pub async fn verify_pool_passphrase(pool_name: &str, password: &str) -> bool {
-    zfskit::Zfs::new()
-        .pool(pool_name)
+/// Verify a pool passphrase via an explicit no-mount import. Import,
+/// verification, and cleanup failures remain visible to the UI.
+pub async fn verify_pool_passphrase(pool_name: &str, password: &str) -> color_eyre::Result<bool> {
+    let zfs = zfskit::Zfs::new();
+    let pool = zfs.pool(pool_name)?;
+    pool.import(&zfskit::pool::ImportOptions {
+        force: true,
+        no_mount: true,
+        ..Default::default()
+    })
+    .await?;
+    let result = pool
+        .root_dataset()
         .verify_passphrase(password.as_bytes())
-        .await
-        .unwrap_or(false)
+        .await;
+    let cleanup = pool.export(&zfskit::pool::ExportOptions::default()).await;
+    let verified = result?;
+    cleanup?;
+    Ok(verified)
 }

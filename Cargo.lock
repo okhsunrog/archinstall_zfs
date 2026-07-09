@@ -8111,6 +8111,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "zeroize"
+version = "1.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
+
+[[package]]
 name = "zerotrie"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8147,9 +8153,9 @@ dependencies = [
 
 [[package]]
 name = "zfskit"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd1338c35f08bc74356ade46047904893047fc1116212b1348df5363a961f034"
+checksum = "2c151d75d62ac48d7efddc512d1670ab821acea68335f2c86eab3747be81b2d9"
 dependencies = [
  "async-trait",
  "regex",
@@ -8157,6 +8163,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "zeroize",
 ]
 
 [[package]]
