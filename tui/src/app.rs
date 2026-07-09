@@ -118,7 +118,7 @@ pub async fn run_install(
     };
 
     // ── Phase 2: ZFS pool + datasets + encryption ─────────────
-    // ZFS ops are async (via palimpsest), so they run directly on the
+    // ZFS ops are async (via zfskit), so they run directly on the
     // current task. mount_efi is sync (subprocess) and stays in spawn_blocking.
     tracing::info!("Phase 2: ZFS pool and datasets");
     archinstall_zfs_core::prepare::prepare_zfs(
@@ -166,7 +166,7 @@ pub async fn run_install(
     }
 
     // TRIM strategy: post-install ZFS-side configuration (no Alpm involved).
-    // Called outside Installer so the palimpsest setter can be a regular
+    // Called outside Installer so the zfskit setter can be a regular
     // .await rather than a block_on bridge.
     archinstall_zfs_core::zfs_trim::configure_zfs_trim(&*runner, &mountpoint, &pool_name, &config)
         .await?;

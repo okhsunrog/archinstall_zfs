@@ -1,6 +1,6 @@
 //! Post-install TRIM configuration. Runs *after* `Installer::perform_installation`
 //! so it can be a regular `async fn` — there's no Alpm involvement, and the
-//! ZFS-side work goes through palimpsest directly without a `block_on` bridge.
+//! ZFS-side work goes through zfskit directly without a `block_on` bridge.
 //!
 //! Strategy:
 //!   - NVMe → set the pool's `autotrim=on` property (kernel TRIMs continuously)
@@ -41,7 +41,7 @@ pub async fn configure_zfs_trim(
     match detect_storage_type(disk_path) {
         StorageType::Nvme => {
             tracing::info!(pool = pool_name, "NVMe detected — enabling autotrim");
-            palimpsest::Zfs::new()
+            zfskit::Zfs::new()
                 .pool(pool_name)
                 .set_property("autotrim", "on")
                 .await?;

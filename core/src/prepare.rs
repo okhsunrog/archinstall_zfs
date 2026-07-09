@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::{Result, eyre};
-use palimpsest::pool::{ExportOptions, ImportOptions, PoolCreateOptions, Vdev};
+use zfskit::pool::{ExportOptions, ImportOptions, PoolCreateOptions, Vdev};
 
 use crate::config::types::{GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode};
 use crate::system::cmd::CommandRunner;
@@ -98,7 +98,7 @@ pub fn prepare_disk(
 /// already exists, so the user must pick a new prefix.
 ///
 /// Sync `runner` is used only for non-ZFS commands (systemctl, hostid, cache
-/// file management). All ZFS operations route through palimpsest, with a
+/// file management). All ZFS operations route through zfskit, with a
 /// `Zfs::new()` handle constructed locally.
 pub async fn prepare_zfs(
     runner: &dyn CommandRunner,
@@ -117,7 +117,7 @@ pub async fn prepare_zfs(
     let compression = config.compression.to_string();
     let encryption = config.zfs_encryption_mode;
 
-    let zfs = palimpsest::Zfs::new();
+    let zfs = zfskit::Zfs::new();
 
     crate::zfs_target_files::create_hostid(runner)?;
     crate::zfs_target_files::prepare_zfs_cache(Path::new("/"), pool_name)?;
@@ -228,7 +228,7 @@ fn base_dataset_props(
 }
 
 async fn load_install_encryption_key(
-    zfs: &palimpsest::Zfs,
+    zfs: &zfskit::Zfs,
     pool_name: &str,
     prefix: &str,
     encryption: ZfsEncryptionMode,
@@ -266,7 +266,7 @@ fn apply_default_pool_options(opts: PoolCreateOptions) -> PoolCreateOptions {
 }
 
 async fn create_pool(
-    zfs: &palimpsest::Zfs,
+    zfs: &zfskit::Zfs,
     name: &str,
     device: &Path,
     mountpoint: &Path,
@@ -286,7 +286,7 @@ async fn create_pool(
     Ok(())
 }
 
-async fn import_pool_no_mount(zfs: &palimpsest::Zfs, name: &str, mountpoint: &Path) -> Result<()> {
+async fn import_pool_no_mount(zfs: &zfskit::Zfs, name: &str, mountpoint: &Path) -> Result<()> {
     let opts = ImportOptions {
         no_mount: true,
         altroot: Some(mountpoint.to_path_buf()),
@@ -296,9 +296,9 @@ async fn import_pool_no_mount(zfs: &palimpsest::Zfs, name: &str, mountpoint: &Pa
     Ok(())
 }
 
-async fn export_pool(zfs: &palimpsest::Zfs, name: &str) -> Result<()> {
+async fn export_pool(zfs: &zfskit::Zfs, name: &str) -> Result<()> {
     nix::unistd::sync();
-    // Best-effort umount-all first; ignore errors. palimpsest's unmount_all
+    // Best-effort umount-all first; ignore errors. zfskit's unmount_all
     // returns Err on real failures (e.g., a stuck mountpoint), but the
     // subsequent zpool export will surface the same condition more clearly.
     let _ = zfs.unmount_all(false).await;
@@ -310,7 +310,7 @@ async fn export_pool(zfs: &palimpsest::Zfs, name: &str) -> Result<()> {
 mod tests {
     use std::path::Path;
 
-    use palimpsest::{Cmd, RecordingRunner, Zfs};
+    use zfskit::{Cmd, RecordingRunner, Zfs};
 
     use super::*;
 

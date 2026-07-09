@@ -3,7 +3,7 @@
 //! filesystems and exports the pool with escalating force.
 //!
 //! Lives in core (rather than each UI crate) so the TUI and Slint installers
-//! share the same logic and don't depend on palimpsest directly.
+//! share the same logic and don't depend on zfskit directly.
 
 use color_eyre::eyre::Result;
 
@@ -26,7 +26,7 @@ use color_eyre::eyre::Result;
 /// best-effort. The function returns `Ok` regardless of pool state at the end
 /// — the kernel sync calls themselves do error-bubble.
 pub async fn cleanup_pool_after_install(pool_name: &str, root_dataset: &str) -> Result<()> {
-    let zfs = palimpsest::Zfs::new();
+    let zfs = zfskit::Zfs::new();
     let root_handle = zfs.dataset(root_dataset);
 
     for attempt in 1..=4 {
@@ -34,13 +34,13 @@ pub async fn cleanup_pool_after_install(pool_name: &str, root_dataset: &str) -> 
             1 => zfs.unmount_all(false).await,
             2 => {
                 root_handle
-                    .unmount(&palimpsest::dataset::UnmountOptions::default())
+                    .unmount(&zfskit::dataset::UnmountOptions::default())
                     .await
             }
             3 => zfs.unmount_all(true).await,
             4 => {
                 root_handle
-                    .unmount(&palimpsest::dataset::UnmountOptions { force: true })
+                    .unmount(&zfskit::dataset::UnmountOptions { force: true })
                     .await
             }
             _ => unreachable!(),
@@ -51,13 +51,13 @@ pub async fn cleanup_pool_after_install(pool_name: &str, root_dataset: &str) -> 
 
     let pool = zfs.pool(pool_name);
     if pool
-        .export(&palimpsest::pool::ExportOptions::default())
+        .export(&zfskit::pool::ExportOptions::default())
         .await
         .is_err()
     {
         tracing::warn!("zpool export failed, trying force");
         let _ = pool
-            .export(&palimpsest::pool::ExportOptions { force: true })
+            .export(&zfskit::pool::ExportOptions { force: true })
             .await;
     }
 

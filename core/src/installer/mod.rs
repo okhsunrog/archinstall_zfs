@@ -560,7 +560,7 @@ impl Installer {
         }
 
         // TRIM strategy is configured outside Installer — it doesn't depend
-        // on Alpm and is async (palimpsest set_property). See
+        // on Alpm and is async (zfskit set_property). See
         // crate::zfs_trim::configure_zfs_trim, called from run_install.
 
         // genfstab

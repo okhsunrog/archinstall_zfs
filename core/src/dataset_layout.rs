@@ -1,5 +1,5 @@
 use color_eyre::eyre::{Result, bail};
-use palimpsest::dataset::{CreateOptions, MountOptions};
+use zfskit::dataset::{CreateOptions, MountOptions};
 
 pub struct DatasetConfig {
     pub name: String,
@@ -35,7 +35,7 @@ fn properties_to_opts(props: &[(&str, &str)]) -> CreateOptions {
 }
 
 pub async fn create_dataset(
-    zfs: &palimpsest::Zfs,
+    zfs: &zfskit::Zfs,
     full_name: &str,
     properties: &[(&str, &str)],
 ) -> Result<()> {
@@ -45,12 +45,12 @@ pub async fn create_dataset(
 }
 
 /// Check if a dataset exists.
-pub async fn dataset_exists(zfs: &palimpsest::Zfs, name: &str) -> bool {
+pub async fn dataset_exists(zfs: &zfskit::Zfs, name: &str) -> bool {
     zfs.dataset(name).exists().await
 }
 
 pub async fn create_base_dataset(
-    zfs: &palimpsest::Zfs,
+    zfs: &zfskit::Zfs,
     pool_name: &str,
     prefix: &str,
     encryption_props: &[(&str, &str)],
@@ -66,7 +66,7 @@ pub async fn create_base_dataset(
 }
 
 pub async fn create_child_datasets(
-    zfs: &palimpsest::Zfs,
+    zfs: &zfskit::Zfs,
     pool_name: &str,
     prefix: &str,
     datasets: &[DatasetConfig],
@@ -102,7 +102,7 @@ pub async fn create_child_datasets(
 }
 
 pub async fn mount_datasets_ordered(
-    zfs: &palimpsest::Zfs,
+    zfs: &zfskit::Zfs,
     pool_name: &str,
     prefix: &str,
     _datasets: &[DatasetConfig],
@@ -127,7 +127,7 @@ pub async fn mount_datasets_ordered(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use palimpsest::{Cmd, RecordingRunner, Zfs};
+    use zfskit::{Cmd, RecordingRunner, Zfs};
 
     #[test]
     fn test_default_datasets() {

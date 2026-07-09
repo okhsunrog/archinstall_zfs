@@ -255,7 +255,7 @@ pub async fn set_zbm_properties(
     zswap_enabled: bool,
     set_bootfs: bool,
 ) -> Result<()> {
-    let zfs = palimpsest::Zfs::new();
+    let zfs = zfskit::Zfs::new();
     let root_ds = format!("{pool_name}/{prefix}/root");
     let cmdline = build_zbm_cmdline(zswap_enabled);
     let rootprefix = rootprefix_for(init_system);
