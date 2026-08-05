@@ -647,7 +647,7 @@ impl Wizard {
             Span::styled(icon, icon_style),
             Span::styled(item.label, label_style),
             Span::styled(padding, label_style),
-            Span::styled(format!("{} ", &item.value), value_style),
+            Span::styled(format!("{} ", item.value), value_style),
         ]);
         frame.render_widget(Paragraph::new(line), area);
     }
@@ -700,7 +700,7 @@ impl Wizard {
                 Span::styled("    ", theme::NORMAL_STYLE),
                 Span::styled(item.label, theme::LABEL_STYLE),
                 Span::styled(padding, theme::NORMAL_STYLE),
-                Span::styled(format!("{} ", &item.value), value_style),
+                Span::styled(format!("{} ", item.value), value_style),
             ]);
             frame.render_widget(Paragraph::new(line), area);
         }

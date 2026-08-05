@@ -23,15 +23,12 @@
 //!   based, but the current slint-ui controller doesn't consume the
 //!   stream yet, so we defer the callback→stream adapter until there's
 //!   a real consumer driving the requirements.
-//! * `connect_hidden()` is not implemented — nmrs doesn't expose a
-//!   direct "connect to hidden SSID" entry point. Calling it returns
-//!   `WifiError::ConnectFailed` with a descriptive message. Revisit
-//!   if a user needs it.
-//! * `list_known_networks()` returns SSIDs from `list_saved_connections`
-//!   but marks every entry as `Security::Psk` because NM doesn't give
-//!   us the security type without an extra lookup. Good enough for
-//!   the "Known" badge; the UI doesn't actually branch on the saved
-//!   profile's security type.
+//! * `connect_hidden()` is not implemented. nmrs has a lower-level
+//!   connection builder for hidden SSIDs, but the common backend API is
+//!   not wired to that workflow yet.
+//! * `list_known_networks()` uses nmrs's lightweight saved-connection IDs
+//!   and marks every entry as `Security::Psk`. Richer saved-profile data is
+//!   available, but the UI only needs the "Known" badge today.
 //! * WEP networks are mapped to `Psk` — nmrs's `Network` struct doesn't
 //!   distinguish them and WEP is effectively extinct.
 
@@ -96,19 +93,19 @@ pub async fn scan_networks() -> Result<Vec<WifiNetwork>, WifiError> {
         .await
         .map_err(|_| WifiError::NotAvailable)?;
 
-    nm.scan_networks().await?;
+    nm.scan_networks(None).await?;
 
     // Pull saved connection names so we can flag known networks in
-    // the scan result. `list_saved_connections` returns the NM
+    // the scan result. `list_saved_connection_ids` returns the NM
     // connection IDs which equal the SSIDs for standard wifi profiles.
     let known: std::collections::HashSet<String> = nm
-        .list_saved_connections()
+        .list_saved_connection_ids()
         .await
         .unwrap_or_default()
         .into_iter()
         .collect();
 
-    let raw = nm.list_networks().await?;
+    let raw = nm.list_networks(None).await?;
     let mut out: Vec<WifiNetwork> = raw
         .into_iter()
         .filter(|n| !n.ssid.is_empty())
@@ -119,7 +116,7 @@ pub async fn scan_networks() -> Result<Vec<WifiNetwork>, WifiError> {
             ssid: n.ssid,
         })
         .collect();
-    out.sort_by(|a, b| b.signal_percent.cmp(&a.signal_percent));
+    out.sort_by_key(|network| std::cmp::Reverse(network.signal_percent));
     Ok(out)
 }
 
@@ -134,7 +131,7 @@ pub async fn connect(ssid: &str, passphrase: Option<String>) -> Result<(), WifiE
     // We need to know the security type before deciding what to pass
     // to nmrs. List the current scan, find the matching SSID, infer
     // security from its flags.
-    let networks = nm.list_networks().await?;
+    let networks = nm.list_networks(None).await?;
     let net = networks
         .iter()
         .find(|n| n.ssid == ssid)
@@ -158,7 +155,7 @@ pub async fn connect(ssid: &str, passphrase: Option<String>) -> Result<(), WifiE
         }
     };
 
-    nm.connect(ssid, creds).await?;
+    nm.connect(ssid, None, creds).await?;
     Ok(())
 }
 
@@ -177,7 +174,7 @@ pub async fn disconnect() -> Result<(), WifiError> {
     let nm = NetworkManager::new()
         .await
         .map_err(|_| WifiError::NotAvailable)?;
-    nm.disconnect().await?;
+    nm.disconnect(None).await?;
     Ok(())
 }
 
@@ -221,14 +218,13 @@ pub async fn list_known_networks() -> Result<Vec<KnownNetworkInfo>, WifiError> {
     let nm = NetworkManager::new()
         .await
         .map_err(|_| WifiError::NotAvailable)?;
-    let ssids = nm.list_saved_connections().await?;
+    let ssids = nm.list_saved_connection_ids().await?;
     let mut out: Vec<KnownNetworkInfo> = ssids
         .into_iter()
         .map(|ssid| KnownNetworkInfo {
             ssid,
-            // nmrs doesn't expose the saved security type without an
-            // extra lookup and we don't actually branch on it in the
-            // UI. Default to Psk.
+            // The lightweight ID query omits security and the UI does not
+            // branch on it. Default to Psk.
             security: Security::Psk,
             hidden: false,
         })
