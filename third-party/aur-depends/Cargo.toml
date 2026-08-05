@@ -21,13 +21,13 @@ alpm = "5.0.2"
 alpm-utils = "5.0.0"
 log = "0.4.33"
 raur = { version = "8.0.0", default-features = false, features = ["async"] }
-bitflags = "2.13.0"
+bitflags = "2.13.1"
 srcinfo = "2.1.0"
 
 [dev-dependencies]
-async-trait = "0.1.89"
+async-trait = "0.1.91"
 simplelog = "0.12.2"
-tokio = { version = "1.52.3", features = ["macros", "rt"] }
+tokio = { version = "1.53.1", features = ["macros", "rt"] }
 
 [features]
 git = ["alpm/git", "alpm-utils/git"]

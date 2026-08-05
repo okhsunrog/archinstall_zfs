@@ -1,4 +1,4 @@
-FROM archlinux@sha256:2b4d67033863d9f495dfd0f52ad8b451fae84adb71b4bdf63f69d10643df2403
+FROM archlinux@sha256:345a872f6c95e082d4b8c050af637eebb57402c6e2177b411c3acf7df84eb33b
 
 # Rust build deps: base-devel, pkgconf, clang for C-FFI crates.
 # UI libs: libxkbcommon/libinput/libdrm/freetype2/fontconfig/ttf-dejavu for the slint UI.
@@ -19,8 +19,8 @@ ENV RUSTUP_HOME=/usr/local/rustup \
     PATH=/usr/local/cargo/bin:$PATH
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
-    sh -s -- -y --default-toolchain 1.96.0 --profile minimal \
+    sh -s -- -y --default-toolchain 1.97.1 --profile minimal \
               --no-modify-path && \
-    rustup component add --toolchain 1.96.0 clippy rustfmt && \
+    rustup component add --toolchain 1.97.1 clippy rustfmt && \
     cargo install cargo-audit --version 0.22.2 --locked && \
     chmod -R a+w /usr/local/rustup /usr/local/cargo

@@ -19,7 +19,7 @@ nmrs = { workspace = true, optional = true }
 pacmanconf = "3.1.0"
 zfskit = "0.2.0"
 raur = { version = "8.0.0", default-features = false, features = ["async", "reqwest", "rusttls-tls"] }
-regex = "1.13.0"
+regex = "1.13.1"
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "stream"] }
 serde.workspace = true
 serde_json.workspace = true
@@ -28,12 +28,12 @@ sha2 = "0.11.0"
 sublime_fuzzy.workspace = true
 sysinfo = "0.39.6"
 tar = "0.4.46"
-thiserror = "2.0.18"
+thiserror = "2.0.19"
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "io-util", "fs", "sync", "time", "process"] }
 tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-zbus = { version = "5.17.0", default-features = false, features = ["tokio"] }
+zbus = { version = "5.18.0", default-features = false, features = ["tokio"] }
 
 [features]
 # Exactly one wifi backend must be enabled. Consumers (slint-ui, tui)
