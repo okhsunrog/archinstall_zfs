@@ -18,11 +18,14 @@ export { WelcomeState }
 import { InstallState } from "state/install-state.slint";
 export { InstallState }
 
+import { DemoState } from "state/demo-state.slint";
+export { DemoState }
+
 import { WifiState } from "state/wifi-state.slint";
 export { WifiState }
 
-import { ItemType, ConfigItem, SelectOption, UserEntry, PackageEntry, PackageSearchResult, LogMessage, DownloadInfo, WifiSecurity, WifiPhase, WifiNetworkUi } from "types.slint";
-export { ItemType, ConfigItem, SelectOption, UserEntry, PackageEntry, PackageSearchResult, LogMessage, DownloadInfo, WifiSecurity, WifiPhase, WifiNetworkUi }
+import { ItemType, ConfigItem, SelectOption, UserEntry, PackageEntry, PackageSearchResult, LogMessage, DownloadInfo, DemoPool, DemoDataset, WifiSecurity, WifiPhase, WifiNetworkUi } from "types.slint";
+export { ItemType, ConfigItem, SelectOption, UserEntry, PackageEntry, PackageSearchResult, LogMessage, DownloadInfo, DemoPool, DemoDataset, WifiSecurity, WifiPhase, WifiNetworkUi }
 
 import { TextInputPopup } from "popups/text-input-popup.slint";
 import { SelectPopup } from "popups/select-popup.slint";
@@ -31,6 +34,7 @@ import { StringListPopup } from "popups/string-list-popup.slint";
 import { PackageSearchPopup } from "popups/package-search-popup.slint";
 import { MultiSelectPopup } from "popups/multi-select-popup.slint";
 import { WifiPopup } from "popups/wifi-popup.slint";
+import { ZfsInspectPopup } from "popups/zfs-inspect-popup.slint";
 
 import { WelcomeView } from "views/welcome-view.slint";
 import { WizardView } from "views/wizard-view.slint";
@@ -68,6 +72,8 @@ export component App inherits Window {
     callback toggle-activated(string);
     callback install-requested();
     callback quit-requested();
+    callback reboot-requested();
+    callback cancel-requested();
     callback user-added(string, string, bool); // username, password, sudo
     callback user-removed(int);
     callback user-sudo-toggled(int);
@@ -114,10 +120,16 @@ export component App inherits Window {
     }
 
     // ── Welcome screen (step 0, no sidebar) ───────────
-    if InstallState.state == 0 && WizardState.current-step == 0: WelcomeView { }
+    if InstallState.state == 0 && WizardState.current-step == 0: WelcomeView {
+        y: DemoState.enabled ? 32px : 0px;
+        height: root.height - self.y;
+        quit-requested() => { quit-requested(); }
+    }
 
     // ── Wizard config screen (steps 1+, with sidebar) ──
     if InstallState.state == 0 && WizardState.current-step > 0: WizardView {
+        y: DemoState.enabled ? 32px : 0px;
+        height: root.height - self.y;
         item-activated(key) => { item-activated(key); }
         toggle-activated(key) => { toggle-activated(key); }
         install-requested() => { install-requested(); }
@@ -129,7 +141,11 @@ export component App inherits Window {
 
     // ── Install progress screen ──────────────────────
     if InstallState.state >= 1: InstallView {
+        y: DemoState.enabled ? 32px : 0px;
+        height: root.height - self.y;
         quit-requested() => { quit-requested(); }
+        reboot-requested() => { reboot-requested(); }
+        cancel-requested() => { cancel-requested(); }
     }
 
     // ── Popup overlays ──────────────────────────────────
@@ -233,5 +249,25 @@ export component App inherits Window {
         // All callbacks already go through WifiState as globals, so
         // the mount site has no per-callback plumbing.
         popup-visible: PopupState.wifi-visible;
+    }
+
+    ZfsInspectPopup {
+        closed() => { DemoState.popup-visible = false; }
+    }
+
+    if DemoState.enabled: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: 32px;
+        background: Theme.c.yellow;
+        Text {
+            text: "SAFE LINUXKMS DEMO — configuration only; installation and destructive storage changes are disabled";
+            color: Theme.c.base;
+            font-size: Theme.font-sm;
+            font-weight: FontWeight.semi-bold;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
     }
 }

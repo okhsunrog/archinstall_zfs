@@ -1,13 +1,16 @@
 // Install progress screen — scrolling log + a progress card with the current
-// phase, optional package-download details, and an Exit/Reboot button when
-// done.
+// phase, optional package-download details, cancellation while running, and
+// separate Quit/Reboot actions after success.
 
 import { ListView } from "std-widgets.slint";
 import { Theme } from "../styling.slint";
 import { InstallState } from "../state/install-state.slint";
+import { StyledButton } from "../components/styled-button.slint";
 
 export component InstallView inherits VerticalLayout {
     callback quit-requested();
+    callback reboot-requested();
+    callback cancel-requested();
 
     padding: 12px;
     spacing: 8px;
@@ -45,7 +48,9 @@ export component InstallView inherits VerticalLayout {
 
     // Progress card (always visible during install)
     Rectangle {
-        height: InstallState.download-active ? 180px : 80px;
+        height: InstallState.download-active ? 232px
+            : (InstallState.state == 1 || InstallState.state == 4) ? 132px
+            : 80px;
         background: Theme.c.surface0;
         border-radius: 10px;
 
@@ -60,9 +65,12 @@ export component InstallView inherits VerticalLayout {
                 Text {
                     text: InstallState.state == 2 ? "\u{2713} Complete"
                         : InstallState.state == 3 ? "\u{2717} Failed"
+                        : InstallState.state == 4 ? "Cancelling..."
+                        : InstallState.state == 5 ? "Cancelled"
                         : InstallState.phase-label;
                     color: InstallState.state == 2 ? Theme.c.green
                         : InstallState.state == 3 ? Theme.c.red
+                        : InstallState.state >= 4 ? Theme.c.yellow
                         : Theme.c.text;
                     font-size: 14px;
                     font-weight: FontWeight.semi-bold;
@@ -167,23 +175,41 @@ export component InstallView inherits VerticalLayout {
                 }
             }
 
-            // Exit button
-            if InstallState.state >= 2: Rectangle {
-                height: 36px;
-                background: exit-ta.has-hover ? Theme.c.blue : Theme.c.surface1;
-                border-radius: 8px;
+            if InstallState.state == 1 || InstallState.state == 4: HorizontalLayout {
+                alignment: end;
 
-                exit-ta := TouchArea {
+                StyledButton {
+                    label: InstallState.state == 4 ? "Cancelling..." : "Cancel installation";
+                    style: Theme.button-default;
+                    enabled: InstallState.state == 1;
+                    clicked => { root.cancel-requested(); }
+                }
+            }
+
+            if InstallState.state == 2: HorizontalLayout {
+                alignment: end;
+                spacing: Theme.spacing-sm;
+
+                StyledButton {
+                    label: "Quit";
+                    style: Theme.button-default;
                     clicked => { root.quit-requested(); }
                 }
 
-                Text {
-                    text: InstallState.state == 2 ? "Reboot" : "Exit";
-                    color: exit-ta.has-hover ? Theme.c.base : Theme.c.text;
-                    font-size: 14px;
-                    font-weight: FontWeight.semi-bold;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+                StyledButton {
+                    label: "Reboot";
+                    style: Theme.button-primary;
+                    clicked => { root.reboot-requested(); }
+                }
+            }
+
+            if InstallState.state == 3 || InstallState.state == 5: HorizontalLayout {
+                alignment: end;
+
+                StyledButton {
+                    label: "Quit";
+                    style: Theme.button-default;
+                    clicked => { root.quit-requested(); }
                 }
             }
         }

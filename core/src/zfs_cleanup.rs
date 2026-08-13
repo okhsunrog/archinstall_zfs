@@ -7,6 +7,15 @@
 
 use color_eyre::eyre::Result;
 
+/// Whether `pool_name` is currently imported. Used to avoid exporting a pool
+/// that was already owned by the live environment before the installer ran.
+pub async fn pool_is_imported(pool_name: &str) -> Result<bool> {
+    let pools = zfskit::Zfs::new()
+        .list_pools(&zfskit::pool::ListOptions::default())
+        .await?;
+    Ok(pools.iter().any(|pool| pool.name == pool_name))
+}
+
 /// Sequence used by both the TUI and Slint install pipelines: try to unmount
 /// everything, then export the pool. Each unmount attempt is best-effort and
 /// followed by a `sync(2)` and a 1-second sleep — old behavior carried from
@@ -22,9 +31,9 @@ use color_eyre::eyre::Result;
 /// After unmount attempts, `zpool export` with a `-f` retry on failure.
 ///
 /// Errors from individual ZFS commands are intentionally swallowed; only the
-/// final export's failure mode is retried with force, and even that's
-/// best-effort. The function returns `Ok` regardless of pool state at the end
-/// — the kernel sync calls themselves do error-bubble.
+/// final export's failure mode is retried with force. Failure of the forced
+/// export is returned to the caller: reporting successful cleanup while the
+/// installer-owned pool remains imported would be unsafe.
 pub async fn cleanup_pool_after_install(pool_name: &str, root_dataset: &str) -> Result<()> {
     let zfs = zfskit::Zfs::new();
     let root_handle = zfs.dataset(root_dataset)?;
@@ -56,9 +65,8 @@ pub async fn cleanup_pool_after_install(pool_name: &str, root_dataset: &str) -> 
         .is_err()
     {
         tracing::warn!("zpool export failed, trying force");
-        let _ = pool
-            .export(&zfskit::pool::ExportOptions { force: true })
-            .await;
+        pool.export(&zfskit::pool::ExportOptions { force: true })
+            .await?;
     }
 
     Ok(())

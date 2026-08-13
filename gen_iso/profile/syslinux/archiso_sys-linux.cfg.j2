@@ -8,6 +8,15 @@ LINUX /%INSTALL_DIR%/boot/%ARCH%/vmlinuz-{{ kernel }}
 INITRD /%INSTALL_DIR%/boot/%ARCH%/initramfs-{{ kernel }}.img
 APPEND archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID%{% if fast_build %} console=tty0 console=ttyS0,115200{% endif %}
 
+LABEL arch-demo
+TEXT HELP
+Boot the real LinuxKMS installer UI with destructive storage operations disabled.
+ENDTEXT
+MENU LABEL Arch Linux installer - safe LinuxKMS ^demo (%ARCH%, BIOS)
+LINUX /%INSTALL_DIR%/boot/%ARCH%/vmlinuz-{{ kernel }}
+INITRD /%INSTALL_DIR%/boot/%ARCH%/initramfs-{{ kernel }}.img
+APPEND archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID% archinstall_zfs.demo=1{% if fast_build %} console=tty0 console=ttyS0,115200{% endif %}
+
 # Accessibility boot option
 LABEL archspeech
 TEXT HELP

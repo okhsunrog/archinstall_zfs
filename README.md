@@ -28,6 +28,7 @@ Key improvements over the Python version:
 - **No external package manager binaries** needed at runtime (no `pacman`, `pacstrap`, `yay`)
 - **Proper AUR dependency resolution** via `raur` + `aur-depends` crates
 - **Cancellable installation** with graceful cleanup
+- **Safe LinuxKMS demo** for real input, cursor, Wi-Fi, disk, and read-only ZFS testing
 - **Trace-level file logging** (`/tmp/archinstall-zfs.log`) for post-mortem analysis
 
 ### Screenshots
@@ -59,6 +60,21 @@ azfs-tui
 ```
 
 > Why recommended: the ISO already contains ZFS components and both installers, so startup is faster and avoids on-the-fly package installation.
+
+### Safe LinuxKMS UI demo
+
+The ISO boot menu also offers **Arch Linux installer — safe LinuxKMS demo**.
+It runs the same Linux KMS, software Skia, libinput, cursor, touchpad, and iwd
+paths as the real graphical installer, while disabling installation and every
+destructive storage operation. Disks and partitions remain visible and every
+configuration step can be exercised.
+
+The demo can discover ZFS pools and explicitly import one for inspection with
+`zpool import -N -o readonly=on -o cachefile=none`. It never mounts datasets,
+verifies the pool's `readonly` property after import, and exports only pools
+that were imported by the current demo session. Those pools are exported when
+the user requests it and again during normal application shutdown. The same
+mode can be selected manually with `azfs --demo`.
 
 ### Option B: Official Arch ISO
 ```bash

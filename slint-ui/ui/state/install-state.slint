@@ -1,11 +1,12 @@
 // Install-progress state. `state` is the high-level mode (0=config, 1=running,
-// 2=done, 3=failed); the rest is driven by the install pipeline running in a
+// 2=done, 3=failed, 4=cancelling, 5=cancelled); the rest is driven by the install pipeline running in a
 // background thread.
 
 import { LogMessage, DownloadInfo } from "../types.slint";
 
 export global InstallState {
-    // 0 = config screen, 1 = installing, 2 = done, 3 = failed
+    // 0 = config, 1 = installing, 2 = done, 3 = failed,
+    // 4 = cancellation requested, 5 = cancelled and cleaned up
     in-out property <int> state: 0;
 
     in property <[LogMessage]> log-messages;

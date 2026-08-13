@@ -1,0 +1,146 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "../styling.slint";
+import { DemoState } from "../state/demo-state.slint";
+import { StyledButton } from "../components/styled-button.slint";
+
+export component ZfsInspectPopup inherits Rectangle {
+    callback closed();
+
+    if DemoState.popup-visible: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: #00000080;
+
+        TouchArea { clicked => { root.closed(); } }
+
+        focus-scope := FocusScope {
+            key-pressed(event) => {
+                if event.text == Key.Escape {
+                    root.closed();
+                    return accept;
+                }
+                return reject;
+            }
+        }
+
+        Rectangle {
+            width: 0px;
+            height: 0px;
+            init => { focus-scope.focus(); }
+        }
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(680px, parent.width - 40px);
+            height: min(540px, parent.height - 40px);
+            background: Theme.c.mantle;
+            border-radius: Theme.radius-md;
+            border-color: Theme.c.surface1;
+            border-width: 1px;
+            clip: true;
+
+            VerticalLayout {
+                padding: Theme.spacing-lg;
+                spacing: Theme.spacing-sm;
+
+                HorizontalLayout {
+                    height: 36px;
+                    spacing: Theme.spacing-sm;
+                    Text {
+                        text: "ZFS pools and datasets";
+                        color: Theme.c.blue;
+                        font-size: Theme.font-lg;
+                        font-weight: FontWeight.semi-bold;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    StyledButton {
+                        label: "Refresh";
+                        enabled: !DemoState.busy;
+                        clicked => { DemoState.refresh(); }
+                    }
+                    StyledButton { label: "Close"; clicked => { root.closed(); } }
+                }
+
+                Text {
+                    text: DemoState.status;
+                    color: DemoState.busy ? Theme.c.blue : Theme.c.subtext0;
+                    font-size: Theme.font-sm;
+                    wrap: word-wrap;
+                }
+
+                Text { text: "POOLS"; color: Theme.c.mauve; font-size: Theme.font-sm; }
+                ListView {
+                    height: 180px;
+                    for pool[index] in DemoState.pools: Rectangle {
+                        height: 48px;
+                        background: Math.mod(index, 2) == 0 ? Theme.c.surface0 : Theme.c.base;
+                        border-radius: Theme.radius-sm;
+                        HorizontalLayout {
+                            padding-left: Theme.spacing-md;
+                            padding-right: Theme.spacing-sm;
+                            spacing: Theme.spacing-sm;
+                            Text {
+                                text: pool.name;
+                                color: Theme.c.text;
+                                font-family: "monospace";
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+                            Text {
+                                text: pool.imported
+                                    ? (pool.owned ? "read-only demo import" : "already imported")
+                                    : "available · " + pool.state;
+                                color: pool.owned ? Theme.c.green : Theme.c.overlay0;
+                                font-size: Theme.font-sm;
+                                vertical-alignment: center;
+                            }
+                            StyledButton {
+                                label: "Use";
+                                enabled: !DemoState.busy;
+                                clicked => { DemoState.select-pool(pool.name); }
+                            }
+                            if !pool.imported: StyledButton {
+                                label: "Import read-only";
+                                enabled: !DemoState.busy;
+                                clicked => { DemoState.import-readonly(pool.name); }
+                            }
+                            if pool.owned: StyledButton {
+                                label: "Export";
+                                enabled: !DemoState.busy;
+                                clicked => { DemoState.export-pool(pool.name); }
+                            }
+                        }
+                    }
+                }
+
+                Text { text: "DATASETS"; color: Theme.c.mauve; font-size: Theme.font-sm; }
+                ListView {
+                    for dataset[index] in DemoState.datasets: Rectangle {
+                        height: 30px;
+                        background: Math.mod(index, 2) == 0 ? Theme.c.surface0 : transparent;
+                        HorizontalLayout {
+                            padding-left: Theme.spacing-md;
+                            padding-right: Theme.spacing-md;
+                            Text {
+                                text: dataset.name;
+                                color: Theme.c.text;
+                                font-family: "monospace";
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: dataset.kind;
+                                color: Theme.c.overlay0;
+                                font-size: Theme.font-sm;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
