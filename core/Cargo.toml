@@ -28,12 +28,12 @@ sha2 = "0.11.0"
 sublime_fuzzy.workspace = true
 sysinfo = "0.39.6"
 tar = "0.4.46"
-thiserror = "2.0.19"
+thiserror = "2.0.20"
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "io-util", "fs", "sync", "time", "process"] }
 tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-zbus = { version = "5.18.0", default-features = false, features = ["tokio"] }
+zbus = { version = "5.19.0", default-features = false, features = ["tokio"] }
 
 [features]
 # Exactly one wifi backend must be enabled. Consumers (slint-ui, tui)

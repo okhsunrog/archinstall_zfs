@@ -103,6 +103,10 @@ impl Installer {
         tracing::info!(target: "metrics", event = "phase_start", num = 6u32, name = "Installing ZFS packages");
         self.install_zfs_on_target()?;
 
+        // The encrypted pool key must exist in the target before either
+        // initramfs backend tries to embed it in the image.
+        self.prepare_encryption_key()?;
+
         // Phase 7: Initramfs
         tracing::info!("Phase 7: Generating initramfs...");
         tracing::info!(target: "metrics", event = "phase_start", num = 7u32, name = "Generating initramfs");
@@ -220,6 +224,19 @@ impl Installer {
         }
 
         Ok(())
+    }
+
+    fn prepare_encryption_key(&self) -> Result<()> {
+        if !self.config.encryption_enabled() {
+            return Ok(());
+        }
+
+        let password = self
+            .config
+            .zfs_encryption_password
+            .as_deref()
+            .ok_or_else(|| color_eyre::eyre::eyre!("encryption enabled but password missing"))?;
+        crate::zfs_keyfile::write_key_file(&self.target, password)
     }
 
     fn configure_users(&self) -> Result<()> {
@@ -574,18 +591,6 @@ impl Installer {
             Path::new("/mnt"),
         )?;
 
-        // Copy encryption key if needed
-        if self.config.encryption_enabled() {
-            let key_src = crate::zfs_keyfile::key_file_path(Path::new("/"));
-            let key_dst = crate::zfs_keyfile::key_file_path(&self.target);
-            if key_src.exists() {
-                if let Some(parent) = key_dst.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                std::fs::copy(&key_src, &key_dst)?;
-            }
-        }
-
         // zrepl
         if self.config.zrepl_enabled {
             crate::zrepl::setup_zrepl(&self.target, pool_name, prefix)?;
@@ -598,8 +603,9 @@ impl Installer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::types::GlobalConfig;
+    use crate::config::types::{GlobalConfig, ZfsEncryptionMode};
     use crate::system::cmd::tests::RecordingRunner;
+    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn test_installer_validates_config() {
@@ -620,5 +626,51 @@ mod tests {
                 .to_string()
                 .contains("validation failed")
         );
+    }
+
+    #[test]
+    fn prepare_encryption_key_writes_target_key_before_initramfs() {
+        let target = tempfile::tempdir().unwrap();
+        let runner: Arc<dyn CommandRunner> = Arc::new(RecordingRunner::new(vec![]));
+        let config = GlobalConfig {
+            zfs_encryption_mode: ZfsEncryptionMode::Pool,
+            zfs_encryption_password: Some("correct horse battery staple".into()),
+            ..Default::default()
+        };
+        let installer = Installer::new(
+            runner,
+            config,
+            target.path(),
+            CancellationToken::new(),
+            None,
+        );
+
+        installer.prepare_encryption_key().unwrap();
+
+        let key_path = crate::zfs_keyfile::key_file_path(target.path());
+        assert!(key_path.exists());
+        assert_eq!(key_path.metadata().unwrap().permissions().mode() & 0o777, 0);
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o400)).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(key_path).unwrap(),
+            "correct horse battery staple"
+        );
+    }
+
+    #[test]
+    fn prepare_encryption_key_is_noop_without_encryption() {
+        let target = tempfile::tempdir().unwrap();
+        let runner: Arc<dyn CommandRunner> = Arc::new(RecordingRunner::new(vec![]));
+        let installer = Installer::new(
+            runner,
+            GlobalConfig::default(),
+            target.path(),
+            CancellationToken::new(),
+            None,
+        );
+
+        installer.prepare_encryption_key().unwrap();
+
+        assert!(!crate::zfs_keyfile::key_file_path(target.path()).exists());
     }
 }
