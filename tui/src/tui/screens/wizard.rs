@@ -206,14 +206,60 @@ impl Wizard {
                     if let Some(path) = result.value
                         && !path.is_empty()
                     {
-                        match self.config.save_to_file(std::path::Path::new(&path)) {
-                            Ok(()) => {
-                                let _ =
-                                    run_select(terminal, &format!("Saved to {path}"), &["OK"], 0);
-                            }
-                            Err(e) => {
-                                let msg = format!("Save failed: {e}");
-                                let _ = run_select(terminal, &msg, &["OK"], 0);
+                        let save_secrets = if self.config.has_secrets() {
+                            run_select(
+                                terminal,
+                                "Passwords are omitted from the main config",
+                                &[
+                                    "Save config only",
+                                    "Save passwords to a separate 0600 secrets file",
+                                    "Cancel",
+                                ],
+                                0,
+                            )?
+                            .selected
+                        } else {
+                            Some(0)
+                        };
+
+                        if !matches!(save_secrets, None | Some(2)) {
+                            match self.config.save_to_file(std::path::Path::new(&path)) {
+                                Ok(()) => {
+                                    let mut message =
+                                        format!("Saved config without passwords to {path}");
+                                    if save_secrets == Some(1) {
+                                        let default_secrets_path = format!("{path}.secrets.json");
+                                        let secret_result = run_edit(
+                                            terminal,
+                                            "Save secrets to file (mode 0600)",
+                                            &default_secrets_path,
+                                            false,
+                                        )?;
+                                        if let Some(secret_path) = secret_result.value
+                                            && !secret_path.is_empty()
+                                        {
+                                            match self.config.save_secrets_to_file(
+                                                std::path::Path::new(&secret_path),
+                                            ) {
+                                                Ok(()) => {
+                                                    message.push_str(&format!(
+                                                        "; saved passwords to {secret_path}"
+                                                    ));
+                                                }
+                                                Err(e) => {
+                                                    message.push_str(&format!(
+                                                        "; secrets save failed: {e}"
+                                                    ));
+                                                }
+                                            }
+                                        }
+                                    }
+                                    let _ = run_select(terminal, &message, &["OK"], 0);
+                                }
+                                Err(e) => {
+                                    let msg = format!("Save failed: {e}");
+                                    let _ = run_select(terminal, &msg, &["OK"], 0);
+                                }
                             }
                         }
                     }

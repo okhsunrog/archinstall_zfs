@@ -81,7 +81,14 @@ pacman -Sy libxkbcommon libinput freetype2 fontconfig ttf-dejavu
 ### Silent mode (for automation)
 ```bash
 azfs-tui --config config.json --silent
+# If the exported config needs passwords:
+azfs-tui --config config.json --secrets config.secrets.json --silent
 ```
+
+Saved configurations omit the ZFS encryption password, root password, and user
+passwords. The TUI can optionally save those values to a separate JSON file
+with mode `0600`; pass that file with `--secrets` for unattended installs.
+Legacy configuration files containing inline passwords remain supported.
 
 ---
 

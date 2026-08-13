@@ -13,12 +13,16 @@ pub async fn run(
     cli: Cli,
     ui_log_rx: tokio::sync::mpsc::UnboundedReceiver<(String, i32)>,
 ) -> Result<()> {
-    let config = if let Some(ref path) = cli.config {
+    let mut config = if let Some(ref path) = cli.config {
         tracing::info!(path = %path.display(), "loading config from file");
         GlobalConfig::load_from_file(path)?
     } else {
         GlobalConfig::default()
     };
+    if let Some(ref path) = cli.secrets {
+        tracing::info!(path = %path.display(), "loading config secrets from file");
+        config.apply_secrets_from_file(path)?;
+    }
 
     if cli.silent {
         if cli.config.is_none() {

@@ -14,6 +14,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub config: Option<std::path::PathBuf>,
 
+    /// Path to a JSON secrets file merged into the configuration
+    #[arg(long, global = true)]
+    pub secrets: Option<std::path::PathBuf>,
+
     /// Run installation without interactive prompts (requires --config)
     #[arg(long, global = true)]
     pub silent: bool,

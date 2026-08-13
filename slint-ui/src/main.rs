@@ -33,6 +33,10 @@ struct Cli {
     #[arg(long, global = true)]
     config: Option<PathBuf>,
 
+    /// Path to a JSON secrets file merged into the configuration
+    #[arg(long, global = true)]
+    secrets: Option<PathBuf>,
+
     #[arg(long, global = true)]
     silent: bool,
 
@@ -58,11 +62,14 @@ async fn main() -> Result<()> {
         }
     }
 
-    let config = if let Some(ref path) = cli.config {
+    let mut config = if let Some(ref path) = cli.config {
         GlobalConfig::load_from_file(path)?
     } else {
         GlobalConfig::default()
     };
+    if let Some(ref path) = cli.secrets {
+        config.apply_secrets_from_file(path)?;
+    }
 
     if cli.silent {
         use color_eyre::eyre::bail;

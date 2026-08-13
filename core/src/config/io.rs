@@ -1,11 +1,30 @@
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
+use serde::{Deserialize, Serialize};
 
 use super::types::GlobalConfig;
 
 const ZFS_CONFIG_KEY: &str = "archinstall_zfs";
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConfigSecrets {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zfs_encryption_password: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_password: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub users: Vec<UserSecrets>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UserSecrets {
+    pub username: String,
+    pub password: String,
+}
 
 impl GlobalConfig {
     pub fn load_from_file(path: &Path) -> Result<Self> {
@@ -29,14 +48,85 @@ impl GlobalConfig {
     }
 
     pub fn save_to_file(&self, path: &Path) -> Result<()> {
-        let json = self.to_json_string()?;
-        fs::write(path, json)
-            .wrap_err_with(|| format!("failed to write config: {}", path.display()))?;
+        let json = self.to_redacted_json_string()?;
+        write_private_file(path, &json, "config")
+    }
+
+    pub fn save_secrets_to_file(&self, path: &Path) -> Result<()> {
+        let json = serde_json::to_string_pretty(&self.secrets())
+            .wrap_err("failed to serialize config secrets")?;
+        write_private_file(path, &json, "config secrets")
+    }
+
+    pub fn apply_secrets_from_file(&mut self, path: &Path) -> Result<()> {
+        let content = fs::read_to_string(path)
+            .wrap_err_with(|| format!("failed to read config secrets: {}", path.display()))?;
+        let secrets: ConfigSecrets =
+            serde_json::from_str(&content).wrap_err("failed to parse config secrets JSON")?;
+        self.apply_secrets(secrets);
         Ok(())
     }
 
     pub fn to_json_string(&self) -> Result<String> {
         serde_json::to_string_pretty(self).wrap_err("failed to serialize config")
+    }
+
+    pub fn to_redacted_json_string(&self) -> Result<String> {
+        let mut redacted = self.clone();
+        redacted.zfs_encryption_password = None;
+        redacted.root_password = None;
+        if let Some(users) = redacted.users.as_mut() {
+            for user in users {
+                user.password = None;
+            }
+        }
+        redacted.to_json_string()
+    }
+
+    pub fn has_secrets(&self) -> bool {
+        self.zfs_encryption_password.is_some()
+            || self.root_password.is_some()
+            || self
+                .users
+                .as_ref()
+                .is_some_and(|users| users.iter().any(|user| user.password.is_some()))
+    }
+
+    pub fn secrets(&self) -> ConfigSecrets {
+        ConfigSecrets {
+            zfs_encryption_password: self.zfs_encryption_password.clone(),
+            root_password: self.root_password.clone(),
+            users: self
+                .users
+                .iter()
+                .flatten()
+                .filter_map(|user| {
+                    user.password.as_ref().map(|password| UserSecrets {
+                        username: user.username.clone(),
+                        password: password.clone(),
+                    })
+                })
+                .collect(),
+        }
+    }
+
+    pub fn apply_secrets(&mut self, secrets: ConfigSecrets) {
+        if secrets.zfs_encryption_password.is_some() {
+            self.zfs_encryption_password = secrets.zfs_encryption_password;
+        }
+        if secrets.root_password.is_some() {
+            self.root_password = secrets.root_password;
+        }
+        if let Some(users) = self.users.as_mut() {
+            for user_secret in secrets.users {
+                if let Some(user) = users
+                    .iter_mut()
+                    .find(|user| user.username == user_secret.username)
+                {
+                    user.password = Some(user_secret.password);
+                }
+            }
+        }
     }
 
     pub fn to_combined_json(&self) -> Result<String> {
@@ -48,9 +138,32 @@ impl GlobalConfig {
     }
 }
 
+fn write_private_file(path: &Path, contents: &str, description: &str) -> Result<()> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .custom_flags(nix::libc::O_NOFOLLOW)
+        .open(path)
+        .wrap_err_with(|| format!("failed to open {description}: {}", path.display()))?;
+    file.set_permissions(fs::Permissions::from_mode(0o600))
+        .wrap_err_with(|| format!("failed to secure {description}: {}", path.display()))?;
+    file.set_len(0)
+        .wrap_err_with(|| format!("failed to truncate {description}: {}", path.display()))?;
+    file.write_all(contents.as_bytes())
+        .wrap_err_with(|| format!("failed to write {description}: {}", path.display()))?;
+    file.sync_all()
+        .wrap_err_with(|| format!("failed to sync {description}: {}", path.display()))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::config::types::{GlobalConfig, InstallationMode};
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+
+    use crate::config::types::{GlobalConfig, InstallationMode, UserConfig};
 
     #[test]
     fn test_load_direct_format() {
@@ -116,5 +229,94 @@ mod tests {
         );
         assert_eq!(loaded.pool_name.as_deref(), Some("roundtrip"));
         assert_eq!(loaded.hostname.as_deref(), Some("testhost"));
+    }
+
+    #[test]
+    fn saved_config_omits_all_passwords_and_is_private() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let cfg = GlobalConfig {
+            zfs_encryption_password: Some("pool-secret".into()),
+            root_password: Some("root-secret".into()),
+            users: Some(vec![UserConfig {
+                username: "alice".into(),
+                password: Some("user-secret".into()),
+                sudo: true,
+                shell: None,
+                groups: None,
+                ssh_authorized_keys: Vec::new(),
+                autologin: false,
+            }]),
+            ..Default::default()
+        };
+
+        fs::write(&path, "old-secret-that-must-be-removed").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        cfg.save_to_file(&path).unwrap();
+
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(!content.contains("old-secret-that-must-be-removed"));
+        assert!(!content.contains("pool-secret"));
+        assert!(!content.contains("root-secret"));
+        assert!(!content.contains("user-secret"));
+        assert_eq!(
+            fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    #[test]
+    fn secrets_file_roundtrip_restores_passwords() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secrets.json");
+        let cfg = GlobalConfig {
+            zfs_encryption_password: Some("pool-secret".into()),
+            root_password: Some("root-secret".into()),
+            users: Some(vec![UserConfig {
+                username: "alice".into(),
+                password: Some("user-secret".into()),
+                sudo: true,
+                shell: None,
+                groups: None,
+                ssh_authorized_keys: Vec::new(),
+                autologin: false,
+            }]),
+            ..Default::default()
+        };
+
+        cfg.save_secrets_to_file(&path).unwrap();
+        let mut redacted = cfg.clone();
+        redacted.zfs_encryption_password = None;
+        redacted.root_password = None;
+        redacted.users.as_mut().unwrap()[0].password = None;
+        redacted.apply_secrets_from_file(&path).unwrap();
+
+        assert_eq!(
+            redacted.zfs_encryption_password.as_deref(),
+            Some("pool-secret")
+        );
+        assert_eq!(redacted.root_password.as_deref(), Some("root-secret"));
+        assert_eq!(
+            redacted.users.unwrap()[0].password.as_deref(),
+            Some("user-secret")
+        );
+        assert_eq!(
+            fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    #[test]
+    fn save_refuses_to_follow_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let victim = dir.path().join("victim.json");
+        let link = dir.path().join("config.json");
+        fs::write(&victim, "do not overwrite").unwrap();
+        std::os::unix::fs::symlink(&victim, &link).unwrap();
+
+        let result = GlobalConfig::default().save_to_file(&link);
+
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(victim).unwrap(), "do not overwrite");
     }
 }
