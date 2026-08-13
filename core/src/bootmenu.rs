@@ -125,6 +125,9 @@ pub async fn install_and_generate_zbm(
         download_config,
     )
     .await?;
+    if cancel.is_cancelled() {
+        color_eyre::eyre::bail!("installation cancelled");
+    }
 
     // 2-5. Sync operations: config, hooks, generate-zbm, copy EFI
     let r = runner;

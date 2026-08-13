@@ -1,0 +1,15 @@
+import { DemoPool, DemoDataset } from "../types.slint";
+
+export global DemoState {
+    in property <bool> enabled: false;
+    in-out property <bool> popup-visible: false;
+    in property <bool> busy: false;
+    in property <string> status: "";
+    in property <[DemoPool]> pools;
+    in property <[DemoDataset]> datasets;
+
+    callback refresh();
+    callback import-readonly(string);
+    callback export-pool(string);
+    callback select-pool(string);
+}

@@ -311,6 +311,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "zfskit",
  "zxcvbn",
 ]
 

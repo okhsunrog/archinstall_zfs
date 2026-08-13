@@ -4,12 +4,14 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::thread;
 
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use archinstall_zfs_core::config::types::GlobalConfig;
 use archinstall_zfs_core::system::async_download::{PackageProgress, PackageState};
+use tokio_util::sync::CancellationToken;
 
 use crate::format::{format_duration, format_speed, truncate_str};
 use crate::install;
@@ -18,11 +20,29 @@ use crate::ui::{App, DownloadInfo, InstallState, LogMessage, WizardState};
 
 const MAX_LOG_LINES: usize = 2000;
 
-pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
+pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>, demo: bool) {
+    let active_cancel = Arc::new(Mutex::new(None::<CancellationToken>));
+
+    let weak = app.as_weak();
+    let cancel_slot = active_cancel.clone();
+    app.on_cancel_requested(move || {
+        let Some(app) = weak.upgrade() else { return };
+        if let Some(token) = cancel_slot.lock().unwrap().as_ref() {
+            token.cancel();
+            app.global::<InstallState>().set_state(4);
+        }
+    });
+
     let weak = app.as_weak();
     let cfg = config.clone();
+    let cancel_slot = active_cancel;
     app.on_install_requested(move || {
         let Some(app) = weak.upgrade() else { return };
+        if !installation_allowed(demo) {
+            app.global::<WizardState>()
+                .set_status_text("Installation is disabled in safe demo mode".into());
+            return;
+        }
         let c = cfg.borrow().clone();
 
         let errors = c.validate_for_install();
@@ -44,8 +64,14 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
         let download_tx = Arc::new(download_tx);
         spawn_download_pump(&app, download_rx);
 
-        spawn_install_thread(&app, c, log_tx, download_tx);
+        let cancel = CancellationToken::new();
+        *cancel_slot.lock().unwrap() = Some(cancel.clone());
+        spawn_install_thread(&app, c, log_tx, download_tx, cancel, cancel_slot.clone());
     });
+}
+
+fn installation_allowed(demo: bool) -> bool {
+    !demo
 }
 
 fn spawn_log_pump(app: &App, log_rx: crossbeam_channel::Receiver<(String, i32)>) {
@@ -226,6 +252,8 @@ fn spawn_install_thread(
     config: GlobalConfig,
     log_tx: crossbeam_channel::Sender<(String, i32)>,
     download_tx: Arc<tokio::sync::watch::Sender<PackageProgress>>,
+    cancel: CancellationToken,
+    cancel_slot: Arc<Mutex<Option<CancellationToken>>>,
 ) {
     let weak = app.as_weak();
     tokio::task::spawn_blocking(move || {
@@ -258,11 +286,29 @@ fn spawn_install_thread(
 
         let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
             Arc::new(archinstall_zfs_core::system::cmd::RealRunner);
-        let result = install::run_install(runner, &config, Some(download_tx));
+        let result = install::run_install(runner, &config, cancel.clone(), Some(download_tx));
 
-        let state = if result.is_ok() { 2 } else { 3 };
+        let state = if result.is_ok() {
+            2
+        } else if cancel.is_cancelled() {
+            5
+        } else {
+            3
+        };
+        *cancel_slot.lock().unwrap() = None;
         let _ = weak.upgrade_in_event_loop(move |app| {
             app.global::<InstallState>().set_state(state);
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::installation_allowed;
+
+    #[test]
+    fn safe_demo_cannot_start_installation() {
+        assert!(!installation_allowed(true));
+        assert!(installation_allowed(false));
+    }
 }

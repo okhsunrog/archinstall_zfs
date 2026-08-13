@@ -41,8 +41,8 @@ impl KernelScan {
     }
 }
 
-pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_scan: &KernelScan) {
-    run_initial_checks(app, config, kernel_scan);
+pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_scan: &KernelScan, demo: bool) {
+    run_initial_checks(app, config, kernel_scan, demo);
 
     let weak = app.as_weak();
     let cfg = config.clone();
@@ -52,7 +52,8 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_scan: &Kernel
         let net = archinstall_zfs_core::system::net::check_internet();
         app.global::<WelcomeState>().set_net_ok(net);
         if net {
-            if !app.global::<WelcomeState>().get_zfs_ok()
+            if !demo
+                && !app.global::<WelcomeState>().get_zfs_ok()
                 && !app.global::<WelcomeState>().get_zfs_installing()
             {
                 start_zfs_init(&app, &cfg.borrow());
@@ -64,13 +65,24 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_scan: &Kernel
     });
 }
 
-fn run_initial_checks(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_scan: &KernelScan) {
+fn run_initial_checks(
+    app: &App,
+    config: &Rc<RefCell<GlobalConfig>>,
+    kernel_scan: &KernelScan,
+    demo: bool,
+) {
     let net = archinstall_zfs_core::system::net::check_internet();
     let uefi = archinstall_zfs_core::system::sysinfo::has_uefi();
-    let zfs_mod = archinstall_zfs_core::zfs_setup::check_zfs_module(
+    let mut zfs_mod = archinstall_zfs_core::zfs_setup::check_zfs_module(
         &archinstall_zfs_core::system::cmd::RealRunner,
     )
     .unwrap_or(false);
+    if demo && !zfs_mod {
+        zfs_mod = archinstall_zfs_core::zfs_setup::load_zfs_module(
+            &archinstall_zfs_core::system::cmd::RealRunner,
+        )
+        .unwrap_or(false);
+    }
     let zfs_utils = archinstall_zfs_core::zfs_setup::check_zfs_utils(
         &archinstall_zfs_core::system::cmd::RealRunner,
     )
@@ -83,7 +95,7 @@ fn run_initial_checks(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_scan
     welcome.set_zfs_ok(zfs_mod && zfs_utils);
 
     if net {
-        if !(zfs_mod && zfs_utils) {
+        if !demo && !(zfs_mod && zfs_utils) {
             start_zfs_init(app, &config.borrow());
         }
         start_kernel_scan(kernel_scan);
