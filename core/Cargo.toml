@@ -17,7 +17,7 @@ lzma-rs = "0.3.0"
 nix = { workspace = true, features = ["fs", "mount", "process", "signal"] }
 nmrs = { workspace = true, optional = true }
 pacmanconf = "3.1.0"
-zfskit = "0.2.0"
+zfskit = "0.2.1"
 raur = { version = "8.0.0", default-features = false, features = ["async", "reqwest", "rusttls-tls"] }
 regex = "1.13.1"
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "stream"] }

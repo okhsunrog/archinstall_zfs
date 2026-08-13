@@ -218,11 +218,13 @@ fn base_dataset_props(
             let mut p = crate::zfs_keyfile::dataset_encryption_properties(key_path);
             p.push(("mountpoint", "none".to_string()));
             p.push(("compression", compression.to_string()));
+            p.push(("overlay", "off".to_string()));
             p
         }
         _ => vec![
             ("mountpoint", "none".to_string()),
             ("compression", compression.to_string()),
+            ("overlay", "off".to_string()),
         ],
     }
 }
@@ -313,6 +315,18 @@ mod tests {
     use zfskit::{Cmd, RecordingRunner, Zfs};
 
     use super::*;
+
+    #[test]
+    fn base_dataset_disables_overlay_mounts() {
+        for encryption in [
+            ZfsEncryptionMode::None,
+            ZfsEncryptionMode::Pool,
+            ZfsEncryptionMode::Dataset,
+        ] {
+            let props = base_dataset_props(encryption, Path::new("/etc/zfs/zroot.key"), "zstd");
+            assert!(props.contains(&("overlay", "off".to_string())));
+        }
+    }
 
     #[tokio::test]
     async fn pool_encryption_loads_pool_key_before_mount() {
