@@ -31,7 +31,9 @@ pub fn default_datasets() -> Vec<DatasetConfig> {
 }
 
 fn properties_to_opts(props: &[(&str, &str)]) -> CreateOptions {
-    CreateOptions::new().properties(props.iter().map(|(k, v)| (k.to_string(), v.to_string())))
+    CreateOptions::new()
+        .no_mount()
+        .properties(props.iter().map(|(k, v)| (k.to_string(), v.to_string())))
 }
 
 pub async fn create_dataset(
@@ -105,7 +107,7 @@ pub async fn mount_datasets_ordered(
     zfs: &zfskit::Zfs,
     pool_name: &str,
     prefix: &str,
-    _datasets: &[DatasetConfig],
+    datasets: &[DatasetConfig],
 ) -> Result<()> {
     // Mount root dataset first (canmount=noauto)
     let root_ds = format!("{pool_name}/{prefix}/root");
@@ -113,12 +115,17 @@ pub async fn mount_datasets_ordered(
         .mount(&MountOptions::default())
         .await?;
 
-    // Recursively mount all child datasets; fall back to mount -a if -R fails
-    // (older or stripped-down ZFS builds occasionally lack -R).
-    let base_ds = format!("{pool_name}/{prefix}");
-    let recursive = MountOptions { recursive: true };
-    if zfs.dataset(&base_ds)?.mount(&recursive).await.is_err() {
-        let _ = zfs.mount_all().await;
+    let mut children: Vec<&DatasetConfig> = datasets
+        .iter()
+        .filter(|dataset| dataset.name != "root")
+        .collect();
+    children.sort_by_key(|dataset| dataset.name.matches('/').count());
+
+    for dataset in children {
+        let full_name = format!("{pool_name}/{prefix}/{}", dataset.name);
+        zfs.dataset(&full_name)?
+            .mount(&MountOptions::default())
+            .await?;
     }
 
     Ok(())
@@ -166,6 +173,7 @@ mod tests {
             .record(
                 Cmd::new("zfs").args([
                     "create",
+                    "-u",
                     "-o",
                     "mountpoint=/",
                     "-o",
@@ -177,19 +185,31 @@ mod tests {
                 0,
             )
             .record(
-                Cmd::new("zfs").args(["create", "-o", "mountpoint=none", "pool/arch0/data"]),
+                Cmd::new("zfs").args(["create", "-u", "-o", "mountpoint=none", "pool/arch0/data"]),
                 vec![],
                 vec![],
                 0,
             )
             .record(
-                Cmd::new("zfs").args(["create", "-o", "mountpoint=/home", "pool/arch0/data/home"]),
+                Cmd::new("zfs").args([
+                    "create",
+                    "-u",
+                    "-o",
+                    "mountpoint=/home",
+                    "pool/arch0/data/home",
+                ]),
                 vec![],
                 vec![],
                 0,
             )
             .record(
-                Cmd::new("zfs").args(["create", "-o", "mountpoint=/root", "pool/arch0/data/root"]),
+                Cmd::new("zfs").args([
+                    "create",
+                    "-u",
+                    "-o",
+                    "mountpoint=/root",
+                    "pool/arch0/data/root",
+                ]),
                 vec![],
                 vec![],
                 0,
@@ -199,5 +219,76 @@ mod tests {
         create_child_datasets(&zfs, "pool", "arch0", &datasets)
             .await
             .expect("create_child_datasets succeeds");
+    }
+
+    #[tokio::test]
+    async fn test_mount_datasets_mounts_only_selected_be() {
+        let datasets = default_datasets();
+        let runner = RecordingRunner::new()
+            .record(
+                Cmd::new("zfs").args(["mount", "pool/arch0/root"]),
+                vec![],
+                vec![],
+                0,
+            )
+            .record(
+                Cmd::new("zfs").args(["mount", "pool/arch0/vm"]),
+                vec![],
+                vec![],
+                0,
+            )
+            .record(
+                Cmd::new("zfs").args(["mount", "pool/arch0/data/home"]),
+                vec![],
+                vec![],
+                0,
+            )
+            .record(
+                Cmd::new("zfs").args(["mount", "pool/arch0/data/root"]),
+                vec![],
+                vec![],
+                0,
+            );
+
+        let zfs = Zfs::with_runner(runner);
+        mount_datasets_ordered(&zfs, "pool", "arch0", &datasets)
+            .await
+            .expect("selected boot environment mounts");
+    }
+
+    #[tokio::test]
+    async fn test_mount_datasets_propagates_nonempty_mountpoint_error() {
+        let datasets = vec![
+            DatasetConfig {
+                name: "root".to_string(),
+                properties: vec![
+                    ("mountpoint".to_string(), "/".to_string()),
+                    ("canmount".to_string(), "noauto".to_string()),
+                ],
+            },
+            DatasetConfig {
+                name: "data/root".to_string(),
+                properties: vec![("mountpoint".to_string(), "/root".to_string())],
+            },
+        ];
+        let runner = RecordingRunner::new()
+            .record(
+                Cmd::new("zfs").args(["mount", "pool/arch0/root"]),
+                vec![],
+                vec![],
+                0,
+            )
+            .record(
+                Cmd::new("zfs").args(["mount", "pool/arch0/data/root"]),
+                vec![],
+                b"cannot mount '/root': directory is not empty\n".to_vec(),
+                1,
+            );
+
+        let zfs = Zfs::with_runner(runner);
+        let error = mount_datasets_ordered(&zfs, "pool", "arch0", &datasets)
+            .await
+            .expect_err("non-empty mountpoint must stop installation");
+        assert!(error.to_string().contains("directory is not empty"));
     }
 }

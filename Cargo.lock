@@ -8345,9 +8345,9 @@ dependencies = [
 
 [[package]]
 name = "zfskit"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c151d75d62ac48d7efddc512d1670ab821acea68335f2c86eab3747be81b2d9"
+checksum = "bf812774e40b666bd61d87f326f7a160ea4be2727b74bc28bbcd50fdd7b4cb83"
 dependencies = [
  "async-trait",
  "regex",
