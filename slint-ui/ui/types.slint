@@ -100,6 +100,18 @@ export struct DownloadInfo {
     state: int,
 }
 
+export struct DemoPool {
+    name: string,
+    state: string,
+    imported: bool,
+    owned: bool,
+}
+
+export struct DemoDataset {
+    name: string,
+    kind: string,
+}
+
 // ── WiFi types ──────────────────────────────────────────────────────────────
 
 // Security mode of a discovered or known network. Mirrors the Rust

@@ -66,6 +66,7 @@ impl Installer {
         if !errors.is_empty() {
             bail!("Config validation failed:\n  {}", errors.join("\n  "));
         }
+        self.ensure_not_cancelled()?;
 
         // Phase 4: install base system via libalpm
         tracing::info!("Phase 4: Installing base system...");
@@ -78,6 +79,7 @@ impl Installer {
             self.download_progress_tx.clone(),
         )?;
         self._target_mounts = Some(target_mounts);
+        self.ensure_not_cancelled()?;
 
         // Create a reusable AlpmContext for all subsequent package installs.
         // The target now has pacman.conf, keyring, and mirrorlist from finalize_target().
@@ -92,16 +94,19 @@ impl Installer {
         )?;
         ctx.sync_databases(false)?;
         self.alpm_ctx = Some(ctx);
+        self.ensure_not_cancelled()?;
 
         // Phase 5: System config
         tracing::info!("Phase 5: Configuring system...");
         tracing::info!(target: "metrics", event = "phase_start", num = 5u32, name = "Configuring system");
         self.configure_system()?;
+        self.ensure_not_cancelled()?;
 
         // Phase 6: archzfs repo on target + ZFS packages
         tracing::info!("Phase 6: Installing ZFS packages on target...");
         tracing::info!(target: "metrics", event = "phase_start", num = 6u32, name = "Installing ZFS packages");
         self.install_zfs_on_target()?;
+        self.ensure_not_cancelled()?;
 
         // The encrypted pool key must exist in the target before either
         // initramfs backend tries to embed it in the image.
@@ -111,32 +116,44 @@ impl Installer {
         tracing::info!("Phase 7: Generating initramfs...");
         tracing::info!(target: "metrics", event = "phase_start", num = 7u32, name = "Generating initramfs");
         self.generate_initramfs()?;
+        self.ensure_not_cancelled()?;
 
         // Phase 8: Users + authentication
         tracing::info!("Phase 8: Configuring users...");
         tracing::info!(target: "metrics", event = "phase_start", num = 8u32, name = "Configuring users");
         self.configure_users()?;
+        self.ensure_not_cancelled()?;
 
         // Phase 9: Profile packages + services
         tracing::info!("Phase 9: Installing profile packages...");
         tracing::info!(target: "metrics", event = "phase_start", num = 9u32, name = "Installing profile packages");
         self.install_profile()?;
+        self.ensure_not_cancelled()?;
 
         // Phase 10: Additional packages + AUR
         tracing::info!("Phase 10: Installing additional packages...");
         tracing::info!(target: "metrics", event = "phase_start", num = 10u32, name = "Installing additional packages");
         self.install_additional_packages()?;
+        self.ensure_not_cancelled()?;
 
         // Phase 11: Swap configuration
         tracing::info!("Phase 11: Configuring swap...");
         tracing::info!(target: "metrics", event = "phase_start", num = 11u32, name = "Configuring swap");
         self.configure_swap()?;
+        self.ensure_not_cancelled()?;
 
         // Phase 12: ZFS services + genfstab + misc files
         tracing::info!("Phase 12: Finalizing ZFS configuration...");
         tracing::info!(target: "metrics", event = "phase_start", num = 12u32, name = "Finalizing ZFS configuration");
         self.finalize_zfs()?;
 
+        Ok(())
+    }
+
+    fn ensure_not_cancelled(&self) -> Result<()> {
+        if self.cancel.is_cancelled() {
+            bail!("installation cancelled");
+        }
         Ok(())
     }
 
@@ -626,6 +643,22 @@ mod tests {
                 .to_string()
                 .contains("validation failed")
         );
+    }
+
+    #[test]
+    fn cancelled_installer_stops_before_first_operation() {
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let runner: Arc<dyn CommandRunner> = Arc::new(RecordingRunner::new(vec![]));
+        let installer = Installer::new(
+            runner,
+            GlobalConfig::default(),
+            Path::new("/mnt"),
+            cancel,
+            None,
+        );
+
+        assert!(installer.ensure_not_cancelled().is_err());
     }
 
     #[test]

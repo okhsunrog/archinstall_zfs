@@ -11,7 +11,27 @@ import { Icon } from "../components/icon.slint";
 import { SignalBars } from "../components/signal-bars.slint";
 
 export component WelcomeView inherits Rectangle {
+    callback quit-requested();
     background: Theme.c.base;
+
+    Rectangle {
+        x: 16px;
+        y: root.height - self.height - 16px;
+        width: 88px;
+        height: 36px;
+        background: quit-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
+        border-radius: Theme.radius-sm;
+        quit-ta := TouchArea {
+            clicked => { root.quit-requested(); }
+            mouse-cursor: pointer;
+        }
+        Text {
+            text: "Quit";
+            color: Theme.c.text;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
 
     // ── Bottom-right connectivity widget ───────────────────────────────
     // Absolutely-positioned pill in the corner — canonical spot for a

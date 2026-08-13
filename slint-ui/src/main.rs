@@ -45,12 +45,18 @@ struct Cli {
     /// physical DPI; on desktop builds the OS value is used unless overridden.
     #[arg(long, global = true)]
     ui_scale: Option<f32>,
+
+    /// Run the full UI and hardware backends while disabling installation and
+    /// destructive storage operations.
+    #[arg(long, global = true)]
+    demo: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
     let cli = Cli::parse();
+    let demo = cli.demo || kernel_cmdline_enables_demo();
 
     if let Some(scale) = cli.ui_scale
         && scale > 0.0
@@ -73,6 +79,9 @@ async fn main() -> Result<()> {
 
     if cli.silent {
         use color_eyre::eyre::bail;
+        if demo {
+            bail!("--silent is unavailable in safe demo mode");
+        }
         if cli.config.is_none() {
             bail!("--silent requires --config");
         }
@@ -82,13 +91,18 @@ async fn main() -> Result<()> {
         }
         let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
             Arc::new(archinstall_zfs_core::system::cmd::RealRunner);
-        install::run_install(runner, &config, None)
+        install::run_install(
+            runner,
+            &config,
+            tokio_util::sync::CancellationToken::new(),
+            None,
+        )
     } else {
-        run_gui(config)
+        run_gui(config, demo)
     }
 }
 
-fn run_gui(config: GlobalConfig) -> Result<()> {
+fn run_gui(config: GlobalConfig, demo: bool) -> Result<()> {
     let app = App::new()?;
     let config = Rc::new(RefCell::new(config));
     let kernel_scan = controllers::welcome::KernelScan::new();
@@ -99,13 +113,45 @@ fn run_gui(config: GlobalConfig) -> Result<()> {
 
     refresh_items(&app, &config.borrow());
 
-    controllers::welcome::setup(&app, &config, &kernel_scan);
+    controllers::welcome::setup(&app, &config, &kernel_scan, demo);
     controllers::lists::setup(&app, &config, &models);
     controllers::wizard::setup(&app, &config, &kernel_scan);
-    controllers::install::setup(&app, &config);
+    controllers::install::setup(&app, &config, demo);
     controllers::wifi::setup(&app);
     controllers::quit::setup(&app);
 
+    let demo_session = demo.then(controllers::demo::DemoSession::new);
+    if let Some(session) = &demo_session {
+        controllers::demo::setup(&app, &config, session);
+    }
+
     app.run()?;
+    if let Some(session) = demo_session {
+        session.export_all_blocking();
+    }
     Ok(())
+}
+
+fn kernel_cmdline_enables_demo() -> bool {
+    cmdline_enables_demo(&std::fs::read_to_string("/proc/cmdline").unwrap_or_default())
+}
+
+fn cmdline_enables_demo(cmdline: &str) -> bool {
+    cmdline
+        .split_whitespace()
+        .any(|arg| matches!(arg, "archinstall_zfs.demo" | "archinstall_zfs.demo=1"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cmdline_enables_demo;
+
+    #[test]
+    fn demo_kernel_argument_is_detected() {
+        assert!(cmdline_enables_demo(
+            "quiet archinstall_zfs.demo=1 console=tty1"
+        ));
+        assert!(cmdline_enables_demo("archinstall_zfs.demo"));
+        assert!(!cmdline_enables_demo("archinstall_zfs.demo=0"));
+    }
 }

@@ -5,6 +5,7 @@ import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../styling.slint";
 import { WizardState } from "../state/wizard-state.slint";
 import { PopupState } from "../state/popup-state.slint";
+import { DemoState } from "../state/demo-state.slint";
 import { SidebarItem } from "../components/sidebar-item.slint";
 import { ConfigItemRow } from "../components/config-item.slint";
 import { StyledButton } from "../components/styled-button.slint";
@@ -185,6 +186,15 @@ export component WizardView inherits Rectangle {
                 clicked => { root.quit-requested(); }
             }
 
+            if DemoState.enabled: StyledButton {
+                label: "Inspect ZFS";
+                style: Theme.button-default;
+                clicked => {
+                    DemoState.popup-visible = true;
+                    DemoState.refresh();
+                }
+            }
+
             // Back button (not on first wizard step)
             if WizardState.current-step > 1: StyledButton {
                 label: "\u{25c2} Back";
@@ -212,8 +222,9 @@ export component WizardView inherits Rectangle {
             // Install button (Review step only) — takes the Next slot so the
             // user never needs to scroll the content card to start the install.
             if WizardState.current-step == WizardState.total-steps - 1: StyledButton {
-                label: "Install \u{25b8}";
+                label: DemoState.enabled ? "Installation disabled" : "Install \u{25b8}";
                 style: Theme.button-primary;
+                enabled: !DemoState.enabled;
                 clicked => { root.install-requested(); }
             }
         }
