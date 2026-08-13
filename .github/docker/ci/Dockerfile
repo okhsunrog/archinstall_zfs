@@ -1,4 +1,4 @@
-FROM archlinux@sha256:345a872f6c95e082d4b8c050af637eebb57402c6e2177b411c3acf7df84eb33b
+FROM archlinux@sha256:b0deabeb3d283da2c7f7dbf0eea051b7b2cd0554e0b737cc457fd21683bdcdd1
 
 # Rust build deps: base-devel, pkgconf, clang for C-FFI crates.
 # UI libs: libxkbcommon/libinput/libdrm/freetype2/fontconfig/ttf-dejavu for the slint UI.
