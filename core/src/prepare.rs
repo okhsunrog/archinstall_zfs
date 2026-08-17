@@ -48,10 +48,11 @@ pub fn prepare_disk(
                 _ => None,
             };
             let layout = crate::disk::partition::create_partitions(runner, disk, swap_size)?;
-            let parts = crate::disk::partition::wait_for_partitions(disk, &layout);
+            let parts = crate::disk::partition::wait_for_partitions(disk, &layout)?;
             let efi = parts[0].clone();
             let zfs = parts[1].clone();
             let swap = parts.get(2).cloned();
+            crate::disk::partition::format_efi(runner, &efi)?;
             Ok(PreparedPartitions {
                 efi,
                 zfs: Some(zfs),
