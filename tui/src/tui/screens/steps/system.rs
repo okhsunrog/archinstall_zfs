@@ -1,4 +1,4 @@
-use archinstall_zfs_core::config::edit::{ChoiceSetting, TextSetting};
+use archinstall_zfs_core::config::edit::{ChoiceSetting, EditorSetting, TextSetting};
 use archinstall_zfs_core::config::types::GlobalConfig;
 
 use super::{MenuItem, MenuKind, radio_group};
@@ -26,19 +26,19 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
             kind: MenuKind::Text,
         },
         MenuItem {
-            key: TextSetting::Locale.as_str(),
+            key: EditorSetting::Locale.as_str(),
             label: "Locale",
             value: config.locale.clone().unwrap_or("Not set".into()),
             kind: MenuKind::Custom,
         },
         MenuItem {
-            key: TextSetting::Timezone.as_str(),
+            key: EditorSetting::Timezone.as_str(),
             label: "Timezone",
             value: config.timezone.clone().unwrap_or("Not set".into()),
             kind: MenuKind::Custom,
         },
         MenuItem {
-            key: "keyboard",
+            key: EditorSetting::Keyboard.as_str(),
             label: "Keyboard layout",
             value: config.keyboard_layout.clone(),
             kind: MenuKind::Custom,

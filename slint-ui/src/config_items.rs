@@ -5,7 +5,9 @@ use slint::SharedString;
 use std::path::PathBuf;
 
 use archinstall_zfs_core::config::choices::Choice;
-use archinstall_zfs_core::config::edit::{ChoiceSetting, DeviceSetting, TextSetting};
+use archinstall_zfs_core::config::edit::{
+    ChoiceSetting, DeviceSetting, EditorSetting, TextSetting,
+};
 use archinstall_zfs_core::config::types::{
     CompressionAlgo, GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode,
 };
@@ -278,7 +280,7 @@ fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         section_header("Locale"),
         ci_opt("locale", "Locale", c.locale.as_deref(), ItemType::Select),
         ci_opt(
-            TextSetting::Timezone.as_str(),
+            EditorSetting::Timezone.as_str(),
             "Timezone",
             c.timezone.as_deref(),
             ItemType::Select,

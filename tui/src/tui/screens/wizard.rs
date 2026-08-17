@@ -6,7 +6,9 @@ use ratatui::widgets::{
     Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
 
-use archinstall_zfs_core::config::edit::{DeviceSetting, apply_device};
+use archinstall_zfs_core::config::edit::{
+    DeviceSetting, EditorSetting, ToggleSetting, apply_device, apply_toggle,
+};
 use archinstall_zfs_core::config::types::GlobalConfig;
 
 use crate::tui::Action;
@@ -281,104 +283,115 @@ impl Wizard {
                 "quit" => return Ok(Action::Quit),
                 _ => {}
             },
-            MenuKind::Custom => match key {
-                "timezone" => {
-                    if let Some(tz) = pickers::pick_timezone(terminal)? {
-                        self.config.timezone = Some(tz);
+            MenuKind::Custom => {
+                // Device rows open a picker and hand the chosen path to the
+                // shared apply; every other row opens its own editor.
+                if let Some(setting) = DeviceSetting::parse(key) {
+                    let picked = match setting {
+                        DeviceSetting::Disk => pickers::pick_disk(terminal)?,
+                        DeviceSetting::EfiPartition => {
+                            pickers::pick_partition(terminal, "EFI partition")?
+                        }
+                        DeviceSetting::ZfsPartition => {
+                            pickers::pick_partition(terminal, "ZFS partition")?
+                        }
+                        DeviceSetting::SwapPartition => {
+                            pickers::pick_partition(terminal, "Swap partition")?
+                        }
+                    };
+                    if let Some(path) = picked {
+                        apply_device(&mut self.config, setting, &path);
                     }
+                    return Ok(Action::Continue);
                 }
-                "locale" => {
-                    let current = self.config.locale.as_deref().unwrap_or("");
-                    if let Some(loc) = pickers::pick_locale(terminal, current)? {
-                        self.config.locale = Some(loc);
+
+                let Some(setting) = EditorSetting::parse(key) else {
+                    tracing::warn!(key, "row names no known setting");
+                    return Ok(Action::Continue);
+                };
+
+                match setting {
+                    EditorSetting::Timezone => {
+                        if let Some(tz) = pickers::pick_timezone(terminal)? {
+                            self.config.timezone = Some(tz);
+                        }
                     }
-                }
-                "keyboard" => {
-                    if let Some(km) =
-                        pickers::pick_keyboard(terminal, &self.config.keyboard_layout)?
-                    {
-                        self.config.keyboard_layout = km;
+                    EditorSetting::Locale => {
+                        let current = self.config.locale.as_deref().unwrap_or("");
+                        if let Some(loc) = pickers::pick_locale(terminal, current)? {
+                            self.config.locale = Some(loc);
+                        }
                     }
-                }
-                "disk" => {
-                    if let Some(path) = pickers::pick_disk(terminal)? {
-                        apply_device(&mut self.config, DeviceSetting::Disk, &path);
+                    EditorSetting::Keyboard => {
+                        if let Some(km) =
+                            pickers::pick_keyboard(terminal, &self.config.keyboard_layout)?
+                        {
+                            self.config.keyboard_layout = km;
+                        }
                     }
-                }
-                "efi_partition" => {
-                    if let Some(path) = pickers::pick_partition(terminal, "EFI partition")? {
-                        apply_device(&mut self.config, DeviceSetting::EfiPartition, &path);
+                    EditorSetting::Kernel => {
+                        if let Some((kernel, mode)) =
+                            pickers::pick_kernel(&self.config, terminal).await?
+                        {
+                            self.config.kernels = Some(vec![kernel]);
+                            self.config.zfs_module_mode = mode;
+                        }
                     }
-                }
-                "zfs_partition" => {
-                    if let Some(path) = pickers::pick_partition(terminal, "ZFS partition")? {
-                        apply_device(&mut self.config, DeviceSetting::ZfsPartition, &path);
+                    EditorSetting::Profile => {
+                        pickers::pick_profile(&mut self.config, terminal)?;
                     }
-                }
-                "swap_partition" => {
-                    if let Some(path) = pickers::pick_partition(terminal, "Swap partition")? {
-                        apply_device(&mut self.config, DeviceSetting::SwapPartition, &path);
+                    EditorSetting::DisplayManager => {
+                        let profile_default = self
+                            .config
+                            .profile_selection
+                            .as_ref()
+                            .and_then(|s| s.profile_def())
+                            .and_then(|p| p.default_display_manager());
+                        if let Some(result) =
+                            pickers::pick_display_manager(terminal, profile_default)?
+                            && let Some(sel) = self.config.profile_selection.as_mut()
+                        {
+                            sel.display_manager_override = result;
+                        }
                     }
-                }
-                "kernel" => {
-                    if let Some((kernel, mode)) =
-                        pickers::pick_kernel(&self.config, terminal).await?
-                    {
-                        self.config.kernels = Some(vec![kernel]);
-                        self.config.zfs_module_mode = mode;
+                    EditorSetting::GpuDriver => {
+                        let wayland_only = self
+                            .config
+                            .profile_selection
+                            .as_ref()
+                            .and_then(|s| s.profile_def())
+                            .map(|p| p.is_wayland_only())
+                            .unwrap_or(false);
+                        if let Some(driver) = pickers::pick_gpu_driver(terminal, wayland_only)? {
+                            self.config.gfx_driver = driver;
+                        }
                     }
-                }
-                "profile" => {
-                    pickers::pick_profile(&mut self.config, terminal)?;
-                }
-                "display_manager" => {
-                    let profile_default = self
-                        .config
-                        .profile_selection
-                        .as_ref()
-                        .and_then(|s| s.profile_def())
-                        .and_then(|p| p.default_display_manager());
-                    if let Some(result) = pickers::pick_display_manager(terminal, profile_default)?
-                        && let Some(sel) = self.config.profile_selection.as_mut()
-                    {
-                        sel.display_manager_override = result;
+                    EditorSetting::Users => {
+                        pickers::manage_users(&mut self.config, terminal)?;
                     }
-                }
-                "gpu_driver" => {
-                    let wayland_only = self
-                        .config
-                        .profile_selection
-                        .as_ref()
-                        .and_then(|s| s.profile_def())
-                        .map(|p| p.is_wayland_only())
-                        .unwrap_or(false);
-                    if let Some(driver) = pickers::pick_gpu_driver(terminal, wayland_only)? {
-                        self.config.gfx_driver = driver;
+                    EditorSetting::Packages => {
+                        if let Some(result) = super::package_picker::run_package_picker(
+                            terminal,
+                            &self.config.additional_packages,
+                            &self.config.aur_packages,
+                        )
+                        .await?
+                        {
+                            self.config.additional_packages = result.repo_packages;
+                            self.config.aur_packages = result.aur_packages;
+                        }
                     }
-                }
-                "users" => {
-                    pickers::manage_users(&mut self.config, terminal)?;
-                }
-                "packages" => {
-                    if let Some(result) = super::package_picker::run_package_picker(
-                        terminal,
-                        &self.config.additional_packages,
-                        &self.config.aur_packages,
-                    )
-                    .await?
-                    {
-                        self.config.additional_packages = result.repo_packages;
-                        self.config.aur_packages = result.aur_packages;
+                    EditorSetting::PoolName => {
+                        pickers::pick_existing_pool(&mut self.config, terminal).await?;
                     }
+                    // Offered by the graphical interface only.
+                    EditorSetting::OptionalPackages => {}
                 }
-                "pool_name" => {
-                    pickers::pick_existing_pool(&mut self.config, terminal).await?;
-                }
-                _ => {}
-            },
-            MenuKind::Toggle => {
-                pickers::apply_toggle(&mut self.config, key);
             }
+            MenuKind::Toggle => match ToggleSetting::parse(key) {
+                Some(setting) => apply_toggle(&mut self.config, setting),
+                None => tracing::warn!(key, "toggle names no known setting"),
+            },
             MenuKind::Select { options, current } => {
                 let label = item.label;
                 let result = run_select(terminal, label, options, *current)?;

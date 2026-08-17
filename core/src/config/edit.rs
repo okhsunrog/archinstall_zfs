@@ -92,8 +92,6 @@ settings! {
         PoolName => "pool_name",
         DatasetPrefix => "dataset_prefix",
         Hostname => "hostname",
-        Locale => "locale",
-        Timezone => "timezone",
         RootPassword => "root_password",
         EncryptionPassword => "encryption_password",
         SwapPartitionSize => "swap_partition_size",
@@ -101,6 +99,49 @@ settings! {
         AdditionalPackages => "additional_packages",
         AurPackages => "aur_packages",
         ExtraServices => "extra_services",
+    }
+}
+
+settings! {
+    /// A setting turned on and off in place.
+    ToggleSetting {
+        Ntp => "ntp",
+        Bluetooth => "bluetooth",
+        Zrepl => "zrepl",
+    }
+}
+
+settings! {
+    /// A setting edited through a dedicated picker rather than in the row.
+    ///
+    /// Identity only: what the picker looks like, and whether an interface
+    /// offers one at all, is that interface's business. Naming them here is
+    /// what lets both dispatch on a value the compiler checks instead of on a
+    /// string literal repeated in two crates.
+    EditorSetting {
+        Kernel => "kernel",
+        Profile => "profile",
+        OptionalPackages => "optional_packages",
+        GpuDriver => "gpu_driver",
+        DisplayManager => "display_manager",
+        Timezone => "timezone",
+        Locale => "locale",
+        Keyboard => "keyboard",
+        Users => "users",
+        Packages => "packages",
+        // Also a text row: in the mode that installs into an existing pool the
+        // terminal interface offers a picker instead of free text, and the row
+        // keeps its key either way.
+        PoolName => "pool_name",
+    }
+}
+
+/// Flip a setting that is on or off.
+pub fn apply_toggle(config: &mut GlobalConfig, setting: ToggleSetting) {
+    match setting {
+        ToggleSetting::Ntp => config.ntp = !config.ntp,
+        ToggleSetting::Bluetooth => config.bluetooth = !config.bluetooth,
+        ToggleSetting::Zrepl => config.zrepl_enabled = !config.zrepl_enabled,
     }
 }
 
@@ -199,8 +240,6 @@ pub fn apply_text(config: &mut GlobalConfig, setting: TextSetting, value: &str) 
     match setting {
         TextSetting::PoolName => config.pool_name = text,
         TextSetting::Hostname => config.hostname = text,
-        TextSetting::Locale => config.locale = text,
-        TextSetting::Timezone => config.timezone = text,
         TextSetting::RootPassword => config.root_password = text,
         TextSetting::EncryptionPassword => config.zfs_encryption_password = text,
         TextSetting::SwapPartitionSize => config.swap_partition_size = text,
@@ -373,6 +412,28 @@ mod tests {
         apply_text(&mut c, TextSetting::AdditionalPackages, "vim, git  htop,");
 
         assert_eq!(c.additional_packages, vec!["vim", "git", "htop"]);
+    }
+
+    #[test]
+    fn toggles_flip() {
+        let mut c = cfg();
+        let was = c.ntp;
+
+        apply_toggle(&mut c, ToggleSetting::Ntp);
+        assert_eq!(c.ntp, !was);
+
+        apply_toggle(&mut c, ToggleSetting::Ntp);
+        assert_eq!(c.ntp, was);
+    }
+
+    #[test]
+    fn each_toggle_moves_only_its_own_setting() {
+        let mut c = cfg();
+        apply_toggle(&mut c, ToggleSetting::Bluetooth);
+
+        assert!(c.bluetooth);
+        assert!(!c.zrepl_enabled);
+        assert!(c.ntp, "ntp defaults on and was not touched");
     }
 
     #[test]

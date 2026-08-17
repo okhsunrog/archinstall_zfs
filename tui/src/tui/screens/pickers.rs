@@ -576,15 +576,6 @@ pub fn manage_users(
 
 // ── Apply handlers ──────────────────────────────────
 
-pub fn apply_toggle(config: &mut GlobalConfig, key: &str) {
-    match key {
-        "ntp" => config.ntp = !config.ntp,
-        "bluetooth" => config.bluetooth = !config.bluetooth,
-        "zrepl" => config.zrepl_enabled = !config.zrepl_enabled,
-        _ => {}
-    }
-}
-
 pub fn apply_select(
     config: &mut GlobalConfig,
     key: &str,
