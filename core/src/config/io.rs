@@ -1,12 +1,11 @@
-use std::fs::{self, OpenOptions};
-use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::fs;
 use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use super::types::GlobalConfig;
+use crate::system::fs::write_file_with_mode;
 
 const ZFS_CONFIG_KEY: &str = "archinstall_zfs";
 
@@ -139,23 +138,7 @@ impl GlobalConfig {
 }
 
 fn write_private_file(path: &Path, contents: &str, description: &str) -> Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .mode(0o600)
-        .custom_flags(nix::libc::O_NOFOLLOW)
-        .open(path)
-        .wrap_err_with(|| format!("failed to open {description}: {}", path.display()))?;
-    file.set_permissions(fs::Permissions::from_mode(0o600))
-        .wrap_err_with(|| format!("failed to secure {description}: {}", path.display()))?;
-    file.set_len(0)
-        .wrap_err_with(|| format!("failed to truncate {description}: {}", path.display()))?;
-    file.write_all(contents.as_bytes())
-        .wrap_err_with(|| format!("failed to write {description}: {}", path.display()))?;
-    file.sync_all()
-        .wrap_err_with(|| format!("failed to sync {description}: {}", path.display()))?;
-    Ok(())
+    write_file_with_mode(path, contents.as_bytes(), 0o600, description)
 }
 
 #[cfg(test)]
