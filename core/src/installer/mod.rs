@@ -600,12 +600,15 @@ impl Installer {
         // genfstab
         fstab::generate_fstab(&*self.runner, &self.target, pool_name, prefix)?;
 
-        // Copy misc files (hostid, zfs cache)
+        // Copy misc files (hostid, zfs cache). The mountpoint the datasets are
+        // currently mounted under is the install target itself — it is what
+        // gets stripped from the cached mountpoints so they are correct once
+        // the system boots on its own root.
         crate::zfs_target_files::copy_misc_files(
             &*self.runner,
             &self.target,
             pool_name,
-            Path::new("/mnt"),
+            &self.target,
         )?;
 
         // zrepl
