@@ -399,7 +399,7 @@ impl InstallProgress {
                             );
                             y += 1;
                         }
-                        PackageState::Verifying { filename } => {
+                        PackageState::Verifying { filename, .. } => {
                             let name = truncate_filename(filename, 30);
                             let line = format!("  {} verifying...", name);
                             let line_area = Rect::new(inner.x, y, inner.width, 1);

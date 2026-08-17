@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Context, Result, bail};
@@ -61,14 +60,32 @@ pub enum PackageState {
     },
     Verifying {
         filename: String,
+        bytes: u64,
     },
     Done {
         filename: String,
+        bytes: u64,
     },
     Failed {
         filename: String,
         error: String,
     },
+}
+
+impl PackageState {
+    /// Bytes of this package that are on disk.
+    ///
+    /// Taken from the package's own state rather than accumulated as chunks
+    /// arrive: a download that fails partway and is retried against another
+    /// mirror would otherwise have its bytes counted once per attempt, and the
+    /// aggregate would climb past the total.
+    fn bytes_on_disk(&self) -> u64 {
+        match self {
+            Self::Downloading { downloaded, .. } => *downloaded,
+            Self::Verifying { bytes, .. } | Self::Done { bytes, .. } => *bytes,
+            Self::Queued | Self::Failed { .. } => 0,
+        }
+    }
 }
 
 /// Aggregate package progress, broadcast via `watch` channel.
@@ -230,10 +247,18 @@ pub async fn download_packages(
 /// Shared state for coordinating progress updates.
 struct SharedProgress {
     tx: Arc<watch::Sender<DownloadProgress>>,
-    downloaded_bytes: AtomicU64,
 }
 
 impl SharedProgress {
+    /// Record `state` for package `index` and recompute the aggregates.
+    ///
+    /// The counters are derived from the package vector instead of being
+    /// adjusted per transition. Enumerating transitions has to get every edge
+    /// right: a package already counted as cached (queued straight to done) was
+    /// missing from `completed`, and a failed SHA256 sends a package from
+    /// verifying back to downloading, which the deltas did not expect — the
+    /// following completion then subtracted from an `active_downloads` that had
+    /// already reached zero, underflowing the count.
     fn update_package(&self, index: usize, state: PackageState) {
         self.tx.send_modify(|progress| {
             let PackageProgress::Downloading {
@@ -247,37 +272,22 @@ impl SharedProgress {
             else {
                 return;
             };
-            // Update aggregate counters based on transition
-            match (&packages[index], &state) {
-                (PackageState::Queued, PackageState::Downloading { .. }) => {
-                    *active_downloads += 1;
-                }
-                (PackageState::Downloading { .. }, PackageState::Verifying { .. }) => {
-                    *active_downloads -= 1;
-                }
-                (PackageState::Downloading { .. }, PackageState::Done { .. }) => {
-                    *active_downloads -= 1;
-                    *completed += 1;
-                }
-                (PackageState::Downloading { .. }, PackageState::Failed { .. }) => {
-                    *active_downloads -= 1;
-                    *failed += 1;
-                }
-                (PackageState::Verifying { .. }, PackageState::Done { .. }) => {
-                    *completed += 1;
-                }
-                (PackageState::Verifying { .. }, PackageState::Failed { .. }) => {
-                    *failed += 1;
-                }
-                _ => {}
-            }
             packages[index] = state;
-            *downloaded_bytes = self.downloaded_bytes.load(Ordering::Relaxed);
-        });
-    }
 
-    fn add_bytes(&self, n: u64) {
-        self.downloaded_bytes.fetch_add(n, Ordering::Relaxed);
+            *active_downloads = packages
+                .iter()
+                .filter(|p| matches!(p, PackageState::Downloading { .. }))
+                .count();
+            *completed = packages
+                .iter()
+                .filter(|p| matches!(p, PackageState::Done { .. }))
+                .count();
+            *failed = packages
+                .iter()
+                .filter(|p| matches!(p, PackageState::Failed { .. }))
+                .count();
+            *downloaded_bytes = packages.iter().map(PackageState::bytes_on_disk).sum();
+        });
     }
 }
 
@@ -297,11 +307,12 @@ async fn run_downloads(
         "downloading {total_count} packages"
     );
 
-    let shared = Arc::new(SharedProgress {
-        tx,
-        downloaded_bytes: AtomicU64::new(0),
-    });
+    let shared = Arc::new(SharedProgress { tx });
 
+    // No overall request timeout on purpose: a kernel or firmware package is
+    // hundreds of megabytes and may legitimately take many minutes on a slow
+    // link. Stalls are caught by the per-chunk idle timeout instead, which
+    // distinguishes "slow" from "stopped".
     let client = reqwest::Client::builder()
         .user_agent("archinstall-zfs-rs")
         .connect_timeout(config.connect_timeout)
@@ -356,24 +367,25 @@ async fn download_single(
     shared: &SharedProgress,
 ) -> Result<()> {
     let dest = cache_dir.join(&task.filename);
+    let total_size = task.size.max(0) as u64;
 
     // Skip if already cached and valid
-    if dest.exists() && verify_sha256_sync(&dest, task.sha256.as_deref()) {
+    if is_cached_and_valid(&dest, task.sha256.as_deref()).await {
         tracing::debug!(file = %task.filename, "already cached, skipping");
+        let bytes = tokio::fs::metadata(&dest)
+            .await
+            .map(|meta| meta.len())
+            .unwrap_or(total_size);
         shared.update_package(
             index,
             PackageState::Done {
                 filename: task.filename.clone(),
+                bytes,
             },
         );
-        // Count cached bytes as already downloaded
-        if let Ok(meta) = std::fs::metadata(&dest) {
-            shared.add_bytes(meta.len());
-        }
         return Ok(());
     }
 
-    let total_size = task.size.max(0) as u64;
     let download_started = std::time::Instant::now();
 
     // Try each mirror
@@ -411,11 +423,12 @@ async fn download_single(
             )
             .await
             {
-                Ok(()) => {
+                Ok(bytes) => {
                     shared.update_package(
                         index,
                         PackageState::Done {
                             filename: task.filename.clone(),
+                            bytes,
                         },
                     );
                     let duration_ms = download_started.elapsed().as_millis() as u64;
@@ -474,7 +487,8 @@ async fn download_single(
     Err(error)
 }
 
-/// Download a file with progress reporting, resume support, and SHA256 verification.
+/// Download a file with progress reporting, resume support, and SHA256
+/// verification. Returns the number of bytes the finished file holds.
 #[expect(clippy::too_many_arguments)]
 async fn download_file_with_progress(
     client: &reqwest::Client,
@@ -483,13 +497,13 @@ async fn download_file_with_progress(
     total_size: u64,
     expected_sha256: Option<&str>,
     cancel: &CancellationToken,
-    _config: &DownloadConfig,
+    config: &DownloadConfig,
     index: usize,
     filename: &str,
     mirror: &str,
     attempt: u32,
     shared: &SharedProgress,
-) -> Result<()> {
+) -> Result<u64> {
     let part_path = part_file_path(dest);
 
     // Check for existing .part file for resume
@@ -562,7 +576,22 @@ async fn download_file_with_progress(
                 bail!("download cancelled");
             }
 
-            chunk = stream.next() => {
+            // A mirror that accepts the connection and then stops sending must
+            // not hold the installation open forever: connect_timeout does not
+            // cover an already-established transfer, so bound the wait for each
+            // chunk. The .part file is kept so the retry resumes from here.
+            chunk = tokio::time::timeout(config.idle_timeout, stream.next()) => {
+                let chunk = match chunk {
+                    Ok(chunk) => chunk,
+                    Err(_) => {
+                        drop(file);
+                        bail!(
+                            "no data from {mirror} for {:?} ({bytes_downloaded} of {total_size} bytes)",
+                            config.idle_timeout
+                        );
+                    }
+                };
+
                 match chunk {
                     Some(Ok(bytes)) => {
                         let len = bytes.len() as u64;
@@ -573,7 +602,6 @@ async fn download_file_with_progress(
                             .wrap_err("failed to write chunk")?;
 
                         bytes_downloaded += len;
-                        shared.add_bytes(len);
                         speed_tracker.record(len);
 
                         // Update progress state
@@ -606,6 +634,7 @@ async fn download_file_with_progress(
             index,
             PackageState::Verifying {
                 filename: filename.to_string(),
+                bytes: bytes_downloaded,
             },
         );
 
@@ -614,7 +643,7 @@ async fn download_file_with_progress(
             hex::encode(hasher.finalize())
         } else {
             // Resumed download — hash the whole file
-            verify_sha256_full(&part_path).await?
+            sha256_file_async(&part_path).await?
         };
 
         if actual != expected {
@@ -631,7 +660,7 @@ async fn download_file_with_progress(
         .await
         .wrap_err_with(|| format!("failed to rename to {}", dest.display()))?;
 
-    Ok(())
+    Ok(bytes_downloaded)
 }
 
 // ── Speed tracker ─────────────────────────────────────
@@ -684,28 +713,54 @@ fn part_file_path(dest: &Path) -> PathBuf {
     dest.with_file_name(name)
 }
 
-/// Synchronous SHA256 verification for checking already-cached files.
-fn verify_sha256_sync(path: &Path, expected: Option<&str>) -> bool {
-    let expected = match expected {
-        Some(e) => e,
-        None => return true,
-    };
+/// Buffer used when hashing a file. Large enough to keep syscall overhead
+/// negligible, small enough that several concurrent hashes cost nothing.
+const HASH_CHUNK_BYTES: usize = 1024 * 1024;
 
-    let data = match std::fs::read(path) {
-        Ok(d) => d,
-        Err(_) => return false,
-    };
+/// SHA256 of a file, read in chunks.
+///
+/// Reading the file whole would hold a package in memory in full — some are
+/// several hundred megabytes, several are hashed at once, and on a live ISO
+/// the filesystem those bytes come from is itself RAM.
+fn sha256_file(path: &Path) -> std::io::Result<String> {
+    use std::io::{BufRead, BufReader};
 
-    let actual = hex::encode(Sha256::digest(&data));
-    actual == expected
+    let file = std::fs::File::open(path)?;
+    let mut reader = BufReader::with_capacity(HASH_CHUNK_BYTES, file);
+    let mut hasher = Sha256::new();
+    loop {
+        let chunk = reader.fill_buf()?;
+        if chunk.is_empty() {
+            break;
+        }
+        hasher.update(chunk);
+        let consumed = chunk.len();
+        reader.consume(consumed);
+    }
+    Ok(hex::encode(hasher.finalize()))
 }
 
-/// Async SHA256 of a whole file (used after resume).
-async fn verify_sha256_full(path: &Path) -> Result<String> {
-    let data = tokio::fs::read(path)
-        .await
-        .wrap_err_with(|| format!("failed to read {} for SHA256", path.display()))?;
-    Ok(hex::encode(Sha256::digest(&data)))
+/// SHA256 of a file without occupying the async runtime while it reads.
+async fn sha256_file_async(path: &Path) -> Result<String> {
+    let owned = path.to_path_buf();
+    tokio::task::spawn_blocking(move || sha256_file(&owned))
+        .await?
+        .wrap_err_with(|| format!("failed to read {} for SHA256", path.display()))
+}
+
+/// Whether a cached package is present and matches its expected digest.
+/// A task without a digest trusts the cached file, as libalpm would.
+async fn is_cached_and_valid(path: &Path, expected: Option<&str>) -> bool {
+    if !path.exists() {
+        return false;
+    }
+    let Some(expected) = expected else {
+        return true;
+    };
+    match sha256_file_async(path).await {
+        Ok(actual) => actual == expected,
+        Err(_) => false,
+    }
 }
 
 #[cfg(test)]
@@ -713,8 +768,8 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    #[test]
-    fn test_verify_sha256_sync_valid() {
+    #[tokio::test]
+    async fn cached_file_matching_its_digest_is_accepted() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test.pkg");
         let mut f = std::fs::File::create(&path).unwrap();
@@ -722,30 +777,48 @@ mod tests {
         drop(f);
 
         let expected = hex::encode(Sha256::digest(b"hello world"));
-        assert!(verify_sha256_sync(&path, Some(&expected)));
+        assert!(is_cached_and_valid(&path, Some(&expected)).await);
     }
 
-    #[test]
-    fn test_verify_sha256_sync_mismatch() {
+    #[tokio::test]
+    async fn cached_file_with_a_wrong_digest_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test.pkg");
         std::fs::write(&path, b"hello world").unwrap();
 
-        assert!(!verify_sha256_sync(&path, Some("0000bad")));
+        assert!(!is_cached_and_valid(&path, Some("0000bad")).await);
     }
 
-    #[test]
-    fn test_verify_sha256_sync_none() {
+    #[tokio::test]
+    async fn cached_file_without_a_digest_is_trusted() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test.pkg");
         std::fs::write(&path, b"anything").unwrap();
 
-        assert!(verify_sha256_sync(&path, None));
+        assert!(is_cached_and_valid(&path, None).await);
+    }
+
+    #[tokio::test]
+    async fn missing_cached_file_is_not_valid() {
+        assert!(!is_cached_and_valid(Path::new("/nonexistent"), Some("abc")).await);
+        // Absent digest must not make a missing file look cached.
+        assert!(!is_cached_and_valid(Path::new("/nonexistent"), None).await);
     }
 
     #[test]
-    fn test_verify_sha256_sync_missing_file() {
-        assert!(!verify_sha256_sync(Path::new("/nonexistent"), Some("abc")));
+    fn chunked_hash_matches_a_whole_file_digest_across_buffer_boundaries() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.pkg");
+        // Larger than one hash buffer, so the chunked loop runs several times.
+        let data: Vec<u8> = (0..HASH_CHUNK_BYTES * 2 + 12345)
+            .map(|i| (i % 251) as u8)
+            .collect();
+        std::fs::write(&path, &data).unwrap();
+
+        assert_eq!(
+            sha256_file(&path).unwrap(),
+            hex::encode(Sha256::digest(&data))
+        );
     }
 
     #[test]
@@ -802,6 +875,114 @@ mod tests {
         };
 
         assert!(progress.eta().is_none());
+    }
+
+    /// A `SharedProgress` over `count` queued packages, plus its receiver.
+    fn progress_for(
+        count: usize,
+        total_bytes: u64,
+    ) -> (SharedProgress, watch::Receiver<PackageProgress>) {
+        let (tx, rx) = watch::channel(PackageProgress::Downloading {
+            packages: vec![PackageState::Queued; count],
+            total_bytes,
+            downloaded_bytes: 0,
+            active_downloads: 0,
+            completed: 0,
+            failed: 0,
+        });
+        (SharedProgress { tx: Arc::new(tx) }, rx)
+    }
+
+    fn counters(progress: &PackageProgress) -> (usize, usize, usize, u64) {
+        match progress {
+            PackageProgress::Downloading {
+                active_downloads,
+                completed,
+                failed,
+                downloaded_bytes,
+                ..
+            } => (*active_downloads, *completed, *failed, *downloaded_bytes),
+            other => panic!("expected a downloading phase, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_package_found_in_the_cache_counts_as_completed() {
+        // Queued straight to Done, with no Downloading in between — the common
+        // case when an install is retried and the cache is warm.
+        let (shared, rx) = progress_for(2, 300);
+        shared.update_package(
+            0,
+            PackageState::Done {
+                filename: "cached.pkg".into(),
+                bytes: 100,
+            },
+        );
+
+        let (active, completed, failed, bytes) = counters(&rx.borrow());
+        assert_eq!((active, completed, failed), (0, 1, 0));
+        assert_eq!(bytes, 100);
+    }
+
+    #[test]
+    fn a_retry_after_a_failed_digest_keeps_the_counters_sane() {
+        // Downloading -> Verifying -> (mismatch) -> Downloading -> Done is the
+        // sequence that used to underflow active_downloads on completion.
+        let (shared, rx) = progress_for(1, 100);
+        let downloading = |downloaded| PackageState::Downloading {
+            filename: "pkg".into(),
+            downloaded,
+            total: 100,
+            speed_bps: 0,
+            mirror: "https://mirror.example".into(),
+            attempt: 1,
+        };
+
+        shared.update_package(0, downloading(100));
+        assert_eq!(counters(&rx.borrow()).0, 1);
+
+        shared.update_package(
+            0,
+            PackageState::Verifying {
+                filename: "pkg".into(),
+                bytes: 100,
+            },
+        );
+        assert_eq!(counters(&rx.borrow()).0, 0);
+
+        // Digest mismatch: the file is downloaded again from scratch.
+        shared.update_package(0, downloading(40));
+        shared.update_package(
+            0,
+            PackageState::Done {
+                filename: "pkg".into(),
+                bytes: 100,
+            },
+        );
+
+        let (active, completed, failed, bytes) = counters(&rx.borrow());
+        assert_eq!((active, completed, failed), (0, 1, 0));
+        assert_eq!(bytes, 100, "a retried package must not be counted twice");
+    }
+
+    #[test]
+    fn bytes_never_exceed_the_total_when_a_mirror_is_retried() {
+        let (shared, rx) = progress_for(1, 100);
+        let attempt_bytes = |downloaded, attempt| PackageState::Downloading {
+            filename: "pkg".into(),
+            downloaded,
+            total: 100,
+            speed_bps: 0,
+            mirror: "https://mirror.example".into(),
+            attempt,
+        };
+
+        // First mirror stalls after 80 bytes, second starts over.
+        shared.update_package(0, attempt_bytes(80, 1));
+        shared.update_package(0, attempt_bytes(30, 2));
+
+        let (_, _, _, bytes) = counters(&rx.borrow());
+        assert_eq!(bytes, 30, "the abandoned attempt's bytes must not linger");
     }
 
     #[test]

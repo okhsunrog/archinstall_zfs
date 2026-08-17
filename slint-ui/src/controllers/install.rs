@@ -201,7 +201,7 @@ fn spawn_download_pump(app: &App, mut rx: tokio::sync::watch::Receiver<PackagePr
                                     state: 0,
                                 });
                             }
-                            PackageState::Verifying { filename } => {
+                            PackageState::Verifying { filename, .. } => {
                                 dl_items.push(DownloadInfo {
                                     filename: truncate_str(filename, 30).into(),
                                     pct: 100,
