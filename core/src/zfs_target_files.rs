@@ -61,6 +61,9 @@ pub fn copy_zfs_cache(target: &Path, pool_name: &str, mountpoint: &Path) -> Resu
 /// Rewrite mountpoints in the zfs-list.cache file by stripping the temporary
 /// mountpoint prefix. The cache is tab-separated; the second field is the
 /// mountpoint. For example, `/mnt/home` becomes `/home`.
+///
+/// Every line keeps its terminator: zfs-mount-generator reads this file line by
+/// line, and an unterminated last line is one it may not see.
 fn rewrite_cache_mountpoints(content: &str, mountpoint: &Path) -> String {
     let prefix = mountpoint.to_str().unwrap_or("/mnt").trim_end_matches('/');
     let mut result = Vec::new();
@@ -92,7 +95,13 @@ fn rewrite_cache_mountpoints(content: &str, mountpoint: &Path) -> String {
             result.push(line.to_string());
         }
     }
-    result.join("\n")
+
+    if result.is_empty() {
+        return String::new();
+    }
+    let mut out = result.join("\n");
+    out.push('\n');
+    out
 }
 
 /// Install the custom boot-environment-aware ZED cache hook on the target.
@@ -203,7 +212,21 @@ mod tests {
         let content = "zroot\tnone\ton\toff";
         let result = rewrite_cache_mountpoints(content, Path::new("/mnt"));
         // "none" doesn't start with /mnt, so it stays unchanged
-        assert_eq!(result, "zroot\tnone\ton\toff");
+        assert_eq!(result, "zroot\tnone\ton\toff\n");
+    }
+
+    #[test]
+    fn test_rewrite_cache_mountpoints_terminates_the_last_line() {
+        let content = "zroot/arch0/root\t/mnt\ton\n\
+                       zroot/arch0/data/home\t/mnt/home\ton";
+        let result = rewrite_cache_mountpoints(content, Path::new("/mnt"));
+        assert!(result.ends_with('\n'), "got: {result:?}");
+        assert_eq!(result.lines().count(), 2);
+    }
+
+    #[test]
+    fn test_rewrite_cache_mountpoints_empty_input() {
+        assert_eq!(rewrite_cache_mountpoints("", Path::new("/mnt")), "");
     }
 
     #[test]

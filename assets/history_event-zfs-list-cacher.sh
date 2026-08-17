@@ -159,6 +159,11 @@ def write_cache(datasets, cache_file, pool):
                 return
     except FileNotFoundError:
         log("No existing cache file, creating new one")
+    except OSError as exc:
+        # Unreadable for some other reason: fall through and replace it. The
+        # comparison is only an optimisation, and failing here would leave a
+        # stale cache in place for every future event as well.
+        log(f"Could not read existing cache ({exc}), replacing it")
 
     log("Cache content changed, updating file")
     # The temporary file must live in the cache directory: rename(2) is only
