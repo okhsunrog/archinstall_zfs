@@ -16,6 +16,13 @@
 
 ---
 
+> [!TIP]
+> Want to understand — or reproduce by hand — what the installer does?
+> [**docs/zfs-root-install-guide.md**](docs/zfs-root-install-guide.md) walks through
+> the whole procedure command by command, explains why each ZFS property and boot
+> setting was chosen, covers managing several boot environments, and maps the steps
+> onto other distributions.
+
 ## Overview
 
 Setting up ZFS on Arch involves kernel selection, ZFS module installation, bootloader configuration, and optional encryption. Archinstall-ZFS automates these steps with two UI options: a graphical installer (Slint, renders directly via Linux KMS) and a terminal UI (ratatui). It uses direct libalpm bindings for package management (no `pacman`/`pacstrap` shell calls), resolves AUR dependency chains via `raur`/`aur-depends`, and validates kernel/ZFS compatibility against OpenZFS release data.
@@ -179,7 +186,7 @@ ZFSBootMenu is built locally via `generate-zbm` (AUR package) with a pacman hook
 
 #### Cross-environment mount prevention
 
-A custom ZED hook (`history_event-zfs-list-cacher.sh`) ensures only the current boot environment's datasets are mounted, preventing cross-environment mount conflicts. It is installed to `/etc/zfs/zed.d/` and marked immutable (`chattr +i`) to survive ZFS package updates.
+A custom ZED hook (`history_event-zfs-list-cacher.sh`) ensures only the current boot environment's datasets are mounted, preventing cross-environment mount conflicts. It is installed to `/etc/zfs/zed.d/` and marked immutable (`chattr +i`) to survive ZFS package updates. See [the installation guide](docs/zfs-root-install-guide.md#14-step-11--fstab-services-and-zfs-listcache) for how it decides what belongs to the running environment.
 
 ### AUR packages
 - Resolves full AUR-to-AUR dependency chains via `raur` + `aur-depends`
@@ -407,6 +414,10 @@ Recovery: Boot from the installer USB and run repair commands via chroot.
 - [Meet archinstall_zfs: The TUI That Tames Arch Linux ZFS Installation](https://okhsunrog.dev/posts/archinstall-zfs/) (English)
 - [Arch Linux on ZFS for humans: archinstall_zfs](https://habr.com/ru/articles/942396/) (Habr, Russian)
 - [Arch Linux on ZFS for humans: archinstall_zfs](https://okhsunrog.dev/ru/posts/archinstall-zfs/) (Russian)
+
+### Documentation
+- [ZFS root installation guide](docs/zfs-root-install-guide.md) — the full manual procedure and the reasoning behind every choice
+- [Debugging boot issues](docs/debugging-boot.md) — diagnosing a system that does not come up after install
 
 ### Resources
 - [Arch Wiki: ZFS](https://wiki.archlinux.org/title/ZFS)
