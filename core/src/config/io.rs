@@ -1,12 +1,11 @@
-use std::fs::{self, OpenOptions};
-use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::fs;
 use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use super::types::GlobalConfig;
+use crate::system::fs::write_file_with_mode;
 
 const ZFS_CONFIG_KEY: &str = "archinstall_zfs";
 
@@ -67,7 +66,10 @@ impl GlobalConfig {
         Ok(())
     }
 
-    pub fn to_json_string(&self) -> Result<String> {
+    /// Serialize including every password. Private on purpose: the only
+    /// caller is the redacting path below, and an accidental public use is a
+    /// secret written somewhere it should not be.
+    fn to_json_string(&self) -> Result<String> {
         serde_json::to_string_pretty(self).wrap_err("failed to serialize config")
     }
 
@@ -128,34 +130,10 @@ impl GlobalConfig {
             }
         }
     }
-
-    pub fn to_combined_json(&self) -> Result<String> {
-        let value = serde_json::to_value(self).wrap_err("failed to serialize config")?;
-        let combined = serde_json::json!({
-            ZFS_CONFIG_KEY: value
-        });
-        serde_json::to_string_pretty(&combined).wrap_err("failed to serialize combined config")
-    }
 }
 
 fn write_private_file(path: &Path, contents: &str, description: &str) -> Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .mode(0o600)
-        .custom_flags(nix::libc::O_NOFOLLOW)
-        .open(path)
-        .wrap_err_with(|| format!("failed to open {description}: {}", path.display()))?;
-    file.set_permissions(fs::Permissions::from_mode(0o600))
-        .wrap_err_with(|| format!("failed to secure {description}: {}", path.display()))?;
-    file.set_len(0)
-        .wrap_err_with(|| format!("failed to truncate {description}: {}", path.display()))?;
-    file.write_all(contents.as_bytes())
-        .wrap_err_with(|| format!("failed to write {description}: {}", path.display()))?;
-    file.sync_all()
-        .wrap_err_with(|| format!("failed to sync {description}: {}", path.display()))?;
-    Ok(())
+    write_file_with_mode(path, contents.as_bytes(), 0o600, description)
 }
 
 #[cfg(test)]
@@ -190,22 +168,6 @@ mod tests {
         let cfg = GlobalConfig::load_from_str(json).unwrap();
         assert_eq!(cfg.installation_mode, Some(InstallationMode::NewPool));
         assert_eq!(cfg.pool_name.as_deref(), Some("zfsroot"));
-    }
-
-    #[test]
-    fn test_to_combined_json() {
-        let cfg = GlobalConfig {
-            pool_name: Some("mypool".to_string()),
-            ..Default::default()
-        };
-
-        let json = cfg.to_combined_json().unwrap();
-        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(value.get("archinstall_zfs").is_some());
-        assert_eq!(
-            value["archinstall_zfs"]["pool_name"].as_str(),
-            Some("mypool")
-        );
     }
 
     #[test]

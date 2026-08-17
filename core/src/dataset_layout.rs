@@ -80,14 +80,16 @@ pub async fn create_child_datasets(
     let mut created: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for ds in sorted {
-        // Auto-create parent datasets if needed (e.g., "data" before "data/home")
+        // Auto-create the intermediate datasets a nested name implies, every
+        // level of them: "a/b/c" needs both "a" and "a/b" to exist first, and
+        // creating only the immediate parent leaves `zfs create` to fail on
+        // the missing grandparent.
         let parts: Vec<&str> = ds.name.split('/').collect();
-        if parts.len() > 1 {
-            let parent = parts[..parts.len() - 1].join("/");
-            let parent_full = format!("{pool_name}/{prefix}/{parent}");
-            if !created.contains(&parent_full) {
-                create_dataset(zfs, &parent_full, &[("mountpoint", "none")]).await?;
-                created.insert(parent_full);
+        for depth in 1..parts.len() {
+            let ancestor = parts[..depth].join("/");
+            let ancestor_full = format!("{pool_name}/{prefix}/{ancestor}");
+            if created.insert(ancestor_full.clone()) {
+                create_dataset(zfs, &ancestor_full, &[("mountpoint", "none")]).await?;
             }
         }
 
@@ -219,6 +221,50 @@ mod tests {
         create_child_datasets(&zfs, "pool", "arch0", &datasets)
             .await
             .expect("create_child_datasets succeeds");
+    }
+
+    #[tokio::test]
+    async fn nested_datasets_get_every_intermediate_level() {
+        let datasets = vec![DatasetConfig {
+            name: "data/media/photos".to_string(),
+            properties: vec![("mountpoint".to_string(), "/photos".to_string())],
+        }];
+        let runner = RecordingRunner::new()
+            .record(
+                Cmd::new("zfs").args(["create", "-u", "-o", "mountpoint=none", "pool/arch0/data"]),
+                vec![],
+                vec![],
+                0,
+            )
+            .record(
+                Cmd::new("zfs").args([
+                    "create",
+                    "-u",
+                    "-o",
+                    "mountpoint=none",
+                    "pool/arch0/data/media",
+                ]),
+                vec![],
+                vec![],
+                0,
+            )
+            .record(
+                Cmd::new("zfs").args([
+                    "create",
+                    "-u",
+                    "-o",
+                    "mountpoint=/photos",
+                    "pool/arch0/data/media/photos",
+                ]),
+                vec![],
+                vec![],
+                0,
+            );
+
+        let zfs = Zfs::with_runner(runner);
+        create_child_datasets(&zfs, "pool", "arch0", &datasets)
+            .await
+            .expect("every intermediate dataset is created");
     }
 
     #[tokio::test]

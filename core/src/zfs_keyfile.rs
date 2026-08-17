@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::{Context, Result};
 
+use crate::system::fs::write_file_with_mode;
+
 const KEY_FILE_PATH: &str = "etc/zfs/zroot.key";
 
 pub fn key_file_path(target: &Path) -> PathBuf {
@@ -23,7 +25,10 @@ pub fn write_key_file(target: &Path, password: &str) -> Result<()> {
         fs::create_dir_all(parent)
             .wrap_err_with(|| format!("failed to create dir: {}", parent.display()))?;
     }
-    fs::write(&key_path, password).wrap_err("failed to write key file")?;
+    // 0600 while the passphrase is written, 0000 once it is on disk. Writing
+    // it with the default umask first and tightening afterwards would publish
+    // the pool passphrase to every local user for the duration of the write.
+    write_file_with_mode(&key_path, password.as_bytes(), 0o600, "key file")?;
     fs::set_permissions(&key_path, fs::Permissions::from_mode(0o000))
         .wrap_err("failed to set key file permissions")?;
     tracing::info!(path = %key_path.display(), "wrote encryption key file");

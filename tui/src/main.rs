@@ -22,9 +22,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub silent: bool,
 
-    /// Preview commands without executing them
+    /// Run the full UI and hardware backends while disabling installation and
+    /// destructive storage operations.
     #[arg(long, global = true)]
-    pub dry_run: bool,
+    pub demo: bool,
 }
 
 fn setup_logging(ui_log_tx: tokio::sync::mpsc::UnboundedSender<(String, i32)>) -> Result<()> {

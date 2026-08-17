@@ -24,16 +24,20 @@ pub struct Wizard {
     step_cursors: [usize; 7],
     step_scrolls: [usize; 7],
     max_visited: usize,
+    /// Safe demo mode: the wizard stays fully usable but refuses to hand back
+    /// [`Action::Install`], so the destructive pipeline is never entered.
+    demo: bool,
 }
 
 impl Wizard {
-    pub fn new(config: GlobalConfig) -> Self {
+    pub fn new(config: GlobalConfig, demo: bool) -> Self {
         Self {
             config,
             current_step: StepId::Welcome,
             step_cursors: [0; 7],
             step_scrolls: [0; 7],
             max_visited: 0,
+            demo,
         }
     }
 
@@ -192,6 +196,15 @@ impl Wizard {
             }
             MenuKind::Action => match key {
                 "install" => {
+                    if self.demo {
+                        let _ = run_select(
+                            terminal,
+                            "Installation is disabled in safe demo mode",
+                            &["OK"],
+                            0,
+                        );
+                        return Ok(Action::Continue);
+                    }
                     let errors = self.config.validate_for_install();
                     if !errors.is_empty() {
                         let msg = errors.join("\n");

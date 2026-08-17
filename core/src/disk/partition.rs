@@ -122,25 +122,48 @@ pub fn create_partitions(
     let _ = runner.run("partprobe", &[&*disk_str]);
     let _ = runner.run("udevadm", &["settle"]);
 
-    // Wait for the newly created EFI partition path to appear.
-    let efi_dev = partition_path(disk, layout.efi_part_num);
-    let efi_dev_str = efi_dev.to_string_lossy();
-    for _ in 0..50 {
-        if efi_dev.exists() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(200));
-    }
-
-    // Format EFI partition
-    let output = runner.run("mkfs.fat", &["-I", "-F32", &efi_dev_str])?;
-    check_exit(&output, "mkfs.fat EFI")?;
-
     Ok(layout)
 }
 
-/// Wait for partition paths to appear after partitioning.
-pub fn wait_for_partitions(disk: &Path, layout: &PartitionLayout) -> Vec<std::path::PathBuf> {
+/// Put a FAT32 filesystem on the EFI system partition.
+///
+/// Separate from [`create_partitions`] because it needs the partition's device
+/// node to exist, which is [`wait_for_partitions`]' job.
+pub fn format_efi(runner: &dyn CommandRunner, efi_partition: &Path) -> Result<()> {
+    let efi_str = efi_partition.to_string_lossy();
+    let output = runner.run("mkfs.fat", &["-I", "-F32", &efi_str])?;
+    check_exit(&output, "mkfs.fat EFI")?;
+    Ok(())
+}
+
+/// How long to wait for udev to publish a freshly created partition node.
+const PARTITION_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+const PARTITION_POLL: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// Block until `path` exists, or report which node never appeared.
+///
+/// Returning without the node present only defers the failure to whatever runs
+/// next — mkfs, or zpool create — where it surfaces as a confusing "no such
+/// file" against a path the user never typed.
+fn wait_for_path(path: &Path) -> Result<()> {
+    let deadline = std::time::Instant::now() + PARTITION_WAIT;
+    loop {
+        if path.exists() {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            color_eyre::eyre::bail!(
+                "partition {} did not appear within {PARTITION_WAIT:?}; udev may not have \
+                 settled or the partition table was not re-read",
+                path.display()
+            );
+        }
+        std::thread::sleep(PARTITION_POLL);
+    }
+}
+
+/// Wait for every partition of `layout` to appear, in EFI, ZFS, swap order.
+pub fn wait_for_partitions(disk: &Path, layout: &PartitionLayout) -> Result<Vec<PathBuf>> {
     let mut parts = vec![
         partition_path(disk, layout.efi_part_num),
         partition_path(disk, layout.zfs_part_num),
@@ -149,17 +172,10 @@ pub fn wait_for_partitions(disk: &Path, layout: &PartitionLayout) -> Vec<std::pa
         parts.push(partition_path(disk, swap));
     }
 
-    let mut result = Vec::new();
-    for path in parts {
-        for _ in 0..50 {
-            if path.exists() {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(200));
-        }
-        result.push(path);
+    for path in &parts {
+        wait_for_path(path)?;
     }
-    result
+    Ok(parts)
 }
 
 pub fn partition_path(disk: &Path, part_num: u32) -> PathBuf {

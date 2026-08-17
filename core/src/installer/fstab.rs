@@ -21,15 +21,7 @@ pub fn generate_fstab(
     let fstab_content: String = output
         .stdout
         .lines()
-        .filter(|line| {
-            let trimmed = line.trim();
-            // Keep empty lines and comments
-            if trimmed.is_empty() || trimmed.starts_with('#') {
-                return true;
-            }
-            // Filter out ZFS-managed mounts
-            !trimmed.contains("zfs") && !trimmed.contains(pool_name)
-        })
+        .filter(|line| !is_zfs_managed_mount(line, pool_name))
         .map(|line| {
             // For the EFI mount (/boot/efi vfat), set passno to 0 (no fsck
             // for vfat) and ensure nofail so a failed mount doesn't block boot
@@ -69,6 +61,30 @@ pub fn generate_fstab(
 
     tracing::info!("generated fstab");
     Ok(())
+}
+
+/// Whether an fstab line describes a mount ZFS manages itself, which the
+/// zfs-mount-generator handles and fstab must not duplicate.
+///
+/// Decided on the filesystem-type column, not on whether the line happens to
+/// contain the text "zfs" anywhere: device paths legitimately carry the pool's
+/// name (`/dev/disk/by-id/…-archzfs-…`, a pool named after the host), and
+/// dropping the EFI mount because its by-id path contains "zfs" would leave
+/// the system without /boot/efi.
+fn is_zfs_managed_mount(line: &str, pool_name: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return false;
+    }
+
+    let mut fields = trimmed.split_whitespace();
+    let Some(device) = fields.next() else {
+        return false;
+    };
+    let fs_type = fields.nth(1); // skip the mountpoint
+
+    // A dataset of our pool is ZFS-managed whatever type column it was given.
+    fs_type == Some("zfs") || device == pool_name || device.starts_with(&format!("{pool_name}/"))
 }
 
 pub fn add_swap_entry(target: &Path, device: &str) -> Result<()> {
@@ -135,6 +151,71 @@ testpool/arch0/data/home /home zfs defaults 0 0
         assert!(!fstab.contains("data/home"));
         // Should add explicit root dataset
         assert!(fstab.contains("testpool/arch0/root\t/\tzfs"));
+    }
+
+    #[test]
+    fn efi_entry_survives_a_device_path_containing_the_pool_name() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("etc")).unwrap();
+
+        // genfstab -U normally emits UUIDs, but it falls back to the device
+        // path when a filesystem has no UUID — and that path routinely
+        // contains both "zfs" and the pool name.
+        let genfstab_output = "\
+/dev/disk/by-id/virtio-archzfs-test-disk-part1\t/boot/efi\tvfat\trw,relatime\t0\t2
+zroot/arch0/root\t/\tzfs\tdefaults\t0\t0
+";
+        let runner = RecordingRunner::new(vec![CannedResponse {
+            stdout: genfstab_output.into(),
+            ..Default::default()
+        }]);
+
+        generate_fstab(&runner, dir.path(), "zroot", "arch0").unwrap();
+
+        let fstab = fs::read_to_string(dir.path().join("etc/fstab")).unwrap();
+        assert!(
+            fstab.contains("/boot/efi"),
+            "the EFI mount must not be dropped: {fstab}"
+        );
+        // genfstab's ZFS line is filtered; the explicit root entry this
+        // function appends is the only one left.
+        let root_entries = fstab
+            .lines()
+            .filter(|line| line.starts_with("zroot/arch0/root"))
+            .count();
+        assert_eq!(root_entries, 1, "root dataset must appear once: {fstab}");
+    }
+
+    #[test]
+    fn zfs_managed_mounts_are_recognised_by_column_not_substring() {
+        // Real ZFS mounts, by type column and by dataset name.
+        assert!(is_zfs_managed_mount(
+            "zroot/arch0/data/home\t/home\tzfs\tdefaults\t0\t0",
+            "zroot"
+        ));
+        assert!(is_zfs_managed_mount(
+            "zroot\t/\tzfs\tdefaults\t0\t0",
+            "zroot"
+        ));
+
+        // Not ZFS mounts, despite the substrings.
+        assert!(!is_zfs_managed_mount(
+            "/dev/disk/by-id/nvme-archzfs_ssd-part1\t/boot/efi\tvfat\trw\t0\t2",
+            "zroot"
+        ));
+        assert!(!is_zfs_managed_mount(
+            "UUID=1234\t/mnt/zfsbackup\text4\tdefaults\t0\t2",
+            "zroot"
+        ));
+        // A pool named like a common word must not eat unrelated mounts.
+        assert!(!is_zfs_managed_mount(
+            "/dev/sda2\t/data\text4\tdefaults\t0\t2",
+            "data"
+        ));
+
+        // Comments and blanks are kept.
+        assert!(!is_zfs_managed_mount("# zroot/arch0/root", "zroot"));
+        assert!(!is_zfs_managed_mount("", "zroot"));
     }
 
     #[test]

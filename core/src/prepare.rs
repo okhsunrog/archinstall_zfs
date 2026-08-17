@@ -48,10 +48,11 @@ pub fn prepare_disk(
                 _ => None,
             };
             let layout = crate::disk::partition::create_partitions(runner, disk, swap_size)?;
-            let parts = crate::disk::partition::wait_for_partitions(disk, &layout);
+            let parts = crate::disk::partition::wait_for_partitions(disk, &layout)?;
             let efi = parts[0].clone();
             let zfs = parts[1].clone();
             let swap = parts.get(2).cloned();
+            crate::disk::partition::format_efi(runner, &efi)?;
             Ok(PreparedPartitions {
                 efi,
                 zfs: Some(zfs),
@@ -171,10 +172,10 @@ pub async fn prepare_zfs(
             tracing::info!("Created datasets");
 
             export_pool(&zfs, pool_name).await?;
-            import_pool_no_mount(&zfs, pool_name, mountpoint).await?;
+            import_pool_no_mount(&zfs, pool_name, Some(mountpoint)).await?;
         }
         InstallationMode::ExistingPool => {
-            import_pool_no_mount(&zfs, pool_name, mountpoint).await?;
+            import_pool_no_mount(&zfs, pool_name, Some(mountpoint)).await?;
 
             // Pool-level encryption: load the pool key so the new BE can be
             // created as an encrypted child. Dataset-level encryption applies
@@ -288,14 +289,56 @@ async fn create_pool(
     Ok(())
 }
 
-async fn import_pool_no_mount(zfs: &zfskit::Zfs, name: &str, mountpoint: &Path) -> Result<()> {
-    let opts = ImportOptions {
+/// Import `name` without mounting anything, forcing only if a plain import is
+/// refused.
+///
+/// Forcing is sometimes unavoidable here. This installer stamps every system
+/// it builds with the same hostid, and the live environment does not carry it
+/// until `create_hostid` runs during phase 2 — so a pool from a previous
+/// installation looks like it belongs to another machine right up until that
+/// point, and anything inspecting it earlier (the pool picker) is refused
+/// without `-f`.
+///
+/// What is avoidable is forcing when it is not needed. The picker used to pass
+/// `force` unconditionally, which discarded the one signal that distinguishes
+/// "my own pool, seen before the hostid was aligned" from "a pool another
+/// machine may still be using" — and left the picker accepting pools that the
+/// installation would later refuse. Trying plainly first keeps that signal,
+/// records it in the log, and makes both paths agree on which pools are
+/// usable.
+///
+/// A pool with `multihost=on` is still protected: ZFS refuses a forced import
+/// while another host holds it, whatever this asks for.
+pub async fn import_pool_no_mount(
+    zfs: &zfskit::Zfs,
+    name: &str,
+    altroot: Option<&Path>,
+) -> Result<()> {
+    let pool = zfs.pool(name)?;
+    let altroot = altroot.map(Path::to_path_buf);
+
+    let plain = ImportOptions {
         no_mount: true,
-        altroot: Some(mountpoint.to_path_buf()),
+        altroot: altroot.clone(),
         ..Default::default()
     };
-    zfs.pool(name)?.import(&opts).await?;
-    Ok(())
+    match pool.import(&plain).await {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            tracing::warn!(
+                pool = name,
+                %error,
+                "pool refused a plain import — it was last used by a different host id; \
+                 importing with force"
+            );
+            let forced = ImportOptions {
+                force: true,
+                ..plain
+            };
+            pool.import(&forced).await?;
+            Ok(())
+        }
+    }
 }
 
 async fn export_pool(zfs: &zfskit::Zfs, name: &str) -> Result<()> {
@@ -383,5 +426,77 @@ mod tests {
         )
         .await
         .expect("no key load is needed");
+    }
+}
+
+#[cfg(test)]
+mod import_tests {
+    use super::*;
+    use zfskit::{Cmd, RecordingRunner, Zfs};
+
+    #[tokio::test]
+    async fn a_pool_that_imports_plainly_is_not_forced() {
+        // Only the plain import is recorded: if the code reached for force
+        // anyway, the runner would have no response for it and this fails.
+        let runner = RecordingRunner::new().record(
+            Cmd::new("zpool").args(["import", "-N", "zroot"]),
+            vec![],
+            vec![],
+            0,
+        );
+        let zfs = Zfs::with_runner(runner);
+
+        import_pool_no_mount(&zfs, "zroot", None)
+            .await
+            .expect("a pool that imports cleanly needs no force");
+    }
+
+    #[tokio::test]
+    async fn a_refused_pool_is_retried_with_force() {
+        // What a pool created by a previous installation looks like before
+        // create_hostid has aligned this system's host id.
+        let runner = RecordingRunner::new()
+            .record(
+                Cmd::new("zpool").args(["import", "-N", "zroot"]),
+                vec![],
+                b"cannot import 'zroot': pool was previously in use from another system\n".to_vec(),
+                1,
+            )
+            .record(
+                Cmd::new("zpool").args(["import", "-f", "-N", "zroot"]),
+                vec![],
+                vec![],
+                0,
+            );
+        let zfs = Zfs::with_runner(runner);
+
+        import_pool_no_mount(&zfs, "zroot", None)
+            .await
+            .expect("a host id mismatch is retried with force");
+    }
+
+    #[tokio::test]
+    async fn a_pool_that_refuses_even_force_reports_the_failure() {
+        // multihost=on keeps ZFS refusing while another host holds the pool,
+        // whatever this asks for.
+        let runner = RecordingRunner::new()
+            .record(
+                Cmd::new("zpool").args(["import", "-N", "zroot"]),
+                vec![],
+                b"cannot import 'zroot': pool is busy\n".to_vec(),
+                1,
+            )
+            .record(
+                Cmd::new("zpool").args(["import", "-f", "-N", "zroot"]),
+                vec![],
+                b"cannot import 'zroot': pool is imported on host other-host\n".to_vec(),
+                1,
+            );
+        let zfs = Zfs::with_runner(runner);
+
+        let error = import_pool_no_mount(&zfs, "zroot", None)
+            .await
+            .expect_err("a pool held by another host must not be reported as imported");
+        assert!(error.to_string().contains("zroot"), "got: {error}");
     }
 }

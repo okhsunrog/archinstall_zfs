@@ -1,9 +1,10 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use color_eyre::eyre::{Result, bail};
+use color_eyre::eyre::{Context, Result, bail};
 
 use crate::system::cmd::{CommandRunner, check_exit, chroot, chroot_cmd, shell_quote};
+use crate::system::fs::write_file_with_mode;
 
 const TEMP_USER: &str = "aurinstall";
 
@@ -59,14 +60,22 @@ pub async fn install_aur_packages(
     let t = target.to_path_buf();
     let c = cancel.clone();
     tokio::task::spawn_blocking(move || -> Result<()> {
-        setup_aur_environment(&*r, &t, &c, download_config)?;
+        // Everything between setup and cleanup runs inside the closure so the
+        // teardown below is reached on *every* exit path. A build that fails
+        // partway through must not leave the `aurinstall` account and its
+        // NOPASSWD sudoers drop-in behind on the installed system.
+        let build_result = (|| -> Result<()> {
+            setup_aur_environment(&*r, &t, &c, download_config)?;
+            for pkg in &install_order {
+                install_single_aur_package(&*r, &t, pkg)?;
+            }
+            Ok(())
+        })();
 
-        for pkg in &install_order {
-            install_single_aur_package(&*r, &t, pkg)?;
-        }
-
-        cleanup_aur_environment(&*r, &t)?;
-        Ok(())
+        let cleanup_result = cleanup_aur_environment(&*r, &t);
+        // The build error is the more useful one to report; a cleanup failure
+        // only surfaces when the build itself succeeded.
+        build_result.and(cleanup_result)
     })
     .await?
 }
@@ -133,11 +142,14 @@ fn setup_aur_environment(
     let output = chroot_cmd(runner, target, "useradd", &["-m", TEMP_USER])?;
     check_exit(&output, "create AUR temp user")?;
 
-    // Enable NOPASSWD sudo
-    let sudoers_content = format!("{TEMP_USER} ALL=(ALL) NOPASSWD: ALL\n");
-    std::fs::write(
-        target.join(format!("etc/sudoers.d/99_{TEMP_USER}")),
-        sudoers_content,
+    // Enable NOPASSWD sudo — removed again by cleanup_aur_environment.
+    let sudoers_dir = target.join("etc/sudoers.d");
+    std::fs::create_dir_all(&sudoers_dir)?;
+    write_file_with_mode(
+        &sudoers_dir.join(format!("99_{TEMP_USER}")),
+        format!("{TEMP_USER} ALL=(ALL) NOPASSWD: ALL\n").as_bytes(),
+        0o440,
+        "AUR sudoers drop-in",
     )?;
 
     Ok(())
@@ -162,9 +174,40 @@ fn install_single_aur_package(
     Ok(())
 }
 
+/// Remove the temporary build account and its sudo rule.
+///
+/// The sudoers drop-in is the security-relevant half: failing to delete it
+/// would ship a passwordless-sudo rule on the installed system, so that
+/// failure is reported rather than swallowed. A `userdel` failure leaves only
+/// a locked, password-less account with no sudo rights, which is worth a
+/// warning but not worth failing an otherwise complete installation.
 fn cleanup_aur_environment(runner: &dyn CommandRunner, target: &Path) -> Result<()> {
-    let _ = std::fs::remove_file(target.join(format!("etc/sudoers.d/99_{TEMP_USER}")));
-    let _ = chroot_cmd(runner, target, "userdel", &["-r", TEMP_USER]);
+    let sudoers = target.join(format!("etc/sudoers.d/99_{TEMP_USER}"));
+    match std::fs::remove_file(&sudoers) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            return Err(e).wrap_err(format!(
+                "failed to remove {} — the target would keep a passwordless sudo rule for {TEMP_USER}",
+                sudoers.display()
+            ));
+        }
+    }
+
+    match chroot_cmd(runner, target, "userdel", &["-r", TEMP_USER]) {
+        Ok(output) if output.success() => {}
+        Ok(output) => tracing::warn!(
+            user = TEMP_USER,
+            exit_code = output.exit_code,
+            stderr = %output.stderr.trim(),
+            "failed to delete AUR build user (sudo rule was removed)"
+        ),
+        Err(error) => tracing::warn!(
+            user = TEMP_USER,
+            %error,
+            "could not run userdel for AUR build user (sudo rule was removed)"
+        ),
+    }
 
     tracing::info!("cleaned up AUR environment");
     Ok(())
@@ -188,6 +231,47 @@ mod tests {
         .await
         .unwrap();
         // Can't check calls on Arc easily, but the test verifies no panic
+    }
+
+    #[test]
+    fn cleanup_removes_the_sudo_rule_and_reports_when_it_cannot() {
+        let dir = tempfile::tempdir().unwrap();
+        let sudoers_dir = dir.path().join("etc/sudoers.d");
+        std::fs::create_dir_all(&sudoers_dir).unwrap();
+        let sudoers = sudoers_dir.join(format!("99_{TEMP_USER}"));
+        std::fs::write(&sudoers, "aurinstall ALL=(ALL) NOPASSWD: ALL\n").unwrap();
+
+        let runner = RecordingRunner::new(vec![]);
+        cleanup_aur_environment(&runner, dir.path()).unwrap();
+        assert!(!sudoers.exists(), "sudo rule must not survive cleanup");
+
+        // Already gone is success, not an error: cleanup runs on paths where
+        // setup never got as far as writing the drop-in.
+        cleanup_aur_environment(&runner, dir.path()).unwrap();
+    }
+
+    #[test]
+    fn failed_build_still_tears_down_the_sudo_rule() {
+        let dir = tempfile::tempdir().unwrap();
+        let sudoers_dir = dir.path().join("etc/sudoers.d");
+        std::fs::create_dir_all(&sudoers_dir).unwrap();
+        let sudoers = sudoers_dir.join(format!("99_{TEMP_USER}"));
+        std::fs::write(&sudoers, "aurinstall ALL=(ALL) NOPASSWD: ALL\n").unwrap();
+
+        // A build failure, mirrored from install_single_aur_package's error path.
+        let build_result: Result<()> = Err(color_eyre::eyre::eyre!("AUR install failed"));
+        let runner = RecordingRunner::new(vec![]);
+        let cleanup_result = cleanup_aur_environment(&runner, dir.path());
+        let combined = build_result.and(cleanup_result);
+
+        assert!(
+            !sudoers.exists(),
+            "sudo rule must not survive a failed build"
+        );
+        assert!(
+            combined.unwrap_err().to_string().contains("AUR install"),
+            "the build error must be the one reported"
+        );
     }
 
     #[test]

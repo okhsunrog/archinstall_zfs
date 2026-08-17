@@ -2,7 +2,6 @@ mod config_items;
 mod controllers;
 mod editing_models;
 mod format;
-mod install;
 mod refresh;
 mod tracing_layer;
 
@@ -12,7 +11,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use clap::Parser;
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Result, WrapErr};
 use slint::ComponentHandle;
 
 use archinstall_zfs_core::config::types::GlobalConfig;
@@ -52,11 +51,55 @@ struct Cli {
     demo: bool,
 }
 
+/// Install the process-wide tracing subscriber.
+///
+/// Global rather than per-install-thread: the pipeline does its work on tokio
+/// worker threads and blocking-pool threads, and a thread-local subscriber is
+/// invisible to all of them. Set as a thread default, everything the package
+/// downloader, the AUR builds and the ZFSBootMenu step emitted was dropped —
+/// missing from both the on-screen log and the log file.
+fn setup_logging(ui_log_tx: crossbeam_channel::Sender<(String, i32)>) -> Result<()> {
+    use tracing_subscriber::Layer as _;
+    use tracing_subscriber::layer::SubscriberExt as _;
+    use tracing_subscriber::util::SubscriberInitExt as _;
+
+    let ui_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    let ui_layer = tracing_layer::UiLogLayer::new(ui_log_tx).with_filter(ui_filter);
+
+    let file_appender = tracing_appender::rolling::never("/tmp", "archinstall-zfs.log");
+    let file_filter = tracing_subscriber::EnvFilter::new(
+        "trace,h2=warn,hyper=warn,reqwest=warn,rustls=warn,pacman=info",
+    );
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(file_appender)
+        .with_ansi(false)
+        .with_target(true)
+        .with_filter(file_filter);
+
+    let metrics_layer =
+        archinstall_zfs_core::metrics::MetricsLayer::open("/tmp/archinstall-metrics.jsonl")
+            .wrap_err("failed to open metrics file")?;
+
+    tracing_subscriber::registry()
+        .with(ui_layer)
+        .with(file_layer)
+        .with(metrics_layer)
+        .init();
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
     let cli = Cli::parse();
-    let demo = cli.demo || kernel_cmdline_enables_demo();
+    let demo = cli.demo || archinstall_zfs_core::demo::enabled_from_kernel_cmdline();
+
+    // Bounded: the UI cannot keep up with trace-level output, and dropping
+    // lines it will never render is preferable to slowing the installation.
+    let (log_tx, log_rx) = crossbeam_channel::bounded::<(String, i32)>(512);
+    setup_logging(log_tx)?;
 
     if let Some(scale) = cli.ui_scale
         && scale > 0.0
@@ -91,18 +134,23 @@ async fn main() -> Result<()> {
         }
         let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
             Arc::new(archinstall_zfs_core::system::cmd::RealRunner);
-        install::run_install(
+        archinstall_zfs_core::install::run_install(
             runner,
-            &config,
+            config,
             tokio_util::sync::CancellationToken::new(),
             None,
         )
+        .await
     } else {
-        run_gui(config, demo)
+        run_gui(config, demo, log_rx)
     }
 }
 
-fn run_gui(config: GlobalConfig, demo: bool) -> Result<()> {
+fn run_gui(
+    config: GlobalConfig,
+    demo: bool,
+    log_rx: crossbeam_channel::Receiver<(String, i32)>,
+) -> Result<()> {
     let app = App::new()?;
     let config = Rc::new(RefCell::new(config));
     let kernel_scan = controllers::welcome::KernelScan::new();
@@ -116,7 +164,7 @@ fn run_gui(config: GlobalConfig, demo: bool) -> Result<()> {
     controllers::welcome::setup(&app, &config, &kernel_scan, demo);
     controllers::lists::setup(&app, &config, &models);
     controllers::wizard::setup(&app, &config, &kernel_scan);
-    controllers::install::setup(&app, &config, demo);
+    controllers::install::setup(&app, &config, demo, log_rx);
     controllers::wifi::setup(&app);
     controllers::quit::setup(&app);
 
@@ -130,28 +178,4 @@ fn run_gui(config: GlobalConfig, demo: bool) -> Result<()> {
         session.export_all_blocking();
     }
     Ok(())
-}
-
-fn kernel_cmdline_enables_demo() -> bool {
-    cmdline_enables_demo(&std::fs::read_to_string("/proc/cmdline").unwrap_or_default())
-}
-
-fn cmdline_enables_demo(cmdline: &str) -> bool {
-    cmdline
-        .split_whitespace()
-        .any(|arg| matches!(arg, "archinstall_zfs.demo" | "archinstall_zfs.demo=1"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::cmdline_enables_demo;
-
-    #[test]
-    fn demo_kernel_argument_is_detected() {
-        assert!(cmdline_enables_demo(
-            "quiet archinstall_zfs.demo=1 console=tty1"
-        ));
-        assert!(cmdline_enables_demo("archinstall_zfs.demo"));
-        assert!(!cmdline_enables_demo("archinstall_zfs.demo=0"));
-    }
 }

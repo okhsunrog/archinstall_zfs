@@ -276,10 +276,10 @@ async fn fetch_zfs_kernel_range(zfs_version: &str) -> Option<(String, String)> {
 
     tracing::debug!(url, "fetching ZFS kernel compatibility from GitHub");
 
-    let resp = reqwest::Client::new()
+    let resp = super::metadata_http_client()
+        .ok()?
         .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
-        .header("User-Agent", "archinstall-zfs-rs")
         .send()
         .await
         .ok()?;

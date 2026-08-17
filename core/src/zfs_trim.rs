@@ -62,3 +62,65 @@ pub async fn configure_zfs_trim(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::config::types::InstallationMode;
+    use crate::system::cmd::tests::RecordingRunner;
+
+    fn config_for(mode: InstallationMode, disk: Option<&str>) -> GlobalConfig {
+        GlobalConfig {
+            installation_mode: Some(mode),
+            disk: disk.map(PathBuf::from),
+            zfs_partition: disk.map(PathBuf::from),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn an_existing_pool_keeps_whatever_trim_it_already_had() {
+        let runner = RecordingRunner::new(vec![]);
+        let config = config_for(
+            InstallationMode::ExistingPool,
+            Some("/dev/disk/by-id/some-disk"),
+        );
+
+        configure_zfs_trim(&runner, Path::new("/mnt"), "zroot", &config)
+            .await
+            .expect("existing pools are left alone");
+
+        assert!(runner.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn no_disk_means_nothing_to_detect() {
+        let runner = RecordingRunner::new(vec![]);
+        let config = config_for(InstallationMode::FullDisk, None);
+
+        configure_zfs_trim(&runner, Path::new("/mnt"), "zroot", &config)
+            .await
+            .expect("a missing disk path is not an error");
+
+        assert!(runner.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_unrecognised_device_gets_no_trim_configuration() {
+        // Nothing under /sys to say it is solid state, so it is treated as
+        // rotational and left without a TRIM strategy rather than guessing.
+        let runner = RecordingRunner::new(vec![]);
+        let config = config_for(
+            InstallationMode::FullDisk,
+            Some("/dev/disk/by-id/definitely-not-a-real-device"),
+        );
+
+        configure_zfs_trim(&runner, Path::new("/mnt"), "zroot", &config)
+            .await
+            .expect("an undetectable device is not an error");
+
+        assert!(runner.calls().is_empty());
+    }
+}

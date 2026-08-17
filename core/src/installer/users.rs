@@ -1,9 +1,10 @@
 use std::fs;
 use std::path::Path;
 
-use color_eyre::eyre::{Context, Result};
+use color_eyre::eyre::Result;
 
 use crate::system::cmd::{CommandRunner, check_exit, chroot_cmd};
+use crate::system::fs::write_file_with_mode;
 
 pub fn set_root_password(runner: &dyn CommandRunner, target: &Path, password: &str) -> Result<()> {
     let target_str = target.to_string_lossy();
@@ -72,21 +73,23 @@ pub fn setup_ssh_keys(
     }
 
     let ssh_dir = format!("/home/{username}/.ssh");
-    let auth_keys_path = format!("{ssh_dir}/authorized_keys");
 
     // Create .ssh directory with correct permissions inside the chroot
     let output = chroot_cmd(runner, target, "install", &["-d", "-m", "700", &ssh_dir])?;
     check_exit(&output, &format!("create .ssh dir for {username}"))?;
 
-    // Write authorized_keys on the host side (simpler than heredoc in chroot)
+    // Write authorized_keys on the host side (simpler than heredoc in chroot),
+    // created 0600 directly so the keys are never briefly world-readable.
     let auth_keys_file = target.join(format!("home/{username}/.ssh/authorized_keys"));
     let content = keys.join("\n") + "\n";
-    fs::write(&auth_keys_file, content).wrap_err("failed to write authorized_keys")?;
+    write_file_with_mode(
+        &auth_keys_file,
+        content.as_bytes(),
+        0o600,
+        "authorized_keys",
+    )?;
 
-    // Fix ownership and permissions via chroot
-    let output = chroot_cmd(runner, target, "chmod", &["600", &auth_keys_path])?;
-    check_exit(&output, &format!("chmod authorized_keys for {username}"))?;
-
+    // Ownership still needs the chroot: the uid/gid live in the target's passwd.
     let owner = format!("{username}:{username}");
     let output = chroot_cmd(runner, target, "chown", &["-R", &owner, &ssh_dir])?;
     check_exit(&output, &format!("chown .ssh for {username}"))?;
@@ -99,13 +102,19 @@ fn enable_sudo(target: &Path, username: &str) -> Result<()> {
     let sudoers_dir = target.join("etc/sudoers.d");
     fs::create_dir_all(&sudoers_dir)?;
     let sudoers_file = sudoers_dir.join(format!("00_{username}"));
-    fs::write(&sudoers_file, format!("{username} ALL=(ALL:ALL) ALL\n"))
-        .wrap_err("failed to write sudoers")?;
-    Ok(())
+    // 0440 is what sudo itself ships and what visudo writes.
+    write_file_with_mode(
+        &sudoers_file,
+        format!("{username} ALL=(ALL:ALL) ALL\n").as_bytes(),
+        0o440,
+        "sudoers",
+    )
 }
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
     use super::*;
     use crate::system::cmd::tests::{CannedResponse, RecordingRunner};
 
@@ -150,8 +159,9 @@ mod tests {
 
     #[test]
     fn test_setup_ssh_keys_writes_file() {
-        // 3 chroot commands: install -d, chmod, chown
-        let responses: Vec<CannedResponse> = (0..3).map(|_| CannedResponse::default()).collect();
+        // 2 chroot commands: install -d, chown. The file mode is applied at
+        // creation time on the host side, so no chroot chmod is needed.
+        let responses: Vec<CannedResponse> = (0..2).map(|_| CannedResponse::default()).collect();
         let runner = RecordingRunner::new(responses);
         let dir = tempfile::tempdir().unwrap();
 
@@ -170,13 +180,18 @@ mod tests {
         assert!(content.contains("ssh-rsa AAAAB3NzaC1 backup@host"));
 
         let calls = runner.calls();
-        assert_eq!(calls.len(), 3);
+        assert_eq!(calls.len(), 2);
         // First call: install -d .ssh
         assert!(calls[0].args.iter().any(|a| a.contains("install")));
-        // Second: chmod
-        assert!(calls[1].args.iter().any(|a| a.contains("chmod")));
-        // Third: chown
-        assert!(calls[2].args.iter().any(|a| a.contains("chown")));
+        // Second: chown
+        assert!(calls[1].args.iter().any(|a| a.contains("chown")));
+
+        // The keys must never be readable by other users on the target.
+        let mode = fs::metadata(dir.path().join("home/alice/.ssh/authorized_keys"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 
     #[test]

@@ -90,6 +90,13 @@ Operation = Upgrade
 Target = usr/lib/modules/*/pkgbase
 Target = usr/lib/modules/*/extramodules/zfs.ko*
 
+[Trigger]
+Type = Package
+Operation = Install
+Operation = Upgrade
+Target = zfsbootmenu
+Target = zfs-utils
+
 [Action]
 Description = Regenerating ZFSBootMenu...
 When = PostTransaction
@@ -353,6 +360,11 @@ mod tests {
         assert!(content.contains("generate-zbm"));
         assert!(content.contains("zfs.ko"));
         assert!(content.contains("pkgbase"));
+        // A new ZBM or zfs-utils release changes neither the kernel nor
+        // zfs.ko, so the path trigger alone would leave a stale EFI bundle.
+        assert!(content.contains("Type = Package"));
+        assert!(content.contains("Target = zfsbootmenu"));
+        assert!(content.contains("Target = zfs-utils"));
     }
 
     #[test]

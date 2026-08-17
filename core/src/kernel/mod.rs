@@ -45,25 +45,36 @@ pub fn get_kernel_info(name: &str) -> Option<&'static KernelInfo> {
 
 pub fn get_zfs_packages(kernel: &str, mode: ZfsModuleMode) -> Vec<String> {
     let mut packages = vec!["zfs-utils".to_string()];
+    packages.extend(zfs_module_packages(kernel, mode));
+    packages
+}
 
-    if let Some(info) = get_kernel_info(kernel) {
-        match mode {
-            ZfsModuleMode::Precompiled => {
-                if let Some(pkg) = info.precompiled_package {
-                    packages.push(pkg.to_string());
-                } else {
-                    packages.push("zfs-dkms".to_string());
-                    packages.push(info.headers_package.to_string());
-                }
-            }
-            ZfsModuleMode::Dkms => {
-                packages.push("zfs-dkms".to_string());
-                packages.push(info.headers_package.to_string());
-            }
+/// The packages that provide a ZFS module for `kernel`, without `zfs-utils`
+/// (which is shared by every kernel and installed once).
+///
+/// Empty for an unknown kernel: there is nothing sensible to install for a
+/// name the installer does not recognise.
+///
+/// The precompiled packages are version-locked to their kernel — `zfs-linux`
+/// depends on `linux=7.1.8.arch1-3`, not on any `linux` — so one can be
+/// unavailable while another is fine. They do not conflict with each other, so
+/// several kernels can each have their own. `zfs-dkms` is the exception: it
+/// conflicts with every precompiled package, which is why DKMS is a
+/// system-wide choice rather than a per-kernel fallback.
+pub fn zfs_module_packages(kernel: &str, mode: ZfsModuleMode) -> Vec<String> {
+    let Some(info) = get_kernel_info(kernel) else {
+        return Vec::new();
+    };
+
+    match mode {
+        ZfsModuleMode::Precompiled => match info.precompiled_package {
+            Some(pkg) => vec![pkg.to_string()],
+            None => vec!["zfs-dkms".to_string(), info.headers_package.to_string()],
+        },
+        ZfsModuleMode::Dkms => {
+            vec!["zfs-dkms".to_string(), info.headers_package.to_string()]
         }
     }
-
-    packages
 }
 
 pub fn supports_precompiled(kernel: &str) -> bool {
@@ -157,6 +168,20 @@ pub async fn query_packages(
     Ok(result)
 }
 
+/// HTTP client for the small metadata fetches the compatibility scan makes.
+///
+/// Both a connect and an overall timeout: these run on the welcome screen and
+/// ahead of the install, where a captive portal or a black-holed route would
+/// otherwise leave the scan waiting forever. The payloads are small, so a
+/// bounded total is safe here in a way it would not be for package downloads.
+pub(crate) fn metadata_http_client() -> reqwest::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent("archinstall-zfs-rs")
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+}
+
 /// Download and parse the archzfs package database to get ZFS package versions.
 /// This works even when archzfs repo isn't configured locally (e.g., before
 /// add_archzfs_repo is called, or in CI environments).
@@ -164,12 +189,7 @@ async fn fetch_archzfs_db_versions() -> Option<std::collections::HashMap<String,
     let url = "https://github.com/archzfs/archzfs/releases/download/experimental/archzfs.db";
     tracing::debug!("downloading archzfs.db from {url}");
 
-    let resp = reqwest::Client::new()
-        .get(url)
-        .header("User-Agent", "archinstall-zfs-rs")
-        .send()
-        .await
-        .ok()?;
+    let resp = metadata_http_client().ok()?.get(url).send().await.ok()?;
     let data = resp.bytes().await.ok()?;
 
     // archzfs.db is an XZ-compressed tar archive

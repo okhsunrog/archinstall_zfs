@@ -15,8 +15,12 @@ import os
 import sys
 import subprocess
 import fcntl
+import tempfile
 
-DEBUG = True
+# Set to True to trace every history event to /tmp/zed_debug.log. Off by
+# default: this hook runs on every ZFS history event, so leaving it enabled
+# grows an unrotated file in /tmp for the life of the system.
+DEBUG = False
 
 def log(message):
     if DEBUG:
@@ -31,7 +35,7 @@ def get_current_root():
             for line in f:
                 if ' / type zfs ' in line:
                     return line.split()[0]
-    except:
+    except Exception:
         pass
 
     # Fallback to mount command
@@ -40,7 +44,7 @@ def get_current_root():
         for line in result.stdout.split('\n'):
             if ' on / type zfs ' in line:
                 return line.split()[0]
-    except:
+    except Exception:
         pass
 
     # Second fallback to zfs mount
@@ -49,7 +53,7 @@ def get_current_root():
         for line in result.stdout.split('\n'):
             if line.strip().endswith(' /'):
                 return line.split()[0]
-    except:
+    except Exception:
         pass
 
     return None
@@ -66,22 +70,70 @@ def get_dataset_props(pool):
     ]
     cmd = ['zfs', 'list', '-H', '-t', 'filesystem', '-r', '-o', ','.join(props), pool]
     log(f"Running command: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    return [line.split('\t') for line in result.stdout.strip().split('\n')]
+    return run_zfs_list(cmd)
 
-def find_boot_environments(datasets):
-    """Identify boot environments by finding their root datasets"""
+def run_zfs_list(cmd):
+    """Run a `zfs list` and return rows, or None if it produced nothing usable.
+
+    Returning None rather than an empty list matters: the caller must leave the
+    existing cache alone on failure. Overwriting it with nothing would strip
+    every mount unit on the next boot.
+    """
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+    except Exception as exc:
+        log(f"Could not run zfs list: {exc}")
+        return None
+    if result.returncode != 0:
+        log(f"zfs list failed (rc={result.returncode}): {result.stderr.strip()}")
+        return None
+    output = result.stdout.strip()
+    if not output:
+        log("zfs list returned no datasets")
+        return None
+    return [line.split('\t') for line in output.split('\n')]
+
+def find_boot_environments(pool):
+    """Identify boot environments by finding their root datasets.
+
+    Queried separately from the cache rows on purpose: the cache column layout
+    is dictated by zfs-mount-generator, so org.zfsbootmenu:active cannot simply
+    be appended to it.
+
+    ZFSBootMenu treats a filesystem as a boot environment when it has
+    mountpoint=/ (unless org.zfsbootmenu:active=off hides it from the menu), or
+    mountpoint=legacy together with org.zfsbootmenu:active=on. Datasets hidden
+    from the menu still count here: hiding a boot environment does not make it
+    safe to mount its /home underneath a different one.
+    """
+    rows = run_zfs_list([
+        'zfs', 'list', '-H', '-t', 'filesystem', '-r',
+        '-o', 'name,mountpoint,org.zfsbootmenu:active', pool,
+    ])
+    if rows is None:
+        return None
+
     boot_envs = set()
-    for dataset in datasets:
-        name, mountpoint = dataset[0], dataset[1]
-        if mountpoint == '/':
-            be = name.rsplit('/', 1)[0]
-            boot_envs.add(be)
+    for row in rows:
+        if len(row) < 3:
+            continue
+        name, mountpoint, active = row[0], row[1], row[2]
+        if mountpoint == '/' or (mountpoint == 'legacy' and active == 'on'):
+            boot_envs.add(name.rsplit('/', 1)[0])
     return boot_envs
+
+def is_below(dataset_name, ancestor):
+    """Dataset-path-aware prefix test.
+
+    A plain str.startswith() would treat 'pool/arch10' as part of 'pool/arch1'
+    and leak one boot environment's datasets into another's cache. Match only
+    on a full dataset-name component boundary.
+    """
+    return dataset_name == ancestor or dataset_name.startswith(ancestor + '/')
 
 def is_part_of_be(dataset_name, boot_envs):
     """Check if dataset belongs to any boot environment"""
-    return any(dataset_name.startswith(be) for be in boot_envs)
+    return any(is_below(dataset_name, be) for be in boot_envs)
 
 def filter_datasets(datasets, current_be, boot_envs):
     """Filter datasets to include current BE hierarchy and shared datasets"""
@@ -89,7 +141,7 @@ def filter_datasets(datasets, current_be, boot_envs):
 
     for dataset in datasets:
         name = dataset[0]
-        if (name.startswith(current_be) or
+        if (is_below(name, current_be) or
             '/' not in name or  # pool itself
             not is_part_of_be(name, boot_envs)):  # shared dataset
             filtered.append(dataset)
@@ -97,29 +149,41 @@ def filter_datasets(datasets, current_be, boot_envs):
     return filtered
 
 def write_cache(datasets, cache_file, pool):
-    """Write datasets to cache file, only update if content changed"""
-    tmp_file = f"/var/run/zfs-list.cache@{pool}"
-    log(f"Writing temporary cache file: {tmp_file}")
-
-    with open(tmp_file, 'w') as f:
-        for dataset in datasets:
-            f.write('\t'.join(dataset) + '\n')
+    """Replace the cache file atomically, and only if the content changed."""
+    new_content = ''.join('\t'.join(dataset) + '\n' for dataset in datasets)
 
     try:
         with open(cache_file, 'r') as f:
-            old_content = f.read()
-        with open(tmp_file, 'r') as f:
-            new_content = f.read()
-        if old_content != new_content:
-            log("Cache content changed, updating file")
-            with open(cache_file, 'w') as f:
-                f.write(new_content)
+            if f.read() == new_content:
+                log("Cache content unchanged, leaving file alone")
+                return
     except FileNotFoundError:
         log("No existing cache file, creating new one")
-        with open(cache_file, 'w') as f:
+    except OSError as exc:
+        # Unreadable for some other reason: fall through and replace it. The
+        # comparison is only an optimisation, and failing here would leave a
+        # stale cache in place for every future event as well.
+        log(f"Could not read existing cache ({exc}), replacing it")
+
+    log("Cache content changed, updating file")
+    # The temporary file must live in the cache directory: rename(2) is only
+    # atomic within a single filesystem, and /run is not the same one as /etc.
+    directory = os.path.dirname(cache_file) or '.'
+    fd, tmp_file = tempfile.mkstemp(dir=directory, prefix='.' + pool + '.', suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w') as f:
             f.write(new_content)
-    finally:
-        os.remove(tmp_file)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp_file, 0o644)
+        os.replace(tmp_file, cache_file)
+    except BaseException:
+        # Never leave a partial cache behind for zfs-mount-generator to read.
+        try:
+            os.unlink(tmp_file)
+        except FileNotFoundError:
+            pass
+        raise
 
 def main():
     log("\n=== New ZED cache update started ===")
@@ -139,7 +203,10 @@ def main():
         log("Cache file not writable, exiting")
         sys.exit(0)
 
-    lock_file = open(cache_file, 'a')
+    # Lock a dedicated file rather than the cache itself: the cache is now
+    # replaced by rename(2), so a lock held on it would end up pinning an
+    # unlinked inode and a concurrent zedlet could take the "same" lock.
+    lock_file = open(f"/run/zfs-list.cache@{pool}.lock", 'w')
     try:
         fcntl.flock(lock_file, fcntl.LOCK_EX)
         log("Acquired file lock")
@@ -153,9 +220,15 @@ def main():
         log(f"Current boot environment: {current_be}")
 
         all_datasets = get_dataset_props(pool)
+        if all_datasets is None:
+            log("Could not enumerate datasets, leaving cache unchanged")
+            sys.exit(0)
         log(f"Found {len(all_datasets)} total datasets")
 
-        boot_envs = find_boot_environments(all_datasets)
+        boot_envs = find_boot_environments(pool)
+        if boot_envs is None:
+            log("Could not identify boot environments, leaving cache unchanged")
+            sys.exit(0)
         log(f"Identified boot environments: {boot_envs}")
 
         filtered_datasets = filter_datasets(all_datasets, current_be, boot_envs)

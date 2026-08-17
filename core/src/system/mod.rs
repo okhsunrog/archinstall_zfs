@@ -1,6 +1,7 @@
 pub mod alpm_pacman;
 pub mod async_download;
 pub mod cmd;
+pub mod fs;
 pub mod gpu;
 pub mod net;
 pub mod pacman;
