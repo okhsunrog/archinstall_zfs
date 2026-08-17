@@ -37,10 +37,8 @@ pub fn add_repositories(
     };
 
     let mut content = std::fs::read_to_string(&pacman_conf)?;
-    if let Some(architecture) = distro.architecture {
-        // Packages built for a newer instruction set are only accepted when
-        // pacman is told to work the architecture out for itself.
-        content = set_option(&content, "Architecture", architecture);
+    if let Some(architectures) = distro.architectures(isa) {
+        content = set_option(&content, "Architecture", architectures);
     }
     for repo in repositories {
         // Rewritten rather than appended when already present, so re-running

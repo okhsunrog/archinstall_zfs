@@ -82,15 +82,23 @@ pub struct Distribution {
     /// Repositories to add, in the order they should appear. Order matters:
     /// pacman prefers the first repository that offers a package.
     pub repositories: RepositorySelection,
-    /// Value for pacman's `Architecture`, when the distribution needs one
-    /// other than the default. CachyOS serves packages built for a newer
-    /// instruction set, which pacman only accepts as `auto`.
-    pub architecture: Option<&'static str>,
+    /// Whether this distribution serves packages built for instruction sets
+    /// newer than the base architecture.
+    ///
+    /// pacman installs those only when told which architectures to accept.
+    /// CachyOS's own tooling writes `Architecture = auto` and relies on a
+    /// patched pacman to expand it; stock pacman expands `auto` to the output
+    /// of `uname -m` and rejects everything else, so the accepted
+    /// architectures are listed out instead.
+    pub optimised_builds: bool,
     /// The keyring `pacman-key --populate` is given.
     pub keyring: &'static str,
     /// The kernels this distribution offers, and where each one's ZFS module
     /// comes from.
     pub kernels: &'static [KernelInfo],
+    /// The package providing ZFSBootMenu, when the distribution has one.
+    /// `None` means building it from the AUR, which is what Arch needs.
+    pub zfsbootmenu_package: Option<&'static str>,
 }
 
 /// Where the ZFS module packages for Arch kernels come from.
@@ -150,12 +158,28 @@ pub const ARCH: Distribution = Distribution {
         "sof-firmware",
     ],
     repositories: RepositorySelection::Fixed(&[ARCHZFS]),
-    architecture: None,
+    optimised_builds: false,
     keyring: "archlinux",
     kernels: ARCH_KERNELS,
+    zfsbootmenu_package: None,
 };
 
 impl Distribution {
+    /// The architectures pacman should accept on this machine, when that
+    /// needs saying at all.
+    pub fn architectures(&self, isa: IsaLevel) -> Option<&'static str> {
+        if !self.optimised_builds {
+            return None;
+        }
+        match isa {
+            // Zen 4 packages are built as x86-64-v4, so both baselines answer
+            // with the same list.
+            IsaLevel::V4 | IsaLevel::Znver4 => Some("x86_64 x86_64_v3 x86_64_v4"),
+            IsaLevel::V3 => Some("x86_64 x86_64_v3"),
+            IsaLevel::Baseline => None,
+        }
+    }
+
     /// The repositories to add on a machine with this instruction set.
     ///
     /// Empty when the distribution has nothing to offer this processor:
@@ -174,22 +198,43 @@ impl Distribution {
     }
 }
 
-/// CachyOS serves its packages from its own mirror, addressed by repository
-/// name. Their mirrorlist package names the same mirrors and is installed as
-/// part of the system, but a `Include` of it cannot be used while installing:
-/// the file does not exist until the package is, and pacman refuses a
-/// configuration that includes a file it cannot read.
-const CACHYOS_SERVER: &str = "https://mirror.cachyos.org/repo/x86_64/$repo";
+/// Where CachyOS serves each build of its package set.
+///
+/// The directory is the instruction set the packages were built for, and it is
+/// not the repository's own name: the Zen 4 repositories live under the
+/// x86-64-v4 directory, and a path built from the repository name instead
+/// answers with the mirror's welcome page rather than a database — which
+/// pacman then reports as a corrupt signature.
+///
+/// Their mirrorlist writes these as `$arch_v3` and `$arch_v4`, variables only
+/// their patched pacman understands, so the paths are written out here.
+const CACHYOS_BASELINE_SERVERS: &[&str] = &[
+    "https://cdn77.cachyos.org/repo/x86_64/$repo",
+    "https://mirror.cachyos.org/repo/x86_64/$repo",
+];
+const CACHYOS_V3_SERVERS: &[&str] = &[
+    "https://cdn77.cachyos.org/repo/x86_64_v3/$repo",
+    "https://mirror.cachyos.org/repo/x86_64_v3/$repo",
+];
+const CACHYOS_V4_SERVERS: &[&str] = &[
+    "https://cdn77.cachyos.org/repo/x86_64_v4/$repo",
+    "https://mirror.cachyos.org/repo/x86_64_v4/$repo",
+];
 
-/// Their packages are signed with one key, which is trusted before the
-/// repositories are used — the same order their own installer script follows.
+/// Their packages are signed with one key, trusted before the repositories are
+/// used — the same order their own installer script follows.
 const CACHYOS_KEY: &str = "F3B607488DB35A47";
 
-/// One of CachyOS's repositories. They all share a server and a key.
-const fn cachyos_repo(name: &'static str) -> Repository {
+/// One of CachyOS's repositories. They share a key and differ in where they
+/// are served from.
+const fn cachyos_repo(name: &'static str, servers: &'static [&'static str]) -> Repository {
     Repository {
         name,
-        servers: &[CACHYOS_SERVER],
+        servers,
+        // Their mirrorlist cannot be included while installing: the file
+        // arrives with a package, and pacman refuses a configuration that
+        // includes a file it cannot read. The installed system gets those
+        // packages and can use them afterwards.
         mirrorlist: None,
         key_ids: &[CACHYOS_KEY],
         signatures: Signatures::Required,
@@ -197,24 +242,26 @@ const fn cachyos_repo(name: &'static str) -> Repository {
 }
 
 const CACHYOS_V3: &[Repository] = &[
-    cachyos_repo("cachyos-v3"),
-    cachyos_repo("cachyos-core-v3"),
-    cachyos_repo("cachyos-extra-v3"),
-    cachyos_repo("cachyos"),
+    cachyos_repo("cachyos-v3", CACHYOS_V3_SERVERS),
+    cachyos_repo("cachyos-core-v3", CACHYOS_V3_SERVERS),
+    cachyos_repo("cachyos-extra-v3", CACHYOS_V3_SERVERS),
+    cachyos_repo("cachyos", CACHYOS_BASELINE_SERVERS),
 ];
 
 const CACHYOS_V4: &[Repository] = &[
-    cachyos_repo("cachyos-v4"),
-    cachyos_repo("cachyos-core-v4"),
-    cachyos_repo("cachyos-extra-v4"),
-    cachyos_repo("cachyos"),
+    cachyos_repo("cachyos-v4", CACHYOS_V4_SERVERS),
+    cachyos_repo("cachyos-core-v4", CACHYOS_V4_SERVERS),
+    cachyos_repo("cachyos-extra-v4", CACHYOS_V4_SERVERS),
+    cachyos_repo("cachyos", CACHYOS_BASELINE_SERVERS),
 ];
 
+/// Zen 4 packages are served from the x86-64-v4 directory, not one named
+/// after the repository.
 const CACHYOS_ZNVER4: &[Repository] = &[
-    cachyos_repo("cachyos-znver4"),
-    cachyos_repo("cachyos-core-znver4"),
-    cachyos_repo("cachyos-extra-znver4"),
-    cachyos_repo("cachyos"),
+    cachyos_repo("cachyos-znver4", CACHYOS_V4_SERVERS),
+    cachyos_repo("cachyos-core-znver4", CACHYOS_V4_SERVERS),
+    cachyos_repo("cachyos-extra-znver4", CACHYOS_V4_SERVERS),
+    cachyos_repo("cachyos", CACHYOS_BASELINE_SERVERS),
 ];
 
 /// CachyOS builds a ZFS module for each of its kernels, version-locked to it.
@@ -270,9 +317,11 @@ pub const CACHYOS: Distribution = Distribution {
         v4: CACHYOS_V4,
         znver4: CACHYOS_ZNVER4,
     },
-    architecture: Some("auto"),
+    optimised_builds: true,
     keyring: "archlinux",
     kernels: CACHYOS_KERNELS,
+    // Theirs is packaged, so there is nothing to build.
+    zfsbootmenu_package: Some("zfsbootmenu"),
 };
 
 /// Every distribution the installer knows.
@@ -333,6 +382,55 @@ mod tests {
         // A processor below the baseline gets nothing, as with their own
         // tooling; add_repositories turns that into a refusal.
         assert!(CACHYOS.repositories(IsaLevel::Baseline).is_empty());
+    }
+
+    /// The directory a repository is served from is the instruction set, not
+    /// the repository name — getting this wrong answers with the mirror's
+    /// welcome page, which pacman reports as a corrupt database signature.
+    #[test]
+    fn repositories_are_served_from_the_directory_for_their_build() {
+        let dir_of = |repos: &'static [Repository], name: &str| {
+            repos
+                .iter()
+                .find(|r| r.name == name)
+                .and_then(|r| r.servers.first().copied())
+                .unwrap_or_default()
+        };
+
+        assert!(dir_of(CACHYOS_V3, "cachyos-v3").contains("/x86_64_v3/"));
+        assert!(dir_of(CACHYOS_V4, "cachyos-v4").contains("/x86_64_v4/"));
+        assert!(
+            dir_of(CACHYOS_ZNVER4, "cachyos-znver4").contains("/x86_64_v4/"),
+            "Zen 4 is served from the v4 directory"
+        );
+        // The unoptimised repository sits in the plain directory in every set.
+        for set in [CACHYOS_V3, CACHYOS_V4, CACHYOS_ZNVER4] {
+            assert!(dir_of(set, "cachyos").contains("/x86_64/"));
+        }
+    }
+
+    #[test]
+    fn accepted_architectures_match_what_the_packages_are_built_as() {
+        // Their packages carry x86_64_v3 and x86_64_v4; Zen 4 builds are
+        // stamped x86_64_v4 like the rest of that baseline.
+        assert_eq!(
+            CACHYOS.architectures(IsaLevel::V3),
+            Some("x86_64 x86_64_v3")
+        );
+        assert_eq!(
+            CACHYOS.architectures(IsaLevel::V4),
+            Some("x86_64 x86_64_v3 x86_64_v4")
+        );
+        assert_eq!(
+            CACHYOS.architectures(IsaLevel::Znver4),
+            CACHYOS.architectures(IsaLevel::V4)
+        );
+        assert_eq!(CACHYOS.architectures(IsaLevel::Baseline), None);
+
+        // A distribution without optimised builds says nothing about it.
+        for isa in [IsaLevel::V3, IsaLevel::V4, IsaLevel::Znver4] {
+            assert_eq!(ARCH.architectures(isa), None);
+        }
     }
 
     #[test]

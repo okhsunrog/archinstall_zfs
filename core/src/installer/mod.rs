@@ -95,6 +95,14 @@ pub fn perform_installation(request: InstallRequest) -> Result<Vec<String>> {
         bail!("installation cancelled");
     }
 
+    // The medium fetches the base system from the distribution's own
+    // repositories, so they have to be configured here rather than in the
+    // phase that installs ZFS: CachyOS's keyring and mirrorlists are part of
+    // its base, and they live in those repositories.
+    let isa = crate::system::sysinfo::detect_isa_level(&*runner);
+    let distro = config.distribution();
+    crate::system::pacman::add_repositories(&*runner, None, distro, isa)?;
+
     tracing::info!("Phase 4: Installing base system...");
     tracing::info!(target: "metrics", event = "phase_start", num = 4u32, name = "Installing base system");
     let target_mounts = base::install_base(
@@ -118,10 +126,9 @@ pub fn perform_installation(request: InstallRequest) -> Result<Vec<String>> {
     )?;
     alpm.sync_databases(false)?;
 
-    let isa = crate::system::sysinfo::detect_isa_level(&*runner);
     let mut installer = Installer {
         runner,
-        distro: config.distribution(),
+        distro,
         isa,
         config,
         target,

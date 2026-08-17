@@ -457,6 +457,20 @@ impl AlpmContext {
     }
 }
 
+/// Install packages from the target's own repositories, for the phases that
+/// run outside the installer's own package handle.
+pub fn install_into_target(
+    target: &Path,
+    packages: &[&str],
+    cancel: &CancellationToken,
+    download_config: DownloadConfig,
+) -> Result<()> {
+    let target_conf = target.join("etc/pacman.conf");
+    let mut ctx = AlpmContext::for_target(target, &target_conf, download_config)?;
+    ctx.sync_databases(false)?;
+    ctx.install_packages(packages, cancel, None)
+}
+
 // ── Target preparation ───────────────────────────────
 
 fn prepare_target_dirs(target: &Path) -> Result<()> {

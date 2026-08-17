@@ -116,23 +116,53 @@ fn install_zbm_pacman_hook(target: &Path) -> Result<()> {
 /// Install zfsbootmenu from AUR and run generate-zbm to build the EFI bundle.
 /// This replaces the old pre-built download approach with a locally built ZBM
 /// that uses the same kernel and ZFS modules as the installed system.
-pub async fn install_and_generate_zbm(
+/// Build ZFSBootMenu from the AUR, for distributions that do not package it.
+async fn install_zbm_from_aur(
     runner: std::sync::Arc<dyn CommandRunner>,
     target: &Path,
-    init_system: InitSystem,
     cancel: &tokio_util::sync::CancellationToken,
     download_config: crate::system::async_download::DownloadConfig,
 ) -> Result<()> {
-    // 1. Install zfsbootmenu from AUR (async: AUR dependency resolution)
-    tracing::info!("installing zfsbootmenu from AUR");
     crate::installer::aur::install_aur_packages(
-        runner.clone(),
+        runner,
         target,
         &["zfsbootmenu"],
         cancel,
         download_config,
     )
-    .await?;
+    .await
+}
+
+pub async fn install_and_generate_zbm(
+    runner: std::sync::Arc<dyn CommandRunner>,
+    target: &Path,
+    distro: &'static crate::distro::Distribution,
+    init_system: InitSystem,
+    cancel: &tokio_util::sync::CancellationToken,
+    download_config: crate::system::async_download::DownloadConfig,
+) -> Result<()> {
+    // 1. Install ZFSBootMenu, from the distribution's repositories when it
+    //    has it and from the AUR when it does not. Asking the AUR for a
+    //    package the repositories already satisfy resolves to nothing to
+    //    build, and nothing gets installed at all.
+    if let Some(package) = distro.zfsbootmenu_package {
+        tracing::info!(package, "installing ZFSBootMenu from the distribution");
+        let target_owned = target.to_path_buf();
+        let cancel_owned = cancel.clone();
+        let config = download_config.clone();
+        tokio::task::spawn_blocking(move || {
+            crate::system::alpm_pacman::install_into_target(
+                &target_owned,
+                &[package],
+                &cancel_owned,
+                config,
+            )
+        })
+        .await??;
+    } else {
+        tracing::info!("building ZFSBootMenu from the AUR");
+        install_zbm_from_aur(runner.clone(), target, cancel, download_config.clone()).await?;
+    }
     if cancel.is_cancelled() {
         color_eyre::eyre::bail!("installation cancelled");
     }

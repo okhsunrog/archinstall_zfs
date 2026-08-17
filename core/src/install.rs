@@ -332,6 +332,7 @@ async fn install(
     crate::bootmenu::install_and_generate_zbm(
         runner.clone(),
         &mountpoint,
+        config.distribution(),
         config.init_system,
         &cancel,
         download_config,
