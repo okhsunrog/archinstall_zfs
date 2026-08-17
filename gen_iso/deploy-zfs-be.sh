@@ -127,7 +127,7 @@ done
 (( EUID == 0 )) || die "run this script as root (for example, with sudo)"
 
 for command in arch-chroot cat chmod find findmnt grep install ln mount mountpoint \
-    realpath rm rsync stat sync umount zfs zpool; do
+    od realpath rm rsync stat sync tr umount zfs zpool; do
     require_command "${command}"
 done
 
@@ -199,6 +199,28 @@ if [[ "${current_root}" == "${pool}/"* ]]; then
     commandline="$(zfs get -H -o value org.zfsbootmenu:commandline -- "${current_root}")"
     [[ "${commandline}" != "-" ]] || commandline=""
 fi
+
+# The command line is inherited verbatim, so a malformed spl.spl_hostid in the
+# source environment would propagate into every environment deployed from it.
+# The kernel parses this parameter with kstrtoul(val, 0, ...), where a leading
+# zero without an "x" selects octal: a bare 00bab10c is not merely misread, it
+# is rejected, leaving spl_hostid at 0. Derive the value from /etc/hostid -- the
+# same file copied into the BE and embedded in its initramfs, already validated
+# above as exactly four bytes -- and always emit it 0x-prefixed.
+host_hostid="$(od -An -tx4 -N4 -- /etc/hostid | tr -d '[:space:]')"
+[[ "${host_hostid}" =~ ^[0-9a-fA-F]{8}$ ]] \
+    || die "could not read an 8-digit hostid from /etc/hostid"
+kcl_args=()
+read -r -a kcl_args <<<"${commandline}"
+commandline=""
+if (( ${#kcl_args[@]} )); then
+    for arg in "${kcl_args[@]}"; do
+        [[ "${arg}" == spl.spl_hostid=* ]] && continue
+        commandline="${commandline:+${commandline} }${arg}"
+    done
+fi
+commandline="${commandline:+${commandline} }spl.spl_hostid=0x${host_hostid}"
+
 if [[ " ${commandline} " != *" archinstall_zfs.demo=1 "* ]]; then
     commandline="${commandline:+${commandline} }archinstall_zfs.demo=1"
 fi
