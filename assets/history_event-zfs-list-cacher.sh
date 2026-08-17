@@ -35,7 +35,7 @@ def get_current_root():
             for line in f:
                 if ' / type zfs ' in line:
                     return line.split()[0]
-    except:
+    except Exception:
         pass
 
     # Fallback to mount command
@@ -44,7 +44,7 @@ def get_current_root():
         for line in result.stdout.split('\n'):
             if ' on / type zfs ' in line:
                 return line.split()[0]
-    except:
+    except Exception:
         pass
 
     # Second fallback to zfs mount
@@ -53,7 +53,7 @@ def get_current_root():
         for line in result.stdout.split('\n'):
             if line.strip().endswith(' /'):
                 return line.split()[0]
-    except:
+    except Exception:
         pass
 
     return None
@@ -70,17 +70,56 @@ def get_dataset_props(pool):
     ]
     cmd = ['zfs', 'list', '-H', '-t', 'filesystem', '-r', '-o', ','.join(props), pool]
     log(f"Running command: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    return [line.split('\t') for line in result.stdout.strip().split('\n')]
+    return run_zfs_list(cmd)
 
-def find_boot_environments(datasets):
-    """Identify boot environments by finding their root datasets"""
+def run_zfs_list(cmd):
+    """Run a `zfs list` and return rows, or None if it produced nothing usable.
+
+    Returning None rather than an empty list matters: the caller must leave the
+    existing cache alone on failure. Overwriting it with nothing would strip
+    every mount unit on the next boot.
+    """
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+    except Exception as exc:
+        log(f"Could not run zfs list: {exc}")
+        return None
+    if result.returncode != 0:
+        log(f"zfs list failed (rc={result.returncode}): {result.stderr.strip()}")
+        return None
+    output = result.stdout.strip()
+    if not output:
+        log("zfs list returned no datasets")
+        return None
+    return [line.split('\t') for line in output.split('\n')]
+
+def find_boot_environments(pool):
+    """Identify boot environments by finding their root datasets.
+
+    Queried separately from the cache rows on purpose: the cache column layout
+    is dictated by zfs-mount-generator, so org.zfsbootmenu:active cannot simply
+    be appended to it.
+
+    ZFSBootMenu treats a filesystem as a boot environment when it has
+    mountpoint=/ (unless org.zfsbootmenu:active=off hides it from the menu), or
+    mountpoint=legacy together with org.zfsbootmenu:active=on. Datasets hidden
+    from the menu still count here: hiding a boot environment does not make it
+    safe to mount its /home underneath a different one.
+    """
+    rows = run_zfs_list([
+        'zfs', 'list', '-H', '-t', 'filesystem', '-r',
+        '-o', 'name,mountpoint,org.zfsbootmenu:active', pool,
+    ])
+    if rows is None:
+        return None
+
     boot_envs = set()
-    for dataset in datasets:
-        name, mountpoint = dataset[0], dataset[1]
-        if mountpoint == '/':
-            be = name.rsplit('/', 1)[0]
-            boot_envs.add(be)
+    for row in rows:
+        if len(row) < 3:
+            continue
+        name, mountpoint, active = row[0], row[1], row[2]
+        if mountpoint == '/' or (mountpoint == 'legacy' and active == 'on'):
+            boot_envs.add(name.rsplit('/', 1)[0])
     return boot_envs
 
 def is_below(dataset_name, ancestor):
@@ -176,9 +215,15 @@ def main():
         log(f"Current boot environment: {current_be}")
 
         all_datasets = get_dataset_props(pool)
+        if all_datasets is None:
+            log("Could not enumerate datasets, leaving cache unchanged")
+            sys.exit(0)
         log(f"Found {len(all_datasets)} total datasets")
 
-        boot_envs = find_boot_environments(all_datasets)
+        boot_envs = find_boot_environments(pool)
+        if boot_envs is None:
+            log("Could not identify boot environments, leaving cache unchanged")
+            sys.exit(0)
         log(f"Identified boot environments: {boot_envs}")
 
         filtered_datasets = filter_datasets(all_datasets, current_be, boot_envs)
