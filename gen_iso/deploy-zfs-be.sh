@@ -270,12 +270,17 @@ zfs create -u \
     -- "${parent}"
 created_parent=1
 
+# rootprefix must match the initramfs generator, not the distribution: this BE
+# is built with mkinitcpio below, whose zfs hook parses zfs=<pool>/<dataset>.
+# Left unset, ZFSBootMenu guesses from /etc/os-release, which happens to yield
+# the same answer for Arch but silently breaks for any other base.
 create_options=(
     -u
     -o mountpoint=/
     -o canmount=noauto
     -o overlay=off
     -o "org.zfsbootmenu:commandline=${commandline}"
+    -o "org.zfsbootmenu:rootprefix=zfs="
 )
 if [[ -n "${keysource}" ]]; then
     create_options+=(-o "org.zfsbootmenu:keysource=${keysource}")
