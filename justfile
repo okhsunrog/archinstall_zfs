@@ -152,6 +152,22 @@ zfs-be-deploy DATASET="novafs/archiso0/root" KERNEL="linux-lts" MOUNT_DIR="/mnt/
         --kernel {{KERNEL}} \
         --mount-dir {{MOUNT_DIR}}
 
+# Replace the installer binaries in a boot environment that already exists.
+# Seconds instead of a full mkarchiso run: the environment, its packages and
+# its configuration stay as they are, and only the binaries change. Use
+# zfs-be-build when the package set or the profile itself changed.
+# Usage: just zfs-be-update [--dataset novafs/archiso0/root] [--snapshot NAME]
+[arg("DATASET", long="dataset")]
+[arg("MOUNT_DIR", long="mount-dir")]
+[arg("SNAPSHOT", long="snapshot")]
+zfs-be-update DATASET="novafs/archiso0/root" MOUNT_DIR="/mnt/archzfs-be" SNAPSHOT="":
+    just cargo-build
+    sudo bash gen_iso/update-zfs-be.sh \
+        --dataset {{DATASET}} \
+        --binary-dir target/release \
+        --mount-dir {{MOUNT_DIR}} \
+        {{ if SNAPSHOT != "" { "--snapshot " + SNAPSHOT } else { "" } }}
+
 # End-to-end bare-metal LinuxKMS demo BE build and deployment.
 [arg("MODE", long="mode")]
 [arg("KERNEL", long="kernel")]
