@@ -368,6 +368,8 @@ The xtask test suite boots a QEMU VM, runs the installer, reboots from the insta
 
 Installer logs are automatically pulled from the VM to `test-install.log` for analysis.
 
+Runs share a package and source cache on the host (`/var/tmp/archinstall-zfs-cache`, `--cache-dir` to move it, `--no-cache` to skip it), so the ~1 GB of packages and the ZFSBootMenu tarball are downloaded once rather than on every run. The installer picks the cache up from `ARCHINSTALL_ZFS_PKG_CACHE` and `ARCHINSTALL_ZFS_SRCDEST`, which also makes an installation from a prepared cache possible outside the tests.
+
 ---
 
 ## Troubleshooting

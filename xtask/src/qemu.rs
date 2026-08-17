@@ -4,6 +4,14 @@ use std::time::{Duration, Instant};
 
 const SSH_TIMEOUT_SECS: u64 = 10;
 
+/// 9p tag the host cache is shared under, and where the guest mounts it.
+///
+/// Under /run on purpose: the installer bind-mounts the medium's /run into the
+/// target, so a path there is reachable from inside the chroot where makepkg
+/// runs, without the share having to know anything about the target.
+pub const CACHE_MOUNT_TAG: &str = "archzfscache";
+pub const CACHE_GUEST_DIR: &str = "/run/archzfs-cache";
+
 pub struct QemuVm {
     pid: Option<u32>,
     port: u16,
@@ -11,8 +19,26 @@ pub struct QemuVm {
 }
 
 impl QemuVm {
-    pub fn boot_iso(disk: &Path, uefi_vars: &Path, iso: &Path, port: u16) -> Self {
+    /// Boot the installation medium, with `cache` shared into the guest when
+    /// one is given.
+    ///
+    /// The share carries the package cache and the pre-downloaded sources, so
+    /// a run reuses what earlier runs fetched instead of pulling a gigabyte of
+    /// packages again.
+    pub fn boot_iso(
+        disk: &Path,
+        uefi_vars: &Path,
+        iso: &Path,
+        port: u16,
+        cache: Option<&Path>,
+    ) -> Self {
         let ovmf = find_ovmf_code();
+        let share = cache.map(|path| {
+            format!(
+                "local,path={},mount_tag={CACHE_MOUNT_TAG},security_model=mapped-xattr",
+                path.display()
+            )
+        });
         let mut child = Command::new("qemu-system-x86_64")
             .args([
                 "-enable-kvm",
@@ -49,6 +75,10 @@ impl QemuVm {
                 "-device",
                 "virtio-blk-pci,drive=disk0,serial=archzfs-test-disk",
             ])
+            .args(match &share {
+                Some(spec) => vec!["-virtfs", spec.as_str()],
+                None => vec![],
+            })
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()

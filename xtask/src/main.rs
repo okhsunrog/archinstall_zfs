@@ -3,7 +3,7 @@ mod qemu;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
+use std::process::{Command, ExitCode};
 use std::time::Duration;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -132,6 +132,15 @@ struct TestOpts {
     /// Place disk image and UEFI vars in /tmp (tmpfs) for faster I/O
     #[arg(long)]
     tmpfs: bool,
+
+    /// Directory on the host holding downloaded packages and sources, reused
+    /// across runs. Created if missing; --no-cache turns it off.
+    #[arg(long, default_value = "/var/tmp/archinstall-zfs-cache")]
+    cache_dir: PathBuf,
+
+    /// Download everything again instead of reusing the host cache.
+    #[arg(long)]
+    no_cache: bool,
 
     /// SSH port for ISO VM
     #[arg(long, default_value_t = 2222)]
@@ -320,6 +329,89 @@ fn detect_init_system(config: &Path) -> String {
     }
 }
 
+/// Prepare the directory shared into the guest, or `None` when caching is off.
+///
+/// Holds two things: the packages the installer downloads, which is the
+/// gigabyte that would otherwise be fetched again on every run, and the
+/// sources makepkg needs for the AUR builds.
+fn prepare_cache(opts: &TestOpts) -> Result<Option<PathBuf>, String> {
+    if opts.no_cache {
+        return Ok(None);
+    }
+
+    let dir = &opts.cache_dir;
+    for sub in ["pkg", "src"] {
+        fs::create_dir_all(dir.join(sub))
+            .map_err(|e| format!("cannot create cache {}: {e}", dir.join(sub).display()))?;
+    }
+    let dir = dir
+        .canonicalize()
+        .map_err(|e| format!("cannot resolve cache {}: {e}", dir.display()))?;
+
+    seed_aur_sources(&dir.join("src"));
+    Ok(Some(dir))
+}
+
+/// Download the ZFSBootMenu tarball so makepkg does not have to.
+///
+/// Best effort: makepkg fetches it itself if this fails, and verifies the
+/// checksum either way, so a stale or missing file costs a download rather
+/// than a wrong build. Worth doing because this one download comes from
+/// GitHub's archive service, which is what fails first when GitHub is
+/// unwell — twice in one afternoon, in the run that prompted this.
+fn seed_aur_sources(dir: &Path) {
+    let pkgbuild = match Command::new("curl")
+        .args([
+            "-fsSL",
+            "--max-time",
+            "30",
+            "https://aur.archlinux.org/cgit/aur.git/plain/PKGBUILD?h=zfsbootmenu",
+        ])
+        .output()
+    {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).into_owned(),
+        _ => {
+            eprintln!("  Could not read the zfsbootmenu PKGBUILD; makepkg will download its own");
+            return;
+        }
+    };
+
+    let Some(version) = pkgbuild.lines().find_map(|l| l.strip_prefix("pkgver=")) else {
+        eprintln!("  No pkgver in the zfsbootmenu PKGBUILD; skipping the source cache");
+        return;
+    };
+    let version = version.trim();
+
+    // The name makepkg looks for, from the PKGBUILD's renamed source entry.
+    let filename = format!("zfsbootmenu-v{version}.tar.gz");
+    let target = dir.join(&filename);
+    if target.exists() {
+        return;
+    }
+
+    let url = format!("https://github.com/zbm-dev/zfsbootmenu/archive/v{version}.tar.gz");
+    let partial = dir.join(format!("{filename}.part"));
+    let fetched = Command::new("curl")
+        .args(["-fsSL", "--max-time", "180", "-o"])
+        .arg(&partial)
+        .arg(&url)
+        .status();
+
+    match fetched {
+        Ok(status) if status.success() => {
+            // Renamed only once complete, so an interrupted download is not
+            // mistaken for a cached one on the next run.
+            if fs::rename(&partial, &target).is_ok() {
+                eprintln!("  Cached {filename}");
+            }
+        }
+        _ => {
+            let _ = fs::remove_file(&partial);
+            eprintln!("  Could not cache {filename}; makepkg will download it");
+        }
+    }
+}
+
 fn cmd_test_install(opts: TestOpts) -> Result<(), String> {
     check_prerequisites(&opts)?;
     let timeout = Duration::from_secs(opts.timeout);
@@ -334,7 +426,14 @@ fn cmd_test_install(opts: TestOpts) -> Result<(), String> {
     // Boot ISO
     eprintln!("[2/4] Booting ISO VM on port {}", opts.iso_port);
     let iso = qemu::find_latest_iso();
-    let mut vm = QemuVm::boot_iso(&opts.disk, &opts.vars, &iso, opts.iso_port);
+    let cache = prepare_cache(&opts)?;
+    let mut vm = QemuVm::boot_iso(
+        &opts.disk,
+        &opts.vars,
+        &iso,
+        opts.iso_port,
+        cache.as_deref(),
+    );
     if !vm.wait_for_ssh(timeout) {
         return Err(format!("ISO VM not SSH-accessible within {timeout:?}"));
     }
@@ -346,8 +445,23 @@ fn cmd_test_install(opts: TestOpts) -> Result<(), String> {
     vm.ssh_run("chmod +x /root/archinstall-zfs-rs")
         .map_err(|e| format!("chmod failed: {e}"))?;
 
+    let installer_command = match &cache {
+        Some(_) => {
+            let tag = qemu::CACHE_MOUNT_TAG;
+            let dir = qemu::CACHE_GUEST_DIR;
+            eprintln!("  Reusing the host cache at {}", opts.cache_dir.display());
+            format!(
+                "mkdir -p {dir} && \
+                 mount -t 9p -o trans=virtio,version=9p2000.L {tag} {dir} && \
+                 mkdir -p {dir}/pkg {dir}/src && \
+                 ARCHINSTALL_ZFS_PKG_CACHE={dir}/pkg ARCHINSTALL_ZFS_SRCDEST={dir}/src \
+                 /root/archinstall-zfs-rs --config /root/config.json --silent"
+            )
+        }
+        None => "/root/archinstall-zfs-rs --config /root/config.json --silent".to_string(),
+    };
     let output = vm
-        .ssh_run("/root/archinstall-zfs-rs --config /root/config.json --silent")
+        .ssh_run(&installer_command)
         .map_err(|e| format!("installer failed to execute: {e}"))?;
 
     // Pull installer logs from VM before shutdown (regardless of success/failure)
