@@ -19,12 +19,9 @@ pub async fn discover_importable_pools() -> Vec<String> {
 pub async fn detect_pool_encryption(pool_name: &str) -> color_eyre::Result<bool> {
     let zfs = zfskit::Zfs::new();
     let pool = zfs.pool(pool_name)?;
-    pool.import(&zfskit::pool::ImportOptions {
-        force: true,
-        no_mount: true,
-        ..Default::default()
-    })
-    .await?;
+    // Same import the installation itself performs, so a pool the picker
+    // accepts is one the installation can use.
+    crate::prepare::import_pool_no_mount(&zfs, pool_name, None).await?;
     let result = pool.root_dataset().get_property("encryption").await;
     let cleanup = pool.export(&zfskit::pool::ExportOptions::default()).await;
     let encrypted = result.map(|p| p.value != "off" && !p.value.is_empty())?;
@@ -37,12 +34,9 @@ pub async fn detect_pool_encryption(pool_name: &str) -> color_eyre::Result<bool>
 pub async fn verify_pool_passphrase(pool_name: &str, password: &str) -> color_eyre::Result<bool> {
     let zfs = zfskit::Zfs::new();
     let pool = zfs.pool(pool_name)?;
-    pool.import(&zfskit::pool::ImportOptions {
-        force: true,
-        no_mount: true,
-        ..Default::default()
-    })
-    .await?;
+    // Same import the installation itself performs, so a pool the picker
+    // accepts is one the installation can use.
+    crate::prepare::import_pool_no_mount(&zfs, pool_name, None).await?;
     let result = pool
         .root_dataset()
         .verify_passphrase(password.as_bytes())
