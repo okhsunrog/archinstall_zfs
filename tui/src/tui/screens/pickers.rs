@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use color_eyre::eyre::Result;
 
+use archinstall_zfs_core::config::choices::Choice;
 use archinstall_zfs_core::config::types::{
     AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, ProfileSelection,
     SeatAccess, SwapMode, UserConfig, ZfsEncryptionMode, ZfsModuleMode,
@@ -591,11 +592,8 @@ pub fn apply_select(
 ) -> Result<()> {
     match key {
         "installation_mode" => {
-            let new_mode = match idx {
-                0 => InstallationMode::FullDisk,
-                1 => InstallationMode::NewPool,
-                2 => InstallationMode::ExistingPool,
-                _ => return Ok(()),
+            let Some(new_mode) = InstallationMode::from_index(idx) else {
+                return Ok(());
             };
             if config.installation_mode != Some(new_mode) {
                 config.disk = None;
@@ -606,11 +604,8 @@ pub fn apply_select(
             config.installation_mode = Some(new_mode);
         }
         "encryption" => {
-            let new_mode = match idx {
-                0 => ZfsEncryptionMode::None,
-                1 => ZfsEncryptionMode::Pool,
-                2 => ZfsEncryptionMode::Dataset,
-                _ => return Ok(()),
+            let Some(new_mode) = ZfsEncryptionMode::from_index(idx) else {
+                return Ok(());
             };
             config.zfs_encryption_mode = new_mode;
             if new_mode != ZfsEncryptionMode::None && config.zfs_encryption_password.is_none() {
@@ -626,50 +621,34 @@ pub fn apply_select(
             }
         }
         "compression" => {
-            config.compression = match idx {
-                0 => CompressionAlgo::Lz4,
-                1 => CompressionAlgo::Zstd,
-                2 => CompressionAlgo::Zstd5,
-                3 => CompressionAlgo::Zstd10,
-                4 => CompressionAlgo::Off,
-                _ => return Ok(()),
-            };
+            if let Some(algo) = CompressionAlgo::from_index(idx) {
+                config.compression = algo;
+            }
         }
         "swap_mode" => {
-            config.swap_mode = match idx {
-                0 => SwapMode::None,
-                1 => SwapMode::Zram,
-                2 => SwapMode::ZswapPartition,
-                3 => SwapMode::ZswapPartitionEncrypted,
-                _ => return Ok(()),
-            };
+            if let Some(mode) = SwapMode::from_index(idx) {
+                config.swap_mode = mode;
+            }
         }
         "init_system" => {
-            config.init_system = match idx {
-                0 => InitSystem::Dracut,
-                1 => InitSystem::Mkinitcpio,
-                _ => return Ok(()),
-            };
+            if let Some(init) = InitSystem::from_index(idx) {
+                config.init_system = init;
+            }
         }
         "audio" => {
-            config.audio = match idx {
-                0 => None,
-                1 => Some(AudioServer::Pipewire),
-                2 => Some(AudioServer::Pulseaudio),
-                _ => return Ok(()),
-            };
+            if let Some(server) = <Option<AudioServer>>::from_index(idx) {
+                config.audio = server;
+            }
         }
         "network" => {
             config.network_copy_iso = idx == 0;
         }
         "seat_access" => {
-            if let Some(sel) = config.profile_selection.as_mut() {
-                sel.seat_access = match idx {
-                    0 => None,
-                    1 => Some(SeatAccess::Seatd),
-                    2 => Some(SeatAccess::Polkit),
-                    _ => return Ok(()),
-                };
+            if let (Some(sel), Some(access)) = (
+                config.profile_selection.as_mut(),
+                <Option<SeatAccess>>::from_index(idx),
+            ) {
+                sel.seat_access = access;
             }
         }
         _ => {}

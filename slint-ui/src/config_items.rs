@@ -4,9 +4,10 @@
 use slint::SharedString;
 use std::path::PathBuf;
 
+use archinstall_zfs_core::config::choices::Choice;
 use archinstall_zfs_core::config::types::{
-    AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, ProfileSelection,
-    SeatAccess, SwapMode, ZfsEncryptionMode,
+    AudioServer, CompressionAlgo, GlobalConfig, InstallationMode, ProfileSelection, SeatAccess,
+    SwapMode, ZfsEncryptionMode,
 };
 use archinstall_zfs_core::disk::device::DeviceChoice;
 
@@ -100,16 +101,10 @@ fn build_welcome_items(_c: &GlobalConfig) -> Vec<ConfigItem> {
 fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     let mode = c.installation_mode;
 
-    let mut items = radio_group(
+    let mut items = choice_group(
         "installation_mode",
         "Installation mode",
-        &["Full Disk", "New Pool", "Existing Pool"],
-        match mode {
-            Some(InstallationMode::FullDisk) => 0,
-            Some(InstallationMode::NewPool) => 1,
-            Some(InstallationMode::ExistingPool) => 2,
-            None => 0,
-        },
+        mode.unwrap_or(InstallationMode::FullDisk),
     );
 
     if matches!(mode, Some(InstallationMode::FullDisk) | None) {
@@ -184,33 +179,17 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         ),
     ];
 
-    items.extend(radio_group_with_off(
+    items.extend(choice_group_with_off(
         "compression",
         "Compression",
-        &["lz4", "zstd", "zstd-5", "zstd-10", "off"],
-        match c.compression {
-            CompressionAlgo::Lz4 => 0,
-            CompressionAlgo::Zstd => 1,
-            CompressionAlgo::Zstd5 => 2,
-            CompressionAlgo::Zstd10 => 3,
-            CompressionAlgo::Off => 4,
-        },
-        4,
+        c.compression,
+        CompressionAlgo::Off,
     ));
 
-    items.extend(radio_group(
+    items.extend(choice_group(
         "encryption",
         "Encryption",
-        &[
-            "No encryption",
-            "Encrypt entire pool",
-            "Encrypt base dataset only",
-        ],
-        match c.zfs_encryption_mode {
-            ZfsEncryptionMode::None => 0,
-            ZfsEncryptionMode::Pool => 1,
-            ZfsEncryptionMode::Dataset => 2,
-        },
+        c.zfs_encryption_mode,
     ));
 
     if c.zfs_encryption_mode != ZfsEncryptionMode::None {
@@ -222,22 +201,11 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         ));
     }
 
-    items.extend(radio_group_with_off(
+    items.extend(choice_group_with_off(
         "swap_mode",
         "Swap",
-        &[
-            "None",
-            "ZRAM",
-            "Swap partition",
-            "Swap partition (encrypted)",
-        ],
-        match c.swap_mode {
-            SwapMode::None => 0,
-            SwapMode::Zram => 1,
-            SwapMode::ZswapPartition => 2,
-            SwapMode::ZswapPartitionEncrypted => 3,
-        },
-        0,
+        c.swap_mode,
+        SwapMode::None,
     ));
 
     if matches!(mode, Some(InstallationMode::FullDisk)) && has_swap_partition {
@@ -264,15 +232,7 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         ));
     }
 
-    items.extend(radio_group(
-        "init_system",
-        "Init system",
-        &["dracut", "mkinitcpio"],
-        match c.init_system {
-            InitSystem::Dracut => 0,
-            InitSystem::Mkinitcpio => 1,
-        },
-    ));
+    items.extend(choice_group("init_system", "Init system", c.init_system));
 
     items
 }
@@ -422,31 +382,16 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         // Seat access (Wayland compositors). Its own section card via
         // radio_group, like Audio.
         if p.needs_seat_access() {
-            items.extend(radio_group_with_off(
+            items.extend(choice_group_with_off(
                 "seat_access",
                 "Seat access",
-                &["None", "seatd", "polkit"],
-                match sel.seat_access {
-                    None => 0,
-                    Some(SeatAccess::Seatd) => 1,
-                    Some(SeatAccess::Polkit) => 2,
-                },
-                0,
+                sel.seat_access,
+                None,
             ));
         }
     }
 
-    items.extend(radio_group_with_off(
-        "audio",
-        "Audio",
-        &["None", "pipewire", "pulseaudio"],
-        match c.audio {
-            None => 0,
-            Some(AudioServer::Pipewire) => 1,
-            Some(AudioServer::Pulseaudio) => 2,
-        },
-        0,
-    ));
+    items.extend(choice_group_with_off("audio", "Audio", c.audio, None));
 
     items.push(section_header("Hardware"));
     // GPU driver — only shown for graphical profiles (mirrors upstream
@@ -700,6 +645,32 @@ fn radio_group(key: &str, label: &str, options: &[&str], selected: i32) -> Vec<C
     radio_group_inner(key, label, options, selected, None)
 }
 
+/// Build a radio group from a [`Choice`] enum, so the order, the labels and
+/// the selected index all come from one table rather than being spelled out
+/// here and inverted again in [`apply_radio`].
+fn choice_group<T: Choice>(key: &str, label: &str, current: T) -> Vec<ConfigItem> {
+    radio_group(key, label, &T::labels(), current.index() as i32)
+}
+
+/// [`choice_group`] for lists with a semantic "off" alternative, named by
+/// value rather than by index.
+fn choice_group_with_off<T: Choice>(key: &str, label: &str, current: T, off: T) -> Vec<ConfigItem> {
+    radio_group_with_off(
+        key,
+        label,
+        &T::labels(),
+        current.index() as i32,
+        off.index(),
+    )
+}
+
+/// Resolve a radio index coming back from the interface. Out of range — or
+/// negative, which the widget layer types as a plain `i32` — yields `None`
+/// rather than silently landing on a neighbouring variant.
+fn selected<T: Choice>(index: i32) -> Option<T> {
+    usize::try_from(index).ok().and_then(T::from_index)
+}
+
 /// Variant of [`radio_group`] that marks one option as the semantic "off"
 /// state (e.g. compression "off", audio "None"). The off row's `is_empty`
 /// flag is propagated to the review screen's collapsed Readonly row when
@@ -910,10 +881,8 @@ pub fn next_selectable_index(items: &[ConfigItem], current: i32, dir: i32) -> i3
 pub fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
     match group_key {
         "installation_mode" => {
-            let new_mode = match idx {
-                0 => InstallationMode::FullDisk,
-                1 => InstallationMode::NewPool,
-                _ => InstallationMode::ExistingPool,
+            let Some(new_mode) = selected::<InstallationMode>(idx) else {
+                return;
             };
             if config.installation_mode != Some(new_mode) {
                 config.disk = None;
@@ -949,36 +918,27 @@ pub fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
             }
         }
         "compression" => {
-            config.compression = match idx {
-                0 => CompressionAlgo::Lz4,
-                1 => CompressionAlgo::Zstd,
-                2 => CompressionAlgo::Zstd5,
-                3 => CompressionAlgo::Zstd10,
-                _ => CompressionAlgo::Off,
+            if let Some(algo) = selected(idx) {
+                config.compression = algo;
             }
         }
         "encryption" => {
-            config.zfs_encryption_mode = match idx {
-                0 => ZfsEncryptionMode::None,
-                1 => ZfsEncryptionMode::Pool,
-                _ => ZfsEncryptionMode::Dataset,
+            let Some(mode) = selected::<ZfsEncryptionMode>(idx) else {
+                return;
             };
-            if config.zfs_encryption_mode == ZfsEncryptionMode::None {
+            config.zfs_encryption_mode = mode;
+            if mode == ZfsEncryptionMode::None {
                 config.zfs_encryption_password = None;
             }
         }
         "swap_mode" => {
-            config.swap_mode = match idx {
-                0 => SwapMode::None,
-                1 => SwapMode::Zram,
-                2 => SwapMode::ZswapPartition,
-                _ => SwapMode::ZswapPartitionEncrypted,
+            if let Some(mode) = selected(idx) {
+                config.swap_mode = mode;
             }
         }
         "init_system" => {
-            config.init_system = match idx {
-                0 => InitSystem::Dracut,
-                _ => InitSystem::Mkinitcpio,
+            if let Some(init) = selected(idx) {
+                config.init_system = init;
             }
         }
         "profile" => {
@@ -992,19 +952,16 @@ pub fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
             };
         }
         "audio" => {
-            config.audio = match idx {
-                0 => None,
-                1 => Some(AudioServer::Pipewire),
-                _ => Some(AudioServer::Pulseaudio),
+            if let Some(server) = selected::<Option<AudioServer>>(idx) {
+                config.audio = server;
             }
         }
         "seat_access" => {
-            if let Some(sel) = config.profile_selection.as_mut() {
-                sel.seat_access = match idx {
-                    0 => None,
-                    1 => Some(SeatAccess::Seatd),
-                    _ => Some(SeatAccess::Polkit),
-                };
+            if let (Some(sel), Some(access)) = (
+                config.profile_selection.as_mut(),
+                selected::<Option<SeatAccess>>(idx),
+            ) {
+                sel.seat_access = access;
             }
         }
         _ => {}
@@ -1052,6 +1009,7 @@ pub fn apply_text(config: &mut GlobalConfig, key: &str, val: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use archinstall_zfs_core::config::types::InitSystem;
 
     fn cfg() -> GlobalConfig {
         GlobalConfig::default()
