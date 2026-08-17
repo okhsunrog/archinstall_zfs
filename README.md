@@ -277,9 +277,46 @@ just cargo-build          # native cargo build, produces target/release/{azfs,az
 just cargo-test
 just iso-test             # native mkarchiso (sudo)
 just iso-full
+just zfs-be-build         # writable bare-metal LinuxKMS demo BE on novafs
 just test-install         # QEMU regression test (requires cargo-build first)
 just qemu-install         # interactive boot of latest ISO
 ```
+
+### Bare-metal LinuxKMS demo boot environment
+
+The full ArchISO profile can also be deployed as a normal writable ZFSBootMenu
+boot environment. This is useful for testing LinuxKMS, libinput, touchpads,
+cursors, real GPUs, and iwd on physical hardware while keeping installation
+and destructive storage operations disabled.
+
+```bash
+# Defaults to novafs/archiso0/root, linux-lts, and the precompiled ZFS package.
+just zfs-be-build
+
+# All important choices can be overridden explicitly.
+just zfs-be-build --mode dkms --kernel linux \
+  --dataset tank/archiso0/root --mount-dir /mnt/archzfs-be
+```
+
+The command uses `mkarchiso` to assemble the full package/profile environment,
+then copies its staging root into a new dataset with numeric ownership, ACLs,
+and xattrs preserved. It replaces the live-media initramfs with a normal ZFS
+root initramfs, configures `mountpoint=/`, `canmount=noauto`, and `overlay=off`,
+adds `archinstall_zfs.demo=1` (and `rw` when no read-write policy is
+inherited from the current root's command line) to the ZFSBootMenu command
+line, and creates a `@fresh` snapshot. The pool's `bootfs` property is not
+changed. The initramfs is built with mkinitcpio's `autodetect` hook, so build
+it on the machine that will boot it; a pool moved to different hardware may
+be missing drivers.
+
+The root-owned staging tree defaults to `/var/tmp/archinstall-zfs-be-workdir`
+so desktop file indexers cannot keep the temporary chroot mounts busy. Set
+`ARCHINSTALL_ZFS_BE_WORKDIR` to override it.
+
+For safety, deployment refuses to reuse an existing dataset. It also refuses a
+staging tree after recursive `chown`, since that would lose root ownership.
+After booting the new environment, tty1 automatically logs in as root (the
+live profile's autologin is kept); run `azfs` or `azfs-demo`.
 
 ### Option 2 — Any other distro via podman
 

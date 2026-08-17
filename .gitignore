@@ -1,6 +1,8 @@
 /target
 gen_iso/out/
 gen_iso/workdir/
+gen_iso/be-out/
+gen_iso/be-workdir/
 gen_iso/arch.qcow2
 gen_iso/my_vars.fd
 gen_iso/profile_rendered/

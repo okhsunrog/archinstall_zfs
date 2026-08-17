@@ -4,6 +4,8 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 PROFILE_DIR := "gen_iso/profile"
 PROFILE_OUT := "gen_iso/profile_rendered"
 ISO_OUT := "gen_iso/out"
+BE_WORKDIR := env_var_or_default("ARCHINSTALL_ZFS_BE_WORKDIR", "/var/tmp/archinstall-zfs-be-workdir")
+BE_ISO_OUT := "gen_iso/be-out"
 DISK_IMAGE := "gen_iso/arch.qcow2"
 UEFI_VARS := "gen_iso/my_vars.fd"
 QEMU_SCRIPT := "gen_iso/run-qemu.sh"
@@ -121,6 +123,43 @@ iso-full MODE="precompiled" KERNEL="linux-lts":
     sudo mkarchiso -v -w "gen_iso/workdir" -o {{ISO_OUT}} {{PROFILE_OUT}}
     sudo chown -R "$(id -u):$(id -g)" {{ISO_OUT}} gen_iso/workdir
     @echo "Full ISO built in {{ISO_OUT}}"
+
+# Build the full hardware profile into a dedicated mkarchiso workdir.
+# The workdir intentionally remains root-owned: changing its ownership would
+# corrupt the numeric ownership metadata needed by zfs-be-deploy.
+[arg("MODE", long="mode")]
+[arg("KERNEL", long="kernel")]
+zfs-be-stage MODE="precompiled" KERNEL="linux-lts":
+    @echo "Staging ZFSBootMenu demo BE (mode={{MODE}}, kernel={{KERNEL}})"
+    just cargo-build
+    just _render-profile {{MODE}} {{KERNEL}}
+    just _prepare-binary
+    sudo bash gen_iso/reset-zfs-be-workdir.sh "{{BE_WORKDIR}}"
+    mkdir -p {{BE_ISO_OUT}}
+    sudo mkarchiso -v -w "{{BE_WORKDIR}}" -o {{BE_ISO_OUT}} {{PROFILE_OUT}}
+    sudo chown -R "$(id -u):$(id -g)" {{BE_ISO_OUT}}
+    @echo "BE rootfs staged in {{BE_WORKDIR}}/x86_64/airootfs"
+
+# Deploy a staged rootfs into a brand-new ZFSBootMenu boot environment.
+# Refuses existing datasets and never changes the pool's bootfs property.
+[arg("DATASET", long="dataset")]
+[arg("KERNEL", long="kernel")]
+[arg("MOUNT_DIR", long="mount-dir")]
+zfs-be-deploy DATASET="novafs/archiso0/root" KERNEL="linux-lts" MOUNT_DIR="/mnt/archzfs-be":
+    sudo bash gen_iso/deploy-zfs-be.sh \
+        --dataset {{DATASET}} \
+        --source-root "{{BE_WORKDIR}}/x86_64/airootfs" \
+        --kernel {{KERNEL}} \
+        --mount-dir {{MOUNT_DIR}}
+
+# End-to-end bare-metal LinuxKMS demo BE build and deployment.
+[arg("MODE", long="mode")]
+[arg("KERNEL", long="kernel")]
+[arg("DATASET", long="dataset")]
+[arg("MOUNT_DIR", long="mount-dir")]
+zfs-be-build MODE="precompiled" KERNEL="linux-lts" DATASET="novafs/archiso0/root" MOUNT_DIR="/mnt/archzfs-be":
+    just zfs-be-stage --mode {{MODE}} --kernel {{KERNEL}}
+    just zfs-be-deploy --dataset {{DATASET}} --kernel {{KERNEL}} --mount-dir {{MOUNT_DIR}}
 
 # List available ISOs
 iso-list:
