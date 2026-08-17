@@ -328,6 +328,15 @@ Creation order matters: datasets are sorted by depth so parents exist first, and
 missing intermediate containers (`data`) are auto-created with `mountpoint=none`
 (`core/src/dataset_layout.rs`).
 
+**Only `root` is structural — the rest is a suggestion.** What has to be true is that
+each boot environment owns exactly one dataset with `mountpoint=/` and
+`canmount=noauto`, holding its own `/boot`. Everything else is yours to shape: add
+`.../docker` for `/var/lib/docker`, `.../portage/distfiles` for a Gentoo BE, split
+`/var/log` out, rename `data/home` to whatever you like, or drop `vm` entirely.
+Nothing downstream — the ZED cache hook, ZFSBootMenu, the mount ordering — cares
+about the names or the number of data datasets; they all work off the BE root and
+the dataset hierarchy beneath it.
+
 ### `zfs create -u` — never mount at creation time
 
 > `-u` — *Do not mount the newly created file system.*
@@ -1160,6 +1169,41 @@ persist.
 
 For read-only forensics, `zpool import -N -o readonly=on -o cachefile=none` cannot
 modify the pool at all — this is what the installer's demo mode uses.
+
+### Inspecting another BE from a *running* system
+
+Same idea, but the pool is already imported, so `-R` is not available and the
+mountpoints have to be moved with `zfs set -u`:
+
+```bash
+# Retarget. -u keeps every one of these a pure property write.
+zfs set -u mountpoint=/mnt/other        zroot/arch1/root
+zfs set -u mountpoint=/mnt/other/home   zroot/arch1/data/home
+
+# Mount explicitly, root first.
+zfs mount zroot/arch1/root
+zfs mount zroot/arch1/data/home
+# … inspect …
+zfs unmount zroot/arch1/data/home
+zfs unmount zroot/arch1/root
+
+# Restore. -u matters *most* here: data/home is canmount=on, so a plain
+# `zfs set mountpoint=/home` would mount it straight over the running /home.
+zfs set -u mountpoint=/home  zroot/arch1/data/home
+zfs set -u mountpoint=/      zroot/arch1/root
+```
+
+Two things to expect while the BE is retargeted:
+
+* **It stops looking like a boot environment.** Nothing under it has `mountpoint=/`
+  any more, so the ZED hook reclassifies its datasets as *shared* and writes them
+  into the running BE's `zfs-list.cache`. Restoring `mountpoint=/` and letting one
+  more ZFS event fire puts the cache right again — verify with
+  `cut -f1 /etc/zfs/zfs-list.cache/<pool>` before rebooting.
+* **`overlay=off` is your seatbelt.** If a restore step is fumbled and something
+  tries to mount the other BE's root on the live `/`, ZFS refuses with
+  `cannot mount '/': directory is not empty` instead of shadowing the running
+  system.
 
 ### Destroying a boot environment
 
