@@ -144,6 +144,29 @@ impl AlpmContext {
             .trans_init(TransFlag::NEEDED)
             .map_err(|e| eyre!("failed to init transaction: {e}"))?;
 
+        // Once the transaction is open it has to be released on every path.
+        // Returning early through `?` used to leave it open and the database
+        // locked, so a later install on the same handle failed with "a
+        // transaction is already initialized" rather than the original error.
+        let result = self.run_transaction(packages, cancel, progress_tx);
+        let released = self
+            .handle
+            .trans_release()
+            .map_err(|e| eyre!("failed to release transaction: {e}"));
+
+        result.and(released)?;
+        tracing::info!("packages installed successfully");
+        Ok(())
+    }
+
+    /// The body of [`Self::install_packages`], between `trans_init` and
+    /// `trans_release`.
+    fn run_transaction(
+        &mut self,
+        packages: &[&str],
+        cancel: &CancellationToken,
+        progress_tx: Option<std::sync::Arc<watch::Sender<DownloadProgress>>>,
+    ) -> Result<()> {
         // Find and add each package from sync databases
         for &pkg_name in packages {
             let pkg = self.find_package(pkg_name)?;
@@ -163,9 +186,6 @@ impl AlpmContext {
         if count == 0 {
             // All packages already installed (NEEDED flag skipped them)
             tracing::info!("all packages already up to date");
-            self.handle
-                .trans_release()
-                .map_err(|e| eyre!("failed to release transaction: {e}"))?;
             return Ok(());
         }
 
@@ -250,11 +270,6 @@ impl AlpmContext {
             duration_ms = batch_duration_ms,
         );
 
-        self.handle
-            .trans_release()
-            .map_err(|e| eyre!("failed to release transaction: {e}"))?;
-
-        tracing::info!("packages installed successfully");
         Ok(())
     }
 
