@@ -157,6 +157,20 @@ pub async fn query_packages(
     Ok(result)
 }
 
+/// HTTP client for the small metadata fetches the compatibility scan makes.
+///
+/// Both a connect and an overall timeout: these run on the welcome screen and
+/// ahead of the install, where a captive portal or a black-holed route would
+/// otherwise leave the scan waiting forever. The payloads are small, so a
+/// bounded total is safe here in a way it would not be for package downloads.
+pub(crate) fn metadata_http_client() -> reqwest::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent("archinstall-zfs-rs")
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+}
+
 /// Download and parse the archzfs package database to get ZFS package versions.
 /// This works even when archzfs repo isn't configured locally (e.g., before
 /// add_archzfs_repo is called, or in CI environments).
@@ -164,12 +178,7 @@ async fn fetch_archzfs_db_versions() -> Option<std::collections::HashMap<String,
     let url = "https://github.com/archzfs/archzfs/releases/download/experimental/archzfs.db";
     tracing::debug!("downloading archzfs.db from {url}");
 
-    let resp = reqwest::Client::new()
-        .get(url)
-        .header("User-Agent", "archinstall-zfs-rs")
-        .send()
-        .await
-        .ok()?;
+    let resp = metadata_http_client().ok()?.get(url).send().await.ok()?;
     let data = resp.bytes().await.ok()?;
 
     // archzfs.db is an XZ-compressed tar archive
