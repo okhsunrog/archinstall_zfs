@@ -14,13 +14,21 @@ use archinstall_zfs_core::system::async_download::{PackageProgress, PackageState
 use tokio_util::sync::CancellationToken;
 
 use crate::format::{format_duration, format_speed, truncate_str};
-use crate::install;
-use crate::tracing_layer;
 use crate::ui::{App, DownloadInfo, InstallState, LogMessage, WizardState};
 
 const MAX_LOG_LINES: usize = 2000;
 
-pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>, demo: bool) {
+pub fn setup(
+    app: &App,
+    config: &Rc<RefCell<GlobalConfig>>,
+    demo: bool,
+    log_rx: crossbeam_channel::Receiver<(String, i32)>,
+) {
+    // One pump for the process, fed by the global subscriber. It starts here
+    // rather than per installation so nothing emitted before or between runs
+    // is lost, and so the receiver is not re-created behind the layer's back.
+    spawn_log_pump(app, log_rx);
+
     let active_cancel = Arc::new(Mutex::new(None::<CancellationToken>));
 
     let weak = app.as_weak();
@@ -56,9 +64,6 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>, demo: bool) {
         app.global::<InstallState>()
             .set_log_messages(ModelRc::new(VecModel::<LogMessage>::default()));
 
-        let (log_tx, log_rx) = crossbeam_channel::bounded::<(String, i32)>(512);
-        spawn_log_pump(&app, log_rx);
-
         // Download progress channel
         let (download_tx, download_rx) = tokio::sync::watch::channel(PackageProgress::default());
         let download_tx = Arc::new(download_tx);
@@ -66,7 +71,7 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>, demo: bool) {
 
         let cancel = CancellationToken::new();
         *cancel_slot.lock().unwrap() = Some(cancel.clone());
-        spawn_install_thread(&app, c, log_tx, download_tx, cancel, cancel_slot.clone());
+        spawn_install(&app, c, download_tx, cancel, cancel_slot.clone());
     });
 }
 
@@ -247,53 +252,34 @@ fn spawn_download_pump(app: &App, mut rx: tokio::sync::watch::Receiver<PackagePr
     });
 }
 
-fn spawn_install_thread(
+/// Run the installation on the tokio runtime, reporting the outcome back to
+/// the UI as an `InstallState` code.
+fn spawn_install(
     app: &App,
     config: GlobalConfig,
-    log_tx: crossbeam_channel::Sender<(String, i32)>,
     download_tx: Arc<tokio::sync::watch::Sender<PackageProgress>>,
     cancel: CancellationToken,
     cancel_slot: Arc<Mutex<Option<CancellationToken>>>,
 ) {
     let weak = app.as_weak();
-    tokio::task::spawn_blocking(move || {
-        use tracing_subscriber::Layer as _;
-        use tracing_subscriber::layer::SubscriberExt as _;
-
-        let layer = tracing_layer::UiLogLayer::new(log_tx);
-        let ui_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-
-        let file_appender = tracing_appender::rolling::never("/tmp", "archinstall-zfs.log");
-        let file_filter = tracing_subscriber::EnvFilter::new(
-            "trace,h2=warn,hyper=warn,reqwest=warn,rustls=warn,pacman=info",
-        );
-        let file_layer = tracing_subscriber::fmt::layer()
-            .with_writer(file_appender)
-            .with_ansi(false)
-            .with_target(true)
-            .with_filter(file_filter);
-
-        let metrics_layer =
-            archinstall_zfs_core::metrics::MetricsLayer::open("/tmp/archinstall-metrics.jsonl")
-                .expect("failed to open metrics file");
-
-        let subscriber = tracing_subscriber::registry()
-            .with(layer.with_filter(ui_filter))
-            .with(file_layer)
-            .with(metrics_layer);
-        let _guard = tracing::subscriber::set_default(subscriber);
-
+    tokio::spawn(async move {
         let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
             Arc::new(archinstall_zfs_core::system::cmd::RealRunner);
-        let result = install::run_install(runner, &config, cancel.clone(), Some(download_tx));
+        let result = archinstall_zfs_core::install::run_install(
+            runner,
+            config,
+            cancel.clone(),
+            Some(download_tx),
+        )
+        .await;
 
-        let state = if result.is_ok() {
-            2
-        } else if cancel.is_cancelled() {
-            5
-        } else {
-            3
+        let state = match &result {
+            Ok(()) => 2,
+            Err(_) if cancel.is_cancelled() => 5,
+            Err(error) => {
+                tracing::error!("{error}");
+                3
+            }
         };
         *cancel_slot.lock().unwrap() = None;
         let _ = weak.upgrade_in_event_loop(move |app| {

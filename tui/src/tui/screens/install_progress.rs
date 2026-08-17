@@ -56,9 +56,13 @@ impl InstallProgress {
         tokio::spawn(async move {
             let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
                 Arc::new(archinstall_zfs_core::system::cmd::RealRunner);
-            let result =
-                crate::app::run_install(runner, config, cancel_clone, Some(download_tx_clone))
-                    .await;
+            let result = archinstall_zfs_core::install::run_install(
+                runner,
+                config,
+                cancel_clone,
+                Some(download_tx_clone),
+            )
+            .await;
 
             if let Err(e) = result {
                 tracing::error!("{e}");
