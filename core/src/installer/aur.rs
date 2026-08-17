@@ -1,3 +1,4 @@
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -142,6 +143,8 @@ fn setup_aur_environment(
     let output = chroot_cmd(runner, target, "useradd", &["-m", TEMP_USER])?;
     check_exit(&output, "create AUR temp user")?;
 
+    configure_source_cache(target)?;
+
     // Enable NOPASSWD sudo — removed again by cleanup_aur_environment.
     let sudoers_dir = target.join("etc/sudoers.d");
     std::fs::create_dir_all(&sudoers_dir)?;
@@ -152,6 +155,62 @@ fn setup_aur_environment(
         "AUR sudoers drop-in",
     )?;
 
+    Ok(())
+}
+
+/// Where sources copied into the target are kept, and what makepkg is told.
+const SOURCE_CACHE_DIR: &str = "var/cache/archinstall-zfs/sources";
+
+/// Give makepkg sources that were downloaded ahead of time, when any were
+/// provided.
+///
+/// `ARCHINSTALL_ZFS_SRCDEST` names a directory on the running system — a
+/// mounted share, a directory on the installation medium — holding files
+/// makepkg would otherwise fetch. They are copied into the target rather than
+/// mounted through: the build runs under arch-chroot, and the target's `/run`
+/// is a plain bind of the medium's, so anything mounted *inside* that `/run`
+/// is not carried across. Copying also spares the build user needing write
+/// access to whatever the sources came from.
+///
+/// makepkg still verifies the checksums the PKGBUILD declares, so a stale file
+/// costs a download rather than a wrong build.
+fn configure_source_cache(target: &Path) -> Result<()> {
+    let Some(source) = std::env::var_os("ARCHINSTALL_ZFS_SRCDEST").filter(|v| !v.is_empty()) else {
+        return Ok(());
+    };
+    let source = Path::new(&source);
+    if !source.is_dir() {
+        tracing::warn!(
+            path = %source.display(),
+            "no source cache at that path; makepkg will download instead"
+        );
+        return Ok(());
+    }
+
+    let dest = target.join(SOURCE_CACHE_DIR);
+    std::fs::create_dir_all(&dest)?;
+    // makepkg writes anything it still has to fetch here, as the build user.
+    std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o1777))?;
+
+    let mut copied = 0usize;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        std::fs::copy(entry.path(), dest.join(entry.file_name()))?;
+        copied += 1;
+    }
+
+    let conf_dir = target.join("etc/makepkg.conf.d");
+    std::fs::create_dir_all(&conf_dir)?;
+    write_file_with_mode(
+        &conf_dir.join("00-archinstall-zfs-srcdest.conf"),
+        format!("SRCDEST=/{SOURCE_CACHE_DIR}\n").as_bytes(),
+        0o644,
+        "makepkg source cache",
+    )?;
+    tracing::info!(files = copied, "building AUR packages from a source cache");
     Ok(())
 }
 
@@ -272,6 +331,53 @@ mod tests {
             combined.unwrap_err().to_string().contains("AUR install"),
             "the build error must be the one reported"
         );
+    }
+
+    #[test]
+    fn sources_are_copied_into_the_target_and_pointed_at() {
+        let medium = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        std::fs::write(medium.path().join("zfsbootmenu-v3.1.0.tar.gz"), b"tarball").unwrap();
+        std::fs::create_dir(medium.path().join("a-directory")).unwrap();
+
+        // SAFETY: single-threaded test; the variable is read straight after.
+        unsafe { std::env::set_var("ARCHINSTALL_ZFS_SRCDEST", medium.path()) };
+        let result = configure_source_cache(target.path());
+        unsafe { std::env::remove_var("ARCHINSTALL_ZFS_SRCDEST") };
+        result.unwrap();
+
+        let copied = target
+            .path()
+            .join(SOURCE_CACHE_DIR)
+            .join("zfsbootmenu-v3.1.0.tar.gz");
+        assert_eq!(std::fs::read(copied).unwrap(), b"tarball");
+        assert!(
+            !target
+                .path()
+                .join(SOURCE_CACHE_DIR)
+                .join("a-directory")
+                .exists(),
+            "only files are sources"
+        );
+
+        let conf = std::fs::read_to_string(
+            target
+                .path()
+                .join("etc/makepkg.conf.d/00-archinstall-zfs-srcdest.conf"),
+        )
+        .unwrap();
+        assert_eq!(conf, format!("SRCDEST=/{SOURCE_CACHE_DIR}\n"));
+    }
+
+    #[test]
+    fn without_a_source_cache_nothing_is_configured() {
+        let target = tempfile::tempdir().unwrap();
+
+        // SAFETY: single-threaded test.
+        unsafe { std::env::remove_var("ARCHINSTALL_ZFS_SRCDEST") };
+        configure_source_cache(target.path()).unwrap();
+
+        assert!(!target.path().join("etc/makepkg.conf.d").exists());
     }
 
     #[test]

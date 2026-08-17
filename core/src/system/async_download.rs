@@ -32,6 +32,33 @@ pub struct DownloadConfig {
     pub connect_timeout: Duration,
     /// Idle timeout — abort if no data received for this long (default: 30s).
     pub idle_timeout: Duration,
+    /// Where downloaded packages are kept.
+    ///
+    /// `None` puts them in the target's own package cache, which is where a
+    /// normal installation wants them. Pointing this somewhere that outlives
+    /// the target — a mounted share, a directory on the installation medium —
+    /// lets an installation reuse what an earlier one downloaded, which is
+    /// what the virtual-machine tests do between runs and what an offline
+    /// installation from a prepared cache needs.
+    ///
+    /// Set from `ARCHINSTALL_ZFS_PKG_CACHE` when that is present.
+    pub cache_dir: Option<PathBuf>,
+}
+
+/// The package cache an operator asked for, if any.
+fn cache_dir_from_environment() -> Option<PathBuf> {
+    let path = cache_dir_from(std::env::var_os("ARCHINSTALL_ZFS_PKG_CACHE"))?;
+    tracing::info!(path = %path.display(), "using the package cache from the environment");
+    Some(path)
+}
+
+/// An unset variable and one set to nothing both mean "use the target's own
+/// cache" — an empty value is what a shell leaves behind when the setting is
+/// there but blank, and treating it as a path would put the cache in the
+/// current directory.
+fn cache_dir_from(value: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    let value = value?;
+    (!value.is_empty()).then(|| PathBuf::from(value))
 }
 
 impl Default for DownloadConfig {
@@ -42,6 +69,7 @@ impl Default for DownloadConfig {
             backoff_base: Duration::from_secs(1),
             connect_timeout: Duration::from_secs(10),
             idle_timeout: Duration::from_secs(30),
+            cache_dir: cache_dir_from_environment(),
         }
     }
 }
@@ -986,6 +1014,18 @@ mod tests {
 
         let (_, _, _, bytes) = counters(&rx.borrow());
         assert_eq!(bytes, 30, "the abandoned attempt's bytes must not linger");
+    }
+
+    #[test]
+    fn an_unset_or_empty_cache_setting_means_the_target_cache() {
+        use std::ffi::OsString;
+
+        assert_eq!(cache_dir_from(None), None);
+        assert_eq!(cache_dir_from(Some(OsString::new())), None);
+        assert_eq!(
+            cache_dir_from(Some(OsString::from("/run/cache"))),
+            Some(PathBuf::from("/run/cache"))
+        );
     }
 
     #[test]

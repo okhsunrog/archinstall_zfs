@@ -85,7 +85,17 @@ impl AlpmContext {
 
         let target_str = target.to_string_lossy();
         let db_path = format!("{}/var/lib/pacman", target_str);
-        let cache_dir = format!("{}/var/cache/pacman/pkg/", target_str);
+        // A cache outside the target survives it, so a later installation can
+        // reuse what this one downloaded.
+        let cache_dir = match download_config.cache_dir.as_ref() {
+            Some(shared) => {
+                fs::create_dir_all(shared).wrap_err_with(|| {
+                    format!("failed to create package cache: {}", shared.display())
+                })?;
+                format!("{}/", shared.display())
+            }
+            None => format!("{}/var/cache/pacman/pkg/", target_str),
+        };
 
         let mut handle = Alpm::new(target_str.as_ref(), &db_path)
             .map_err(|e| eyre!("failed to init alpm for target: {e}"))?;
