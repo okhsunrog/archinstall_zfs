@@ -138,18 +138,38 @@ fn installed_kernels(target: &Path) -> Result<Vec<InstalledKernel>> {
 
 /// Install each kernel's vmlinuz into /boot and build its initramfs.
 ///
-/// Every installed kernel is covered: the config accepts a list of them, and
-/// one without an initramfs is one that cannot boot. The kernels are read from
-/// the target's module directories rather than from the config because that is
-/// what is actually on disk — a package can pull in a kernel the config never
-/// named.
-pub fn generate(runner: &dyn CommandRunner, target: &Path) -> Result<()> {
-    let kernels = installed_kernels(target)?;
-    if kernels.is_empty() {
+/// Every kernel in `with_zfs` is covered — the configuration accepts a list of
+/// them, and one without an initramfs cannot boot. Kernels outside that list
+/// are skipped: an initramfs built for a kernel with no ZFS module produces a
+/// boot entry that drops to an emergency shell, so leaving /boot without it
+/// keeps ZFSBootMenu from offering it at all.
+///
+/// The kernel versions come from the target's module directories rather than
+/// from the configuration, because that is what is actually installed; the
+/// package base recorded there is what matches `with_zfs`.
+pub fn generate(runner: &dyn CommandRunner, target: &Path, with_zfs: &[&str]) -> Result<()> {
+    let installed = installed_kernels(target)?;
+    if installed.is_empty() {
         bail!(
             "no installed kernel found under {}/usr/lib/modules",
             target.display()
         );
+    }
+
+    let (kernels, skipped): (Vec<_>, Vec<_>) = installed
+        .into_iter()
+        .partition(|kernel| with_zfs.contains(&kernel.pkgbase.as_str()));
+
+    for kernel in &skipped {
+        tracing::warn!(
+            kver = kernel.kver,
+            pkgbase = kernel.pkgbase,
+            "skipping initramfs: this kernel has no ZFS module"
+        );
+    }
+
+    if kernels.is_empty() {
+        bail!("no installed kernel has a ZFS module, so none can boot this pool");
     }
 
     for kernel in &kernels {
@@ -254,7 +274,7 @@ mod tests {
         let responses: Vec<CannedResponse> = (0..4).map(|_| CannedResponse::default()).collect();
         let runner = RecordingRunner::new(responses);
 
-        generate(&runner, dir.path()).unwrap();
+        generate(&runner, dir.path(), &["linux", "linux-lts"]).unwrap();
 
         let calls = runner.calls();
         assert_eq!(calls.len(), 4, "expected install + dracut for both kernels");
@@ -274,6 +294,49 @@ mod tests {
                 .iter()
                 .any(|c| c.contains("/boot/initramfs-linux.img") && c.contains("6.12.4-arch1-1"))
         );
+    }
+
+    #[test]
+    fn a_kernel_without_a_zfs_module_gets_no_initramfs() {
+        let dir = tempfile::tempdir().unwrap();
+        add_kernel(dir.path(), "6.6.63-1-lts", "linux-lts");
+        add_kernel(dir.path(), "7.1.8-arch1-3", "linux");
+
+        // Only linux-lts has a module: archzfs had no build matching the
+        // current `linux` version.
+        let responses: Vec<CannedResponse> = (0..2).map(|_| CannedResponse::default()).collect();
+        let runner = RecordingRunner::new(responses);
+
+        generate(&runner, dir.path(), &["linux-lts"]).unwrap();
+
+        let calls = runner.calls();
+        assert_eq!(calls.len(), 2, "only the kernel with a module is built");
+        let joined = calls
+            .iter()
+            .map(|c| c.args.join(" "))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("initramfs-linux-lts.img"));
+        assert!(
+            !joined.contains("initramfs-linux.img"),
+            "a kernel with no ZFS module must not get a boot entry: {joined}"
+        );
+        assert!(!joined.contains("vmlinuz-linux "));
+    }
+
+    #[test]
+    fn no_kernel_with_a_module_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        add_kernel(dir.path(), "7.1.8-arch1-3", "linux");
+        let runner = RecordingRunner::new(vec![]);
+
+        let err = generate(&runner, dir.path(), &["linux-lts"]).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("no installed kernel has a ZFS module")
+        );
+        assert!(runner.calls().is_empty());
     }
 
     #[test]
@@ -298,7 +361,7 @@ mod tests {
         fs::create_dir_all(dir.path().join("usr/lib/modules")).unwrap();
         let runner = RecordingRunner::new(vec![]);
 
-        let err = generate(&runner, dir.path()).unwrap_err();
+        let err = generate(&runner, dir.path(), &["linux-lts"]).unwrap_err();
 
         assert!(err.to_string().contains("no installed kernel"));
         assert!(runner.calls().is_empty());
@@ -318,7 +381,7 @@ mod tests {
             },
         ]);
 
-        let err = generate(&runner, dir.path()).unwrap_err();
+        let err = generate(&runner, dir.path(), &["linux-lts"]).unwrap_err();
         assert!(err.to_string().contains("linux-lts"));
     }
 }

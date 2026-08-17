@@ -229,13 +229,13 @@ async fn install(
     // One blocking task for all of it: AlpmContext holds a `!Send` handle and
     // is reused across the package phases, so it cannot cross an await point.
     tracing::info!("Phase 4-12: Running installer pipeline");
-    {
+    let notices = {
         let runner = runner.clone();
         let config = config.clone();
         let mountpoint = mountpoint.clone();
         let cancel = cancel.clone();
         let progress_tx = progress_tx.clone();
-        tokio::task::spawn_blocking(move || -> Result<()> {
+        tokio::task::spawn_blocking(move || -> Result<Vec<String>> {
             let mut installer = crate::installer::Installer::new(
                 runner,
                 (*config).clone(),
@@ -246,10 +246,11 @@ async fn install(
             if let Some(swap) = swap_partition {
                 installer.set_swap_partition(swap);
             }
-            installer.perform_installation()
+            installer.perform_installation()?;
+            Ok(installer.notices().to_vec())
         })
-        .await??;
-    }
+        .await??
+    };
     ensure_not_cancelled(&cancel)?;
 
     // TRIM strategy: post-install ZFS-side configuration (no Alpm involved).
@@ -288,6 +289,15 @@ async fn install(
         let efi = efi_partition.clone();
         tokio::task::spawn_blocking(move || crate::bootmenu::create_efi_entries(&*runner, &efi))
             .await??;
+    }
+
+    // Last, so they are the final thing in the log the user is looking at
+    // rather than something scrolled away thousands of lines ago.
+    if !notices.is_empty() {
+        tracing::warn!("The installation finished with notices:");
+        for notice in &notices {
+            tracing::warn!("  • {notice}");
+        }
     }
 
     Ok(())

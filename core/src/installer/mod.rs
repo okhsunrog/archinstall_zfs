@@ -32,6 +32,12 @@ pub struct Installer {
     swap_partition: Option<PathBuf>,
     _target_mounts: Option<TargetMounts>,
     alpm_ctx: Option<AlpmContext>,
+    /// Kernels that ended up with a working ZFS module. Only these get an
+    /// initramfs: one built for a kernel with no module produces a boot entry
+    /// that cannot import the pool.
+    kernels_with_zfs: Vec<String>,
+    /// Things the user should be told once the installation finishes.
+    notices: Vec<String>,
 }
 
 impl Installer {
@@ -51,7 +57,14 @@ impl Installer {
             swap_partition: None,
             _target_mounts: None,
             alpm_ctx: None,
+            kernels_with_zfs: Vec::new(),
+            notices: Vec::new(),
         }
+    }
+
+    /// Messages worth surfacing after a successful installation.
+    pub fn notices(&self) -> &[String] {
+        &self.notices
     }
 
     /// Set the swap partition path (used when full-disk partitioning computed
@@ -201,6 +214,16 @@ impl Installer {
         Ok(())
     }
 
+    /// Install a ZFS module for every configured kernel.
+    ///
+    /// Each kernel is attempted in its own transaction, because the precompiled
+    /// packages are pinned to an exact kernel version: archzfs can have a build
+    /// for one of the configured kernels and not yet for another, and one
+    /// missing build should not cost the user the kernels that do work.
+    ///
+    /// Only a total failure aborts — a system with no ZFS module cannot mount
+    /// its own root. Kernels left without a module are recorded so the
+    /// initramfs phase can skip them and the user can be told.
     fn install_zfs_on_target(&mut self) -> Result<()> {
         // Edit pacman.conf and import GPG keys (still needs shell for pacman-key)
         crate::system::pacman::add_archzfs_repo(&*self.runner, Some(&self.target))?;
@@ -217,26 +240,70 @@ impl Installer {
         )?;
         ctx.sync_databases(true)?;
 
-        // Install ZFS packages via libalpm
-        let kernel = self.config.primary_kernel();
-        let zfs_packages = crate::kernel::get_zfs_packages(kernel, self.config.zfs_module_mode);
-        let pkg_refs: Vec<&str> = zfs_packages.iter().map(|s| s.as_str()).collect();
-        ctx.install_packages(&pkg_refs, &self.cancel, self.download_progress_tx.clone())?;
+        // zfs-utils is shared by every kernel's module package.
+        self.install_target_packages(&["zfs-utils"])?;
+
+        let kernels: Vec<String> = self
+            .config
+            .effective_kernels()
+            .iter()
+            .map(|k| k.to_string())
+            .collect();
+        let mode = self.config.zfs_module_mode;
+        let mut failures: Vec<(String, String)> = Vec::new();
+
+        for kernel in &kernels {
+            let packages = crate::kernel::zfs_module_packages(kernel, mode);
+            if packages.is_empty() {
+                failures.push((kernel.clone(), "unknown kernel".to_string()));
+                continue;
+            }
+            let pkg_refs: Vec<&str> = packages.iter().map(|s| s.as_str()).collect();
+            match self.install_target_packages(&pkg_refs) {
+                Ok(()) => {
+                    tracing::info!(kernel, ?packages, "installed ZFS module");
+                    self.kernels_with_zfs.push(kernel.clone());
+                }
+                Err(error) => {
+                    tracing::warn!(kernel, %error, "no ZFS module could be installed");
+                    failures.push((kernel.clone(), error.to_string()));
+                }
+            }
+        }
+
+        if self.kernels_with_zfs.is_empty() {
+            let detail = failures
+                .iter()
+                .map(|(kernel, error)| format!("{kernel}: {error}"))
+                .collect::<Vec<_>>()
+                .join("; ");
+            bail!("no ZFS module could be installed for any configured kernel ({detail})");
+        }
+
+        for (kernel, error) in failures {
+            self.notices.push(format!(
+                "No ZFS module is available for {kernel}, so it was left without an initramfs \
+                 and will not be offered at boot. Install one later with \
+                 `pacman -S zfs-{kernel}` (or zfs-dkms) and regenerate the initramfs. \
+                 Reason: {error}"
+            ));
+        }
 
         Ok(())
     }
 
     fn generate_initramfs(&self) -> Result<()> {
         let encryption = self.config.zfs_encryption_mode != ZfsEncryptionMode::None;
+        let kernels: Vec<&str> = self.kernels_with_zfs.iter().map(|k| k.as_str()).collect();
 
         match self.config.init_system {
             InitSystem::Dracut => {
                 initramfs::dracut::configure(&*self.runner, &self.target, encryption)?;
-                initramfs::dracut::generate(&*self.runner, &self.target)?;
+                initramfs::dracut::generate(&*self.runner, &self.target, &kernels)?;
             }
             InitSystem::Mkinitcpio => {
                 initramfs::mkinitcpio::configure(&self.target, encryption)?;
-                initramfs::mkinitcpio::generate(&*self.runner, &self.target)?;
+                initramfs::mkinitcpio::generate(&*self.runner, &self.target, &kernels)?;
             }
         }
 

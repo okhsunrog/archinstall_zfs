@@ -72,10 +72,22 @@ pub fn configure(target: &Path, encryption: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn generate(runner: &dyn CommandRunner, target: &Path) -> Result<()> {
-    let output = chroot_cmd(runner, target, "mkinitcpio", &["-P"])?;
-    check_exit(&output, "mkinitcpio -P")?;
-    tracing::info!("generated initramfs with mkinitcpio");
+/// Build the initramfs for each kernel in `with_zfs`.
+///
+/// One preset at a time rather than `-P`: a kernel with no ZFS module would
+/// get an image that cannot import the pool, and a boot entry that drops to an
+/// emergency shell is worse than no entry at all. Preset names are the package
+/// bases, which is what mkinitcpio installs into /etc/mkinitcpio.d.
+pub fn generate(runner: &dyn CommandRunner, target: &Path, with_zfs: &[&str]) -> Result<()> {
+    if with_zfs.is_empty() {
+        bail!("no installed kernel has a ZFS module, so none can boot this pool");
+    }
+
+    for kernel in with_zfs {
+        let output = chroot_cmd(runner, target, "mkinitcpio", &["-p", kernel])?;
+        check_exit(&output, &format!("mkinitcpio -p {kernel}"))?;
+        tracing::info!(kernel, "generated initramfs with mkinitcpio");
+    }
     Ok(())
 }
 
@@ -165,6 +177,37 @@ mod tests {
         })
         .unwrap();
         assert!(result.contains("zfs filesystems"));
+    }
+
+    #[test]
+    fn each_kernel_with_a_module_gets_its_own_preset_run() {
+        use crate::system::cmd::tests::{CannedResponse, RecordingRunner};
+
+        let responses: Vec<CannedResponse> = (0..2).map(|_| CannedResponse::default()).collect();
+        let runner = RecordingRunner::new(responses);
+
+        generate(&runner, Path::new("/mnt"), &["linux-lts", "linux-zen"]).unwrap();
+
+        let calls = runner.calls();
+        assert_eq!(calls.len(), 2);
+        for call in &calls {
+            assert_eq!(call.program, "arch-chroot");
+            assert!(call.args.contains(&"-p".to_string()), "preset run expected");
+        }
+        assert!(calls[0].args.contains(&"linux-lts".to_string()));
+        assert!(calls[1].args.contains(&"linux-zen".to_string()));
+    }
+
+    #[test]
+    fn generating_for_no_kernel_at_all_is_an_error() {
+        use crate::system::cmd::tests::RecordingRunner;
+
+        let runner = RecordingRunner::new(vec![]);
+        let err = generate(&runner, Path::new("/mnt"), &[]).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("no installed kernel has a ZFS module")
+        );
     }
 
     #[test]

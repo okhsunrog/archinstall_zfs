@@ -45,25 +45,36 @@ pub fn get_kernel_info(name: &str) -> Option<&'static KernelInfo> {
 
 pub fn get_zfs_packages(kernel: &str, mode: ZfsModuleMode) -> Vec<String> {
     let mut packages = vec!["zfs-utils".to_string()];
+    packages.extend(zfs_module_packages(kernel, mode));
+    packages
+}
 
-    if let Some(info) = get_kernel_info(kernel) {
-        match mode {
-            ZfsModuleMode::Precompiled => {
-                if let Some(pkg) = info.precompiled_package {
-                    packages.push(pkg.to_string());
-                } else {
-                    packages.push("zfs-dkms".to_string());
-                    packages.push(info.headers_package.to_string());
-                }
-            }
-            ZfsModuleMode::Dkms => {
-                packages.push("zfs-dkms".to_string());
-                packages.push(info.headers_package.to_string());
-            }
+/// The packages that provide a ZFS module for `kernel`, without `zfs-utils`
+/// (which is shared by every kernel and installed once).
+///
+/// Empty for an unknown kernel: there is nothing sensible to install for a
+/// name the installer does not recognise.
+///
+/// The precompiled packages are version-locked to their kernel — `zfs-linux`
+/// depends on `linux=7.1.8.arch1-3`, not on any `linux` — so one can be
+/// unavailable while another is fine. They do not conflict with each other, so
+/// several kernels can each have their own. `zfs-dkms` is the exception: it
+/// conflicts with every precompiled package, which is why DKMS is a
+/// system-wide choice rather than a per-kernel fallback.
+pub fn zfs_module_packages(kernel: &str, mode: ZfsModuleMode) -> Vec<String> {
+    let Some(info) = get_kernel_info(kernel) else {
+        return Vec::new();
+    };
+
+    match mode {
+        ZfsModuleMode::Precompiled => match info.precompiled_package {
+            Some(pkg) => vec![pkg.to_string()],
+            None => vec!["zfs-dkms".to_string(), info.headers_package.to_string()],
+        },
+        ZfsModuleMode::Dkms => {
+            vec!["zfs-dkms".to_string(), info.headers_package.to_string()]
         }
     }
-
-    packages
 }
 
 pub fn supports_precompiled(kernel: &str) -> bool {
