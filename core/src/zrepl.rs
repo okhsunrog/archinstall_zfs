@@ -3,13 +3,16 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-pub fn generate_zrepl_config(pool_name: &str, dataset_prefix: &str) -> String {
+use crate::boot_environment::BootEnvironment;
+
+pub fn generate_zrepl_config(be: &BootEnvironment) -> String {
+    let base = be.base();
     format!(
         r#"jobs:
 - name: snap
   type: snap
   filesystems:
-    "{pool_name}/{dataset_prefix}<": true
+    "{base}<": true
   snapshotting:
     type: periodic
     interval: 15m
@@ -23,8 +26,8 @@ pub fn generate_zrepl_config(pool_name: &str, dataset_prefix: &str) -> String {
     )
 }
 
-pub fn setup_zrepl(target: &Path, pool_name: &str, dataset_prefix: &str) -> Result<()> {
-    let config = generate_zrepl_config(pool_name, dataset_prefix);
+pub fn setup_zrepl(target: &Path, be: &BootEnvironment) -> Result<()> {
+    let config = generate_zrepl_config(be);
 
     let config_dir = target.join("etc/zrepl");
     fs::create_dir_all(&config_dir)?;
@@ -42,7 +45,7 @@ mod tests {
 
     #[test]
     fn test_generate_zrepl_config() {
-        let config = generate_zrepl_config("mypool", "arch0");
+        let config = generate_zrepl_config(&BootEnvironment::new("mypool", "arch0"));
         assert!(config.contains("mypool/arch0<"));
         assert!(config.contains("15m"));
         assert!(config.contains("zrepl_"));
@@ -52,7 +55,7 @@ mod tests {
     #[test]
     fn test_setup_zrepl() {
         let dir = tempfile::tempdir().unwrap();
-        setup_zrepl(dir.path(), "testpool", "arch0").unwrap();
+        setup_zrepl(dir.path(), &BootEnvironment::new("testpool", "arch0")).unwrap();
 
         let config_path = dir.path().join("etc/zrepl/zrepl.yml");
         assert!(config_path.exists());

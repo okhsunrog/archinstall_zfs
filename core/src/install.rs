@@ -23,6 +23,7 @@ use color_eyre::eyre::{Result, bail, eyre};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
+use crate::boot_environment::BootEnvironment;
 use crate::config::types::{GlobalConfig, SwapMode};
 use crate::system::async_download::{DownloadConfig, DownloadProgress};
 use crate::system::cmd::CommandRunner;
@@ -47,7 +48,7 @@ pub async fn run_install(
         .as_deref()
         .ok_or_else(|| eyre!("pool name not set"))?
         .to_string();
-    let root_dataset = format!("{pool_name}/{}/root", config.dataset_prefix);
+    let root_dataset = BootEnvironment::new(&pool_name, config.dataset_prefix.as_str()).root();
     let cleanup = Arc::new(CleanupState::default());
 
     let result = install(runner.clone(), config, cancel, progress_tx, cleanup.clone()).await;
@@ -137,7 +138,7 @@ async fn install(
         .as_deref()
         .ok_or_else(|| eyre!("pool name not set"))?
         .to_string();
-    let prefix = config.dataset_prefix.clone();
+    let be = BootEnvironment::new(&pool_name, config.dataset_prefix.as_str());
     let kernel = config.primary_kernel().to_string();
     let download_config = DownloadConfig {
         concurrency: config.parallel_downloads as usize,
@@ -265,14 +266,8 @@ async fn install(
         config.swap_mode,
         SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
     );
-    crate::bootmenu::set_zbm_properties(
-        &pool_name,
-        &prefix,
-        config.init_system,
-        zswap_on,
-        config.set_bootfs,
-    )
-    .await?;
+    crate::bootmenu::set_zbm_properties(&be, config.init_system, zswap_on, config.set_bootfs)
+        .await?;
 
     crate::bootmenu::install_and_generate_zbm(
         runner.clone(),

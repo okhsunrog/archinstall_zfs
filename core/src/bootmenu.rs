@@ -4,6 +4,7 @@ use std::path::Path;
 use color_eyre::eyre::{Context, Result};
 use serde::Serialize;
 
+use crate::boot_environment::BootEnvironment;
 use crate::config::types::InitSystem;
 use crate::system::cmd::{CommandRunner, check_exit, chroot_cmd};
 
@@ -259,14 +260,13 @@ fn rootprefix_for(init_system: InitSystem) -> &'static str {
 }
 
 pub async fn set_zbm_properties(
-    pool_name: &str,
-    prefix: &str,
+    be: &BootEnvironment,
     init_system: InitSystem,
     zswap_enabled: bool,
     set_bootfs: bool,
 ) -> Result<()> {
     let zfs = zfskit::Zfs::new();
-    let root_ds = format!("{pool_name}/{prefix}/root");
+    let root_ds = be.root();
     let cmdline = build_zbm_cmdline(zswap_enabled);
     let rootprefix = rootprefix_for(init_system);
 
@@ -284,7 +284,7 @@ pub async fn set_zbm_properties(
         // 10-second countdown then boots the bootfs dataset. Users can press
         // any key during the countdown to browse/select other BEs.
         // Without bootfs, ZBM ignores zbm.timeout and always waits for input.
-        zfs.pool(pool_name)?
+        zfs.pool(be.pool())?
             .set_property("bootfs", &root_ds)
             .await?;
         tracing::info!(

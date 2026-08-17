@@ -3,13 +3,13 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
+use crate::boot_environment::BootEnvironment;
 use crate::system::cmd::{CommandRunner, check_exit};
 
 pub fn generate_fstab(
     runner: &dyn CommandRunner,
     target: &Path,
-    pool_name: &str,
-    prefix: &str,
+    be: &BootEnvironment,
 ) -> Result<()> {
     let target_str = target.to_string_lossy();
 
@@ -21,7 +21,7 @@ pub fn generate_fstab(
     let fstab_content: String = output
         .stdout
         .lines()
-        .filter(|line| !is_zfs_managed_mount(line, pool_name))
+        .filter(|line| !is_zfs_managed_mount(line, be.pool()))
         .map(|line| {
             // For the EFI mount (/boot/efi vfat), set passno to 0 (no fsck
             // for vfat) and ensure nofail so a failed mount doesn't block boot
@@ -46,7 +46,7 @@ pub fn generate_fstab(
         .join("\n");
 
     // Add root dataset explicitly
-    let root_ds = format!("{pool_name}/{prefix}/root");
+    let root_ds = be.root();
     let mut final_fstab = fstab_content;
     final_fstab.push_str(&format!(
         "\n# ZFS root dataset\n{root_ds}\t/\tzfs\tdefaults\t0\t0\n"
@@ -142,7 +142,12 @@ testpool/arch0/data/home /home zfs defaults 0 0
             ..Default::default()
         }]);
 
-        generate_fstab(&runner, dir.path(), "testpool", "arch0").unwrap();
+        generate_fstab(
+            &runner,
+            dir.path(),
+            &BootEnvironment::new("testpool", "arch0"),
+        )
+        .unwrap();
 
         let fstab = fs::read_to_string(dir.path().join("etc/fstab")).unwrap();
         // Should keep EFI entry
@@ -170,7 +175,7 @@ zroot/arch0/root\t/\tzfs\tdefaults\t0\t0
             ..Default::default()
         }]);
 
-        generate_fstab(&runner, dir.path(), "zroot", "arch0").unwrap();
+        generate_fstab(&runner, dir.path(), &BootEnvironment::new("zroot", "arch0")).unwrap();
 
         let fstab = fs::read_to_string(dir.path().join("etc/fstab")).unwrap();
         assert!(

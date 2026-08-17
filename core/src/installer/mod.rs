@@ -62,6 +62,14 @@ impl Installer {
         }
     }
 
+    /// The boot environment this installation is building.
+    fn boot_environment(&self) -> crate::boot_environment::BootEnvironment {
+        crate::boot_environment::BootEnvironment::new(
+            self.config.pool_name.as_deref().unwrap_or("zroot"),
+            self.config.dataset_prefix.as_str(),
+        )
+    }
+
     /// Messages worth surfacing after a successful installation.
     pub fn notices(&self) -> &[String] {
         &self.notices
@@ -652,8 +660,7 @@ impl Installer {
     }
 
     fn finalize_zfs(&self) -> Result<()> {
-        let pool_name = self.config.pool_name.as_deref().unwrap_or("zroot");
-        let prefix = &self.config.dataset_prefix;
+        let be = self.boot_environment();
 
         // Enable ZFS services
         for service in crate::zfs_setup::ZFS_SERVICES {
@@ -665,7 +672,7 @@ impl Installer {
         // crate::zfs_trim::configure_zfs_trim, called from run_install.
 
         // genfstab
-        fstab::generate_fstab(&*self.runner, &self.target, pool_name, prefix)?;
+        fstab::generate_fstab(&*self.runner, &self.target, &be)?;
 
         // Copy misc files (hostid, zfs cache). The mountpoint the datasets are
         // currently mounted under is the install target itself — it is what
@@ -674,13 +681,13 @@ impl Installer {
         crate::zfs_target_files::copy_misc_files(
             &*self.runner,
             &self.target,
-            pool_name,
+            be.pool(),
             &self.target,
         )?;
 
         // zrepl
         if self.config.zrepl_enabled {
-            crate::zrepl::setup_zrepl(&self.target, pool_name, prefix)?;
+            crate::zrepl::setup_zrepl(&self.target, &be)?;
         }
 
         Ok(())

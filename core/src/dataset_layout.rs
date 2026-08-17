@@ -1,4 +1,6 @@
 use color_eyre::eyre::{Result, bail};
+
+use crate::boot_environment::BootEnvironment;
 use zfskit::dataset::{CreateOptions, MountOptions};
 
 pub struct DatasetConfig {
@@ -53,11 +55,10 @@ pub async fn dataset_exists(zfs: &zfskit::Zfs, name: &str) -> Result<bool> {
 
 pub async fn create_base_dataset(
     zfs: &zfskit::Zfs,
-    pool_name: &str,
-    prefix: &str,
+    be: &BootEnvironment,
     encryption_props: &[(&str, &str)],
 ) -> Result<()> {
-    let base_name = format!("{pool_name}/{prefix}");
+    let base_name = be.base();
     if dataset_exists(zfs, &base_name).await? {
         bail!(
             "Dataset '{base_name}' already exists. \
@@ -69,8 +70,7 @@ pub async fn create_base_dataset(
 
 pub async fn create_child_datasets(
     zfs: &zfskit::Zfs,
-    pool_name: &str,
-    prefix: &str,
+    be: &BootEnvironment,
     datasets: &[DatasetConfig],
 ) -> Result<()> {
     // Sort by depth (number of slashes) to ensure parents are created first
@@ -87,13 +87,13 @@ pub async fn create_child_datasets(
         let parts: Vec<&str> = ds.name.split('/').collect();
         for depth in 1..parts.len() {
             let ancestor = parts[..depth].join("/");
-            let ancestor_full = format!("{pool_name}/{prefix}/{ancestor}");
+            let ancestor_full = be.child(&ancestor);
             if created.insert(ancestor_full.clone()) {
                 create_dataset(zfs, &ancestor_full, &[("mountpoint", "none")]).await?;
             }
         }
 
-        let full_name = format!("{pool_name}/{prefix}/{}", ds.name);
+        let full_name = be.child(&ds.name);
         let props: Vec<(&str, &str)> = ds
             .properties
             .iter()
@@ -107,12 +107,11 @@ pub async fn create_child_datasets(
 
 pub async fn mount_datasets_ordered(
     zfs: &zfskit::Zfs,
-    pool_name: &str,
-    prefix: &str,
+    be: &BootEnvironment,
     datasets: &[DatasetConfig],
 ) -> Result<()> {
     // Mount root dataset first (canmount=noauto)
-    let root_ds = format!("{pool_name}/{prefix}/root");
+    let root_ds = be.root();
     zfs.dataset(&root_ds)?
         .mount(&MountOptions::default())
         .await?;
@@ -124,7 +123,7 @@ pub async fn mount_datasets_ordered(
     children.sort_by_key(|dataset| dataset.name.matches('/').count());
 
     for dataset in children {
-        let full_name = format!("{pool_name}/{prefix}/{}", dataset.name);
+        let full_name = be.child(&dataset.name);
         zfs.dataset(&full_name)?
             .mount(&MountOptions::default())
             .await?;
@@ -218,7 +217,7 @@ mod tests {
             );
 
         let zfs = Zfs::with_runner(runner);
-        create_child_datasets(&zfs, "pool", "arch0", &datasets)
+        create_child_datasets(&zfs, &BootEnvironment::new("pool", "arch0"), &datasets)
             .await
             .expect("create_child_datasets succeeds");
     }
@@ -262,7 +261,7 @@ mod tests {
             );
 
         let zfs = Zfs::with_runner(runner);
-        create_child_datasets(&zfs, "pool", "arch0", &datasets)
+        create_child_datasets(&zfs, &BootEnvironment::new("pool", "arch0"), &datasets)
             .await
             .expect("every intermediate dataset is created");
     }
@@ -297,7 +296,7 @@ mod tests {
             );
 
         let zfs = Zfs::with_runner(runner);
-        mount_datasets_ordered(&zfs, "pool", "arch0", &datasets)
+        mount_datasets_ordered(&zfs, &BootEnvironment::new("pool", "arch0"), &datasets)
             .await
             .expect("selected boot environment mounts");
     }
@@ -332,7 +331,7 @@ mod tests {
             );
 
         let zfs = Zfs::with_runner(runner);
-        let error = mount_datasets_ordered(&zfs, "pool", "arch0", &datasets)
+        let error = mount_datasets_ordered(&zfs, &BootEnvironment::new("pool", "arch0"), &datasets)
             .await
             .expect_err("non-empty mountpoint must stop installation");
         assert!(error.to_string().contains("directory is not empty"));

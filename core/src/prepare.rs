@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use color_eyre::eyre::{Result, eyre};
 use zfskit::pool::{ExportOptions, ImportOptions, PoolCreateOptions, Vdev};
 
+use crate::boot_environment::BootEnvironment;
 use crate::config::types::{GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode};
 use crate::system::cmd::CommandRunner;
 
@@ -114,7 +115,7 @@ pub async fn prepare_zfs(
         .pool_name
         .as_deref()
         .ok_or_else(|| eyre!("pool name not set"))?;
-    let prefix = config.dataset_prefix.as_str();
+    let be = BootEnvironment::new(pool_name, config.dataset_prefix.as_str());
     let compression = config.compression.to_string();
     let encryption = config.zfs_encryption_mode;
 
@@ -163,12 +164,10 @@ pub async fn prepare_zfs(
             let base_refs = base_dataset_props(encryption, &key_path, &compression);
             let base_refs_view: Vec<(&str, &str)> =
                 base_refs.iter().map(|(k, v)| (*k, v.as_str())).collect();
-            crate::dataset_layout::create_base_dataset(&zfs, pool_name, prefix, &base_refs_view)
-                .await?;
+            crate::dataset_layout::create_base_dataset(&zfs, &be, &base_refs_view).await?;
 
             let datasets = crate::dataset_layout::default_datasets();
-            crate::dataset_layout::create_child_datasets(&zfs, pool_name, prefix, &datasets)
-                .await?;
+            crate::dataset_layout::create_child_datasets(&zfs, &be, &datasets).await?;
             tracing::info!("Created datasets");
 
             export_pool(&zfs, pool_name).await?;
@@ -190,20 +189,18 @@ pub async fn prepare_zfs(
             let base_refs = base_dataset_props(encryption, &key_path, &compression);
             let base_refs_view: Vec<(&str, &str)> =
                 base_refs.iter().map(|(k, v)| (*k, v.as_str())).collect();
-            crate::dataset_layout::create_base_dataset(&zfs, pool_name, prefix, &base_refs_view)
-                .await?;
+            crate::dataset_layout::create_base_dataset(&zfs, &be, &base_refs_view).await?;
 
             let datasets = crate::dataset_layout::default_datasets();
-            crate::dataset_layout::create_child_datasets(&zfs, pool_name, prefix, &datasets)
-                .await?;
+            crate::dataset_layout::create_child_datasets(&zfs, &be, &datasets).await?;
             tracing::info!("Created new BE in existing pool");
         }
     }
 
-    load_install_encryption_key(&zfs, pool_name, prefix, encryption, &key_path).await?;
+    load_install_encryption_key(&zfs, &be, encryption, &key_path).await?;
 
     let datasets = crate::dataset_layout::default_datasets();
-    crate::dataset_layout::mount_datasets_ordered(&zfs, pool_name, prefix, &datasets).await?;
+    crate::dataset_layout::mount_datasets_ordered(&zfs, &be, &datasets).await?;
     tracing::info!("Datasets mounted");
 
     Ok(())
@@ -232,14 +229,13 @@ fn base_dataset_props(
 
 async fn load_install_encryption_key(
     zfs: &zfskit::Zfs,
-    pool_name: &str,
-    prefix: &str,
+    be: &BootEnvironment,
     encryption: ZfsEncryptionMode,
     key_path: &Path,
 ) -> Result<()> {
     let key_dataset = match encryption {
-        ZfsEncryptionMode::Pool => pool_name.to_string(),
-        ZfsEncryptionMode::Dataset => format!("{pool_name}/{prefix}"),
+        ZfsEncryptionMode::Pool => be.pool().to_string(),
+        ZfsEncryptionMode::Dataset => be.base(),
         ZfsEncryptionMode::None => return Ok(()),
     };
     let key_loc = format!("file://{}", key_path.display());
@@ -383,8 +379,7 @@ mod tests {
 
         load_install_encryption_key(
             &zfs,
-            "zroot",
-            "arch0",
+            &BootEnvironment::new("zroot", "arch0"),
             ZfsEncryptionMode::Pool,
             Path::new("/etc/zfs/zroot.key"),
         )
@@ -404,8 +399,7 @@ mod tests {
 
         load_install_encryption_key(
             &zfs,
-            "zroot",
-            "arch0",
+            &BootEnvironment::new("zroot", "arch0"),
             ZfsEncryptionMode::Dataset,
             Path::new("/etc/zfs/zroot.key"),
         )
@@ -419,8 +413,7 @@ mod tests {
 
         load_install_encryption_key(
             &zfs,
-            "zroot",
-            "arch0",
+            &BootEnvironment::new("zroot", "arch0"),
             ZfsEncryptionMode::None,
             Path::new("/etc/zfs/zroot.key"),
         )
