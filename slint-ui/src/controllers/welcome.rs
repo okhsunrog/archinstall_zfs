@@ -59,7 +59,7 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_scan: &Kernel
                 start_zfs_init(&app, &cfg.borrow());
             }
             if !kscan.is_some() {
-                start_kernel_scan(&kscan);
+                start_kernel_scan(&kscan, cfg.borrow().distribution());
             }
         }
     });
@@ -98,7 +98,7 @@ fn run_initial_checks(
         if !demo && !(zfs_mod && zfs_utils) {
             start_zfs_init(app, &config.borrow());
         }
-        start_kernel_scan(kernel_scan);
+        start_kernel_scan(kernel_scan, config.borrow().distribution());
     }
 }
 
@@ -159,15 +159,15 @@ fn start_zfs_init(app: &App, config: &GlobalConfig) {
 }
 
 /// Start kernel compatibility scan in background, store results in shared state.
-fn start_kernel_scan(scan_cache: &KernelScan) {
+fn start_kernel_scan(
+    scan_cache: &KernelScan,
+    distro: &'static archinstall_zfs_core::distro::Distribution,
+) {
     let cache = scan_cache.clone();
     tokio::task::spawn(async move {
         tracing::info!("scanning kernel compatibility...");
-        let results = archinstall_zfs_core::kernel::scanner::scan_all_kernels().await;
-        for (info, result) in archinstall_zfs_core::kernel::AVAILABLE_KERNELS
-            .iter()
-            .zip(&results)
-        {
+        let results = archinstall_zfs_core::kernel::scanner::scan_all_kernels(distro).await;
+        for (info, result) in distro.kernels.iter().zip(&results) {
             let pre = if result.precompiled_compatible {
                 "OK"
             } else {

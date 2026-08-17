@@ -7,6 +7,8 @@
 //!
 //! A distribution is data, so a second one is an entry rather than a branch.
 
+use crate::kernel::KernelInfo;
+
 /// How much pacman verifies of what a repository serves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Signatures {
@@ -67,6 +69,9 @@ pub struct Distribution {
     pub repositories: &'static [Repository],
     /// The keyring `pacman-key --populate` is given.
     pub keyring: &'static str,
+    /// The kernels this distribution offers, and where each one's ZFS module
+    /// comes from.
+    pub kernels: &'static [KernelInfo],
 }
 
 /// Where the ZFS module packages for Arch kernels come from.
@@ -87,6 +92,34 @@ const ARCHZFS: Repository = Repository {
     signatures: Signatures::Never,
 };
 
+/// Arch's own kernels, each with the archzfs module built for it.
+const ARCH_KERNELS: &[KernelInfo] = &[
+    KernelInfo {
+        name: "linux-lts",
+        display_name: "Linux LTS",
+        precompiled_package: Some("zfs-linux-lts"),
+        headers_package: "linux-lts-headers",
+    },
+    KernelInfo {
+        name: "linux",
+        display_name: "Linux",
+        precompiled_package: Some("zfs-linux"),
+        headers_package: "linux-headers",
+    },
+    KernelInfo {
+        name: "linux-zen",
+        display_name: "Linux Zen",
+        precompiled_package: Some("zfs-linux-zen"),
+        headers_package: "linux-zen-headers",
+    },
+    KernelInfo {
+        name: "linux-hardened",
+        display_name: "Linux Hardened",
+        precompiled_package: Some("zfs-linux-hardened"),
+        headers_package: "linux-hardened-headers",
+    },
+];
+
 pub const ARCH: Distribution = Distribution {
     name: "arch",
     display_name: "Arch Linux",
@@ -99,6 +132,7 @@ pub const ARCH: Distribution = Distribution {
     ],
     repositories: &[ARCHZFS],
     keyring: "archlinux",
+    kernels: ARCH_KERNELS,
 };
 
 /// Every distribution the installer knows.

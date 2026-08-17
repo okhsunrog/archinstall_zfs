@@ -213,8 +213,12 @@ async fn install(
     }
     tracing::info!("UEFI boot detected");
 
-    for warning in
-        crate::kernel::scanner::validate_kernel_zfs_plan(&kernel, config.zfs_module_mode).await
+    for warning in crate::kernel::scanner::validate_kernel_zfs_plan(
+        config.distribution(),
+        &kernel,
+        config.zfs_module_mode,
+    )
+    .await
     {
         tracing::warn!("kernel compatibility: {warning}");
     }

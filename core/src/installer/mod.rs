@@ -285,7 +285,7 @@ impl Installer {
         let mut failures: Vec<(String, String)> = Vec::new();
 
         for kernel in &kernels {
-            let packages = crate::kernel::zfs_module_packages(kernel, mode);
+            let packages = crate::kernel::zfs_module_packages(self.distro, kernel, mode);
             if packages.is_empty() {
                 failures.push((kernel.clone(), "unknown kernel".to_string()));
                 continue;
