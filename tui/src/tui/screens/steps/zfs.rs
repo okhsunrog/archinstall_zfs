@@ -1,3 +1,4 @@
+use archinstall_zfs_core::config::edit::{ChoiceSetting, DeviceSetting, TextSetting};
 use archinstall_zfs_core::config::types::{
     GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode,
 };
@@ -13,7 +14,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
 
     let mut items = vec![
         MenuItem {
-            key: "pool_name",
+            key: TextSetting::PoolName.as_str(),
             label: "Pool name",
             value: config.pool_name.clone().unwrap_or("Not set".into()),
             kind: if matches!(mode, Some(InstallationMode::ExistingPool)) {
@@ -23,7 +24,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
             },
         },
         MenuItem {
-            key: "dataset_prefix",
+            key: TextSetting::DatasetPrefix.as_str(),
             label: "Dataset prefix",
             value: config.dataset_prefix.clone(),
             kind: MenuKind::Text,
@@ -31,20 +32,20 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     ];
 
     items.extend(choice_group(
-        "compression",
+        ChoiceSetting::Compression,
         "Compression",
         config.compression,
     ));
 
     items.extend(choice_group(
-        "encryption",
+        ChoiceSetting::Encryption,
         "Encryption",
         config.zfs_encryption_mode,
     ));
 
     if config.zfs_encryption_mode != ZfsEncryptionMode::None {
         items.push(MenuItem {
-            key: "encryption_password",
+            key: TextSetting::EncryptionPassword.as_str(),
             label: "Encryption password",
             value: if config.zfs_encryption_password.is_some() {
                 "Set".into()
@@ -55,11 +56,15 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
         });
     }
 
-    items.extend(choice_group("swap_mode", "Swap", config.swap_mode));
+    items.extend(choice_group(
+        ChoiceSetting::SwapMode,
+        "Swap",
+        config.swap_mode,
+    ));
 
     if matches!(mode, Some(InstallationMode::FullDisk)) && has_swap_partition {
         items.push(MenuItem {
-            key: "swap_partition_size",
+            key: TextSetting::SwapPartitionSize.as_str(),
             label: "Swap size",
             value: config
                 .swap_partition_size
@@ -70,7 +75,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     }
     if !matches!(mode, Some(InstallationMode::FullDisk) | None) && has_swap_partition {
         items.push(MenuItem {
-            key: "swap_partition",
+            key: DeviceSetting::SwapPartition.as_str(),
             label: "Swap partition",
             value: config
                 .swap_partition
@@ -82,7 +87,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     }
 
     items.extend(choice_group(
-        "init_system",
+        ChoiceSetting::InitSystem,
         "Init system",
         config.init_system,
     ));

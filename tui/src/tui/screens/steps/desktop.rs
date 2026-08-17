@@ -1,3 +1,4 @@
+use archinstall_zfs_core::config::edit::{ChoiceSetting, TextSetting};
 use archinstall_zfs_core::config::types::GlobalConfig;
 
 use super::{MenuItem, MenuKind, choice_group};
@@ -28,7 +29,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     ];
 
     items.extend(choice_group(
-        "seat_access",
+        ChoiceSetting::SeatAccess,
         "Seat access",
         sel.and_then(|s| s.seat_access),
     ));
@@ -50,7 +51,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
         });
     }
 
-    items.extend(choice_group("audio", "Audio", config.audio));
+    items.extend(choice_group(ChoiceSetting::Audio, "Audio", config.audio));
 
     items.extend([
         MenuItem {
@@ -84,7 +85,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
             kind: MenuKind::Custom,
         },
         MenuItem {
-            key: "extra_services",
+            key: TextSetting::ExtraServices.as_str(),
             label: "Extra services",
             value: if config.extra_services.is_empty() {
                 "None".into()

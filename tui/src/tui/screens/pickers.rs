@@ -2,10 +2,11 @@ use std::path::PathBuf;
 
 use color_eyre::eyre::Result;
 
-use archinstall_zfs_core::config::choices::Choice;
+use archinstall_zfs_core::config::edit::{
+    ChoiceSetting, TextSetting, apply_choice, apply_text as apply_text_setting,
+};
 use archinstall_zfs_core::config::types::{
-    AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, ProfileSelection,
-    SeatAccess, SwapMode, UserConfig, ZfsEncryptionMode, ZfsModuleMode,
+    GlobalConfig, ProfileSelection, SeatAccess, UserConfig, ZfsEncryptionMode, ZfsModuleMode,
 };
 use archinstall_zfs_core::profile::{DisplayManager, OptionalPackage};
 use archinstall_zfs_core::system::gpu::{GfxDriver, detect_gpus, suggested_driver};
@@ -590,115 +591,33 @@ pub fn apply_select(
     idx: usize,
     terminal: &mut ratatui::DefaultTerminal,
 ) -> Result<()> {
-    match key {
-        "installation_mode" => {
-            let Some(new_mode) = InstallationMode::from_index(idx) else {
-                return Ok(());
-            };
-            if config.installation_mode != Some(new_mode) {
-                config.disk = None;
-                config.efi_partition = None;
-                config.zfs_partition = None;
-                config.swap_partition = None;
-            }
-            config.installation_mode = Some(new_mode);
+    let Some(setting) = ChoiceSetting::parse(key) else {
+        tracing::warn!(key, "selection names no known setting");
+        return Ok(());
+    };
+
+    apply_choice(config, setting, idx);
+
+    // Asking for the passphrase belongs here rather than in core: it is a
+    // prompt, not a configuration change, and each interface asks its own way.
+    if setting == ChoiceSetting::Encryption
+        && config.zfs_encryption_mode != ZfsEncryptionMode::None
+        && config.zfs_encryption_password.is_none()
+    {
+        let result = run_edit(terminal, "Encryption password (min 8 chars)", "", true)?;
+        if let Some(pw) = result.value
+            && !pw.is_empty()
+        {
+            config.zfs_encryption_password = Some(pw);
         }
-        "encryption" => {
-            let Some(new_mode) = ZfsEncryptionMode::from_index(idx) else {
-                return Ok(());
-            };
-            config.zfs_encryption_mode = new_mode;
-            if new_mode != ZfsEncryptionMode::None && config.zfs_encryption_password.is_none() {
-                let result = run_edit(terminal, "Encryption password (min 8 chars)", "", true)?;
-                if let Some(pw) = result.value
-                    && !pw.is_empty()
-                {
-                    config.zfs_encryption_password = Some(pw);
-                }
-            }
-            if new_mode == ZfsEncryptionMode::None {
-                config.zfs_encryption_password = None;
-            }
-        }
-        "compression" => {
-            if let Some(algo) = CompressionAlgo::from_index(idx) {
-                config.compression = algo;
-            }
-        }
-        "swap_mode" => {
-            if let Some(mode) = SwapMode::from_index(idx) {
-                config.swap_mode = mode;
-            }
-        }
-        "init_system" => {
-            if let Some(init) = InitSystem::from_index(idx) {
-                config.init_system = init;
-            }
-        }
-        "audio" => {
-            if let Some(server) = <Option<AudioServer>>::from_index(idx) {
-                config.audio = server;
-            }
-        }
-        "network" => {
-            config.network_copy_iso = idx == 0;
-        }
-        "seat_access" => {
-            if let (Some(sel), Some(access)) = (
-                config.profile_selection.as_mut(),
-                <Option<SeatAccess>>::from_index(idx),
-            ) {
-                sel.seat_access = access;
-            }
-        }
-        _ => {}
     }
+
     Ok(())
 }
 
 pub fn apply_text(config: &mut GlobalConfig, key: &str, val: &str) {
-    let val_opt = if val.is_empty() {
-        None
-    } else {
-        Some(val.to_string())
-    };
-    match key {
-        "pool_name" => config.pool_name = val_opt,
-        "dataset_prefix" if !val.is_empty() => {
-            config.dataset_prefix = val.to_string();
-        }
-        "hostname" => config.hostname = val_opt,
-        "locale" => config.locale = val_opt,
-        "timezone" => config.timezone = val_opt,
-        "root_password" => config.root_password = val_opt,
-        "encryption_password" => config.zfs_encryption_password = val_opt,
-        "swap_partition_size" => config.swap_partition_size = val_opt,
-        "parallel_downloads" => {
-            if let Ok(n) = val.parse::<u32>() {
-                config.parallel_downloads = n.clamp(1, 20);
-            }
-        }
-        "additional_packages" => {
-            config.additional_packages = val
-                .split_whitespace()
-                .map(|s| s.trim_matches(',').to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-        }
-        "aur_packages" => {
-            config.aur_packages = val
-                .split_whitespace()
-                .map(|s| s.trim_matches(',').to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-        }
-        "extra_services" => {
-            config.extra_services = val
-                .split_whitespace()
-                .map(|s| s.trim_matches(',').to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-        }
-        _ => {}
+    match TextSetting::parse(key) {
+        Some(setting) => apply_text_setting(config, setting, val),
+        None => tracing::warn!(key, "edited row names no known setting"),
     }
 }

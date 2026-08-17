@@ -7,6 +7,7 @@ pub mod welcome;
 pub mod zfs;
 
 use archinstall_zfs_core::config::choices::Choice;
+use archinstall_zfs_core::config::edit::ChoiceSetting;
 
 // ── Shared types for all wizard steps ──────────────────
 
@@ -114,11 +115,11 @@ impl MenuItem {
 /// the selected index all come from one table rather than being spelled out
 /// here and inverted again in `pickers::apply_select`.
 pub fn choice_group<T: Choice>(
-    key: &'static str,
+    setting: ChoiceSetting,
     label: &'static str,
     current: T,
 ) -> Vec<MenuItem> {
-    radio_group(key, label, &T::labels(), current.index())
+    radio_group(setting.as_str(), label, &T::labels(), current.index())
 }
 
 pub fn radio_group(

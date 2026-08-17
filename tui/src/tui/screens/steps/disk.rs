@@ -1,3 +1,4 @@
+use archinstall_zfs_core::config::edit::DeviceSetting;
 use archinstall_zfs_core::config::types::{GlobalConfig, InstallationMode};
 
 use super::{MenuItem, MenuKind};
@@ -9,7 +10,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     // Show disk picker for FullDisk mode
     if matches!(mode, Some(InstallationMode::FullDisk) | None) {
         items.push(MenuItem {
-            key: "disk",
+            key: DeviceSetting::Disk.as_str(),
             label: "Disk",
             value: config
                 .disk
@@ -26,7 +27,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
         Some(InstallationMode::NewPool) | Some(InstallationMode::ExistingPool)
     ) {
         items.push(MenuItem {
-            key: "efi_partition",
+            key: DeviceSetting::EfiPartition.as_str(),
             label: "EFI partition",
             value: config
                 .efi_partition
@@ -38,7 +39,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     }
     if matches!(mode, Some(InstallationMode::NewPool)) {
         items.push(MenuItem {
-            key: "zfs_partition",
+            key: DeviceSetting::ZfsPartition.as_str(),
             label: "ZFS partition",
             value: config
                 .zfs_partition

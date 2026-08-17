@@ -5,9 +5,9 @@ use slint::SharedString;
 use std::path::PathBuf;
 
 use archinstall_zfs_core::config::choices::Choice;
+use archinstall_zfs_core::config::edit::{ChoiceSetting, DeviceSetting, TextSetting};
 use archinstall_zfs_core::config::types::{
-    AudioServer, CompressionAlgo, GlobalConfig, InstallationMode, ProfileSelection, SeatAccess,
-    SwapMode, ZfsEncryptionMode,
+    CompressionAlgo, GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode,
 };
 use archinstall_zfs_core::disk::device::DeviceChoice;
 
@@ -102,7 +102,7 @@ fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     let mode = c.installation_mode;
 
     let mut items = choice_group(
-        "installation_mode",
+        ChoiceSetting::InstallationMode,
         "Installation mode",
         mode.unwrap_or(InstallationMode::FullDisk),
     );
@@ -115,7 +115,12 @@ fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             .and_then(|sel| disks.iter().position(|choice| &choice.path == sel))
             .map(|i| i as i32)
             .unwrap_or(-1);
-        items.extend(radio_choice_group("disk", "Disk", &disks, selected));
+        items.extend(radio_choice_group(
+            DeviceSetting::Disk,
+            "Disk",
+            &disks,
+            selected,
+        ));
     }
 
     if matches!(
@@ -131,7 +136,7 @@ fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             .map(|i| i as i32)
             .unwrap_or(-1);
         items.extend(radio_partition_choice_group(
-            "efi_partition",
+            DeviceSetting::EfiPartition,
             "EFI partition",
             &parts,
             efi_selected,
@@ -145,7 +150,7 @@ fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                 .map(|i| i as i32)
                 .unwrap_or(-1);
             items.extend(radio_partition_choice_group(
-                "zfs_partition",
+                DeviceSetting::ZfsPartition,
                 "ZFS partition",
                 &parts,
                 zfs_selected,
@@ -166,13 +171,13 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     let mut items = vec![
         section_header("Pool"),
         ci_opt(
-            "pool_name",
+            TextSetting::PoolName.as_str(),
             "Pool name",
             c.pool_name.as_deref(),
             ItemType::Text,
         ),
         ci(
-            "dataset_prefix",
+            TextSetting::DatasetPrefix.as_str(),
             "Dataset prefix",
             &c.dataset_prefix,
             ItemType::Text,
@@ -180,21 +185,21 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     ];
 
     items.extend(choice_group_with_off(
-        "compression",
+        ChoiceSetting::Compression,
         "Compression",
         c.compression,
         CompressionAlgo::Off,
     ));
 
     items.extend(choice_group(
-        "encryption",
+        ChoiceSetting::Encryption,
         "Encryption",
         c.zfs_encryption_mode,
     ));
 
     if c.zfs_encryption_mode != ZfsEncryptionMode::None {
         items.push(ci_opt(
-            "encryption_password",
+            TextSetting::EncryptionPassword.as_str(),
             "Encryption password",
             c.zfs_encryption_password.as_ref().map(|_| "Set"),
             ItemType::Password,
@@ -202,7 +207,7 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     }
 
     items.extend(choice_group_with_off(
-        "swap_mode",
+        ChoiceSetting::SwapMode,
         "Swap",
         c.swap_mode,
         SwapMode::None,
@@ -210,7 +215,7 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
 
     if matches!(mode, Some(InstallationMode::FullDisk)) && has_swap_partition {
         items.push(ci_opt(
-            "swap_partition_size",
+            TextSetting::SwapPartitionSize.as_str(),
             "Swap size",
             c.swap_partition_size.as_deref(),
             ItemType::Text,
@@ -225,14 +230,18 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             .map(|i| i as i32)
             .unwrap_or(-1);
         items.extend(radio_choice_group(
-            "swap_partition",
+            DeviceSetting::SwapPartition,
             "Swap partition",
             &parts,
             swap_selected,
         ));
     }
 
-    items.extend(choice_group("init_system", "Init system", c.init_system));
+    items.extend(choice_group(
+        ChoiceSetting::InitSystem,
+        "Init system",
+        c.init_system,
+    ));
 
     items
 }
@@ -254,14 +263,14 @@ fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             ItemType::Select,
         ),
         ci_opt(
-            "hostname",
+            TextSetting::Hostname.as_str(),
             "Hostname",
             c.hostname.as_deref(),
             ItemType::Text,
         ),
         ci_toggle("ntp", "NTP (time sync)", c.ntp),
         ci(
-            "parallel_downloads",
+            TextSetting::ParallelDownloads.as_str(),
             "Parallel downloads",
             &c.parallel_downloads.to_string(),
             ItemType::Text,
@@ -269,7 +278,7 @@ fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         section_header("Locale"),
         ci_opt("locale", "Locale", c.locale.as_deref(), ItemType::Select),
         ci_opt(
-            "timezone",
+            TextSetting::Timezone.as_str(),
             "Timezone",
             c.timezone.as_deref(),
             ItemType::Select,
@@ -287,7 +296,7 @@ fn build_users_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     vec![
         section_header("Authentication"),
         ci_opt(
-            "root_password",
+            TextSetting::RootPassword.as_str(),
             "Root password",
             c.root_password.as_ref().map(|_| "Set"),
             ItemType::Password,
@@ -383,7 +392,7 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         // radio_group, like Audio.
         if p.needs_seat_access() {
             items.extend(choice_group_with_off(
-                "seat_access",
+                ChoiceSetting::SeatAccess,
                 "Seat access",
                 sel.seat_access,
                 None,
@@ -391,7 +400,12 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         }
     }
 
-    items.extend(choice_group_with_off("audio", "Audio", c.audio, None));
+    items.extend(choice_group_with_off(
+        ChoiceSetting::Audio,
+        "Audio",
+        c.audio,
+        None,
+    ));
 
     items.push(section_header("Hardware"));
     // GPU driver — only shown for graphical profiles (mirrors upstream
@@ -648,27 +662,30 @@ fn radio_group(key: &str, label: &str, options: &[&str], selected: i32) -> Vec<C
 /// Build a radio group from a [`Choice`] enum, so the order, the labels and
 /// the selected index all come from one table rather than being spelled out
 /// here and inverted again in [`apply_radio`].
-fn choice_group<T: Choice>(key: &str, label: &str, current: T) -> Vec<ConfigItem> {
-    radio_group(key, label, &T::labels(), current.index() as i32)
+fn choice_group<T: Choice>(setting: ChoiceSetting, label: &str, current: T) -> Vec<ConfigItem> {
+    radio_group(
+        setting.as_str(),
+        label,
+        &T::labels(),
+        current.index() as i32,
+    )
 }
 
 /// [`choice_group`] for lists with a semantic "off" alternative, named by
 /// value rather than by index.
-fn choice_group_with_off<T: Choice>(key: &str, label: &str, current: T, off: T) -> Vec<ConfigItem> {
+fn choice_group_with_off<T: Choice>(
+    setting: ChoiceSetting,
+    label: &str,
+    current: T,
+    off: T,
+) -> Vec<ConfigItem> {
     radio_group_with_off(
-        key,
+        setting.as_str(),
         label,
         &T::labels(),
         current.index() as i32,
         off.index(),
     )
-}
-
-/// Resolve a radio index coming back from the interface. Out of range — or
-/// negative, which the widget layer types as a plain `i32` — yields `None`
-/// rather than silently landing on a neighbouring variant.
-fn selected<T: Choice>(index: i32) -> Option<T> {
-    usize::try_from(index).ok().and_then(T::from_index)
 }
 
 /// Variant of [`radio_group`] that marks one option as the semantic "off"
@@ -715,7 +732,7 @@ fn radio_group_inner(
 }
 
 fn radio_choice_group(
-    key: &str,
+    setting: DeviceSetting,
     label: &str,
     options: &[ChoiceRow],
     selected: i32,
@@ -727,7 +744,7 @@ fn radio_choice_group(
     }];
     for (i, option) in options.iter().enumerate() {
         items.push(ConfigItem {
-            key: device_key(key, &option.path),
+            key: device_key(setting, &option.path),
             label: option.label.as_str().into(),
             icon: option.icon.as_str().into(),
             detail_model: option.model.as_str().into(),
@@ -758,7 +775,7 @@ fn radio_choice_group(
 }
 
 fn radio_partition_choice_group(
-    key: &str,
+    setting: DeviceSetting,
     label: &str,
     options: &[ChoiceRow],
     selected: i32,
@@ -789,7 +806,7 @@ fn radio_partition_choice_group(
         }
 
         items.push(ConfigItem {
-            key: device_key(key, &option.path),
+            key: device_key(setting, &option.path),
             label: option.label.as_str().into(),
             detail_size: option.size.as_str().into(),
             persistent_path: option.persistent_path.as_str().into(),
@@ -887,90 +904,8 @@ pub fn next_selectable_index(items: &[ConfigItem], current: i32, dir: i32) -> i3
 /// it. For a screen whose next step erases the chosen disk, selecting by
 /// identity rather than by position is the only version that is safe to be
 /// wrong about.
-fn device_key(group_key: &str, path: &std::path::Path) -> SharedString {
-    format!("device:{group_key}:{}", path.display()).into()
-}
-
-/// Apply a device selection. `path` comes from the row the user activated, so
-/// no second enumeration is involved.
-pub fn apply_device(config: &mut GlobalConfig, group_key: &str, path: &std::path::Path) {
-    let path = path.to_path_buf();
-    match group_key {
-        "disk" => {
-            // Choosing a disk is what puts the wizard in full-disk mode.
-            config.installation_mode = Some(InstallationMode::FullDisk);
-            config.disk = Some(path);
-        }
-        "efi_partition" => config.efi_partition = Some(path),
-        "zfs_partition" => config.zfs_partition = Some(path),
-        "swap_partition" => config.swap_partition = Some(path),
-        _ => {}
-    }
-}
-
-pub fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
-    match group_key {
-        "installation_mode" => {
-            let Some(new_mode) = selected::<InstallationMode>(idx) else {
-                return;
-            };
-            if config.installation_mode != Some(new_mode) {
-                config.disk = None;
-                config.efi_partition = None;
-                config.zfs_partition = None;
-                config.swap_partition = None;
-            }
-            config.installation_mode = Some(new_mode);
-        }
-        "compression" => {
-            if let Some(algo) = selected(idx) {
-                config.compression = algo;
-            }
-        }
-        "encryption" => {
-            let Some(mode) = selected::<ZfsEncryptionMode>(idx) else {
-                return;
-            };
-            config.zfs_encryption_mode = mode;
-            if mode == ZfsEncryptionMode::None {
-                config.zfs_encryption_password = None;
-            }
-        }
-        "swap_mode" => {
-            if let Some(mode) = selected(idx) {
-                config.swap_mode = mode;
-            }
-        }
-        "init_system" => {
-            if let Some(init) = selected(idx) {
-                config.init_system = init;
-            }
-        }
-        "profile" => {
-            let profiles = archinstall_zfs_core::profile::all_profiles();
-            config.profile_selection = if idx == 0 {
-                None
-            } else {
-                profiles
-                    .get((idx - 1) as usize)
-                    .and_then(|p| ProfileSelection::new(p.name))
-            };
-        }
-        "audio" => {
-            if let Some(server) = selected::<Option<AudioServer>>(idx) {
-                config.audio = server;
-            }
-        }
-        "seat_access" => {
-            if let (Some(sel), Some(access)) = (
-                config.profile_selection.as_mut(),
-                selected::<Option<SeatAccess>>(idx),
-            ) {
-                sel.seat_access = access;
-            }
-        }
-        _ => {}
-    }
+fn device_key(setting: DeviceSetting, path: &std::path::Path) -> SharedString {
+    format!("device:{}:{}", setting.as_str(), path.display()).into()
 }
 
 fn disk_choices() -> Vec<ChoiceRow> {
@@ -985,166 +920,18 @@ fn partition_choices() -> Vec<ChoiceRow> {
         .unwrap_or_default()
 }
 
-pub fn apply_text(config: &mut GlobalConfig, key: &str, val: &str) {
-    let opt = if val.is_empty() {
-        None
-    } else {
-        Some(val.to_string())
-    };
-    match key {
-        "pool_name" => config.pool_name = opt,
-        "dataset_prefix" if !val.is_empty() => {
-            config.dataset_prefix = val.to_string();
-        }
-        "hostname" => config.hostname = opt,
-        "locale" => config.locale = opt,
-        "timezone" => config.timezone = opt,
-        "root_password" => config.root_password = opt,
-        "encryption_password" => config.zfs_encryption_password = opt,
-        "swap_partition_size" => config.swap_partition_size = opt,
-        "parallel_downloads" => {
-            if let Ok(n) = val.parse::<u32>() {
-                config.parallel_downloads = n.clamp(1, 20);
-            }
-        }
-        _ => {}
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use archinstall_zfs_core::config::types::InitSystem;
-
-    fn cfg() -> GlobalConfig {
-        GlobalConfig::default()
-    }
 
     // ── apply_radio ─────────────────────────────────────
-
-    #[test]
-    fn radio_installation_mode_sets_and_clears_dependents() {
-        let mut c = cfg();
-        c.disk = Some("/dev/sda".into());
-        c.efi_partition = Some("/dev/sda1".into());
-
-        // Switching mode should clear all device selections
-        apply_radio(&mut c, "installation_mode", 1);
-        assert_eq!(c.installation_mode, Some(InstallationMode::NewPool));
-        assert!(c.disk.is_none());
-        assert!(c.efi_partition.is_none());
-        assert!(c.zfs_partition.is_none());
-        assert!(c.swap_partition.is_none());
-    }
-
-    #[test]
-    fn radio_installation_mode_no_clear_when_unchanged() {
-        let mut c = cfg();
-        c.installation_mode = Some(InstallationMode::FullDisk);
-        c.disk = Some("/dev/sda".into());
-
-        apply_radio(&mut c, "installation_mode", 0); // Same mode (FullDisk)
-        assert_eq!(c.installation_mode, Some(InstallationMode::FullDisk));
-        // Selections should be preserved when mode doesn't actually change
-        assert!(c.disk.is_some());
-    }
-
-    #[test]
-    fn radio_installation_mode_indices() {
-        let cases = [
-            (0, InstallationMode::FullDisk),
-            (1, InstallationMode::NewPool),
-            (2, InstallationMode::ExistingPool),
-        ];
-        for (idx, expected) in cases {
-            let mut c = cfg();
-            apply_radio(&mut c, "installation_mode", idx);
-            assert_eq!(c.installation_mode, Some(expected), "idx={idx}");
-        }
-    }
-
-    #[test]
-    fn radio_compression_indices() {
-        let cases = [
-            (0, CompressionAlgo::Lz4),
-            (1, CompressionAlgo::Zstd),
-            (2, CompressionAlgo::Zstd5),
-            (3, CompressionAlgo::Zstd10),
-            (4, CompressionAlgo::Off),
-        ];
-        for (idx, expected) in cases {
-            let mut c = cfg();
-            apply_radio(&mut c, "compression", idx);
-            assert_eq!(c.compression, expected, "idx={idx}");
-        }
-    }
-
-    #[test]
-    fn radio_encryption_clears_password_when_set_to_none() {
-        let mut c = cfg();
-        c.zfs_encryption_mode = ZfsEncryptionMode::Pool;
-        c.zfs_encryption_password = Some("hunter2".into());
-
-        apply_radio(&mut c, "encryption", 0); // None
-        assert_eq!(c.zfs_encryption_mode, ZfsEncryptionMode::None);
-        assert!(c.zfs_encryption_password.is_none());
-    }
-
-    #[test]
-    fn radio_encryption_keeps_password_when_set_to_pool() {
-        let mut c = cfg();
-        c.zfs_encryption_mode = ZfsEncryptionMode::Dataset;
-        c.zfs_encryption_password = Some("hunter2".into());
-
-        apply_radio(&mut c, "encryption", 1); // Pool
-        assert_eq!(c.zfs_encryption_mode, ZfsEncryptionMode::Pool);
-        assert_eq!(c.zfs_encryption_password.as_deref(), Some("hunter2"));
-    }
-
-    #[test]
-    fn radio_swap_mode_indices() {
-        let cases = [
-            (0, SwapMode::None),
-            (1, SwapMode::Zram),
-            (2, SwapMode::ZswapPartition),
-            (3, SwapMode::ZswapPartitionEncrypted),
-        ];
-        for (idx, expected) in cases {
-            let mut c = cfg();
-            apply_radio(&mut c, "swap_mode", idx);
-            assert_eq!(c.swap_mode, expected, "idx={idx}");
-        }
-    }
-
-    #[test]
-    fn radio_init_system_indices() {
-        let mut c = cfg();
-        apply_radio(&mut c, "init_system", 0);
-        assert_eq!(c.init_system, InitSystem::Dracut);
-        apply_radio(&mut c, "init_system", 1);
-        assert_eq!(c.init_system, InitSystem::Mkinitcpio);
-    }
-
-    #[test]
-    fn radio_audio_indices() {
-        let cases = [
-            (0, None),
-            (1, Some(AudioServer::Pipewire)),
-            (2, Some(AudioServer::Pulseaudio)),
-        ];
-        for (idx, expected) in cases {
-            let mut c = cfg();
-            apply_radio(&mut c, "audio", idx);
-            assert_eq!(c.audio, expected, "idx={idx}");
-        }
-    }
 
     #[test]
     fn a_device_row_carries_the_path_it_selects() {
         let path = std::path::Path::new("/dev/disk/by-path/pci-0000:00:04.0");
         // Colons in persistent paths must survive the round trip through the
         // key, so the dispatcher has to split on the first one only.
-        let key = device_key("disk", path);
+        let key = device_key(DeviceSetting::Disk, path);
         let rest = key.strip_prefix("device:").expect("device prefix");
         let (group, payload) = rest.split_once(':').expect("group and payload");
 
@@ -1152,156 +939,7 @@ mod tests {
         assert_eq!(std::path::Path::new(payload), path);
     }
 
-    #[test]
-    fn selecting_a_device_stores_that_device() {
-        let mut c = cfg();
-        let disk = std::path::Path::new("/dev/disk/by-id/nvme-eui.0001");
-
-        apply_device(&mut c, "disk", disk);
-
-        assert_eq!(c.disk.as_deref(), Some(disk));
-        assert_eq!(c.installation_mode, Some(InstallationMode::FullDisk));
-    }
-
-    #[test]
-    fn a_device_selection_does_not_depend_on_list_position() {
-        // The whole point: two different rows resolve to two different disks
-        // regardless of what the enumeration would return now.
-        let mut c = cfg();
-        apply_device(&mut c, "efi_partition", std::path::Path::new("/dev/sda1"));
-        apply_device(&mut c, "zfs_partition", std::path::Path::new("/dev/sdb2"));
-
-        assert_eq!(
-            c.efi_partition.as_deref(),
-            Some(std::path::Path::new("/dev/sda1"))
-        );
-        assert_eq!(
-            c.zfs_partition.as_deref(),
-            Some(std::path::Path::new("/dev/sdb2"))
-        );
-    }
-
-    #[test]
-    fn device_unknown_group_is_noop() {
-        let mut c = cfg();
-        apply_device(&mut c, "nonsense", std::path::Path::new("/dev/sda"));
-        assert!(c.disk.is_none());
-        assert!(c.efi_partition.is_none());
-    }
-
-    #[test]
-    fn radio_unknown_key_is_noop() {
-        let mut c = cfg();
-        let before_mode = c.installation_mode;
-        let before_compression = c.compression;
-        let before_swap = c.swap_mode;
-        apply_radio(&mut c, "totally_made_up", 5);
-        assert_eq!(c.installation_mode, before_mode);
-        assert_eq!(c.compression, before_compression);
-        assert_eq!(c.swap_mode, before_swap);
-    }
-
     // ── apply_text ──────────────────────────────────────
-
-    #[test]
-    fn text_pool_name_sets_and_clears() {
-        let mut c = cfg();
-        apply_text(&mut c, "pool_name", "rpool");
-        assert_eq!(c.pool_name.as_deref(), Some("rpool"));
-
-        // Empty string clears the field
-        apply_text(&mut c, "pool_name", "");
-        assert!(c.pool_name.is_none());
-    }
-
-    #[test]
-    fn text_dataset_prefix_does_not_clear_on_empty() {
-        let mut c = cfg();
-        let original = c.dataset_prefix.clone();
-        apply_text(&mut c, "dataset_prefix", "myprefix");
-        assert_eq!(c.dataset_prefix, "myprefix");
-
-        // Empty string is a no-op (must not blank the prefix)
-        apply_text(&mut c, "dataset_prefix", "");
-        assert_eq!(c.dataset_prefix, "myprefix");
-
-        // Restoring the default works
-        apply_text(&mut c, "dataset_prefix", &original);
-        assert_eq!(c.dataset_prefix, original);
-    }
-
-    #[test]
-    fn text_hostname_sets_and_clears() {
-        let mut c = cfg();
-        apply_text(&mut c, "hostname", "archbox");
-        assert_eq!(c.hostname.as_deref(), Some("archbox"));
-        apply_text(&mut c, "hostname", "");
-        assert!(c.hostname.is_none());
-    }
-
-    #[test]
-    fn text_timezone_sets_and_clears() {
-        let mut c = cfg();
-        apply_text(&mut c, "timezone", "Europe/Berlin");
-        assert_eq!(c.timezone.as_deref(), Some("Europe/Berlin"));
-        apply_text(&mut c, "timezone", "");
-        assert!(c.timezone.is_none());
-    }
-
-    #[test]
-    fn text_root_password_sets_and_clears() {
-        let mut c = cfg();
-        apply_text(&mut c, "root_password", "hunter2");
-        assert_eq!(c.root_password.as_deref(), Some("hunter2"));
-        apply_text(&mut c, "root_password", "");
-        assert!(c.root_password.is_none());
-    }
-
-    #[test]
-    fn text_encryption_password_sets_and_clears() {
-        let mut c = cfg();
-        apply_text(&mut c, "encryption_password", "secret");
-        assert_eq!(c.zfs_encryption_password.as_deref(), Some("secret"));
-        apply_text(&mut c, "encryption_password", "");
-        assert!(c.zfs_encryption_password.is_none());
-    }
-
-    #[test]
-    fn text_parallel_downloads_clamps_and_rejects_garbage() {
-        let mut c = cfg();
-
-        apply_text(&mut c, "parallel_downloads", "8");
-        assert_eq!(c.parallel_downloads, 8);
-
-        // Above 20 → clamped to 20
-        apply_text(&mut c, "parallel_downloads", "100");
-        assert_eq!(c.parallel_downloads, 20);
-
-        // Zero → clamped to 1
-        apply_text(&mut c, "parallel_downloads", "0");
-        assert_eq!(c.parallel_downloads, 1);
-
-        // Garbage / non-numeric → previous value preserved
-        c.parallel_downloads = 5;
-        apply_text(&mut c, "parallel_downloads", "abc");
-        assert_eq!(c.parallel_downloads, 5);
-
-        // Negative parses fail (it's u32) → preserved
-        apply_text(&mut c, "parallel_downloads", "-3");
-        assert_eq!(c.parallel_downloads, 5);
-    }
-
-    #[test]
-    fn text_unknown_key_is_noop() {
-        let mut c = cfg();
-        let before_pool = c.pool_name.clone();
-        let before_hostname = c.hostname.clone();
-        let before_parallel = c.parallel_downloads;
-        apply_text(&mut c, "totally_made_up", "value");
-        assert_eq!(c.pool_name, before_pool);
-        assert_eq!(c.hostname, before_hostname);
-        assert_eq!(c.parallel_downloads, before_parallel);
-    }
 
     // ── next_selectable_index ───────────────────────────
 

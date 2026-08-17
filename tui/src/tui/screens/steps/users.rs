@@ -1,3 +1,4 @@
+use archinstall_zfs_core::config::edit::TextSetting;
 use archinstall_zfs_core::config::types::GlobalConfig;
 
 use super::{MenuItem, MenuKind};
@@ -5,7 +6,7 @@ use super::{MenuItem, MenuKind};
 pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     vec![
         MenuItem {
-            key: "root_password",
+            key: TextSetting::RootPassword.as_str(),
             label: "Root password",
             value: if config.root_password.is_some() {
                 "Set".into()

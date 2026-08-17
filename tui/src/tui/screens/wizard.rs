@@ -6,6 +6,7 @@ use ratatui::widgets::{
     Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
 
+use archinstall_zfs_core::config::edit::{DeviceSetting, apply_device};
 use archinstall_zfs_core::config::types::GlobalConfig;
 
 use crate::tui::Action;
@@ -300,23 +301,23 @@ impl Wizard {
                     }
                 }
                 "disk" => {
-                    if let Some(disk) = pickers::pick_disk(terminal)? {
-                        self.config.disk = Some(disk);
+                    if let Some(path) = pickers::pick_disk(terminal)? {
+                        apply_device(&mut self.config, DeviceSetting::Disk, &path);
                     }
                 }
                 "efi_partition" => {
-                    if let Some(part) = pickers::pick_partition(terminal, "EFI partition")? {
-                        self.config.efi_partition = Some(part);
+                    if let Some(path) = pickers::pick_partition(terminal, "EFI partition")? {
+                        apply_device(&mut self.config, DeviceSetting::EfiPartition, &path);
                     }
                 }
                 "zfs_partition" => {
-                    if let Some(part) = pickers::pick_partition(terminal, "ZFS partition")? {
-                        self.config.zfs_partition = Some(part);
+                    if let Some(path) = pickers::pick_partition(terminal, "ZFS partition")? {
+                        apply_device(&mut self.config, DeviceSetting::ZfsPartition, &path);
                     }
                 }
                 "swap_partition" => {
-                    if let Some(part) = pickers::pick_partition(terminal, "Swap partition")? {
-                        self.config.swap_partition = Some(part);
+                    if let Some(path) = pickers::pick_partition(terminal, "Swap partition")? {
+                        apply_device(&mut self.config, DeviceSetting::SwapPartition, &path);
                     }
                 }
                 "kernel" => {

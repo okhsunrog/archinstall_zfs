@@ -12,9 +12,11 @@ use archinstall_zfs_core::config::types::GlobalConfig;
 use archinstall_zfs_core::profile::DisplayManager;
 use archinstall_zfs_core::system::gpu::{GfxDriver, detect_gpus, suggested_driver};
 
-use crate::config_items::{
-    apply_device, apply_radio, apply_text, build_step_items, next_selectable_index,
+use archinstall_zfs_core::config::edit::{
+    ChoiceSetting, DeviceSetting, TextSetting, apply_choice, apply_device, apply_text,
 };
+
+use crate::config_items::{build_step_items, next_selectable_index};
 use crate::controllers::welcome::KernelScan;
 use crate::editing_models::set_multi_select_options;
 use crate::refresh::refresh_items;
@@ -49,26 +51,35 @@ fn setup_item_activated(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_sc
     app.on_item_activated(move |key| {
         let Some(app) = weak.upgrade() else { return };
 
-        // Device rows: "device:{group_key}:{path}". Split on the first colon
+        // Device rows: "device:{setting}:{path}". Split on the first colon
         // only — persistent device paths contain colons of their own, as in
         // by-path/pci-0000:00:04.0.
         if let Some(rest) = key.strip_prefix("device:") {
-            if let Some((group_key, path)) = rest.split_once(':') {
-                let mut c = cfg.borrow_mut();
-                apply_device(&mut c, group_key, std::path::Path::new(path));
-                refresh_items(&app, &c);
+            match rest
+                .split_once(':')
+                .and_then(|(name, path)| DeviceSetting::parse(name).map(|setting| (setting, path)))
+            {
+                Some((setting, path)) => {
+                    let mut c = cfg.borrow_mut();
+                    apply_device(&mut c, setting, std::path::Path::new(path));
+                    refresh_items(&app, &c);
+                }
+                None => tracing::warn!(%key, "device row names no known setting"),
             }
             return;
         }
 
-        // Inline radio option clicks: "radio:{group_key}:{index}"
+        // Inline radio option clicks: "radio:{setting}:{index}"
         if let Some(rest) = key.strip_prefix("radio:") {
-            if let Some((group_key, idx_str)) = rest.rsplit_once(':')
-                && let Ok(idx) = idx_str.parse::<i32>()
-            {
-                let mut c = cfg.borrow_mut();
-                apply_radio(&mut c, group_key, idx);
-                refresh_items(&app, &c);
+            match rest.rsplit_once(':').and_then(|(name, index)| {
+                Some((ChoiceSetting::parse(name)?, index.parse::<usize>().ok()?))
+            }) {
+                Some((setting, index)) => {
+                    let mut c = cfg.borrow_mut();
+                    apply_choice(&mut c, setting, index);
+                    refresh_items(&app, &c);
+                }
+                None => tracing::warn!(%key, "radio row names no known setting"),
             }
             return;
         }
@@ -210,9 +221,14 @@ fn setup_select_confirmed(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_
             return;
         }
 
-        let mut c = cfg.borrow_mut();
-        apply_radio(&mut c, &key, idx);
-        refresh_items(&app, &c);
+        match ChoiceSetting::parse(&key) {
+            Some(setting) => {
+                let mut c = cfg.borrow_mut();
+                apply_choice(&mut c, setting, idx.max(0) as usize);
+                refresh_items(&app, &c);
+            }
+            None => tracing::warn!(%key, "selection names no known setting"),
+        }
     });
 }
 
@@ -221,9 +237,14 @@ fn setup_text_confirmed(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
     let cfg = config.clone();
     app.on_text_confirmed(move |key, val| {
         let Some(app) = weak.upgrade() else { return };
-        let mut c = cfg.borrow_mut();
-        apply_text(&mut c, &key, &val);
-        refresh_items(&app, &c);
+        match TextSetting::parse(&key) {
+            Some(setting) => {
+                let mut c = cfg.borrow_mut();
+                apply_text(&mut c, setting, &val);
+                refresh_items(&app, &c);
+            }
+            None => tracing::warn!(%key, "edited row names no known setting"),
+        }
     });
 }
 
