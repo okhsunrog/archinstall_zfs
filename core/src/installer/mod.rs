@@ -44,6 +44,9 @@ struct Installer {
     config: GlobalConfig,
     /// Resolved once: every phase that consults it wants the same answer.
     distro: &'static crate::distro::Distribution,
+    /// What this machine's processor supports, which decides where a
+    /// distribution's packages come from.
+    isa: crate::system::sysinfo::IsaLevel,
     target: PathBuf,
     cancel: CancellationToken,
     download_progress_tx: Option<Arc<tokio::sync::watch::Sender<DownloadProgress>>>,
@@ -115,9 +118,11 @@ pub fn perform_installation(request: InstallRequest) -> Result<Vec<String>> {
     )?;
     alpm.sync_databases(false)?;
 
+    let isa = crate::system::sysinfo::detect_isa_level(&*runner);
     let mut installer = Installer {
         runner,
         distro: config.distribution(),
+        isa,
         config,
         target,
         cancel,
@@ -261,7 +266,12 @@ impl Installer {
     /// initramfs phase can skip them and the user can be told.
     fn install_zfs_on_target(&mut self) -> Result<()> {
         // Edit pacman.conf and import GPG keys (still needs shell for pacman-key)
-        crate::system::pacman::add_repositories(&*self.runner, Some(&self.target), self.distro)?;
+        crate::system::pacman::add_repositories(
+            &*self.runner,
+            Some(&self.target),
+            self.distro,
+            self.isa,
+        )?;
 
         // Register archzfs repo in the live alpm handle and sync
         let ctx = &mut self.alpm;

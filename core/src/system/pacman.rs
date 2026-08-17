@@ -1,9 +1,10 @@
 use std::path::Path;
 
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Result, bail};
 
 use super::cmd::CommandRunner;
 use crate::distro::{Distribution, Repository};
+use crate::system::sysinfo::IsaLevel;
 
 /// Tried in order until one answers with the key.
 const KEYSERVERS: &[&str] = &[
@@ -20,14 +21,28 @@ pub fn add_repositories(
     runner: &dyn CommandRunner,
     target: Option<&Path>,
     distro: &Distribution,
+    isa: IsaLevel,
 ) -> Result<()> {
+    let repositories = distro.repositories(isa);
+    if repositories.is_empty() {
+        bail!(
+            "{} has no repositories for this processor: its packages start at x86-64-v3",
+            distro.display_name
+        );
+    }
+
     let pacman_conf = match target {
         Some(t) => t.join("etc/pacman.conf"),
         None => std::path::PathBuf::from("/etc/pacman.conf"),
     };
 
     let mut content = std::fs::read_to_string(&pacman_conf)?;
-    for repo in distro.repositories {
+    if let Some(architecture) = distro.architecture {
+        // Packages built for a newer instruction set are only accepted when
+        // pacman is told to work the architecture out for itself.
+        content = set_option(&content, "Architecture", architecture);
+    }
+    for repo in repositories {
         // Rewritten rather than appended when already present, so re-running
         // an installation does not stack duplicate blocks.
         content = replace_repo_block(&content, repo);
@@ -36,7 +51,7 @@ pub fn add_repositories(
     std::fs::write(&pacman_conf, content)?;
 
     init_keyring(runner, target, distro.keyring);
-    for repo in distro.repositories {
+    for repo in repositories {
         trust_repository_keys(runner, target, repo);
     }
 
@@ -126,6 +141,41 @@ fn replace_repo_block(content: &str, repo: &Repository) -> String {
     result
 }
 
+/// Set a key in pacman.conf's `[options]`, adding it when absent.
+///
+/// Both keys this is used for appear only in that section, so a line-based
+/// replacement is enough and does not need a full parser.
+fn set_option(content: &str, key: &str, value: &str) -> String {
+    let line = format!("{key} = {value}");
+    let mut replaced = false;
+    let mut result: Vec<String> = content
+        .lines()
+        .map(|existing| {
+            let trimmed = existing.trim_start().trim_start_matches('#');
+            if trimmed.starts_with(&format!("{key} ")) || trimmed.starts_with(&format!("{key}=")) {
+                replaced = true;
+                line.clone()
+            } else {
+                existing.to_string()
+            }
+        })
+        .collect();
+
+    if !replaced {
+        // Straight after [options], which every pacman.conf opens with.
+        let at = result
+            .iter()
+            .position(|l| l.trim() == "[options]")
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        result.insert(at, line);
+    }
+
+    let mut out = result.join("\n");
+    out.push('\n');
+    out
+}
+
 pub fn set_parallel_downloads(target: Option<&Path>, count: u32) -> Result<()> {
     let pacman_conf = match target {
         Some(t) => t.join("etc/pacman.conf"),
@@ -169,6 +219,41 @@ mod tests {
         key_ids: &[],
         signatures: Signatures::Never,
     };
+
+    #[test]
+    fn an_option_is_replaced_in_place() {
+        let conf = "[options]\nArchitecture = x86_64\nParallelDownloads = 5\n\n[core]\n";
+
+        let result = set_option(conf, "Architecture", "auto");
+
+        assert!(result.contains("Architecture = auto"));
+        assert!(!result.contains("Architecture = x86_64"));
+        assert!(result.contains("ParallelDownloads = 5"), "others untouched");
+    }
+
+    #[test]
+    fn a_commented_option_is_taken_over() {
+        let conf = "[options]\n#Architecture = auto\n\n[core]\n";
+
+        let result = set_option(conf, "Architecture", "auto");
+
+        assert_eq!(result.matches("Architecture").count(), 1);
+        assert!(!result.contains('#'));
+    }
+
+    #[test]
+    fn a_missing_option_is_added_under_options() {
+        let conf = "[options]\nHoldPkg = pacman\n\n[core]\nSigLevel = Required\n";
+
+        let result = set_option(conf, "Architecture", "auto");
+
+        let lines: Vec<&str> = result.lines().collect();
+        assert_eq!(lines[0], "[options]");
+        assert_eq!(
+            lines[1], "Architecture = auto",
+            "must land inside [options]"
+        );
+    }
 
     #[test]
     fn a_repository_is_added_once() {

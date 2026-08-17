@@ -188,7 +188,8 @@ pub fn initialize_zfs(
     tracing::info!("preparing live system for ZFS support");
 
     // 4. Add archzfs repo on host
-    crate::system::pacman::add_repositories(runner, None, distro)?;
+    let isa = crate::system::sysinfo::detect_isa_level(runner);
+    crate::system::pacman::add_repositories(runner, None, distro, isa)?;
 
     // 5. Increase cowspace
     increase_cowspace(runner)?;

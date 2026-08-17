@@ -106,3 +106,60 @@ mod tests {
         assert_eq!(CpuVendor::Unknown.microcode_package(), None);
     }
 }
+
+/// Instruction-set baseline a processor supports, as far as it matters for
+/// choosing packages.
+///
+/// CachyOS rebuilds the Arch package set for these baselines and serves each
+/// from its own repositories, so which repositories apply is a property of the
+/// machine rather than of the configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum IsaLevel {
+    /// Below x86-64-v3. No optimised repositories apply.
+    Baseline,
+    V3,
+    V4,
+    /// AMD Zen 4 and later, which get their own build.
+    Znver4,
+}
+
+/// Ask the dynamic loader and the compiler what this processor supports.
+///
+/// The loader knows the baselines and is always installed; gcc is asked only
+/// about Zen 4, is not always present on an installation medium, and its
+/// absence simply means the answer falls back to a baseline that is still
+/// correct, just less specific. This mirrors what CachyOS's own repository
+/// script checks.
+pub fn detect_isa_level(runner: &dyn crate::system::cmd::CommandRunner) -> IsaLevel {
+    let supports = |level: &str| {
+        runner
+            .run("/lib/ld-linux-x86-64.so.2", &["--help"])
+            .map(|out| {
+                out.stdout
+                    .contains(&format!("{level} (supported, searched)"))
+            })
+            .unwrap_or(false)
+    };
+
+    let znver4 = runner
+        .run("gcc", &["-march=native", "-Q", "--help=target"])
+        .map(|out| {
+            out.stdout
+                .lines()
+                .filter(|line| line.contains("march"))
+                .any(|line| line.contains("znver4") || line.contains("znver5"))
+        })
+        .unwrap_or(false);
+
+    let level = if znver4 {
+        IsaLevel::Znver4
+    } else if supports("x86-64-v4") {
+        IsaLevel::V4
+    } else if supports("x86-64-v3") {
+        IsaLevel::V3
+    } else {
+        IsaLevel::Baseline
+    };
+    tracing::info!(?level, "detected instruction set baseline");
+    level
+}
