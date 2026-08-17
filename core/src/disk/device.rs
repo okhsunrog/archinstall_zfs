@@ -507,7 +507,7 @@ fn is_installable_devnode(path: &Path) -> bool {
 
 fn parent_devnode_for_partition(path: &Path) -> Option<PathBuf> {
     let name = path.file_name()?.to_str()?;
-    let parent_name = strip_partition_suffix(name);
+    let parent_name = super::whole_disk_name(name);
     if parent_name == name || parent_name.is_empty() {
         return None;
     }
@@ -516,17 +516,6 @@ fn parent_devnode_for_partition(path: &Path) -> Option<PathBuf> {
         Some(parent) => parent.join(parent_name),
         None => PathBuf::from(parent_name),
     })
-}
-
-fn strip_partition_suffix(name: &str) -> &str {
-    if let Some(pos) = name.rfind('p') {
-        let after = &name[pos + 1..];
-        if !after.is_empty() && after.bytes().all(|b| b.is_ascii_digit()) {
-            return &name[..pos];
-        }
-    }
-
-    name.trim_end_matches(|c: char| c.is_ascii_digit())
 }
 
 fn collect_device_aliases() -> Result<HashMap<PathBuf, Vec<DevicePath>>> {

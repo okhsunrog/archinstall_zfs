@@ -76,7 +76,7 @@ pub fn detect_storage_type(dev_path: &std::path::Path) -> StorageType {
         .and_then(|n| n.to_str())
         .unwrap_or_default();
 
-    let base = strip_partition_suffix(dev_name);
+    let base = crate::disk::whole_disk_name(dev_name);
 
     // NVMe device nodes are always named nvme<ctrl>n<ns>[p<part>].
     if base.starts_with("nvme") {
@@ -95,27 +95,6 @@ pub fn detect_storage_type(dev_path: &std::path::Path) -> StorageType {
     }
 }
 
-/// Strip the partition suffix from a block device name.
-///
-/// - NVMe:  `nvme0n1p2` → `nvme0n1`  (partition suffix is `p<N>`)
-/// - NVMe:  `nvme0n1`   → `nvme0n1`  (no partition, unchanged)
-/// - SCSI:  `sda1`      → `sda`      (partition suffix is trailing digits)
-fn strip_partition_suffix(name: &str) -> &str {
-    if name.starts_with("nvme") {
-        // NVMe partition suffix is 'p' followed by one or more digits.
-        // Only strip if we actually find that pattern to avoid eating the
-        // namespace number (e.g. the '1' in nvme0n1 is NOT a partition).
-        if let Some(pos) = name.rfind('p') {
-            let after = &name[pos + 1..];
-            if !after.is_empty() && after.bytes().all(|b| b.is_ascii_digit()) {
-                return &name[..pos];
-            }
-        }
-        return name;
-    }
-    name.trim_end_matches(|c: char| c.is_ascii_digit())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,16 +104,5 @@ mod tests {
         assert_eq!(CpuVendor::Intel.microcode_package(), Some("intel-ucode"));
         assert_eq!(CpuVendor::Amd.microcode_package(), Some("amd-ucode"));
         assert_eq!(CpuVendor::Unknown.microcode_package(), None);
-    }
-
-    #[test]
-    fn test_strip_partition_suffix() {
-        assert_eq!(strip_partition_suffix("sda1"), "sda");
-        assert_eq!(strip_partition_suffix("sda"), "sda");
-        assert_eq!(strip_partition_suffix("sdb12"), "sdb");
-        assert_eq!(strip_partition_suffix("nvme0n1p1"), "nvme0n1");
-        assert_eq!(strip_partition_suffix("nvme0n1p12"), "nvme0n1");
-        assert_eq!(strip_partition_suffix("nvme0n1"), "nvme0n1");
-        assert_eq!(strip_partition_suffix("vda1"), "vda");
     }
 }
