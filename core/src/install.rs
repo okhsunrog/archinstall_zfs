@@ -289,18 +289,14 @@ async fn install(
         let cancel = cancel.clone();
         let progress_tx = progress_tx.clone();
         tokio::task::spawn_blocking(move || -> Result<Vec<String>> {
-            let mut installer = crate::installer::Installer::new(
+            crate::installer::perform_installation(crate::installer::InstallRequest {
                 runner,
-                (*config).clone(),
-                &mountpoint,
+                config: (*config).clone(),
+                target: mountpoint,
                 cancel,
-                progress_tx,
-            );
-            if let Some(swap) = swap_partition {
-                installer.set_swap_partition(swap);
-            }
-            installer.perform_installation()?;
-            Ok(installer.notices().to_vec())
+                download_progress_tx: progress_tx,
+                swap_partition,
+            })
         })
         .await??
     };
