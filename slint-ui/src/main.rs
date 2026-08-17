@@ -56,7 +56,7 @@ struct Cli {
 async fn main() -> Result<()> {
     color_eyre::install()?;
     let cli = Cli::parse();
-    let demo = cli.demo || kernel_cmdline_enables_demo();
+    let demo = cli.demo || archinstall_zfs_core::demo::enabled_from_kernel_cmdline();
 
     if let Some(scale) = cli.ui_scale
         && scale > 0.0
@@ -130,28 +130,4 @@ fn run_gui(config: GlobalConfig, demo: bool) -> Result<()> {
         session.export_all_blocking();
     }
     Ok(())
-}
-
-fn kernel_cmdline_enables_demo() -> bool {
-    cmdline_enables_demo(&std::fs::read_to_string("/proc/cmdline").unwrap_or_default())
-}
-
-fn cmdline_enables_demo(cmdline: &str) -> bool {
-    cmdline
-        .split_whitespace()
-        .any(|arg| matches!(arg, "archinstall_zfs.demo" | "archinstall_zfs.demo=1"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::cmdline_enables_demo;
-
-    #[test]
-    fn demo_kernel_argument_is_detected() {
-        assert!(cmdline_enables_demo(
-            "quiet archinstall_zfs.demo=1 console=tty1"
-        ));
-        assert!(cmdline_enables_demo("archinstall_zfs.demo"));
-        assert!(!cmdline_enables_demo("archinstall_zfs.demo=0"));
-    }
 }

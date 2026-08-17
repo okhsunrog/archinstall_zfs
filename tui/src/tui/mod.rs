@@ -22,11 +22,11 @@ use self::screens::wizard::Wizard;
 
 pub async fn run_tui(
     config: GlobalConfig,
-    _dry_run: bool,
+    demo: bool,
     ui_log_rx: tokio::sync::mpsc::UnboundedReceiver<(String, i32)>,
 ) -> Result<()> {
     let mut terminal = setup_terminal()?;
-    let result = run_app(&mut terminal, config, ui_log_rx).await;
+    let result = run_app(&mut terminal, config, demo, ui_log_rx).await;
     restore_terminal()?;
     result
 }
@@ -57,6 +57,7 @@ pub enum Action {
 async fn run_app(
     terminal: &mut DefaultTerminal,
     mut config: GlobalConfig,
+    demo: bool,
     ui_log_rx: tokio::sync::mpsc::UnboundedReceiver<(String, i32)>,
 ) -> Result<()> {
     // Check connectivity before the wizard. If the user connects via WiFi,
@@ -67,7 +68,7 @@ async fn run_app(
         config.network_copy_iso = true;
     }
 
-    let mut wizard = Wizard::new(config);
+    let mut wizard = Wizard::new(config, demo);
     let mut events = EventStream::new();
 
     loop {

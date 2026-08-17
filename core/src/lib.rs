@@ -1,6 +1,7 @@
 pub mod bootmenu;
 pub mod config;
 pub mod dataset_layout;
+pub mod demo;
 pub mod disk;
 pub mod installer;
 pub mod kernel;

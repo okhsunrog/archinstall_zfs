@@ -25,7 +25,12 @@ pub async fn run(
         config.apply_secrets_from_file(path)?;
     }
 
+    let demo = cli.demo || archinstall_zfs_core::demo::enabled_from_kernel_cmdline();
+
     if cli.silent {
+        if demo {
+            bail!("--silent is unavailable in safe demo mode");
+        }
         if cli.config.is_none() {
             bail!("--silent requires --config");
         }
@@ -40,7 +45,7 @@ pub async fn run(
     }
 
     // Interactive TUI mode
-    crate::tui::run_tui(config, cli.dry_run, ui_log_rx).await
+    crate::tui::run_tui(config, demo, ui_log_rx).await
 }
 
 /// Full installation pipeline — async orchestrator.
