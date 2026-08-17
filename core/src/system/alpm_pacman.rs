@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use alpm::{Alpm, DownloadEvent, LogLevel, SigLevel, TransFlag};
+use alpm::{Alpm, DownloadEvent, LogLevel, TransFlag};
 use color_eyre::eyre::{Context, Result, bail, eyre};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
@@ -280,25 +280,6 @@ impl AlpmContext {
             duration_ms = batch_duration_ms,
         );
 
-        Ok(())
-    }
-
-    /// Dynamically register an additional repo (e.g., archzfs after config edit).
-    pub fn register_repo(
-        &mut self,
-        name: &str,
-        servers: &[&str],
-        siglevel: SigLevel,
-    ) -> Result<()> {
-        let db = self
-            .handle
-            .register_syncdb_mut(name, siglevel)
-            .map_err(|e| eyre!("failed to register repo '{name}': {e}"))?;
-        for &server in servers {
-            db.add_server(server)
-                .map_err(|e| eyre!("failed to add server to '{name}': {e}"))?;
-        }
-        tracing::info!(name, "registered additional repo");
         Ok(())
     }
 

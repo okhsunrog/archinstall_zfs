@@ -12,7 +12,6 @@ pub mod users;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use alpm::SigLevel;
 use color_eyre::eyre::{Result, bail};
 use tokio_util::sync::CancellationToken;
 
@@ -280,14 +279,12 @@ impl Installer {
             self.isa,
         )?;
 
-        // Register archzfs repo in the live alpm handle and sync
-        let ctx = &mut self.alpm;
-        ctx.register_repo(
-            "archzfs",
-            &["https://github.com/archzfs/archzfs/releases/download/experimental"],
-            SigLevel::PACKAGE_OPTIONAL | SigLevel::DATABASE_OPTIONAL,
-        )?;
-        ctx.sync_databases(true)?;
+        // The repositories are already registered: they were written into
+        // pacman.conf before this handle was opened from it. Registering one
+        // again is an error, and doing it here used to be the only way the
+        // handle learned about archzfs at all — from a second copy of its
+        // address and a signature level that disagreed with the file's.
+        self.alpm.sync_databases(true)?;
 
         // zfs-utils is shared by every kernel's module package.
         self.install_target_packages(&["zfs-utils"])?;
