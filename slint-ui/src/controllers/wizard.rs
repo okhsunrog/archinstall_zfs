@@ -12,7 +12,9 @@ use archinstall_zfs_core::config::types::GlobalConfig;
 use archinstall_zfs_core::profile::DisplayManager;
 use archinstall_zfs_core::system::gpu::{GfxDriver, detect_gpus, suggested_driver};
 
-use crate::config_items::{apply_radio, apply_text, build_step_items, next_selectable_index};
+use crate::config_items::{
+    apply_device, apply_radio, apply_text, build_step_items, next_selectable_index,
+};
 use crate::controllers::welcome::KernelScan;
 use crate::editing_models::set_multi_select_options;
 use crate::refresh::refresh_items;
@@ -46,6 +48,18 @@ fn setup_item_activated(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_sc
     let kscan = kernel_scan.clone();
     app.on_item_activated(move |key| {
         let Some(app) = weak.upgrade() else { return };
+
+        // Device rows: "device:{group_key}:{path}". Split on the first colon
+        // only — persistent device paths contain colons of their own, as in
+        // by-path/pci-0000:00:04.0.
+        if let Some(rest) = key.strip_prefix("device:") {
+            if let Some((group_key, path)) = rest.split_once(':') {
+                let mut c = cfg.borrow_mut();
+                apply_device(&mut c, group_key, std::path::Path::new(path));
+                refresh_items(&app, &c);
+            }
+            return;
+        }
 
         // Inline radio option clicks: "radio:{group_key}:{index}"
         if let Some(rest) = key.strip_prefix("radio:") {

@@ -727,7 +727,7 @@ fn radio_choice_group(
     }];
     for (i, option) in options.iter().enumerate() {
         items.push(ConfigItem {
-            key: format!("radio:{key}:{i}").into(),
+            key: device_key(key, &option.path),
             label: option.label.as_str().into(),
             icon: option.icon.as_str().into(),
             detail_model: option.model.as_str().into(),
@@ -789,7 +789,7 @@ fn radio_partition_choice_group(
         }
 
         items.push(ConfigItem {
-            key: format!("radio:{key}:{i}").into(),
+            key: device_key(key, &option.path),
             label: option.label.as_str().into(),
             detail_size: option.size.as_str().into(),
             persistent_path: option.persistent_path.as_str().into(),
@@ -878,6 +878,36 @@ pub fn next_selectable_index(items: &[ConfigItem], current: i32, dir: i32) -> i3
 // ── Apply mutations ─────────────────────────────────
 
 /// Apply an inline radio selection. `group_key` is e.g. "compression".
+/// Key for a device row.
+///
+/// The device's path travels with the row rather than its position in the
+/// list. Resolving a position means enumerating the block devices a second
+/// time when the click arrives, and the set can change in between — a stick
+/// plugged in, udev still settling — which silently shifts every index after
+/// it. For a screen whose next step erases the chosen disk, selecting by
+/// identity rather than by position is the only version that is safe to be
+/// wrong about.
+fn device_key(group_key: &str, path: &std::path::Path) -> SharedString {
+    format!("device:{group_key}:{}", path.display()).into()
+}
+
+/// Apply a device selection. `path` comes from the row the user activated, so
+/// no second enumeration is involved.
+pub fn apply_device(config: &mut GlobalConfig, group_key: &str, path: &std::path::Path) {
+    let path = path.to_path_buf();
+    match group_key {
+        "disk" => {
+            // Choosing a disk is what puts the wizard in full-disk mode.
+            config.installation_mode = Some(InstallationMode::FullDisk);
+            config.disk = Some(path);
+        }
+        "efi_partition" => config.efi_partition = Some(path),
+        "zfs_partition" => config.zfs_partition = Some(path),
+        "swap_partition" => config.swap_partition = Some(path),
+        _ => {}
+    }
+}
+
 pub fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
     match group_key {
         "installation_mode" => {
@@ -891,31 +921,6 @@ pub fn apply_radio(config: &mut GlobalConfig, group_key: &str, idx: i32) {
                 config.swap_partition = None;
             }
             config.installation_mode = Some(new_mode);
-        }
-        "disk" => {
-            let disks = disk_choices();
-            if let Some(choice) = disks.get(idx as usize) {
-                config.installation_mode = Some(InstallationMode::FullDisk);
-                config.disk = Some(choice.path.clone());
-            }
-        }
-        "efi_partition" => {
-            let parts = partition_choices();
-            if let Some(choice) = parts.get(idx as usize) {
-                config.efi_partition = Some(choice.path.clone());
-            }
-        }
-        "zfs_partition" => {
-            let parts = partition_choices();
-            if let Some(choice) = parts.get(idx as usize) {
-                config.zfs_partition = Some(choice.path.clone());
-            }
-        }
-        "swap_partition" => {
-            let parts = partition_choices();
-            if let Some(choice) = parts.get(idx as usize) {
-                config.swap_partition = Some(choice.path.clone());
-            }
         }
         "compression" => {
             if let Some(algo) = selected(idx) {
@@ -1132,6 +1137,56 @@ mod tests {
             apply_radio(&mut c, "audio", idx);
             assert_eq!(c.audio, expected, "idx={idx}");
         }
+    }
+
+    #[test]
+    fn a_device_row_carries_the_path_it_selects() {
+        let path = std::path::Path::new("/dev/disk/by-path/pci-0000:00:04.0");
+        // Colons in persistent paths must survive the round trip through the
+        // key, so the dispatcher has to split on the first one only.
+        let key = device_key("disk", path);
+        let rest = key.strip_prefix("device:").expect("device prefix");
+        let (group, payload) = rest.split_once(':').expect("group and payload");
+
+        assert_eq!(group, "disk");
+        assert_eq!(std::path::Path::new(payload), path);
+    }
+
+    #[test]
+    fn selecting_a_device_stores_that_device() {
+        let mut c = cfg();
+        let disk = std::path::Path::new("/dev/disk/by-id/nvme-eui.0001");
+
+        apply_device(&mut c, "disk", disk);
+
+        assert_eq!(c.disk.as_deref(), Some(disk));
+        assert_eq!(c.installation_mode, Some(InstallationMode::FullDisk));
+    }
+
+    #[test]
+    fn a_device_selection_does_not_depend_on_list_position() {
+        // The whole point: two different rows resolve to two different disks
+        // regardless of what the enumeration would return now.
+        let mut c = cfg();
+        apply_device(&mut c, "efi_partition", std::path::Path::new("/dev/sda1"));
+        apply_device(&mut c, "zfs_partition", std::path::Path::new("/dev/sdb2"));
+
+        assert_eq!(
+            c.efi_partition.as_deref(),
+            Some(std::path::Path::new("/dev/sda1"))
+        );
+        assert_eq!(
+            c.zfs_partition.as_deref(),
+            Some(std::path::Path::new("/dev/sdb2"))
+        );
+    }
+
+    #[test]
+    fn device_unknown_group_is_noop() {
+        let mut c = cfg();
+        apply_device(&mut c, "nonsense", std::path::Path::new("/dev/sda"));
+        assert!(c.disk.is_none());
+        assert!(c.efi_partition.is_none());
     }
 
     #[test]
