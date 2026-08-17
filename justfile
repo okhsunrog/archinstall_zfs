@@ -148,7 +148,7 @@ zfs-be-stage MODE="precompiled" KERNEL="linux-lts":
 zfs-be-deploy DATASET="novafs/archiso0/root" KERNEL="linux-lts" MOUNT_DIR="/mnt/archzfs-be":
     sudo bash gen_iso/deploy-zfs-be.sh \
         --dataset {{DATASET}} \
-        --source-root {{BE_WORKDIR}}/x86_64/airootfs \
+        --source-root "{{BE_WORKDIR}}/x86_64/airootfs" \
         --kernel {{KERNEL}} \
         --mount-dir {{MOUNT_DIR}}
 

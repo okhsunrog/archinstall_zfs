@@ -202,15 +202,26 @@ fi
 if [[ " ${commandline} " != *" archinstall_zfs.demo=1 "* ]]; then
     commandline="${commandline:+${commandline} }archinstall_zfs.demo=1"
 fi
+# The zfs mkinitcpio hook mounts the root read-only unless rw is on the
+# kernel command line, and a host command line is not always inherited.
+if [[ " ${commandline} " != *" rw "* && " ${commandline} " != *" ro "* ]]; then
+    commandline="${commandline} rw"
+fi
 
-encryption="$(zfs get -H -o value encryption -- "${pool}")"
+# Encryption may start below the pool root, so inspect the nearest existing
+# ancestor, which is what the new datasets will inherit from.
+ancestor="${parent%/*}"
+zfs list -H -o name -- "${ancestor}" >/dev/null 2>&1 \
+    || die "ancestor dataset does not exist: ${ancestor}"
+encryption="$(zfs get -H -o value encryption -- "${ancestor}")"
 key_target=""
 if [[ "${encryption}" != "off" ]]; then
-    key_location="$(zfs get -H -o value keylocation -- "${pool}")"
+    encryption_root="$(zfs get -H -o value encryptionroot -- "${ancestor}")"
+    key_location="$(zfs get -H -o value keylocation -- "${encryption_root}")"
     case "${key_location}" in
         file:///*)
             [[ -f "${key_file}" ]] \
-                || die "encrypted pool requires readable --key-file: ${key_file}"
+                || die "encrypted target requires readable --key-file: ${key_file}"
             key_target="$(realpath -m -- "${key_location#file://}")"
             [[ "${key_target}" == /* && "${key_target}" != "/" ]] \
                 || die "unsafe ZFS keylocation: ${key_location}"
@@ -222,7 +233,7 @@ if [[ "${encryption}" != "off" ]]; then
             keysource=""
             ;;
         *)
-            die "unsupported encrypted-pool keylocation: ${key_location}"
+            die "unsupported keylocation on ${encryption_root}: ${key_location}"
             ;;
     esac
 else
@@ -256,7 +267,6 @@ zfs create -u \
     -o mountpoint=none \
     -o canmount=off \
     -o overlay=off \
-    -o compression=lz4 \
     -- "${parent}"
 created_parent=1
 
@@ -325,6 +335,12 @@ rm -f -- \
 rm -f -- \
     "${mount_dir}/etc/systemd/system/multi-user.target.wants/reflector.service" \
     "${mount_dir}/etc/systemd/system/multi-user.target.wants/sshd.service" \
+    "${mount_dir}/etc/systemd/system/multi-user.target.wants/choose-mirror.service" \
+    "${mount_dir}/etc/systemd/system/multi-user.target.wants/livecd-talk.service" \
+    "${mount_dir}/etc/systemd/system/sound.target.wants/livecd-alsa-unmuter.service" \
+    "${mount_dir}/etc/systemd/system/choose-mirror.service" \
+    "${mount_dir}/etc/systemd/system/livecd-talk.service" \
+    "${mount_dir}/etc/systemd/system/livecd-alsa-unmuter.service" \
     "${mount_dir}/etc/systemd/journald.conf.d/volatile-storage.conf"
 install -D -m 0644 /dev/null "${mount_dir}/etc/cloud/cloud-init.disabled"
 ln -sfn /dev/null "${mount_dir}/etc/systemd/system/zfs-mount.service"

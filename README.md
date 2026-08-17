@@ -302,8 +302,12 @@ The command uses `mkarchiso` to assemble the full package/profile environment,
 then copies its staging root into a new dataset with numeric ownership, ACLs,
 and xattrs preserved. It replaces the live-media initramfs with a normal ZFS
 root initramfs, configures `mountpoint=/`, `canmount=noauto`, and `overlay=off`,
-adds `archinstall_zfs.demo=1` to the ZFSBootMenu command line, and creates a
-`@fresh` snapshot. The pool's `bootfs` property is not changed.
+adds `archinstall_zfs.demo=1` (and `rw` when no read-write policy is
+inherited from the current root's command line) to the ZFSBootMenu command
+line, and creates a `@fresh` snapshot. The pool's `bootfs` property is not
+changed. The initramfs is built with mkinitcpio's `autodetect` hook, so build
+it on the machine that will boot it; a pool moved to different hardware may
+be missing drivers.
 
 The root-owned staging tree defaults to `/var/tmp/archinstall-zfs-be-workdir`
 so desktop file indexers cannot keep the temporary chroot mounts busy. Set
@@ -311,8 +315,8 @@ so desktop file indexers cannot keep the temporary chroot mounts busy. Set
 
 For safety, deployment refuses to reuse an existing dataset. It also refuses a
 staging tree after recursive `chown`, since that would lose root ownership.
-After booting the new environment, log in on tty1 and run `azfs` or
-`azfs-demo`.
+After booting the new environment, tty1 automatically logs in as root (the
+live profile's autologin is kept); run `azfs` or `azfs-demo`.
 
 ### Option 2 — Any other distro via podman
 
