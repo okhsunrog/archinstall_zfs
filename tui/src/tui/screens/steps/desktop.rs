@@ -1,6 +1,7 @@
-use archinstall_zfs_core::config::types::{AudioServer, GlobalConfig, SeatAccess};
+use archinstall_zfs_core::config::edit::{ChoiceSetting, TextSetting};
+use archinstall_zfs_core::config::types::GlobalConfig;
 
-use super::{MenuItem, MenuKind, radio_group};
+use super::{MenuItem, MenuKind, choice_group};
 
 pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     let sel = config.profile_selection.as_ref();
@@ -27,15 +28,10 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
         },
     ];
 
-    items.extend(radio_group(
-        "seat_access",
+    items.extend(choice_group(
+        ChoiceSetting::SeatAccess,
         "Seat access",
-        &["None", "seatd", "polkit"],
-        match sel.and_then(|s| s.seat_access) {
-            None => 0,
-            Some(SeatAccess::Seatd) => 1,
-            Some(SeatAccess::Polkit) => 2,
-        },
+        sel.and_then(|s| s.seat_access),
     ));
 
     // GPU driver is only meaningful for graphical profiles. Hide the row
@@ -55,16 +51,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
         });
     }
 
-    items.extend(radio_group(
-        "audio",
-        "Audio",
-        &["None", "pipewire", "pulseaudio"],
-        match config.audio {
-            None => 0,
-            Some(AudioServer::Pipewire) => 1,
-            Some(AudioServer::Pulseaudio) => 2,
-        },
-    ));
+    items.extend(choice_group(ChoiceSetting::Audio, "Audio", config.audio));
 
     items.extend([
         MenuItem {
@@ -98,7 +85,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
             kind: MenuKind::Custom,
         },
         MenuItem {
-            key: "extra_services",
+            key: TextSetting::ExtraServices.as_str(),
             label: "Extra services",
             value: if config.extra_services.is_empty() {
                 "None".into()

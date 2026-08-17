@@ -128,19 +128,15 @@ async fn main() -> Result<()> {
         if cli.config.is_none() {
             bail!("--silent requires --config");
         }
-        let errors = config.validate_for_install();
-        if !errors.is_empty() {
-            bail!("Config validation failed:\n  {}", errors.join("\n  "));
-        }
         let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
             Arc::new(archinstall_zfs_core::system::cmd::RealRunner);
-        archinstall_zfs_core::install::run_install(
+        Ok(archinstall_zfs_core::install::run_install(
             runner,
             config,
             tokio_util::sync::CancellationToken::new(),
             None,
         )
-        .await
+        .await?)
     } else {
         run_gui(config, demo, log_rx)
     }

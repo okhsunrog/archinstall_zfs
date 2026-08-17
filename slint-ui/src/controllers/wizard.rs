@@ -12,7 +12,12 @@ use archinstall_zfs_core::config::types::GlobalConfig;
 use archinstall_zfs_core::profile::DisplayManager;
 use archinstall_zfs_core::system::gpu::{GfxDriver, detect_gpus, suggested_driver};
 
-use crate::config_items::{apply_radio, apply_text, build_step_items, next_selectable_index};
+use archinstall_zfs_core::config::edit::{
+    ChoiceSetting, DeviceSetting, EditorSetting, TextSetting, ToggleSetting, apply_choice,
+    apply_device, apply_text, apply_toggle,
+};
+
+use crate::config_items::{build_step_items, next_selectable_index};
 use crate::controllers::welcome::KernelScan;
 use crate::editing_models::set_multi_select_options;
 use crate::refresh::refresh_items;
@@ -47,14 +52,35 @@ fn setup_item_activated(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_sc
     app.on_item_activated(move |key| {
         let Some(app) = weak.upgrade() else { return };
 
-        // Inline radio option clicks: "radio:{group_key}:{index}"
-        if let Some(rest) = key.strip_prefix("radio:") {
-            if let Some((group_key, idx_str)) = rest.rsplit_once(':')
-                && let Ok(idx) = idx_str.parse::<i32>()
+        // Device rows: "device:{setting}:{path}". Split on the first colon
+        // only — persistent device paths contain colons of their own, as in
+        // by-path/pci-0000:00:04.0.
+        if let Some(rest) = key.strip_prefix("device:") {
+            match rest
+                .split_once(':')
+                .and_then(|(name, path)| DeviceSetting::parse(name).map(|setting| (setting, path)))
             {
-                let mut c = cfg.borrow_mut();
-                apply_radio(&mut c, group_key, idx);
-                refresh_items(&app, &c);
+                Some((setting, path)) => {
+                    let mut c = cfg.borrow_mut();
+                    apply_device(&mut c, setting, std::path::Path::new(path));
+                    refresh_items(&app, &c);
+                }
+                None => tracing::warn!(%key, "device row names no known setting"),
+            }
+            return;
+        }
+
+        // Inline radio option clicks: "radio:{setting}:{index}"
+        if let Some(rest) = key.strip_prefix("radio:") {
+            match rest.rsplit_once(':').and_then(|(name, index)| {
+                Some((ChoiceSetting::parse(name)?, index.parse::<usize>().ok()?))
+            }) {
+                Some((setting, index)) => {
+                    let mut c = cfg.borrow_mut();
+                    apply_choice(&mut c, setting, index);
+                    refresh_items(&app, &c);
+                }
+                None => tracing::warn!(%key, "radio row names no known setting"),
             }
             return;
         }
@@ -69,12 +95,11 @@ fn setup_toggle(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
     app.on_toggle_activated(move |key| {
         let Some(app) = weak.upgrade() else { return };
         let mut c = cfg.borrow_mut();
-        match key.as_str() {
-            "ntp" => c.ntp = !c.ntp,
-            "bluetooth" => c.bluetooth = !c.bluetooth,
-            "zrepl" => c.zrepl_enabled = !c.zrepl_enabled,
-            _ => return,
-        }
+        let Some(setting) = ToggleSetting::parse(&key) else {
+            tracing::warn!(%key, "toggle names no known setting");
+            return;
+        };
+        apply_toggle(&mut c, setting);
         refresh_items(&app, &c);
     });
 }
@@ -196,9 +221,14 @@ fn setup_select_confirmed(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_
             return;
         }
 
-        let mut c = cfg.borrow_mut();
-        apply_radio(&mut c, &key, idx);
-        refresh_items(&app, &c);
+        match ChoiceSetting::parse(&key) {
+            Some(setting) => {
+                let mut c = cfg.borrow_mut();
+                apply_choice(&mut c, setting, idx.max(0) as usize);
+                refresh_items(&app, &c);
+            }
+            None => tracing::warn!(%key, "selection names no known setting"),
+        }
     });
 }
 
@@ -207,9 +237,14 @@ fn setup_text_confirmed(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
     let cfg = config.clone();
     app.on_text_confirmed(move |key, val| {
         let Some(app) = weak.upgrade() else { return };
-        let mut c = cfg.borrow_mut();
-        apply_text(&mut c, &key, &val);
-        refresh_items(&app, &c);
+        match TextSetting::parse(&key) {
+            Some(setting) => {
+                let mut c = cfg.borrow_mut();
+                apply_text(&mut c, setting, &val);
+                refresh_items(&app, &c);
+            }
+            None => tracing::warn!(%key, "edited row names no known setting"),
+        }
     });
 }
 
@@ -405,8 +440,18 @@ fn dm_picker_labels(profile_default: Option<DisplayManager>) -> Vec<String> {
 // ── Item activation (open the right popup for the clicked row) ──────
 
 fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_scan: &KernelScan) {
-    match key {
-        "kernel" => {
+    if let Some(setting) = TextSetting::parse(key) {
+        show_setting_text_input(app, setting, config);
+        return;
+    }
+
+    let Some(setting) = EditorSetting::parse(key) else {
+        tracing::warn!(key, "row names no known setting");
+        return;
+    };
+
+    match setting {
+        EditorSetting::Kernel => {
             // Use the cached scan results if available; otherwise block-scan now.
             let fresh: Vec<archinstall_zfs_core::kernel::scanner::CompatibilityResult>;
             let options =
@@ -432,7 +477,7 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
                 current_idx as i32,
             );
         }
-        "profile" => {
+        EditorSetting::Profile => {
             let profiles = archinstall_zfs_core::profile::all_profiles();
             let mut names: Vec<String> = vec!["None".to_string()];
             names.extend(profiles.iter().map(|p| p.display_name.to_string()));
@@ -445,7 +490,7 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
                 .unwrap_or(0);
             show_select(app, "profile", "Profile", &refs, current);
         }
-        "optional_packages" => {
+        EditorSetting::OptionalPackages => {
             // Build a fresh MultiSelectOption list from the profile's
             // optional packages and the user's current checked subset.
             let Some(sel) = config.profile_selection.as_ref() else {
@@ -467,7 +512,7 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
             popup.set_multi_select_title(format!("Optional packages — {}", p.display_name).into());
             popup.set_multi_select_visible(true);
         }
-        "gpu_driver" => {
+        EditorSetting::GpuDriver => {
             // Build the GPU driver options list. Order matches the TUI
             // picker (None first, then drivers in display order). The
             // suggested driver based on detected hardware is annotated.
@@ -502,7 +547,7 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
                 .unwrap_or(0) as i32;
             show_select(app, "gfx_driver_select", "GPU driver", &refs, current);
         }
-        "display_manager" => {
+        EditorSetting::DisplayManager => {
             // Open SelectPopup with the full DisplayManager list, annotating
             // the profile's own default with `  ✦ default` (same idiom as the
             // GPU driver picker uses for its suggestion). Picking the
@@ -525,11 +570,11 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
                 .unwrap_or(-1);
             show_select(app, "dm_select", "Display manager", &refs, current);
         }
-        "timezone" => {
+        EditorSetting::Timezone => {
             let regions = archinstall_zfs_core::installer::locale::list_timezone_regions();
             show_select(app, "timezone_region", "Timezone region", &regions, 0);
         }
-        "locale" => {
+        EditorSetting::Locale => {
             let locales = archinstall_zfs_core::installer::locale::list_locales();
             let locale_strs: Vec<&str> = locales.iter().map(|s| s.as_str()).collect();
             let current_idx = config
@@ -547,10 +592,10 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
                 true,
             );
         }
-        "users" => {
+        EditorSetting::Users => {
             show_users_popup(app);
         }
-        "keyboard" => {
+        EditorSetting::Keyboard => {
             let keymaps = archinstall_zfs_core::installer::locale::list_keymaps();
             let keymap_strs: Vec<&str> = keymaps.iter().map(|s| s.as_str()).collect();
             let current_idx = keymaps
@@ -567,40 +612,53 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
                 true,
             );
         }
-        "packages" => {
-            show_package_search(app);
-        }
-        "extra_services" => {
-            show_string_list(app, "Extra systemd services");
-        }
-        "pool_name"
-        | "dataset_prefix"
-        | "hostname"
-        | "swap_partition_size"
-        | "parallel_downloads" => {
-            let (title, current) = match key {
-                "pool_name" => ("Pool name", config.pool_name.clone().unwrap_or_default()),
-                "dataset_prefix" => ("Dataset prefix", config.dataset_prefix.clone()),
-                "hostname" => ("Hostname", config.hostname.clone().unwrap_or_default()),
-                "swap_partition_size" => (
-                    "Swap partition size",
-                    config.swap_partition_size.clone().unwrap_or_default(),
-                ),
-                "parallel_downloads" => {
-                    ("Parallel downloads", config.parallel_downloads.to_string())
-                }
-                _ => ("", String::new()),
-            };
-            show_text_input(app, key, title, &current, false);
-        }
-        "root_password" => {
-            show_text_input(app, key, "Root password", "", true);
-        }
-        "encryption_password" => {
-            show_text_input(app, key, "Encryption password", "", true);
-        }
-        _ => {}
+        // The pool picker and the package list are the terminal interface's;
+        // here those rows are typed into and handled above.
+        EditorSetting::PoolName | EditorSetting::Packages => {}
     }
+}
+
+/// Open the text editor for a row that is typed into.
+///
+/// The title and the starting text are the row's own business; the setting
+/// travels with the popup so the confirmation handler knows what was edited.
+fn show_setting_text_input(app: &App, setting: TextSetting, config: &GlobalConfig) {
+    let (title, current, secret) = match setting {
+        TextSetting::PoolName => (
+            "Pool name",
+            config.pool_name.clone().unwrap_or_default(),
+            false,
+        ),
+        TextSetting::DatasetPrefix => ("Dataset prefix", config.dataset_prefix.clone(), false),
+        TextSetting::Hostname => (
+            "Hostname",
+            config.hostname.clone().unwrap_or_default(),
+            false,
+        ),
+        TextSetting::SwapPartitionSize => (
+            "Swap partition size",
+            config.swap_partition_size.clone().unwrap_or_default(),
+            false,
+        ),
+        TextSetting::ParallelDownloads => (
+            "Parallel downloads",
+            config.parallel_downloads.to_string(),
+            false,
+        ),
+        // Never shown filled in: a stored secret is not echoed back.
+        TextSetting::RootPassword => ("Root password", String::new(), true),
+        TextSetting::EncryptionPassword => ("Encryption password", String::new(), true),
+        // Edited through the list editor rather than a single line.
+        TextSetting::AdditionalPackages | TextSetting::AurPackages => {
+            show_package_search(app);
+            return;
+        }
+        TextSetting::ExtraServices => {
+            show_string_list(app, "Extra systemd services");
+            return;
+        }
+    };
+    show_text_input(app, setting.as_str(), title, &current, secret);
 }
 
 // ── Popup show helpers ──────────────────────────────

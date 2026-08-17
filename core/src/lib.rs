@@ -1,3 +1,4 @@
+pub mod boot_environment;
 pub mod bootmenu;
 pub mod config;
 pub mod dataset_layout;

@@ -1,6 +1,43 @@
+use std::fmt;
+use std::path::PathBuf;
+
 use super::types::{
     GlobalConfig, InstallationMode, SwapMode, ZFS_PASSPHRASE_MIN_LENGTH, ZfsEncryptionMode,
 };
+
+/// Something about the configuration that stops the installation.
+///
+/// A value rather than a sentence: the sentence is one rendering of it, and
+/// an interface that wants to point at the offending field needs the parts,
+/// not the prose. Rendering lives in the `Display` implementation below, so
+/// every interface words a given problem the same way.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ValidationError {
+    InstallationModeNotSelected,
+    PoolNameMissing,
+    PoolNameInvalid(String),
+    DatasetPrefixInvalid(String),
+    /// A device path the installer will not accept, and the setting it was
+    /// given for.
+    DevicePathUnsupported {
+        setting: &'static str,
+        path: PathBuf,
+    },
+    DiskRequired,
+    EfiPartitionRequired(InstallationMode),
+    ZfsPartitionRequired,
+    /// Full-disk mode carves the swap partition itself and needs its size.
+    SwapSizeRequired,
+    /// The other modes need an existing partition to use.
+    SwapPartitionRequired(InstallationMode),
+    EncryptionPasswordMissing,
+    EncryptionPasswordTooShort {
+        minimum: usize,
+    },
+    HostnameInvalid(String),
+    UnknownKernel(String),
+    UsernameInvalid(String),
+}
 
 /// Valid Linux hostname: 1-63 chars, alphanumeric + hyphens, no leading/trailing hyphen.
 fn is_valid_hostname(name: &str) -> bool {
@@ -22,134 +59,149 @@ pub fn is_valid_username(name: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
 }
 
+impl fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InstallationModeNotSelected => write!(f, "Installation mode not selected"),
+            Self::PoolNameMissing => write!(f, "Pool name is required"),
+            Self::PoolNameInvalid(name) => write!(
+                f,
+                "Pool name '{name}' is invalid: must be alphanumeric, underscores, or hyphens"
+            ),
+            Self::DatasetPrefixInvalid(prefix) => write!(
+                f,
+                "Dataset prefix '{prefix}' is invalid: must be alphanumeric, underscores, or hyphens"
+            ),
+            Self::DevicePathUnsupported { setting, path } => write!(
+                f,
+                "{setting} must be a /dev/disk/by-id/, /dev/disk/by-path/, or supported /dev node \
+                 path, got: {}",
+                path.display()
+            ),
+            Self::DiskRequired => write!(f, "Full disk mode requires a disk selection (disk)"),
+            Self::EfiPartitionRequired(mode) => {
+                write!(f, "{} mode requires an EFI partition (efi_partition)", mode)
+            }
+            Self::ZfsPartitionRequired => {
+                write!(f, "New pool mode requires a ZFS partition (zfs_partition)")
+            }
+            Self::SwapSizeRequired => write!(
+                f,
+                "Swap partition mode requires swap_partition_size in full disk mode"
+            ),
+            Self::SwapPartitionRequired(mode) => write!(
+                f,
+                "Swap partition mode requires swap_partition in {} mode",
+                mode.to_string().to_lowercase()
+            ),
+            Self::EncryptionPasswordMissing => {
+                write!(f, "Encryption enabled but no password provided")
+            }
+            Self::EncryptionPasswordTooShort { minimum } => {
+                write!(
+                    f,
+                    "Encryption password must be at least {minimum} characters"
+                )
+            }
+            Self::HostnameInvalid(name) => write!(
+                f,
+                "Hostname '{name}' is invalid: must be 1-63 chars, alphanumeric and hyphens, no \
+                 leading/trailing hyphen"
+            ),
+            Self::UnknownKernel(name) => {
+                let known: Vec<&str> = crate::kernel::AVAILABLE_KERNELS
+                    .iter()
+                    .map(|k| k.name)
+                    .collect();
+                write!(
+                    f,
+                    "Unknown kernel '{name}'. Available: {}",
+                    known.join(", ")
+                )
+            }
+            Self::UsernameInvalid(name) => write!(
+                f,
+                "Username '{name}' is invalid: must be 1-32 chars, start with lowercase letter or \
+                 underscore, contain only lowercase, digits, underscore, hyphen"
+            ),
+        }
+    }
+}
+
 impl GlobalConfig {
-    /// Validate configuration for installation.
-    /// Returns a list of error messages. Empty means valid.
-    pub fn validate_for_install(&self) -> Vec<String> {
+    /// Everything about this configuration that stops the installation.
+    /// Empty means it can proceed.
+    pub fn validate_for_install(&self) -> Vec<ValidationError> {
         let mut errors = Vec::new();
 
-        // Must have an installation mode
-        let mode = match self.installation_mode {
-            Some(m) => m,
-            None => {
-                errors.push("Installation mode not selected".to_string());
-                return errors;
-            }
+        // Without a mode there is nothing to check the rest against.
+        let Some(mode) = self.installation_mode else {
+            return vec![ValidationError::InstallationModeNotSelected];
         };
 
-        // Pool name required for all modes
         if self.pool_name.is_none() {
-            errors.push("Pool name is required".to_string());
+            errors.push(ValidationError::PoolNameMissing);
         }
         errors.extend(self.validate_pool_name());
         errors.extend(self.validate_dataset_prefix());
         errors.extend(self.validate_device_paths());
 
-        // Mode-dependent validation
+        let wants_swap_partition = matches!(
+            self.swap_mode,
+            SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
+        );
+
         match mode {
             InstallationMode::FullDisk => {
                 if self.disk.is_none() {
-                    errors.push("Full disk mode requires a disk selection (disk)".to_string());
+                    errors.push(ValidationError::DiskRequired);
                 }
-                if matches!(
-                    self.swap_mode,
-                    SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-                ) && self.swap_partition_size.is_none()
-                {
-                    errors.push(
-                        "Swap partition mode requires swap_partition_size in full disk mode"
-                            .to_string(),
-                    );
+                // Full-disk mode creates the partition, so it needs a size
+                // rather than an existing one.
+                if wants_swap_partition && self.swap_partition_size.is_none() {
+                    errors.push(ValidationError::SwapSizeRequired);
                 }
             }
-            InstallationMode::NewPool => {
+            InstallationMode::NewPool | InstallationMode::ExistingPool => {
                 if self.efi_partition.is_none() {
-                    errors.push(
-                        "New pool mode requires an EFI partition (efi_partition)".to_string(),
-                    );
+                    errors.push(ValidationError::EfiPartitionRequired(mode));
                 }
-                if self.zfs_partition.is_none() {
-                    errors
-                        .push("New pool mode requires a ZFS partition (zfs_partition)".to_string());
+                if mode == InstallationMode::NewPool && self.zfs_partition.is_none() {
+                    errors.push(ValidationError::ZfsPartitionRequired);
                 }
-                if matches!(
-                    self.swap_mode,
-                    SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-                ) && self.swap_partition.is_none()
-                {
-                    errors.push(
-                        "Swap partition mode requires swap_partition in new pool mode".to_string(),
-                    );
-                }
-            }
-            InstallationMode::ExistingPool => {
-                if self.efi_partition.is_none() {
-                    errors.push(
-                        "Existing pool mode requires an EFI partition (efi_partition)".to_string(),
-                    );
-                }
-                if matches!(
-                    self.swap_mode,
-                    SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-                ) && self.swap_partition.is_none()
-                {
-                    errors.push(
-                        "Swap partition mode requires swap_partition in existing pool mode"
-                            .to_string(),
-                    );
+                if wants_swap_partition && self.swap_partition.is_none() {
+                    errors.push(ValidationError::SwapPartitionRequired(mode));
                 }
             }
         }
 
-        // Encryption validation
         if self.zfs_encryption_mode != ZfsEncryptionMode::None {
             match &self.zfs_encryption_password {
-                None => {
-                    errors.push("Encryption enabled but no password provided".to_string());
+                None => errors.push(ValidationError::EncryptionPasswordMissing),
+                Some(password) if password.len() < ZFS_PASSPHRASE_MIN_LENGTH => {
+                    errors.push(ValidationError::EncryptionPasswordTooShort {
+                        minimum: ZFS_PASSPHRASE_MIN_LENGTH,
+                    });
                 }
-                Some(pw) if pw.len() < ZFS_PASSPHRASE_MIN_LENGTH => {
-                    errors.push(format!(
-                        "Encryption password must be at least {ZFS_PASSPHRASE_MIN_LENGTH} characters"
-                    ));
-                }
-                _ => {}
+                Some(_) => {}
             }
         }
 
-        // Hostname validation
-        if let Some(ref hostname) = self.hostname
+        if let Some(hostname) = &self.hostname
             && !is_valid_hostname(hostname)
         {
-            errors.push(format!(
-                    "Hostname '{hostname}' is invalid: must be 1-63 chars, alphanumeric and hyphens, no leading/trailing hyphen"
-                ));
+            errors.push(ValidationError::HostnameInvalid(hostname.clone()));
         }
 
-        // Kernel validation
-        if let Some(ref kernels) = self.kernels {
-            for kernel in kernels {
-                if crate::kernel::get_kernel_info(kernel).is_none() {
-                    let known: Vec<&str> = crate::kernel::AVAILABLE_KERNELS
-                        .iter()
-                        .map(|k| k.name)
-                        .collect();
-                    errors.push(format!(
-                        "Unknown kernel '{kernel}'. Available: {}",
-                        known.join(", ")
-                    ));
-                }
+        for kernel in self.kernels.iter().flatten() {
+            if crate::kernel::get_kernel_info(kernel).is_none() {
+                errors.push(ValidationError::UnknownKernel(kernel.clone()));
             }
         }
 
-        // User validation
-        if let Some(ref users) = self.users {
-            for user in users {
-                if !is_valid_username(&user.username) {
-                    errors.push(format!(
-                        "Username '{}' is invalid: must be 1-32 chars, start with lowercase letter or underscore, contain only lowercase, digits, underscore, hyphen",
-                        user.username
-                    ));
-                }
+        for user in self.users.iter().flatten() {
+            if !is_valid_username(&user.username) {
+                errors.push(ValidationError::UsernameInvalid(user.username.clone()));
             }
         }
 
@@ -159,6 +211,7 @@ impl GlobalConfig {
 
 #[cfg(test)]
 mod tests {
+    use super::ValidationError;
     use std::path::PathBuf;
 
     use super::*;
@@ -200,6 +253,32 @@ mod tests {
         }
     }
 
+    /// Every problem renders as something a user can act on, and the ones
+    /// carrying a value mention it.
+    #[test]
+    fn errors_render_with_their_details() {
+        assert_eq!(
+            ValidationError::PoolNameInvalid("bad name".into()).to_string(),
+            "Pool name 'bad name' is invalid: must be alphanumeric, underscores, or hyphens"
+        );
+        assert_eq!(
+            ValidationError::EncryptionPasswordTooShort { minimum: 8 }.to_string(),
+            "Encryption password must be at least 8 characters"
+        );
+        assert!(
+            ValidationError::EfiPartitionRequired(InstallationMode::ExistingPool)
+                .to_string()
+                .starts_with("Existing Pool mode"),
+            "the mode belongs in the message"
+        );
+        assert!(
+            ValidationError::UnknownKernel("linux-custom".into())
+                .to_string()
+                .contains("linux-lts"),
+            "an unknown kernel should list the known ones"
+        );
+    }
+
     #[test]
     fn test_valid_full_disk() {
         let cfg = valid_full_disk_config();
@@ -225,7 +304,11 @@ mod tests {
     fn test_no_installation_mode() {
         let cfg = GlobalConfig::default();
         let errors = cfg.validate_for_install();
-        assert!(errors.iter().any(|e| e.contains("Installation mode")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::InstallationModeNotSelected))
+        );
     }
 
     #[test]
@@ -233,7 +316,11 @@ mod tests {
         let mut cfg = valid_full_disk_config();
         cfg.disk = None;
         let errors = cfg.validate_for_install();
-        assert!(errors.iter().any(|e| e.contains("disk selection")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::DiskRequired))
+        );
     }
 
     #[test]
@@ -242,8 +329,16 @@ mod tests {
         cfg.efi_partition = None;
         cfg.zfs_partition = None;
         let errors = cfg.validate_for_install();
-        assert!(errors.iter().any(|e| e.contains("EFI partition")));
-        assert!(errors.iter().any(|e| e.contains("ZFS partition")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::EfiPartitionRequired(_)))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::ZfsPartitionRequired))
+        );
     }
 
     #[test]
@@ -251,7 +346,11 @@ mod tests {
         let mut cfg = valid_existing_pool_config();
         cfg.efi_partition = None;
         let errors = cfg.validate_for_install();
-        assert!(errors.iter().any(|e| e.contains("EFI partition")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::EfiPartitionRequired(_)))
+        );
     }
 
     #[test]
@@ -259,7 +358,11 @@ mod tests {
         let mut cfg = valid_full_disk_config();
         cfg.pool_name = None;
         let errors = cfg.validate_for_install();
-        assert!(errors.iter().any(|e| e.contains("Pool name")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::PoolNameMissing))
+        );
     }
 
     #[test]
@@ -268,7 +371,11 @@ mod tests {
         cfg.zfs_encryption_mode = ZfsEncryptionMode::Pool;
         cfg.zfs_encryption_password = None;
         let errors = cfg.validate_for_install();
-        assert!(errors.iter().any(|e| e.contains("no password")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::EncryptionPasswordMissing))
+        );
     }
 
     #[test]
@@ -277,7 +384,11 @@ mod tests {
         cfg.zfs_encryption_mode = ZfsEncryptionMode::Dataset;
         cfg.zfs_encryption_password = Some("short".to_string());
         let errors = cfg.validate_for_install();
-        assert!(errors.iter().any(|e| e.contains("at least")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::EncryptionPasswordTooShort { .. }))
+        );
     }
 
     #[test]
@@ -295,7 +406,11 @@ mod tests {
         cfg.swap_mode = SwapMode::ZswapPartition;
         cfg.swap_partition_size = None;
         let errors = cfg.validate_for_install();
-        assert!(errors.iter().any(|e| e.contains("swap_partition_size")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::SwapSizeRequired))
+        );
     }
 
     #[test]
@@ -313,7 +428,11 @@ mod tests {
         cfg.swap_mode = SwapMode::ZswapPartitionEncrypted;
         cfg.swap_partition = None;
         let errors = cfg.validate_for_install();
-        assert!(errors.iter().any(|e| e.contains("swap_partition")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::SwapPartitionRequired(_)))
+        );
     }
 
     #[test]
@@ -345,7 +464,11 @@ mod tests {
         let mut cfg = valid_full_disk_config();
         cfg.disk = Some(PathBuf::from("/tmp/not-a-disk"));
         let errors = cfg.validate_for_install();
-        assert!(errors.iter().any(|e| e.contains("supported /dev node")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::DevicePathUnsupported { .. }))
+        );
     }
 
     #[test]
@@ -361,7 +484,11 @@ mod tests {
         let mut cfg = valid_full_disk_config();
         cfg.hostname = Some("-badhost".to_string());
         let errors = cfg.validate_for_install();
-        assert!(errors.iter().any(|e| e.contains("Hostname")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::HostnameInvalid(_)))
+        );
     }
 
     #[test]
@@ -369,7 +496,11 @@ mod tests {
         let mut cfg = valid_full_disk_config();
         cfg.hostname = Some("host.name".to_string());
         let errors = cfg.validate_for_install();
-        assert!(errors.iter().any(|e| e.contains("Hostname")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::HostnameInvalid(_)))
+        );
     }
 
     #[test]
@@ -377,7 +508,11 @@ mod tests {
         let mut cfg = valid_full_disk_config();
         cfg.hostname = Some("a".repeat(64));
         let errors = cfg.validate_for_install();
-        assert!(errors.iter().any(|e| e.contains("Hostname")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::HostnameInvalid(_)))
+        );
     }
 
     #[test]
@@ -385,7 +520,11 @@ mod tests {
         let mut cfg = valid_full_disk_config();
         cfg.kernels = Some(vec!["linux-custom".to_string()]);
         let errors = cfg.validate_for_install();
-        assert!(errors.iter().any(|e| e.contains("Unknown kernel")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::UnknownKernel(_)))
+        );
     }
 
     #[test]
@@ -425,7 +564,11 @@ mod tests {
             autologin: false,
         }]);
         let errors = cfg.validate_for_install();
-        assert!(errors.iter().any(|e| e.contains("Username")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::UsernameInvalid(_)))
+        );
     }
 
     #[test]
@@ -441,7 +584,11 @@ mod tests {
             autologin: false,
         }]);
         let errors = cfg.validate_for_install();
-        assert!(errors.iter().any(|e| e.contains("Username")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::UsernameInvalid(_)))
+        );
     }
 
     #[test]
@@ -457,7 +604,11 @@ mod tests {
             autologin: false,
         }]);
         let errors = cfg.validate_for_install();
-        assert!(errors.iter().any(|e| e.contains("Username")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::UsernameInvalid(_)))
+        );
     }
 
     #[test]

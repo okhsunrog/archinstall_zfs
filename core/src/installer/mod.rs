@@ -21,17 +21,35 @@ use crate::system::alpm_pacman::{AlpmContext, TargetMounts};
 use crate::system::async_download::{DownloadConfig, DownloadProgress};
 use crate::system::cmd::CommandRunner;
 
-pub struct Installer {
+/// What an installation needs to know before it starts.
+pub struct InstallRequest {
     pub runner: Arc<dyn CommandRunner>,
     pub config: GlobalConfig,
     pub target: PathBuf,
+    pub cancel: CancellationToken,
+    pub download_progress_tx: Option<Arc<tokio::sync::watch::Sender<DownloadProgress>>>,
+    /// Swap partition computed at runtime by full-disk partitioning, which is
+    /// not in the configuration. Overrides `config.swap_partition`.
+    pub swap_partition: Option<PathBuf>,
+}
+
+/// Phases 4 to 12: the target system being assembled.
+///
+/// Constructed only once the base system is installed, because everything it
+/// does needs the package handle that becomes available at that point. Holding
+/// that handle as an `Option` and asserting it at each use made a state the
+/// type permitted but no method could survive.
+struct Installer {
+    runner: Arc<dyn CommandRunner>,
+    config: GlobalConfig,
+    target: PathBuf,
     cancel: CancellationToken,
     download_progress_tx: Option<Arc<tokio::sync::watch::Sender<DownloadProgress>>>,
-    /// Swap partition computed at runtime (e.g. from full-disk partitioning).
-    /// Overrides `config.swap_partition` when set.
     swap_partition: Option<PathBuf>,
-    _target_mounts: Option<TargetMounts>,
-    alpm_ctx: Option<AlpmContext>,
+    /// Unmounts the target's API filesystems when dropped; kept alive for as
+    /// long as anything runs inside the chroot.
+    _target_mounts: TargetMounts,
+    alpm: AlpmContext,
     /// Kernels that ended up with a working ZFS module. Only these get an
     /// initramfs: one built for a kernel with no module produces a boot entry
     /// that cannot import the pool.
@@ -40,73 +58,89 @@ pub struct Installer {
     notices: Vec<String>,
 }
 
+/// Put the pool's passphrase in the target, where the initramfs will find it.
+///
+/// Nothing to do when the pool is not encrypted.
+fn write_encryption_key(config: &GlobalConfig, target: &Path) -> Result<()> {
+    if !config.encryption_enabled() {
+        return Ok(());
+    }
+    let password = config
+        .zfs_encryption_password
+        .as_deref()
+        .ok_or_else(|| color_eyre::eyre::eyre!("encryption enabled but password missing"))?;
+    crate::zfs_keyfile::write_key_file(target, password)
+}
+
+/// Install the target system, returning whatever the user should be told.
+///
+/// Phase 4 runs here because its result — the package handle and the mounts —
+/// is what the rest of the installation is built on.
+pub fn perform_installation(request: InstallRequest) -> Result<Vec<String>> {
+    let InstallRequest {
+        runner,
+        config,
+        target,
+        cancel,
+        download_progress_tx,
+        swap_partition,
+    } = request;
+
+    if cancel.is_cancelled() {
+        bail!("installation cancelled");
+    }
+
+    tracing::info!("Phase 4: Installing base system...");
+    tracing::info!(target: "metrics", event = "phase_start", num = 4u32, name = "Installing base system");
+    let target_mounts = base::install_base(
+        &*runner,
+        &target,
+        &config,
+        &cancel,
+        download_progress_tx.clone(),
+    )?;
+
+    // The target now has pacman.conf, keyring and mirrorlist from
+    // finalize_target(), so the handle for the remaining phases can be made.
+    let target_conf = target.join("etc/pacman.conf");
+    let mut alpm = AlpmContext::for_target(
+        &target,
+        &target_conf,
+        DownloadConfig {
+            concurrency: config.parallel_downloads as usize,
+            ..Default::default()
+        },
+    )?;
+    alpm.sync_databases(false)?;
+
+    let mut installer = Installer {
+        runner,
+        config,
+        target,
+        cancel,
+        download_progress_tx,
+        swap_partition,
+        _target_mounts: target_mounts,
+        alpm,
+        kernels_with_zfs: Vec::new(),
+        notices: Vec::new(),
+    };
+    installer.configure_target()?;
+    Ok(installer.notices)
+}
+
 impl Installer {
-    pub fn new(
-        runner: Arc<dyn CommandRunner>,
-        config: GlobalConfig,
-        target: &Path,
-        cancel: CancellationToken,
-        download_progress_tx: Option<Arc<tokio::sync::watch::Sender<DownloadProgress>>>,
-    ) -> Self {
-        Self {
-            runner,
-            config,
-            target: target.to_path_buf(),
-            cancel,
-            download_progress_tx,
-            swap_partition: None,
-            _target_mounts: None,
-            alpm_ctx: None,
-            kernels_with_zfs: Vec::new(),
-            notices: Vec::new(),
-        }
-    }
-
-    /// Messages worth surfacing after a successful installation.
-    pub fn notices(&self) -> &[String] {
-        &self.notices
-    }
-
-    /// Set the swap partition path (used when full-disk partitioning computed
-    /// the path at runtime, since it's not in the static config).
-    pub fn set_swap_partition(&mut self, partition: PathBuf) {
-        self.swap_partition = Some(partition);
+    /// The boot environment this installation is building.
+    fn boot_environment(&self) -> crate::boot_environment::BootEnvironment {
+        crate::boot_environment::BootEnvironment::new(
+            self.config.pool_name.as_deref().unwrap_or("zroot"),
+            self.config.dataset_prefix.as_str(),
+        )
     }
 
     /// Run the full installation pipeline.
-    pub fn perform_installation(&mut self) -> Result<()> {
-        let errors = self.config.validate_for_install();
-        if !errors.is_empty() {
-            bail!("Config validation failed:\n  {}", errors.join("\n  "));
-        }
-        self.ensure_not_cancelled()?;
-
-        // Phase 4: install base system via libalpm
-        tracing::info!("Phase 4: Installing base system...");
-        tracing::info!(target: "metrics", event = "phase_start", num = 4u32, name = "Installing base system");
-        let target_mounts = base::install_base(
-            &*self.runner,
-            &self.target,
-            &self.config,
-            &self.cancel,
-            self.download_progress_tx.clone(),
-        )?;
-        self._target_mounts = Some(target_mounts);
-        self.ensure_not_cancelled()?;
-
-        // Create a reusable AlpmContext for all subsequent package installs.
-        // The target now has pacman.conf, keyring, and mirrorlist from finalize_target().
-        let target_conf = self.target.join("etc/pacman.conf");
-        let mut ctx = AlpmContext::for_target(
-            &self.target,
-            &target_conf,
-            DownloadConfig {
-                concurrency: self.config.parallel_downloads as usize,
-                ..Default::default()
-            },
-        )?;
-        ctx.sync_databases(false)?;
-        self.alpm_ctx = Some(ctx);
+    /// Phases 5 to 12, on a target whose base system is already installed.
+    fn configure_target(&mut self) -> Result<()> {
         self.ensure_not_cancelled()?;
 
         // Phase 5: System config
@@ -123,7 +157,7 @@ impl Installer {
 
         // The encrypted pool key must exist in the target before either
         // initramfs backend tries to embed it in the image.
-        self.prepare_encryption_key()?;
+        write_encryption_key(&self.config, &self.target)?;
 
         // Phase 7: Initramfs
         tracing::info!("Phase 7: Generating initramfs...");
@@ -175,9 +209,7 @@ impl Installer {
         if packages.is_empty() {
             return Ok(());
         }
-        self.alpm_ctx
-            .as_mut()
-            .expect("alpm_ctx must be initialized before installing packages")
+        self.alpm
             .install_packages(packages, &self.cancel, self.download_progress_tx.clone())
     }
 
@@ -229,10 +261,7 @@ impl Installer {
         crate::system::pacman::add_archzfs_repo(&*self.runner, Some(&self.target))?;
 
         // Register archzfs repo in the live alpm handle and sync
-        let ctx = self
-            .alpm_ctx
-            .as_mut()
-            .expect("alpm_ctx must be initialized");
+        let ctx = &mut self.alpm;
         ctx.register_repo(
             "archzfs",
             &["https://github.com/archzfs/archzfs/releases/download/experimental"],
@@ -308,19 +337,6 @@ impl Installer {
         }
 
         Ok(())
-    }
-
-    fn prepare_encryption_key(&self) -> Result<()> {
-        if !self.config.encryption_enabled() {
-            return Ok(());
-        }
-
-        let password = self
-            .config
-            .zfs_encryption_password
-            .as_deref()
-            .ok_or_else(|| color_eyre::eyre::eyre!("encryption enabled but password missing"))?;
-        crate::zfs_keyfile::write_key_file(&self.target, password)
     }
 
     fn configure_users(&self) -> Result<()> {
@@ -652,8 +668,7 @@ impl Installer {
     }
 
     fn finalize_zfs(&self) -> Result<()> {
-        let pool_name = self.config.pool_name.as_deref().unwrap_or("zroot");
-        let prefix = &self.config.dataset_prefix;
+        let be = self.boot_environment();
 
         // Enable ZFS services
         for service in crate::zfs_setup::ZFS_SERVICES {
@@ -665,7 +680,7 @@ impl Installer {
         // crate::zfs_trim::configure_zfs_trim, called from run_install.
 
         // genfstab
-        fstab::generate_fstab(&*self.runner, &self.target, pool_name, prefix)?;
+        fstab::generate_fstab(&*self.runner, &self.target, &be)?;
 
         // Copy misc files (hostid, zfs cache). The mountpoint the datasets are
         // currently mounted under is the install target itself — it is what
@@ -674,13 +689,13 @@ impl Installer {
         crate::zfs_target_files::copy_misc_files(
             &*self.runner,
             &self.target,
-            pool_name,
+            be.pool(),
             &self.target,
         )?;
 
         // zrepl
         if self.config.zrepl_enabled {
-            crate::zrepl::setup_zrepl(&self.target, pool_name, prefix)?;
+            crate::zrepl::setup_zrepl(&self.target, &be)?;
         }
 
         Ok(())
@@ -690,65 +705,44 @@ impl Installer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::types::{GlobalConfig, ZfsEncryptionMode};
+    use crate::config::types::ZfsEncryptionMode;
     use crate::system::cmd::tests::RecordingRunner;
     use std::os::unix::fs::PermissionsExt;
 
-    #[test]
-    fn test_installer_validates_config() {
-        let runner: Arc<dyn CommandRunner> = Arc::new(RecordingRunner::new(vec![]));
-        let config = GlobalConfig::default(); // missing installation_mode
-        let mut installer = Installer::new(
-            runner,
+    fn request(config: GlobalConfig, target: &Path, cancel: CancellationToken) -> InstallRequest {
+        InstallRequest {
+            runner: Arc::new(RecordingRunner::new(vec![])),
             config,
-            Path::new("/mnt"),
-            CancellationToken::new(),
-            None,
-        );
-        let result = installer.perform_installation();
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("validation failed")
-        );
+            target: target.to_path_buf(),
+            cancel,
+            download_progress_tx: None,
+            swap_partition: None,
+        }
     }
 
     #[test]
-    fn cancelled_installer_stops_before_first_operation() {
+    fn a_cancelled_request_installs_nothing() {
+        let target = tempfile::tempdir().unwrap();
         let cancel = CancellationToken::new();
         cancel.cancel();
-        let runner: Arc<dyn CommandRunner> = Arc::new(RecordingRunner::new(vec![]));
-        let installer = Installer::new(
-            runner,
-            GlobalConfig::default(),
-            Path::new("/mnt"),
-            cancel,
-            None,
-        );
 
-        assert!(installer.ensure_not_cancelled().is_err());
+        let result = perform_installation(request(GlobalConfig::default(), target.path(), cancel));
+
+        assert!(result.is_err());
+        // Nothing was written into the target before the check.
+        assert!(!target.path().join("var/lib/pacman").exists());
     }
 
     #[test]
-    fn prepare_encryption_key_writes_target_key_before_initramfs() {
+    fn the_passphrase_is_written_where_the_initramfs_looks_for_it() {
         let target = tempfile::tempdir().unwrap();
-        let runner: Arc<dyn CommandRunner> = Arc::new(RecordingRunner::new(vec![]));
         let config = GlobalConfig {
             zfs_encryption_mode: ZfsEncryptionMode::Pool,
             zfs_encryption_password: Some("correct horse battery staple".into()),
             ..Default::default()
         };
-        let installer = Installer::new(
-            runner,
-            config,
-            target.path(),
-            CancellationToken::new(),
-            None,
-        );
 
-        installer.prepare_encryption_key().unwrap();
+        write_encryption_key(&config, target.path()).unwrap();
 
         let key_path = crate::zfs_keyfile::key_file_path(target.path());
         assert!(key_path.exists());
@@ -761,19 +755,27 @@ mod tests {
     }
 
     #[test]
-    fn prepare_encryption_key_is_noop_without_encryption() {
+    fn no_key_is_written_for_an_unencrypted_pool() {
         let target = tempfile::tempdir().unwrap();
-        let runner: Arc<dyn CommandRunner> = Arc::new(RecordingRunner::new(vec![]));
-        let installer = Installer::new(
-            runner,
-            GlobalConfig::default(),
-            target.path(),
-            CancellationToken::new(),
-            None,
-        );
 
-        installer.prepare_encryption_key().unwrap();
+        write_encryption_key(&GlobalConfig::default(), target.path()).unwrap();
 
+        assert!(!crate::zfs_keyfile::key_file_path(target.path()).exists());
+    }
+
+    #[test]
+    fn encryption_without_a_passphrase_is_an_error_rather_than_an_empty_key() {
+        let target = tempfile::tempdir().unwrap();
+        let config = GlobalConfig {
+            zfs_encryption_mode: ZfsEncryptionMode::Pool,
+            zfs_encryption_password: None,
+            ..Default::default()
+        };
+
+        let error = write_encryption_key(&config, target.path())
+            .expect_err("an empty key file would fail to unlock the pool at boot");
+
+        assert!(error.to_string().contains("password missing"));
         assert!(!crate::zfs_keyfile::key_file_path(target.path()).exists());
     }
 }

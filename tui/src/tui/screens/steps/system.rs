@@ -1,3 +1,4 @@
+use archinstall_zfs_core::config::edit::{ChoiceSetting, EditorSetting, TextSetting};
 use archinstall_zfs_core::config::types::GlobalConfig;
 
 use super::{MenuItem, MenuKind, radio_group};
@@ -19,25 +20,25 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
             kind: MenuKind::Custom,
         },
         MenuItem {
-            key: "hostname",
+            key: TextSetting::Hostname.as_str(),
             label: "Hostname",
             value: config.hostname.clone().unwrap_or("Not set".into()),
             kind: MenuKind::Text,
         },
         MenuItem {
-            key: "locale",
+            key: EditorSetting::Locale.as_str(),
             label: "Locale",
             value: config.locale.clone().unwrap_or("Not set".into()),
             kind: MenuKind::Custom,
         },
         MenuItem {
-            key: "timezone",
+            key: EditorSetting::Timezone.as_str(),
             label: "Timezone",
             value: config.timezone.clone().unwrap_or("Not set".into()),
             kind: MenuKind::Custom,
         },
         MenuItem {
-            key: "keyboard",
+            key: EditorSetting::Keyboard.as_str(),
             label: "Keyboard layout",
             value: config.keyboard_layout.clone(),
             kind: MenuKind::Custom,
@@ -51,14 +52,14 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     ];
 
     items.extend(radio_group(
-        "network",
+        ChoiceSetting::NetworkCopyIso.as_str(),
         "Network",
         &["Copy from ISO", "Manual"],
         if config.network_copy_iso { 0 } else { 1 },
     ));
 
     items.push(MenuItem {
-        key: "parallel_downloads",
+        key: TextSetting::ParallelDownloads.as_str(),
         label: "Parallel downloads",
         value: config.parallel_downloads.to_string(),
         kind: MenuKind::Text,

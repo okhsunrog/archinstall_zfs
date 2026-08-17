@@ -1,8 +1,9 @@
+use archinstall_zfs_core::config::edit::{ChoiceSetting, DeviceSetting, TextSetting};
 use archinstall_zfs_core::config::types::{
-    CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, SwapMode, ZfsEncryptionMode,
+    GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode,
 };
 
-use super::{MenuItem, MenuKind, radio_group};
+use super::{MenuItem, MenuKind, choice_group};
 
 pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     let mode = config.installation_mode;
@@ -13,7 +14,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
 
     let mut items = vec![
         MenuItem {
-            key: "pool_name",
+            key: TextSetting::PoolName.as_str(),
             label: "Pool name",
             value: config.pool_name.clone().unwrap_or("Not set".into()),
             kind: if matches!(mode, Some(InstallationMode::ExistingPool)) {
@@ -23,44 +24,28 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
             },
         },
         MenuItem {
-            key: "dataset_prefix",
+            key: TextSetting::DatasetPrefix.as_str(),
             label: "Dataset prefix",
             value: config.dataset_prefix.clone(),
             kind: MenuKind::Text,
         },
     ];
 
-    items.extend(radio_group(
-        "compression",
+    items.extend(choice_group(
+        ChoiceSetting::Compression,
         "Compression",
-        &["lz4", "zstd", "zstd-5", "zstd-10", "off"],
-        match config.compression {
-            CompressionAlgo::Lz4 => 0,
-            CompressionAlgo::Zstd => 1,
-            CompressionAlgo::Zstd5 => 2,
-            CompressionAlgo::Zstd10 => 3,
-            CompressionAlgo::Off => 4,
-        },
+        config.compression,
     ));
 
-    items.extend(radio_group(
-        "encryption",
+    items.extend(choice_group(
+        ChoiceSetting::Encryption,
         "Encryption",
-        &[
-            "No encryption",
-            "Encrypt entire pool",
-            "Encrypt base dataset only",
-        ],
-        match config.zfs_encryption_mode {
-            ZfsEncryptionMode::None => 0,
-            ZfsEncryptionMode::Pool => 1,
-            ZfsEncryptionMode::Dataset => 2,
-        },
+        config.zfs_encryption_mode,
     ));
 
     if config.zfs_encryption_mode != ZfsEncryptionMode::None {
         items.push(MenuItem {
-            key: "encryption_password",
+            key: TextSetting::EncryptionPassword.as_str(),
             label: "Encryption password",
             value: if config.zfs_encryption_password.is_some() {
                 "Set".into()
@@ -71,26 +56,15 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
         });
     }
 
-    items.extend(radio_group(
-        "swap_mode",
+    items.extend(choice_group(
+        ChoiceSetting::SwapMode,
         "Swap",
-        &[
-            "None",
-            "ZRAM",
-            "Swap partition",
-            "Swap partition (encrypted)",
-        ],
-        match config.swap_mode {
-            SwapMode::None => 0,
-            SwapMode::Zram => 1,
-            SwapMode::ZswapPartition => 2,
-            SwapMode::ZswapPartitionEncrypted => 3,
-        },
+        config.swap_mode,
     ));
 
     if matches!(mode, Some(InstallationMode::FullDisk)) && has_swap_partition {
         items.push(MenuItem {
-            key: "swap_partition_size",
+            key: TextSetting::SwapPartitionSize.as_str(),
             label: "Swap size",
             value: config
                 .swap_partition_size
@@ -101,7 +75,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     }
     if !matches!(mode, Some(InstallationMode::FullDisk) | None) && has_swap_partition {
         items.push(MenuItem {
-            key: "swap_partition",
+            key: DeviceSetting::SwapPartition.as_str(),
             label: "Swap partition",
             value: config
                 .swap_partition
@@ -112,14 +86,10 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
         });
     }
 
-    items.extend(radio_group(
-        "init_system",
+    items.extend(choice_group(
+        ChoiceSetting::InitSystem,
         "Init system",
-        &["dracut", "mkinitcpio"],
-        match config.init_system {
-            InitSystem::Dracut => 0,
-            InitSystem::Mkinitcpio => 1,
-        },
+        config.init_system,
     ));
 
     items

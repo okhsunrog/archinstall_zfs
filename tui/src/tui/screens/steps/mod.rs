@@ -6,6 +6,9 @@ pub mod users;
 pub mod welcome;
 pub mod zfs;
 
+use archinstall_zfs_core::config::choices::Choice;
+use archinstall_zfs_core::config::edit::ChoiceSetting;
+
 // ── Shared types for all wizard steps ──────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -108,6 +111,17 @@ impl MenuItem {
 }
 
 /// Helper: emit a radio group header + options as a flat list of MenuItems.
+/// Build a radio group from a [`Choice`] enum, so the order, the labels and
+/// the selected index all come from one table rather than being spelled out
+/// here and inverted again in `pickers::apply_select`.
+pub fn choice_group<T: Choice>(
+    setting: ChoiceSetting,
+    label: &'static str,
+    current: T,
+) -> Vec<MenuItem> {
+    radio_group(setting.as_str(), label, &T::labels(), current.index())
+}
+
 pub fn radio_group(
     key: &'static str,
     label: &'static str,

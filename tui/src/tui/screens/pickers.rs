@@ -2,9 +2,11 @@ use std::path::PathBuf;
 
 use color_eyre::eyre::Result;
 
+use archinstall_zfs_core::config::edit::{
+    ChoiceSetting, TextSetting, apply_choice, apply_text as apply_text_setting,
+};
 use archinstall_zfs_core::config::types::{
-    AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, ProfileSelection,
-    SeatAccess, SwapMode, UserConfig, ZfsEncryptionMode, ZfsModuleMode,
+    GlobalConfig, ProfileSelection, SeatAccess, UserConfig, ZfsEncryptionMode, ZfsModuleMode,
 };
 use archinstall_zfs_core::profile::{DisplayManager, OptionalPackage};
 use archinstall_zfs_core::system::gpu::{GfxDriver, detect_gpus, suggested_driver};
@@ -574,152 +576,39 @@ pub fn manage_users(
 
 // ── Apply handlers ──────────────────────────────────
 
-pub fn apply_toggle(config: &mut GlobalConfig, key: &str) {
-    match key {
-        "ntp" => config.ntp = !config.ntp,
-        "bluetooth" => config.bluetooth = !config.bluetooth,
-        "zrepl" => config.zrepl_enabled = !config.zrepl_enabled,
-        _ => {}
-    }
-}
-
 pub fn apply_select(
     config: &mut GlobalConfig,
     key: &str,
     idx: usize,
     terminal: &mut ratatui::DefaultTerminal,
 ) -> Result<()> {
-    match key {
-        "installation_mode" => {
-            let new_mode = match idx {
-                0 => InstallationMode::FullDisk,
-                1 => InstallationMode::NewPool,
-                2 => InstallationMode::ExistingPool,
-                _ => return Ok(()),
-            };
-            if config.installation_mode != Some(new_mode) {
-                config.disk = None;
-                config.efi_partition = None;
-                config.zfs_partition = None;
-                config.swap_partition = None;
-            }
-            config.installation_mode = Some(new_mode);
+    let Some(setting) = ChoiceSetting::parse(key) else {
+        tracing::warn!(key, "selection names no known setting");
+        return Ok(());
+    };
+
+    apply_choice(config, setting, idx);
+
+    // Asking for the passphrase belongs here rather than in core: it is a
+    // prompt, not a configuration change, and each interface asks its own way.
+    if setting == ChoiceSetting::Encryption
+        && config.zfs_encryption_mode != ZfsEncryptionMode::None
+        && config.zfs_encryption_password.is_none()
+    {
+        let result = run_edit(terminal, "Encryption password (min 8 chars)", "", true)?;
+        if let Some(pw) = result.value
+            && !pw.is_empty()
+        {
+            config.zfs_encryption_password = Some(pw);
         }
-        "encryption" => {
-            let new_mode = match idx {
-                0 => ZfsEncryptionMode::None,
-                1 => ZfsEncryptionMode::Pool,
-                2 => ZfsEncryptionMode::Dataset,
-                _ => return Ok(()),
-            };
-            config.zfs_encryption_mode = new_mode;
-            if new_mode != ZfsEncryptionMode::None && config.zfs_encryption_password.is_none() {
-                let result = run_edit(terminal, "Encryption password (min 8 chars)", "", true)?;
-                if let Some(pw) = result.value
-                    && !pw.is_empty()
-                {
-                    config.zfs_encryption_password = Some(pw);
-                }
-            }
-            if new_mode == ZfsEncryptionMode::None {
-                config.zfs_encryption_password = None;
-            }
-        }
-        "compression" => {
-            config.compression = match idx {
-                0 => CompressionAlgo::Lz4,
-                1 => CompressionAlgo::Zstd,
-                2 => CompressionAlgo::Zstd5,
-                3 => CompressionAlgo::Zstd10,
-                4 => CompressionAlgo::Off,
-                _ => return Ok(()),
-            };
-        }
-        "swap_mode" => {
-            config.swap_mode = match idx {
-                0 => SwapMode::None,
-                1 => SwapMode::Zram,
-                2 => SwapMode::ZswapPartition,
-                3 => SwapMode::ZswapPartitionEncrypted,
-                _ => return Ok(()),
-            };
-        }
-        "init_system" => {
-            config.init_system = match idx {
-                0 => InitSystem::Dracut,
-                1 => InitSystem::Mkinitcpio,
-                _ => return Ok(()),
-            };
-        }
-        "audio" => {
-            config.audio = match idx {
-                0 => None,
-                1 => Some(AudioServer::Pipewire),
-                2 => Some(AudioServer::Pulseaudio),
-                _ => return Ok(()),
-            };
-        }
-        "network" => {
-            config.network_copy_iso = idx == 0;
-        }
-        "seat_access" => {
-            if let Some(sel) = config.profile_selection.as_mut() {
-                sel.seat_access = match idx {
-                    0 => None,
-                    1 => Some(SeatAccess::Seatd),
-                    2 => Some(SeatAccess::Polkit),
-                    _ => return Ok(()),
-                };
-            }
-        }
-        _ => {}
     }
+
     Ok(())
 }
 
 pub fn apply_text(config: &mut GlobalConfig, key: &str, val: &str) {
-    let val_opt = if val.is_empty() {
-        None
-    } else {
-        Some(val.to_string())
-    };
-    match key {
-        "pool_name" => config.pool_name = val_opt,
-        "dataset_prefix" if !val.is_empty() => {
-            config.dataset_prefix = val.to_string();
-        }
-        "hostname" => config.hostname = val_opt,
-        "locale" => config.locale = val_opt,
-        "timezone" => config.timezone = val_opt,
-        "root_password" => config.root_password = val_opt,
-        "encryption_password" => config.zfs_encryption_password = val_opt,
-        "swap_partition_size" => config.swap_partition_size = val_opt,
-        "parallel_downloads" => {
-            if let Ok(n) = val.parse::<u32>() {
-                config.parallel_downloads = n.clamp(1, 20);
-            }
-        }
-        "additional_packages" => {
-            config.additional_packages = val
-                .split_whitespace()
-                .map(|s| s.trim_matches(',').to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-        }
-        "aur_packages" => {
-            config.aur_packages = val
-                .split_whitespace()
-                .map(|s| s.trim_matches(',').to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-        }
-        "extra_services" => {
-            config.extra_services = val
-                .split_whitespace()
-                .map(|s| s.trim_matches(',').to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-        }
-        _ => {}
+    match TextSetting::parse(key) {
+        Some(setting) => apply_text_setting(config, setting, val),
+        None => tracing::warn!(key, "edited row names no known setting"),
     }
 }

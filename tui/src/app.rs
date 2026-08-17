@@ -32,14 +32,10 @@ pub async fn run(
         if cli.config.is_none() {
             bail!("--silent requires --config");
         }
-        let errors = config.validate_for_install();
-        if !errors.is_empty() {
-            bail!("Config validation failed:\n  {}", errors.join("\n  "));
-        }
-        tracing::info!("silent mode: config valid, starting installation");
+        tracing::info!("silent mode: starting installation");
         let runner: Arc<dyn CommandRunner> = Arc::new(RealRunner);
         let cancel = CancellationToken::new();
-        return archinstall_zfs_core::install::run_install(runner, config, cancel, None).await;
+        return Ok(archinstall_zfs_core::install::run_install(runner, config, cancel, None).await?);
     }
 
     // Interactive TUI mode

@@ -10,6 +10,7 @@ use std::thread;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use archinstall_zfs_core::config::types::GlobalConfig;
+use archinstall_zfs_core::install::InstallError;
 use archinstall_zfs_core::system::async_download::{PackageProgress, PackageState};
 use tokio_util::sync::CancellationToken;
 
@@ -18,12 +19,49 @@ use crate::ui::{App, DownloadInfo, InstallState, LogMessage, WizardState};
 
 const MAX_LOG_LINES: usize = 2000;
 
+/// The install view's high-level mode.
+///
+/// The markup holds this as a number and compares it by order — anything at
+/// or past `Running` means the installation has started, anything at or past
+/// `Done` means it has finished — so the values are a protocol rather than an
+/// arbitrary numbering, and both sides have to agree on them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InstallPhase {
+    Configuring,
+    Running,
+    Done,
+    Failed,
+    Cancelling,
+    Cancelled,
+}
+
+impl InstallPhase {
+    const fn code(self) -> i32 {
+        match self {
+            Self::Configuring => 0,
+            Self::Running => 1,
+            Self::Done => 2,
+            Self::Failed => 3,
+            Self::Cancelling => 4,
+            Self::Cancelled => 5,
+        }
+    }
+}
+
+fn set_phase(app: &App, phase: InstallPhase) {
+    app.global::<InstallState>().set_state(phase.code());
+}
+
 pub fn setup(
     app: &App,
     config: &Rc<RefCell<GlobalConfig>>,
     demo: bool,
     log_rx: crossbeam_channel::Receiver<(String, i32)>,
 ) {
+    // The markup starts at this phase too; setting it here keeps the value
+    // owned in one place rather than agreeing by coincidence.
+    set_phase(app, InstallPhase::Configuring);
+
     // One pump for the process, fed by the global subscriber. It starts here
     // rather than per installation so nothing emitted before or between runs
     // is lost, and so the receiver is not re-created behind the layer's back.
@@ -37,7 +75,7 @@ pub fn setup(
         let Some(app) = weak.upgrade() else { return };
         if let Some(token) = cancel_slot.lock().unwrap().as_ref() {
             token.cancel();
-            app.global::<InstallState>().set_state(4);
+            set_phase(&app, InstallPhase::Cancelling);
         }
     });
 
@@ -60,7 +98,7 @@ pub fn setup(
             return;
         }
 
-        app.global::<InstallState>().set_state(1);
+        set_phase(&app, InstallPhase::Running);
         app.global::<InstallState>()
             .set_log_messages(ModelRc::new(VecModel::<LogMessage>::default()));
 
@@ -273,24 +311,38 @@ fn spawn_install(
         )
         .await;
 
-        let state = match &result {
-            Ok(()) => 2,
-            Err(_) if cancel.is_cancelled() => 5,
+        let phase = match &result {
+            Ok(()) => InstallPhase::Done,
+            Err(InstallError::Cancelled) => InstallPhase::Cancelled,
             Err(error) => {
                 tracing::error!("{error}");
-                3
+                InstallPhase::Failed
             }
         };
         *cancel_slot.lock().unwrap() = None;
-        let _ = weak.upgrade_in_event_loop(move |app| {
-            app.global::<InstallState>().set_state(state);
-        });
+        let _ = weak.upgrade_in_event_loop(move |app| set_phase(&app, phase));
     });
 }
 
 #[cfg(test)]
 mod tests {
-    use super::installation_allowed;
+    use super::{InstallPhase, installation_allowed};
+
+    /// The markup compares these by order, so the codes are load-bearing.
+    #[test]
+    fn phase_codes_match_the_markup_protocol() {
+        assert_eq!(InstallPhase::Configuring.code(), 0);
+        assert_eq!(InstallPhase::Running.code(), 1);
+        assert_eq!(InstallPhase::Done.code(), 2);
+        assert_eq!(InstallPhase::Failed.code(), 3);
+        assert_eq!(InstallPhase::Cancelling.code(), 4);
+        assert_eq!(InstallPhase::Cancelled.code(), 5);
+
+        // "started" and "finished" are expressed as >= in the markup.
+        assert!(InstallPhase::Running.code() > InstallPhase::Configuring.code());
+        assert!(InstallPhase::Done.code() > InstallPhase::Running.code());
+        assert!(InstallPhase::Cancelling.code() > InstallPhase::Failed.code());
+    }
 
     #[test]
     fn safe_demo_cannot_start_installation() {
