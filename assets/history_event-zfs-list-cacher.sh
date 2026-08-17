@@ -15,6 +15,7 @@ import os
 import sys
 import subprocess
 import fcntl
+import tempfile
 
 # Set to True to trace every history event to /tmp/zed_debug.log. Off by
 # default: this hook runs on every ZFS history event, so leaving it enabled
@@ -82,9 +83,18 @@ def find_boot_environments(datasets):
             boot_envs.add(be)
     return boot_envs
 
+def is_below(dataset_name, ancestor):
+    """Dataset-path-aware prefix test.
+
+    A plain str.startswith() would treat 'pool/arch10' as part of 'pool/arch1'
+    and leak one boot environment's datasets into another's cache. Match only
+    on a full dataset-name component boundary.
+    """
+    return dataset_name == ancestor or dataset_name.startswith(ancestor + '/')
+
 def is_part_of_be(dataset_name, boot_envs):
     """Check if dataset belongs to any boot environment"""
-    return any(dataset_name.startswith(be) for be in boot_envs)
+    return any(is_below(dataset_name, be) for be in boot_envs)
 
 def filter_datasets(datasets, current_be, boot_envs):
     """Filter datasets to include current BE hierarchy and shared datasets"""
@@ -92,7 +102,7 @@ def filter_datasets(datasets, current_be, boot_envs):
 
     for dataset in datasets:
         name = dataset[0]
-        if (name.startswith(current_be) or
+        if (is_below(name, current_be) or
             '/' not in name or  # pool itself
             not is_part_of_be(name, boot_envs)):  # shared dataset
             filtered.append(dataset)
@@ -100,29 +110,36 @@ def filter_datasets(datasets, current_be, boot_envs):
     return filtered
 
 def write_cache(datasets, cache_file, pool):
-    """Write datasets to cache file, only update if content changed"""
-    tmp_file = f"/var/run/zfs-list.cache@{pool}"
-    log(f"Writing temporary cache file: {tmp_file}")
-
-    with open(tmp_file, 'w') as f:
-        for dataset in datasets:
-            f.write('\t'.join(dataset) + '\n')
+    """Replace the cache file atomically, and only if the content changed."""
+    new_content = ''.join('\t'.join(dataset) + '\n' for dataset in datasets)
 
     try:
         with open(cache_file, 'r') as f:
-            old_content = f.read()
-        with open(tmp_file, 'r') as f:
-            new_content = f.read()
-        if old_content != new_content:
-            log("Cache content changed, updating file")
-            with open(cache_file, 'w') as f:
-                f.write(new_content)
+            if f.read() == new_content:
+                log("Cache content unchanged, leaving file alone")
+                return
     except FileNotFoundError:
         log("No existing cache file, creating new one")
-        with open(cache_file, 'w') as f:
+
+    log("Cache content changed, updating file")
+    # The temporary file must live in the cache directory: rename(2) is only
+    # atomic within a single filesystem, and /run is not the same one as /etc.
+    directory = os.path.dirname(cache_file) or '.'
+    fd, tmp_file = tempfile.mkstemp(dir=directory, prefix='.' + pool + '.', suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w') as f:
             f.write(new_content)
-    finally:
-        os.remove(tmp_file)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp_file, 0o644)
+        os.replace(tmp_file, cache_file)
+    except BaseException:
+        # Never leave a partial cache behind for zfs-mount-generator to read.
+        try:
+            os.unlink(tmp_file)
+        except FileNotFoundError:
+            pass
+        raise
 
 def main():
     log("\n=== New ZED cache update started ===")
@@ -142,7 +159,10 @@ def main():
         log("Cache file not writable, exiting")
         sys.exit(0)
 
-    lock_file = open(cache_file, 'a')
+    # Lock a dedicated file rather than the cache itself: the cache is now
+    # replaced by rename(2), so a lock held on it would end up pinning an
+    # unlinked inode and a concurrent zedlet could take the "same" lock.
+    lock_file = open(f"/run/zfs-list.cache@{pool}.lock", 'w')
     try:
         fcntl.flock(lock_file, fcntl.LOCK_EX)
         log("Acquired file lock")
