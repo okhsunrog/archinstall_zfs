@@ -432,15 +432,28 @@ impl GlobalConfig {
     pub fn effective_kernels(&self) -> Vec<&str> {
         match &self.kernels {
             Some(k) if !k.is_empty() => k.iter().map(|s| s.as_str()).collect(),
-            _ => vec!["linux-lts"],
+            _ => vec![self.default_kernel()],
         }
     }
 
     pub fn primary_kernel(&self) -> &str {
         match &self.kernels {
             Some(k) if !k.is_empty() => k[0].as_str(),
-            _ => "linux-lts",
+            _ => self.default_kernel(),
         }
+    }
+
+    /// The kernel installed when the configuration names none.
+    ///
+    /// The distribution's first, because a kernel from another one does not
+    /// exist in its repositories — an Arch name would leave a CachyOS
+    /// installation with nothing to boot.
+    fn default_kernel(&self) -> &'static str {
+        self.distribution()
+            .kernels
+            .first()
+            .map(|kernel| kernel.name)
+            .unwrap_or("linux-lts")
     }
 }
 

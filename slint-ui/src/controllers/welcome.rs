@@ -7,6 +7,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use archinstall_zfs_core::config::types::GlobalConfig;
+use archinstall_zfs_core::distro::Distribution;
 use archinstall_zfs_core::kernel::scanner::CompatibilityResult;
 use slint::{ComponentHandle, SharedString};
 
@@ -15,9 +16,16 @@ use crate::ui::{App, WelcomeState};
 /// Cached results of the background kernel compatibility scan. The wizard's
 /// "Kernel" item activation reads this to populate the kernel select popup
 /// without re-scanning every time.
+/// Scan results together with the distribution they describe.
+type ScannedKernels = (&'static str, Vec<CompatibilityResult>);
+
 #[derive(Clone, Default)]
 pub struct KernelScan {
-    inner: Arc<Mutex<Option<Vec<CompatibilityResult>>>>,
+    /// Results, and the distribution they describe. Kept together because the
+    /// kernel list is paired with these by position: results from one
+    /// distribution against another's kernels would mark the wrong ones
+    /// compatible.
+    inner: Arc<Mutex<Option<ScannedKernels>>>,
 }
 
 impl KernelScan {
@@ -25,19 +33,29 @@ impl KernelScan {
         Self::default()
     }
 
-    pub fn is_some(&self) -> bool {
-        self.inner.lock().unwrap().is_some()
+    /// Whether a scan for `distro` has completed.
+    pub fn has(&self, distro: &Distribution) -> bool {
+        matches!(*self.inner.lock().unwrap(), Some((name, _)) if name == distro.name)
     }
 
-    /// Borrow the cached results for the duration of `f`. `None` if the scan
-    /// hasn't completed yet.
-    pub fn with<R>(&self, f: impl FnOnce(Option<&[CompatibilityResult]>) -> R) -> R {
+    /// Borrow the cached results for `distro` for the duration of `f`. `None`
+    /// when nothing has been scanned yet, or when what was scanned describes a
+    /// different distribution.
+    pub fn with<R>(
+        &self,
+        distro: &Distribution,
+        f: impl FnOnce(Option<&[CompatibilityResult]>) -> R,
+    ) -> R {
         let guard = self.inner.lock().unwrap();
-        f(guard.as_deref())
+        let results = match guard.as_ref() {
+            Some((name, results)) if *name == distro.name => Some(results.as_slice()),
+            _ => None,
+        };
+        f(results)
     }
 
-    pub(super) fn store(&self, results: Vec<CompatibilityResult>) {
-        *self.inner.lock().unwrap() = Some(results);
+    pub(super) fn store(&self, distro: &Distribution, results: Vec<CompatibilityResult>) {
+        *self.inner.lock().unwrap() = Some((distro.name, results));
     }
 }
 
@@ -58,8 +76,9 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_scan: &Kernel
             {
                 start_zfs_init(&app, &cfg.borrow());
             }
-            if !kscan.is_some() {
-                start_kernel_scan(&kscan, cfg.borrow().distribution());
+            let distro = cfg.borrow().distribution();
+            if !kscan.has(distro) {
+                start_kernel_scan(&kscan, distro);
             }
         }
     });
@@ -181,7 +200,7 @@ fn start_kernel_scan(
                 "kernel scan result"
             );
         }
-        cache.store(results);
+        cache.store(distro, results);
         tracing::info!("kernel compatibility scan complete");
     });
 }

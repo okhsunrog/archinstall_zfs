@@ -133,11 +133,11 @@ fn setup_select_confirmed(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_
         }
 
         if key == "kernel_select" {
-            let kernels = cfg.borrow().distribution().kernels;
-            if let Some(info) = kernels.get(idx as usize) {
+            let distro = cfg.borrow().distribution();
+            if let Some(info) = distro.kernels.get(idx as usize) {
                 let mut c = cfg.borrow_mut();
                 c.kernels = Some(vec![info.name.to_string()]);
-                let auto_mode = kscan.with(|cached| {
+                let auto_mode = kscan.with(distro, |cached| {
                     cached
                         .and_then(|results| results.get(idx as usize))
                         .and_then(|r| r.best_mode())
@@ -453,13 +453,30 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
     };
 
     match setting {
+        EditorSetting::Distribution => {
+            let names: Vec<&str> = archinstall_zfs_core::distro::ALL
+                .iter()
+                .map(|distro| distro.display_name)
+                .collect();
+            let current = archinstall_zfs_core::distro::ALL
+                .iter()
+                .position(|distro| distro.name == config.distribution)
+                .unwrap_or(0);
+            show_select(
+                app,
+                ChoiceSetting::Distribution.as_str(),
+                "Distribution",
+                &names,
+                current as i32,
+            );
+        }
         EditorSetting::Kernel => {
             // Use the cached scan results if available; otherwise block-scan now.
             let fresh: Vec<archinstall_zfs_core::kernel::scanner::CompatibilityResult>;
             let distro = config.distribution();
-            let options = if let Some(opts) =
-                kernel_scan.with(|cached| cached.map(|r| build_kernel_options(distro, r)))
-            {
+            let options = if let Some(opts) = kernel_scan.with(distro, |cached| {
+                cached.map(|r| build_kernel_options(distro, r))
+            }) {
                 opts
             } else {
                 let rt = tokio::runtime::Handle::current();

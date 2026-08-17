@@ -7,7 +7,8 @@ use ratatui::widgets::{
 };
 
 use archinstall_zfs_core::config::edit::{
-    DeviceSetting, EditorSetting, ToggleSetting, apply_device, apply_toggle,
+    ChoiceSetting, DeviceSetting, EditorSetting, ToggleSetting, apply_choice, apply_device,
+    apply_toggle,
 };
 use archinstall_zfs_core::config::types::GlobalConfig;
 
@@ -339,6 +340,20 @@ impl Wizard {
                         {
                             self.config.kernels = Some(vec![kernel]);
                             self.config.zfs_module_mode = mode;
+                        }
+                    }
+                    EditorSetting::Distribution => {
+                        let names: Vec<&str> = archinstall_zfs_core::distro::ALL
+                            .iter()
+                            .map(|distro| distro.display_name)
+                            .collect();
+                        let current = archinstall_zfs_core::distro::ALL
+                            .iter()
+                            .position(|distro| distro.name == self.config.distribution)
+                            .unwrap_or(0);
+                        let result = run_select(terminal, "Distribution", &names, current)?;
+                        if let Some(index) = result.selected {
+                            apply_choice(&mut self.config, ChoiceSetting::Distribution, index);
                         }
                     }
                     EditorSetting::Profile => {
