@@ -16,6 +16,15 @@ pub fn wait_for_db_lock(_runner: &dyn CommandRunner) -> Result<()> {
     bail!("pacman db.lck not released after 10 minutes");
 }
 
+/// KNOWN GAP: `SigLevel = Never` means archzfs packages — kernel modules —
+/// are installed without signature verification, with only the sync DB's
+/// sha256 standing behind them. The key import below therefore has no effect
+/// on what actually gets installed today. This is deliberate for now: the
+/// experimental archzfs release channel's signing is not reliable enough to
+/// gate installs on, and a failed key fetch would otherwise make the
+/// installer unusable. Revisit together with `register_repo`'s SigLevel in
+/// `installer::install_zfs_on_target` and the missing `.sig` fetch in
+/// `system::async_download` — the three have to change as one.
 const ARCHZFS_REPO_BLOCK: &str = "\n[archzfs]\nSigLevel = Never\nServer = https://github.com/archzfs/archzfs/releases/download/experimental\n";
 
 const ARCHZFS_KEY_IDS: &[&str] = &[
