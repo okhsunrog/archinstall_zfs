@@ -346,10 +346,13 @@ async fn run_downloads(
     }
 
     if !errors.is_empty() {
-        let first = errors.remove(0);
-        if first.to_string().contains("cancelled") {
+        // Ask the token rather than reading the message: a cancelled run
+        // fails every download in flight, and matching on the words those
+        // failures happen to use is not a way to tell the two apart.
+        if cancel.is_cancelled() {
             bail!("download cancelled");
         }
+        let first = errors.remove(0);
         return Err(first.wrap_err(format!("{} package download(s) failed", errors.len() + 1)));
     }
 

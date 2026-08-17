@@ -10,6 +10,7 @@ use std::thread;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use archinstall_zfs_core::config::types::GlobalConfig;
+use archinstall_zfs_core::install::InstallError;
 use archinstall_zfs_core::system::async_download::{PackageProgress, PackageState};
 use tokio_util::sync::CancellationToken;
 
@@ -312,7 +313,7 @@ fn spawn_install(
 
         let phase = match &result {
             Ok(()) => InstallPhase::Done,
-            Err(_) if cancel.is_cancelled() => InstallPhase::Cancelled,
+            Err(InstallError::Cancelled) => InstallPhase::Cancelled,
             Err(error) => {
                 tracing::error!("{error}");
                 InstallPhase::Failed

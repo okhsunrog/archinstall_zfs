@@ -25,11 +25,42 @@ use tokio_util::sync::CancellationToken;
 
 use crate::boot_environment::BootEnvironment;
 use crate::config::types::{GlobalConfig, SwapMode};
+use crate::config::validation::ValidationError;
 use crate::system::async_download::{DownloadConfig, DownloadProgress};
 use crate::system::cmd::CommandRunner;
 
 /// Where the pool is mounted while the target system is assembled.
 const MOUNTPOINT: &str = "/mnt";
+
+/// Why an installation stopped.
+///
+/// The interfaces need to tell a cancellation from a failure — one is a
+/// button the user pressed, the other is a problem to report — and they used
+/// to work it out by asking the cancellation token themselves, each in its own
+/// way, while the pipeline said only "installation cancelled" in prose.
+/// Deciding it once, here, is what lets them match on it.
+#[derive(Debug, thiserror::Error)]
+pub enum InstallError {
+    /// The user asked for the installation to stop.
+    #[error("installation cancelled")]
+    Cancelled,
+
+    /// The configuration cannot be installed as it stands.
+    #[error("configuration is not valid:\n  {}", render(.0))]
+    InvalidConfig(Vec<ValidationError>),
+
+    /// Anything that went wrong while installing.
+    #[error(transparent)]
+    Failed(#[from] color_eyre::Report),
+}
+
+fn render(errors: &[ValidationError]) -> String {
+    errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n  ")
+}
 
 type ProgressSender = Arc<watch::Sender<DownloadProgress>>;
 
@@ -42,7 +73,12 @@ pub async fn run_install(
     config: GlobalConfig,
     cancel: CancellationToken,
     progress_tx: Option<ProgressSender>,
-) -> Result<()> {
+) -> Result<(), InstallError> {
+    let problems = config.validate_for_install();
+    if !problems.is_empty() {
+        return Err(InstallError::InvalidConfig(problems));
+    }
+
     let pool_name = config
         .pool_name
         .as_deref()
@@ -51,13 +87,29 @@ pub async fn run_install(
     let root_dataset = BootEnvironment::new(&pool_name, config.dataset_prefix.as_str()).root();
     let cleanup = Arc::new(CleanupState::default());
 
-    let result = install(runner.clone(), config, cancel, progress_tx, cleanup.clone()).await;
+    let result = install(
+        runner.clone(),
+        config,
+        cancel.clone(),
+        progress_tx,
+        cleanup.clone(),
+    )
+    .await;
 
     cleanup
         .run(&*runner, &pool_name, &root_dataset, result.is_ok())
         .await?;
 
-    result?;
+    // A cancelled run fails wherever it happened to be — inside a download,
+    // between phases, part-way through a chroot command — so the token is what
+    // says whether the failure was asked for.
+    result.map_err(|error| {
+        if cancel.is_cancelled() {
+            InstallError::Cancelled
+        } else {
+            InstallError::Failed(error)
+        }
+    })?;
     tracing::info!("Installation complete!");
     Ok(())
 }
@@ -351,6 +403,51 @@ mod tests {
         assert!(cleanup.pool_preexisting.load(Ordering::Acquire));
         assert!(!cleanup.pool_setup_started.load(Ordering::Acquire));
         assert!(!cleanup.efi_mounted.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn an_invalid_configuration_is_reported_as_such() {
+        let runner: Arc<dyn CommandRunner> =
+            Arc::new(crate::system::cmd::tests::RecordingRunner::new(vec![]));
+
+        // No installation mode: nothing about this can be installed.
+        let error = run_install(
+            runner,
+            GlobalConfig::default(),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect_err("an unusable configuration must not start an installation");
+
+        assert!(
+            matches!(error, InstallError::InvalidConfig(_)),
+            "got {error:?}"
+        );
+        assert!(
+            error.to_string().contains("Installation mode not selected"),
+            "the reason belongs in the message: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_run_is_distinguishable_from_a_failure() {
+        let runner: Arc<dyn CommandRunner> =
+            Arc::new(crate::system::cmd::tests::RecordingRunner::new(vec![]));
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+
+        let config = GlobalConfig {
+            installation_mode: Some(crate::config::types::InstallationMode::FullDisk),
+            disk: Some(std::path::PathBuf::from("/dev/disk/by-id/test")),
+            ..Default::default()
+        };
+
+        let error = run_install(runner, config, cancel, None)
+            .await
+            .expect_err("a cancelled run does not succeed");
+
+        assert!(matches!(error, InstallError::Cancelled), "got {error:?}");
     }
 
     #[test]
