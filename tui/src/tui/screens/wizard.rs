@@ -210,7 +210,11 @@ impl Wizard {
                     }
                     let errors = self.config.validate_for_install();
                     if !errors.is_empty() {
-                        let msg = errors.join("\n");
+                        let msg = errors
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join("\n");
                         let lines: Vec<&str> = msg.lines().collect();
                         let _ = run_select(terminal, "Validation errors", &lines, 0);
                         return Ok(Action::Continue);

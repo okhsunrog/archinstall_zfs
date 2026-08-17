@@ -584,7 +584,7 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         items.push(section_header("Validation"));
         for error in &errors {
             items.push(ConfigItem {
-                value: error.as_str().into(),
+                value: error.to_string().into(),
                 item_type: ItemType::Warning,
                 ..Default::default()
             });

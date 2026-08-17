@@ -3,6 +3,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use super::validation::ValidationError;
+
 use crate::profile::DisplayManager;
 use crate::system::gpu::GfxDriver;
 
@@ -447,67 +449,44 @@ fn is_supported_device_path(path: &std::path::Path) -> bool {
             || name.starts_with("mmcblk"))
 }
 
-/// Validates the config and returns a list of error messages.
-/// Empty list means the config is valid for installation.
+/// Field-level checks, shared by `validate_for_install` and by interfaces
+/// that want to flag a single field as it is edited.
 impl GlobalConfig {
-    pub fn validate_pool_name(&self) -> Vec<String> {
-        let mut errors = Vec::new();
-        if let Some(ref name) = self.pool_name
-            && !is_valid_pool_name(name)
-        {
-            errors.push(format!(
-                "Pool name '{name}' is invalid: must be alphanumeric, underscores, or hyphens"
-            ));
+    pub fn validate_pool_name(&self) -> Vec<ValidationError> {
+        match &self.pool_name {
+            Some(name) if !is_valid_pool_name(name) => {
+                vec![ValidationError::PoolNameInvalid(name.clone())]
+            }
+            _ => Vec::new(),
         }
-        errors
     }
 
-    pub fn validate_dataset_prefix(&self) -> Vec<String> {
-        let mut errors = Vec::new();
-        if !is_valid_dataset_prefix(&self.dataset_prefix) {
-            errors.push(format!(
-                "Dataset prefix '{}' is invalid: must be alphanumeric, underscores, or hyphens",
-                self.dataset_prefix
-            ));
+    pub fn validate_dataset_prefix(&self) -> Vec<ValidationError> {
+        if is_valid_dataset_prefix(&self.dataset_prefix) {
+            Vec::new()
+        } else {
+            vec![ValidationError::DatasetPrefixInvalid(
+                self.dataset_prefix.clone(),
+            )]
         }
-        errors
     }
 
-    pub fn validate_device_paths(&self) -> Vec<String> {
-        let mut errors = Vec::new();
-        if let Some(ref p) = self.disk
-            && !is_supported_device_path(p)
-        {
-            errors.push(format!(
-                "disk must be a /dev/disk/by-id/, /dev/disk/by-path/, or supported /dev node path, got: {}",
-                p.display()
-            ));
-        }
-        if let Some(ref p) = self.efi_partition
-            && !is_supported_device_path(p)
-        {
-            errors.push(format!(
-                "efi_partition must be a /dev/disk/by-id/, /dev/disk/by-path/, or supported /dev node path, got: {}",
-                p.display()
-            ));
-        }
-        if let Some(ref p) = self.zfs_partition
-            && !is_supported_device_path(p)
-        {
-            errors.push(format!(
-                "zfs_partition must be a /dev/disk/by-id/, /dev/disk/by-path/, or supported /dev node path, got: {}",
-                p.display()
-            ));
-        }
-        if let Some(ref p) = self.swap_partition
-            && !is_supported_device_path(p)
-        {
-            errors.push(format!(
-                "swap_partition must be a /dev/disk/by-id/, /dev/disk/by-path/, or supported /dev node path, got: {}",
-                p.display()
-            ));
-        }
-        errors
+    pub fn validate_device_paths(&self) -> Vec<ValidationError> {
+        [
+            ("disk", self.disk.as_ref()),
+            ("efi_partition", self.efi_partition.as_ref()),
+            ("zfs_partition", self.zfs_partition.as_ref()),
+            ("swap_partition", self.swap_partition.as_ref()),
+        ]
+        .into_iter()
+        .filter_map(|(setting, path)| {
+            let path = path?;
+            (!is_supported_device_path(path)).then(|| ValidationError::DevicePathUnsupported {
+                setting,
+                path: path.clone(),
+            })
+        })
+        .collect()
     }
 }
 

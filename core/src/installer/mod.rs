@@ -85,7 +85,8 @@ impl Installer {
     pub fn perform_installation(&mut self) -> Result<()> {
         let errors = self.config.validate_for_install();
         if !errors.is_empty() {
-            bail!("Config validation failed:\n  {}", errors.join("\n  "));
+            let rendered: Vec<String> = errors.iter().map(ToString::to_string).collect();
+            bail!("Config validation failed:\n  {}", rendered.join("\n  "));
         }
         self.ensure_not_cancelled()?;
 

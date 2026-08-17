@@ -130,7 +130,8 @@ async fn main() -> Result<()> {
         }
         let errors = config.validate_for_install();
         if !errors.is_empty() {
-            bail!("Config validation failed:\n  {}", errors.join("\n  "));
+            let rendered: Vec<String> = errors.iter().map(ToString::to_string).collect();
+            bail!("Config validation failed:\n  {}", rendered.join("\n  "));
         }
         let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
             Arc::new(archinstall_zfs_core::system::cmd::RealRunner);

@@ -82,7 +82,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
             items.push(MenuItem {
                 key: "error",
                 label: "",
-                value: error.clone(),
+                value: error.to_string(),
                 kind: MenuKind::SectionHeader,
             });
         }

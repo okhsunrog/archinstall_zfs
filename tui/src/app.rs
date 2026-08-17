@@ -34,7 +34,8 @@ pub async fn run(
         }
         let errors = config.validate_for_install();
         if !errors.is_empty() {
-            bail!("Config validation failed:\n  {}", errors.join("\n  "));
+            let rendered: Vec<String> = errors.iter().map(ToString::to_string).collect();
+            bail!("Config validation failed:\n  {}", rendered.join("\n  "));
         }
         tracing::info!("silent mode: config valid, starting installation");
         let runner: Arc<dyn CommandRunner> = Arc::new(RealRunner);
