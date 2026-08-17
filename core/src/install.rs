@@ -226,10 +226,18 @@ async fn install(
         let runner = runner.clone();
         let kernel = kernel.clone();
         let zfs_mode = config.zfs_module_mode;
+        let distro = config.distribution();
         let cancel = cancel.clone();
         let download_config = download_config.clone();
         tokio::task::spawn_blocking(move || {
-            crate::zfs_setup::initialize_zfs(&*runner, &kernel, zfs_mode, &cancel, download_config)
+            crate::zfs_setup::initialize_zfs(
+                &*runner,
+                distro,
+                &kernel,
+                zfs_mode,
+                &cancel,
+                download_config,
+            )
         })
         .await??;
     }

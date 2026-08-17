@@ -3,136 +3,126 @@ use std::path::Path;
 use color_eyre::eyre::Result;
 
 use super::cmd::CommandRunner;
+use crate::distro::{Distribution, Repository};
 
-/// KNOWN GAP: `SigLevel = Never` means archzfs packages — kernel modules —
-/// are installed without signature verification, with only the sync DB's
-/// sha256 standing behind them. The key import below therefore has no effect
-/// on what actually gets installed today. This is deliberate for now: the
-/// experimental archzfs release channel's signing is not reliable enough to
-/// gate installs on, and a failed key fetch would otherwise make the
-/// installer unusable. Revisit together with `register_repo`'s SigLevel in
-/// `installer::install_zfs_on_target` and the missing `.sig` fetch in
-/// `system::async_download` — the three have to change as one.
-const ARCHZFS_REPO_BLOCK: &str = "\n[archzfs]\nSigLevel = Never\nServer = https://github.com/archzfs/archzfs/releases/download/experimental\n";
-
-const ARCHZFS_KEY_IDS: &[&str] = &[
-    "3A9917BF0DED5C13F69AC68FABEC0A1208037BE9",
-    "DDF7DB817396A49B2A2723F7403BD972F75D9D76",
-];
-
+/// Tried in order until one answers with the key.
 const KEYSERVERS: &[&str] = &[
     "hkps://keyserver.ubuntu.com",
     "hkps://pgp.mit.edu",
-    "hkps://pool.sks-keyservers.net",
     "hkps://keys.openpgp.org",
 ];
 
-pub fn add_archzfs_repo(runner: &dyn CommandRunner, target: Option<&Path>) -> Result<()> {
+/// Add a distribution's repositories to pacman.conf and trust their keys.
+///
+/// `target` selects which pacman.conf: the medium's own when `None`, the
+/// installed system's when given.
+pub fn add_repositories(
+    runner: &dyn CommandRunner,
+    target: Option<&Path>,
+    distro: &Distribution,
+) -> Result<()> {
     let pacman_conf = match target {
         Some(t) => t.join("etc/pacman.conf"),
         None => std::path::PathBuf::from("/etc/pacman.conf"),
     };
 
-    // Rewrite or append [archzfs] block
-    let content = std::fs::read_to_string(&pacman_conf)?;
-    if content.contains("[archzfs]") {
-        let new_content = rewrite_archzfs_block(&content);
-        std::fs::write(&pacman_conf, new_content)?;
-        tracing::info!("updated existing archzfs repo block");
-    } else {
-        let mut new_content = content;
-        new_content.push_str(ARCHZFS_REPO_BLOCK);
-        std::fs::write(&pacman_conf, new_content)?;
-        tracing::info!(path = %pacman_conf.display(), "added archzfs repo to pacman.conf");
+    let mut content = std::fs::read_to_string(&pacman_conf)?;
+    for repo in distro.repositories {
+        // Rewritten rather than appended when already present, so re-running
+        // an installation does not stack duplicate blocks.
+        content = replace_repo_block(&content, repo);
+        tracing::info!(repo = repo.name, path = %pacman_conf.display(), "repository configured");
     }
+    std::fs::write(&pacman_conf, content)?;
 
-    // Initialize keyring
-    let init_result = if let Some(t) = target {
-        let r = crate::system::cmd::chroot_cmd(runner, t, "pacman-key", &["--init"]);
-        if let Ok(ref output) = r
-            && output.success()
-        {
-            crate::system::cmd::chroot_cmd(runner, t, "pacman-key", &["--populate", "archlinux"])
-        } else {
-            r
-        }
-    } else {
-        let r = runner.run("pacman-key", &["--init"]);
-        if let Ok(ref output) = r
-            && output.success()
-        {
-            runner.run("pacman-key", &["--populate", "archlinux"])
-        } else {
-            r
-        }
-    };
-    if let Ok(ref output) = init_result
-        && !output.success()
-    {
-        tracing::warn!(
-            "pacman-key init/populate had issues: {}",
-            output.stderr.trim()
-        );
-    }
-
-    // Import archzfs signing keys
-    for key_id in ARCHZFS_KEY_IDS {
-        let mut received = false;
-        for server in KEYSERVERS {
-            let output = if let Some(t) = target {
-                crate::system::cmd::chroot_cmd(
-                    runner,
-                    t,
-                    "pacman-key",
-                    &["--keyserver", server, "-r", key_id],
-                )
-            } else {
-                runner.run("pacman-key", &["--keyserver", server, "-r", key_id])
-            };
-            if output.is_ok() && output.as_ref().unwrap().success() {
-                tracing::info!(key = key_id, server, "received archzfs key");
-                received = true;
-                break;
-            }
-        }
-        if !received {
-            tracing::warn!(key = key_id, "failed to receive key from any keyserver");
-        }
-
-        // Locally sign the key
-        let _ = if let Some(t) = target {
-            crate::system::cmd::chroot_cmd(runner, t, "pacman-key", &["--lsign-key", key_id])
-        } else {
-            runner.run("pacman-key", &["--lsign-key", key_id])
-        };
+    init_keyring(runner, target, distro.keyring);
+    for repo in distro.repositories {
+        trust_repository_keys(runner, target, repo);
     }
 
     // Database sync is handled by the caller via AlpmContext::sync_databases()
     Ok(())
 }
 
-fn rewrite_archzfs_block(content: &str) -> String {
-    let mut result = String::new();
-    let mut in_archzfs_block = false;
+/// Populate the keyring the distribution's packages are signed against.
+fn init_keyring(runner: &dyn CommandRunner, target: Option<&Path>, keyring: &str) {
+    let run = |args: &[&str]| match target {
+        Some(t) => crate::system::cmd::chroot_cmd(runner, t, "pacman-key", args),
+        None => runner.run("pacman-key", args),
+    };
 
-    for line in content.lines() {
-        if line.trim() == "[archzfs]" {
-            in_archzfs_block = true;
+    let initialised = run(&["--init"]);
+    let result = match &initialised {
+        Ok(output) if output.success() => run(&["--populate", keyring]),
+        _ => initialised,
+    };
+    if let Ok(output) = &result
+        && !output.success()
+    {
+        tracing::warn!(
+            keyring,
+            "pacman-key init/populate had issues: {}",
+            output.stderr.trim()
+        );
+    }
+}
+
+/// Receive and locally sign the keys a repository's packages are signed with.
+fn trust_repository_keys(runner: &dyn CommandRunner, target: Option<&Path>, repo: &Repository) {
+    let run = |args: &[&str]| match target {
+        Some(t) => crate::system::cmd::chroot_cmd(runner, t, "pacman-key", args),
+        None => runner.run("pacman-key", args),
+    };
+
+    for key_id in repo.key_ids {
+        let received =
+            KEYSERVERS
+                .iter()
+                .any(|server| match run(&["--keyserver", server, "-r", key_id]) {
+                    Ok(output) if output.success() => {
+                        tracing::info!(repo = repo.name, key = key_id, server, "received key");
+                        true
+                    }
+                    _ => false,
+                });
+        if !received {
+            tracing::warn!(
+                repo = repo.name,
+                key = key_id,
+                "failed to receive key from any keyserver"
+            );
             continue;
         }
-        if in_archzfs_block {
-            if line.starts_with('[') {
-                in_archzfs_block = false;
-                result.push_str(line);
-                result.push('\n');
-            }
+        let _ = run(&["--lsign-key", key_id]);
+    }
+}
+
+/// Replace a repository's block, or append it when the file has none.
+fn replace_repo_block(content: &str, repo: &Repository) -> String {
+    let header = format!("[{}]", repo.name);
+    let mut result = String::new();
+    let mut inside = false;
+
+    for line in content.lines() {
+        if line.trim() == header {
+            inside = true;
             continue;
+        }
+        if inside {
+            // The block runs until the next section header.
+            if line.starts_with('[') {
+                inside = false;
+            } else {
+                continue;
+            }
         }
         result.push_str(line);
         result.push('\n');
     }
 
-    result.push_str(ARCHZFS_REPO_BLOCK);
+    // Appended either way: an existing block was dropped above, and where a
+    // repository sits only matters against ones offering the same packages.
+    result.push_str(&repo.pacman_conf_block());
     result
 }
 
@@ -170,6 +160,55 @@ pub fn set_parallel_downloads(target: Option<&Path>, count: u32) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::distro::Signatures;
+
+    const REPO: Repository = Repository {
+        name: "archzfs",
+        servers: &["https://example.invalid/archzfs"],
+        mirrorlist: None,
+        key_ids: &[],
+        signatures: Signatures::Never,
+    };
+
+    #[test]
+    fn a_repository_is_added_once() {
+        let conf = "[options]\nHoldPkg = pacman\n\n[core]\nInclude = /etc/pacman.d/mirrorlist\n";
+
+        let once = replace_repo_block(conf, &REPO);
+        let twice = replace_repo_block(&once, &REPO);
+
+        assert_eq!(once.matches("[archzfs]").count(), 1);
+        assert_eq!(
+            twice.matches("[archzfs]").count(),
+            1,
+            "re-running an installation must not stack blocks: {twice}"
+        );
+    }
+
+    #[test]
+    fn rewriting_replaces_the_old_settings() {
+        // What a previous version of this installer left behind.
+        let conf = "[options]\n\n[archzfs]\nSigLevel = Optional\nServer = https://old.invalid\n\n[core]\nInclude = /etc/pacman.d/mirrorlist\n";
+
+        let result = replace_repo_block(conf, &REPO);
+
+        assert!(!result.contains("https://old.invalid"), "got: {result}");
+        assert!(result.contains("https://example.invalid/archzfs"));
+        assert!(result.contains("SigLevel = Never"));
+        // Untouched sections survive.
+        assert!(result.contains("[core]"));
+        assert!(result.contains("Include = /etc/pacman.d/mirrorlist"));
+    }
+
+    #[test]
+    fn other_sections_keep_their_settings() {
+        let conf = "[options]\nParallelDownloads = 5\n\n[extra]\nSigLevel = Required\n";
+
+        let result = replace_repo_block(conf, &REPO);
+
+        assert!(result.contains("ParallelDownloads = 5"));
+        assert!(result.contains("[extra]\nSigLevel = Required"));
+    }
 
     #[test]
     fn test_set_parallel_downloads() {

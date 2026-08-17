@@ -42,6 +42,8 @@ pub struct InstallRequest {
 struct Installer {
     runner: Arc<dyn CommandRunner>,
     config: GlobalConfig,
+    /// Resolved once: every phase that consults it wants the same answer.
+    distro: &'static crate::distro::Distribution,
     target: PathBuf,
     cancel: CancellationToken,
     download_progress_tx: Option<Arc<tokio::sync::watch::Sender<DownloadProgress>>>,
@@ -115,6 +117,7 @@ pub fn perform_installation(request: InstallRequest) -> Result<Vec<String>> {
 
     let mut installer = Installer {
         runner,
+        distro: config.distribution(),
         config,
         target,
         cancel,
@@ -258,7 +261,7 @@ impl Installer {
     /// initramfs phase can skip them and the user can be told.
     fn install_zfs_on_target(&mut self) -> Result<()> {
         // Edit pacman.conf and import GPG keys (still needs shell for pacman-key)
-        crate::system::pacman::add_archzfs_repo(&*self.runner, Some(&self.target))?;
+        crate::system::pacman::add_repositories(&*self.runner, Some(&self.target), self.distro)?;
 
         // Register archzfs repo in the live alpm handle and sync
         let ctx = &mut self.alpm;

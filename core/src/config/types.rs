@@ -147,6 +147,11 @@ impl std::fmt::Display for SwapMode {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalConfig {
+    /// Which distribution to install, by registry name. Decides the base
+    /// packages, the repositories added for ZFS and the kernels on offer.
+    #[serde(default = "default_distribution")]
+    pub distribution: String,
+
     // Flow control
     pub installation_mode: Option<InstallationMode>,
     #[serde(default, alias = "disk_by_id")]
@@ -321,6 +326,10 @@ impl std::fmt::Display for AudioServer {
     }
 }
 
+fn default_distribution() -> String {
+    crate::distro::default().name.to_string()
+}
+
 fn default_dataset_prefix() -> String {
     "arch0".to_string()
 }
@@ -348,6 +357,7 @@ fn default_parallel_downloads() -> u32 {
 impl Default for GlobalConfig {
     fn default() -> Self {
         Self {
+            distribution: default_distribution(),
             installation_mode: None,
             disk: None,
             efi_partition: None,
@@ -389,6 +399,22 @@ impl Default for GlobalConfig {
 }
 
 impl GlobalConfig {
+    /// The distribution this configuration installs.
+    ///
+    /// An unknown name falls back to the default rather than failing: the
+    /// registry can lose an entry between versions, and refusing to start
+    /// over a name is worse than installing what the rest of the
+    /// configuration describes. Validation reports the name separately.
+    pub fn distribution(&self) -> &'static crate::distro::Distribution {
+        crate::distro::get(&self.distribution).unwrap_or_else(|| {
+            tracing::warn!(
+                name = self.distribution,
+                "unknown distribution; installing the default"
+            );
+            crate::distro::default()
+        })
+    }
+
     pub fn encryption_enabled(&self) -> bool {
         self.zfs_encryption_mode != ZfsEncryptionMode::None
     }

@@ -110,6 +110,7 @@ fn start_zfs_init(app: &App, config: &GlobalConfig) {
     let weak = app.as_weak();
     let kernel = config.primary_kernel().to_string();
     let zfs_mode = config.zfs_module_mode;
+    let distro = config.distribution();
 
     tokio::task::spawn_blocking(move || {
         let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
@@ -134,6 +135,7 @@ fn start_zfs_init(app: &App, config: &GlobalConfig) {
 
         let result = archinstall_zfs_core::zfs_setup::initialize_zfs(
             &*runner,
+            distro,
             &kernel,
             zfs_mode,
             &cancel,
