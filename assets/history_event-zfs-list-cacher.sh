@@ -16,7 +16,10 @@ import sys
 import subprocess
 import fcntl
 
-DEBUG = True
+# Set to True to trace every history event to /tmp/zed_debug.log. Off by
+# default: this hook runs on every ZFS history event, so leaving it enabled
+# grows an unrotated file in /tmp for the life of the system.
+DEBUG = False
 
 def log(message):
     if DEBUG:
