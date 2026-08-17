@@ -165,6 +165,7 @@ pub fn install_zfs_on_host(
 /// Matches Python initialize_zfs() from kmod_setup.py.
 pub fn initialize_zfs(
     runner: &dyn CommandRunner,
+    distro: &crate::distro::Distribution,
     kernel: &str,
     mode: ZfsModuleMode,
     cancel: &tokio_util::sync::CancellationToken,
@@ -187,7 +188,8 @@ pub fn initialize_zfs(
     tracing::info!("preparing live system for ZFS support");
 
     // 4. Add archzfs repo on host
-    crate::system::pacman::add_archzfs_repo(runner, None)?;
+    let isa = crate::system::sysinfo::detect_isa_level(runner);
+    crate::system::pacman::add_repositories(runner, None, distro, isa)?;
 
     // 5. Increase cowspace
     increase_cowspace(runner)?;
@@ -262,6 +264,7 @@ mod tests {
 
         initialize_zfs(
             &runner,
+            crate::distro::default(),
             "linux-lts",
             ZfsModuleMode::Precompiled,
             &tokio_util::sync::CancellationToken::new(),

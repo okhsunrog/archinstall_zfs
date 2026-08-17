@@ -109,7 +109,11 @@ impl fmt::Display for ValidationError {
                  leading/trailing hyphen"
             ),
             Self::UnknownKernel(name) => {
-                let known: Vec<&str> = crate::kernel::AVAILABLE_KERNELS
+                // Listed for the default distribution: the message is built
+                // without one to hand, and every distribution's kernels are
+                // its own.
+                let known: Vec<&str> = crate::distro::default()
+                    .kernels
                     .iter()
                     .map(|k| k.name)
                     .collect();
@@ -194,7 +198,7 @@ impl GlobalConfig {
         }
 
         for kernel in self.kernels.iter().flatten() {
-            if crate::kernel::get_kernel_info(kernel).is_none() {
+            if crate::kernel::get_kernel_info(self.distribution(), kernel).is_none() {
                 errors.push(ValidationError::UnknownKernel(kernel.clone()));
             }
         }

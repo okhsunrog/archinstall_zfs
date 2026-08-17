@@ -5,8 +5,15 @@ use super::{MenuItem, MenuKind, radio_group};
 
 pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     let mut items = vec![
+        // Before the kernel: which kernels exist depends on the answer here.
         MenuItem {
-            key: "kernel",
+            key: EditorSetting::Distribution.as_str(),
+            label: "Distribution",
+            value: config.distribution().display_name.to_string(),
+            kind: MenuKind::Custom,
+        },
+        MenuItem {
+            key: EditorSetting::Kernel.as_str(),
             label: "Kernel",
             value: format!(
                 "{} [{}]",

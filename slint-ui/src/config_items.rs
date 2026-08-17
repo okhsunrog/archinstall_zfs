@@ -251,8 +251,17 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
 fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     vec![
         section_header("System"),
+        // Before the kernel row on purpose: which kernels exist is the
+        // distribution's answer, so choosing one first is the order that makes
+        // sense on screen.
         ci(
-            "kernel",
+            EditorSetting::Distribution.as_str(),
+            "Distribution",
+            c.distribution().display_name,
+            ItemType::Select,
+        ),
+        ci(
+            EditorSetting::Kernel.as_str(),
             "Kernel",
             &format!(
                 "{} [{}]",

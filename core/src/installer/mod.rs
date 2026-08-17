@@ -12,7 +12,6 @@ pub mod users;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use alpm::SigLevel;
 use color_eyre::eyre::{Result, bail};
 use tokio_util::sync::CancellationToken;
 
@@ -42,6 +41,11 @@ pub struct InstallRequest {
 struct Installer {
     runner: Arc<dyn CommandRunner>,
     config: GlobalConfig,
+    /// Resolved once: every phase that consults it wants the same answer.
+    distro: &'static crate::distro::Distribution,
+    /// What this machine's processor supports, which decides where a
+    /// distribution's packages come from.
+    isa: crate::system::sysinfo::IsaLevel,
     target: PathBuf,
     cancel: CancellationToken,
     download_progress_tx: Option<Arc<tokio::sync::watch::Sender<DownloadProgress>>>,
@@ -90,6 +94,14 @@ pub fn perform_installation(request: InstallRequest) -> Result<Vec<String>> {
         bail!("installation cancelled");
     }
 
+    // The medium fetches the base system from the distribution's own
+    // repositories, so they have to be configured here rather than in the
+    // phase that installs ZFS: CachyOS's keyring and mirrorlists are part of
+    // its base, and they live in those repositories.
+    let isa = crate::system::sysinfo::detect_isa_level(&*runner);
+    let distro = config.distribution();
+    crate::system::pacman::add_repositories(&*runner, None, distro, isa)?;
+
     tracing::info!("Phase 4: Installing base system...");
     tracing::info!(target: "metrics", event = "phase_start", num = 4u32, name = "Installing base system");
     let target_mounts = base::install_base(
@@ -115,6 +127,8 @@ pub fn perform_installation(request: InstallRequest) -> Result<Vec<String>> {
 
     let mut installer = Installer {
         runner,
+        distro,
+        isa,
         config,
         target,
         cancel,
@@ -258,16 +272,19 @@ impl Installer {
     /// initramfs phase can skip them and the user can be told.
     fn install_zfs_on_target(&mut self) -> Result<()> {
         // Edit pacman.conf and import GPG keys (still needs shell for pacman-key)
-        crate::system::pacman::add_archzfs_repo(&*self.runner, Some(&self.target))?;
-
-        // Register archzfs repo in the live alpm handle and sync
-        let ctx = &mut self.alpm;
-        ctx.register_repo(
-            "archzfs",
-            &["https://github.com/archzfs/archzfs/releases/download/experimental"],
-            SigLevel::PACKAGE_OPTIONAL | SigLevel::DATABASE_OPTIONAL,
+        crate::system::pacman::add_repositories(
+            &*self.runner,
+            Some(&self.target),
+            self.distro,
+            self.isa,
         )?;
-        ctx.sync_databases(true)?;
+
+        // The repositories are already registered: they were written into
+        // pacman.conf before this handle was opened from it. Registering one
+        // again is an error, and doing it here used to be the only way the
+        // handle learned about archzfs at all — from a second copy of its
+        // address and a signature level that disagreed with the file's.
+        self.alpm.sync_databases(true)?;
 
         // zfs-utils is shared by every kernel's module package.
         self.install_target_packages(&["zfs-utils"])?;
@@ -282,7 +299,7 @@ impl Installer {
         let mut failures: Vec<(String, String)> = Vec::new();
 
         for kernel in &kernels {
-            let packages = crate::kernel::zfs_module_packages(kernel, mode);
+            let packages = crate::kernel::zfs_module_packages(self.distro, kernel, mode);
             if packages.is_empty() {
                 failures.push((kernel.clone(), "unknown kernel".to_string()));
                 continue;

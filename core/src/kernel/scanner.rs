@@ -4,6 +4,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use crate::config::types::ZfsModuleMode;
+use crate::distro::Distribution;
 
 /// Result of compatibility check for a single kernel.
 #[derive(Debug, Clone)]
@@ -43,10 +44,10 @@ impl CompatibilityResult {
 /// Scan all known kernels for ZFS compatibility using libalpm.
 /// Queries all packages in a single alpm session to avoid DB lock contention,
 /// then runs DKMS range checks concurrently (HTTP requests).
-pub async fn scan_all_kernels() -> Vec<CompatibilityResult> {
+pub async fn scan_all_kernels(distro: &'static Distribution) -> Vec<CompatibilityResult> {
     // Collect all packages we need to query across all kernels
     let mut all_pkg_names: Vec<&str> = vec!["zfs-dkms", "zfs-utils"];
-    for info in super::AVAILABLE_KERNELS {
+    for info in distro.kernels {
         all_pkg_names.push(info.name);
         if let Some(pre) = info.precompiled_package {
             all_pkg_names.push(pre);
@@ -67,7 +68,8 @@ pub async fn scan_all_kernels() -> Vec<CompatibilityResult> {
         }
         Err(e) => {
             tracing::warn!(error = %e, "alpm query failed, returning fail-open results");
-            return super::AVAILABLE_KERNELS
+            return distro
+                .kernels
                 .iter()
                 .map(|info| CompatibilityResult {
                     kernel_name: info.name.to_string(),
@@ -83,7 +85,8 @@ pub async fn scan_all_kernels() -> Vec<CompatibilityResult> {
     };
 
     // Run DKMS range checks concurrently (they do HTTP requests)
-    let futures: Vec<_> = super::AVAILABLE_KERNELS
+    let futures: Vec<_> = distro
+        .kernels
         .iter()
         .map(|info| scan_kernel_with_versions(info, &versions))
         .collect();
@@ -116,8 +119,8 @@ async fn scan_kernel_with_versions(
 }
 
 /// Scan a single kernel (public API for validate_kernel_zfs_plan).
-pub async fn scan_kernel(kernel: &str) -> CompatibilityResult {
-    let info = match super::get_kernel_info(kernel) {
+pub async fn scan_kernel(distro: &'static Distribution, kernel: &str) -> CompatibilityResult {
+    let info = match super::get_kernel_info(distro, kernel) {
         Some(i) => i,
         None => {
             return CompatibilityResult {
@@ -164,17 +167,19 @@ pub async fn scan_kernel(kernel: &str) -> CompatibilityResult {
 /// Validate a kernel/ZFS plan before installation.
 /// Returns a list of warnings (empty = no issues).
 pub async fn validate_kernel_zfs_plan(
+    distro: &'static Distribution,
     kernel: &str,
     mode: crate::config::types::ZfsModuleMode,
 ) -> Vec<String> {
     let mut warnings = Vec::new();
 
-    let info = match super::get_kernel_info(kernel) {
+    let info = match super::get_kernel_info(distro, kernel) {
         Some(i) => i,
         None => {
             warnings.push(format!(
                 "Unsupported kernel: {kernel}. Supported: {}",
-                super::AVAILABLE_KERNELS
+                distro
+                    .kernels
                     .iter()
                     .map(|k| k.name)
                     .collect::<Vec<_>>()
@@ -193,7 +198,7 @@ pub async fn validate_kernel_zfs_plan(
     }
 
     // Run the full compatibility scan
-    let result = scan_kernel(kernel).await;
+    let result = scan_kernel(distro, kernel).await;
     match mode {
         crate::config::types::ZfsModuleMode::Precompiled => {
             if !result.precompiled_compatible {
@@ -523,7 +528,7 @@ mod tests {
         let versions: HashMap<String, String> = [("linux-lts".into(), "6.12.41-2".into())]
             .into_iter()
             .collect();
-        let info = crate::kernel::get_kernel_info("linux-lts").unwrap();
+        let info = crate::kernel::get_kernel_info(crate::distro::default(), "linux-lts").unwrap();
         let (ok, _ver, warnings) = check_precompiled_compat(info, &versions);
         assert!(!ok);
         assert!(warnings.iter().any(|w| w.contains("not found in repos")));
@@ -639,7 +644,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_plan_invalid_kernel() {
-        let warnings = validate_kernel_zfs_plan("linux-invalid", ZfsModuleMode::Precompiled).await;
+        let warnings = validate_kernel_zfs_plan(
+            crate::distro::default(),
+            "linux-invalid",
+            ZfsModuleMode::Precompiled,
+        )
+        .await;
         assert!(!warnings.is_empty());
         assert!(warnings[0].contains("Unsupported kernel"));
     }
@@ -648,7 +658,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_scan_unknown_kernel() {
-        let result = scan_kernel("linux-nonexistent").await;
+        let result = scan_kernel(crate::distro::default(), "linux-nonexistent").await;
         assert!(!result.dkms_compatible);
         assert!(!result.precompiled_compatible);
         assert!(result.dkms_warnings[0].contains("Unknown kernel"));
@@ -728,7 +738,7 @@ mod tests {
         if !std::path::Path::new("/var/lib/pacman/sync").exists() {
             return;
         }
-        let result = scan_kernel("linux-lts").await;
+        let result = scan_kernel(crate::distro::default(), "linux-lts").await;
         // Should at least not crash and return meaningful data
         assert_eq!(result.kernel_name, "linux-lts");
         tracing::info!(?result, "scan result for linux-lts");

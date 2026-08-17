@@ -64,6 +64,7 @@ macro_rules! settings {
 settings! {
     /// A setting picked from a list of alternatives.
     ChoiceSetting {
+        Distribution => "distribution",
         InstallationMode => "installation_mode",
         Compression => "compression",
         Encryption => "encryption",
@@ -119,6 +120,8 @@ settings! {
     /// what lets both dispatch on a value the compiler checks instead of on a
     /// string literal repeated in two crates.
     EditorSetting {
+        // Also a choice: the row opens a list, and confirming one applies it.
+        Distribution => "distribution",
         Kernel => "kernel",
         Profile => "profile",
         OptionalPackages => "optional_packages",
@@ -153,6 +156,19 @@ pub fn apply_toggle(config: &mut GlobalConfig, setting: ToggleSetting) {
 /// nothing.
 pub fn apply_choice(config: &mut GlobalConfig, setting: ChoiceSetting, index: usize) {
     match setting {
+        ChoiceSetting::Distribution => {
+            let Some(distro) = crate::distro::ALL.get(index) else {
+                return;
+            };
+            if config.distribution != distro.name {
+                // Kernels belong to the distribution that ships them: an Arch
+                // name does not exist in CachyOS's repositories, and the other
+                // way round. Clearing them falls back to the new
+                // distribution's own default.
+                config.kernels = None;
+            }
+            config.distribution = distro.name.to_string();
+        }
         ChoiceSetting::InstallationMode => {
             let Some(mode) = InstallationMode::from_index(index) else {
                 return;
@@ -309,6 +325,46 @@ mod tests {
             DeviceSetting::parse,
         );
         check(TextSetting::ALL, TextSetting::as_str, TextSetting::parse);
+    }
+
+    #[test]
+    fn changing_distribution_drops_a_kernel_that_does_not_exist_in_it() {
+        let mut c = cfg();
+        c.kernels = Some(vec!["linux-lts".to_string()]);
+
+        let cachyos = crate::distro::ALL
+            .iter()
+            .position(|d| d.name == "cachyos")
+            .expect("cachyos is registered");
+        apply_choice(&mut c, ChoiceSetting::Distribution, cachyos);
+
+        assert_eq!(c.distribution, "cachyos");
+        assert!(
+            c.kernels.is_none(),
+            "an Arch kernel cannot be installed here"
+        );
+        assert_eq!(
+            c.primary_kernel(),
+            "linux-cachyos",
+            "the new distribution's own default takes over"
+        );
+    }
+
+    #[test]
+    fn reselecting_the_same_distribution_keeps_the_kernel() {
+        let mut c = cfg();
+        c.kernels = Some(vec!["linux-zen".to_string()]);
+        let arch = crate::distro::ALL
+            .iter()
+            .position(|d| d.name == "arch")
+            .expect("arch is registered");
+
+        apply_choice(&mut c, ChoiceSetting::Distribution, arch);
+
+        assert_eq!(
+            c.kernels.as_deref(),
+            Some(["linux-zen".to_string()].as_slice())
+        );
     }
 
     #[test]

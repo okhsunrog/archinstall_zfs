@@ -21,13 +21,7 @@ pub fn install_base(
         std::sync::Arc<tokio::sync::watch::Sender<crate::system::async_download::DownloadProgress>>,
     >,
 ) -> Result<TargetMounts> {
-    let mut packages: Vec<&str> = vec![
-        "base",
-        "base-devel",
-        "linux-firmware",
-        "linux-firmware-marvell",
-        "sof-firmware",
-    ];
+    let mut packages: Vec<&str> = config.distribution().base_packages.to_vec();
 
     // Add selected kernels
     packages.extend(config.effective_kernels());

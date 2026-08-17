@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use alpm::{Alpm, DownloadEvent, LogLevel, SigLevel, TransFlag};
+use alpm::{Alpm, DownloadEvent, LogLevel, TransFlag};
 use color_eyre::eyre::{Context, Result, bail, eyre};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
@@ -283,25 +283,6 @@ impl AlpmContext {
         Ok(())
     }
 
-    /// Dynamically register an additional repo (e.g., archzfs after config edit).
-    pub fn register_repo(
-        &mut self,
-        name: &str,
-        servers: &[&str],
-        siglevel: SigLevel,
-    ) -> Result<()> {
-        let db = self
-            .handle
-            .register_syncdb_mut(name, siglevel)
-            .map_err(|e| eyre!("failed to register repo '{name}': {e}"))?;
-        for &server in servers {
-            db.add_server(server)
-                .map_err(|e| eyre!("failed to add server to '{name}': {e}"))?;
-        }
-        tracing::info!(name, "registered additional repo");
-        Ok(())
-    }
-
     /// Copy keyring, mirrorlist, and pacman.conf from host to target.
     /// Call this once after the first install transaction.
     pub fn finalize_target(&self) -> Result<()> {
@@ -455,6 +436,20 @@ impl AlpmContext {
             }
         });
     }
+}
+
+/// Install packages from the target's own repositories, for the phases that
+/// run outside the installer's own package handle.
+pub fn install_into_target(
+    target: &Path,
+    packages: &[&str],
+    cancel: &CancellationToken,
+    download_config: DownloadConfig,
+) -> Result<()> {
+    let target_conf = target.join("etc/pacman.conf");
+    let mut ctx = AlpmContext::for_target(target, &target_conf, download_config)?;
+    ctx.sync_databases(false)?;
+    ctx.install_packages(packages, cancel, None)
 }
 
 // ── Target preparation ───────────────────────────────

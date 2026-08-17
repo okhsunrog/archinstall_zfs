@@ -133,11 +133,11 @@ fn setup_select_confirmed(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_
         }
 
         if key == "kernel_select" {
-            let kernels = archinstall_zfs_core::kernel::AVAILABLE_KERNELS;
-            if let Some(info) = kernels.get(idx as usize) {
+            let distro = cfg.borrow().distribution();
+            if let Some(info) = distro.kernels.get(idx as usize) {
                 let mut c = cfg.borrow_mut();
                 c.kernels = Some(vec![info.name.to_string()]);
-                let auto_mode = kscan.with(|cached| {
+                let auto_mode = kscan.with(distro, |cached| {
                     cached
                         .and_then(|results| results.get(idx as usize))
                         .and_then(|r| r.best_mode())
@@ -399,9 +399,11 @@ fn setup_password_strength(app: &App) {
 
 /// Format the cached/fresh kernel scan results as user-facing strings.
 fn build_kernel_options(
+    distro: &'static archinstall_zfs_core::distro::Distribution,
     results: &[archinstall_zfs_core::kernel::scanner::CompatibilityResult],
 ) -> Vec<String> {
-    archinstall_zfs_core::kernel::AVAILABLE_KERNELS
+    distro
+        .kernels
         .iter()
         .zip(results.iter())
         .map(|(info, result)| {
@@ -451,21 +453,43 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
     };
 
     match setting {
+        EditorSetting::Distribution => {
+            let names: Vec<&str> = archinstall_zfs_core::distro::ALL
+                .iter()
+                .map(|distro| distro.display_name)
+                .collect();
+            let current = archinstall_zfs_core::distro::ALL
+                .iter()
+                .position(|distro| distro.name == config.distribution)
+                .unwrap_or(0);
+            show_select(
+                app,
+                ChoiceSetting::Distribution.as_str(),
+                "Distribution",
+                &names,
+                current as i32,
+            );
+        }
         EditorSetting::Kernel => {
             // Use the cached scan results if available; otherwise block-scan now.
             let fresh: Vec<archinstall_zfs_core::kernel::scanner::CompatibilityResult>;
-            let options =
-                if let Some(opts) = kernel_scan.with(|cached| cached.map(build_kernel_options)) {
-                    opts
-                } else {
-                    let rt = tokio::runtime::Handle::current();
-                    fresh = rt.block_on(archinstall_zfs_core::kernel::scanner::scan_all_kernels());
-                    build_kernel_options(&fresh)
-                };
+            let distro = config.distribution();
+            let options = if let Some(opts) = kernel_scan.with(distro, |cached| {
+                cached.map(|r| build_kernel_options(distro, r))
+            }) {
+                opts
+            } else {
+                let rt = tokio::runtime::Handle::current();
+                fresh = rt.block_on(archinstall_zfs_core::kernel::scanner::scan_all_kernels(
+                    distro,
+                ));
+                build_kernel_options(distro, &fresh)
+            };
 
             let opt_refs: Vec<&str> = options.iter().map(|s| s.as_str()).collect();
             let current_kernel = config.primary_kernel();
-            let current_idx = archinstall_zfs_core::kernel::AVAILABLE_KERNELS
+            let current_idx = distro
+                .kernels
                 .iter()
                 .position(|k| k.name == current_kernel)
                 .unwrap_or(0);

@@ -213,8 +213,12 @@ async fn install(
     }
     tracing::info!("UEFI boot detected");
 
-    for warning in
-        crate::kernel::scanner::validate_kernel_zfs_plan(&kernel, config.zfs_module_mode).await
+    for warning in crate::kernel::scanner::validate_kernel_zfs_plan(
+        config.distribution(),
+        &kernel,
+        config.zfs_module_mode,
+    )
+    .await
     {
         tracing::warn!("kernel compatibility: {warning}");
     }
@@ -226,10 +230,18 @@ async fn install(
         let runner = runner.clone();
         let kernel = kernel.clone();
         let zfs_mode = config.zfs_module_mode;
+        let distro = config.distribution();
         let cancel = cancel.clone();
         let download_config = download_config.clone();
         tokio::task::spawn_blocking(move || {
-            crate::zfs_setup::initialize_zfs(&*runner, &kernel, zfs_mode, &cancel, download_config)
+            crate::zfs_setup::initialize_zfs(
+                &*runner,
+                distro,
+                &kernel,
+                zfs_mode,
+                &cancel,
+                download_config,
+            )
         })
         .await??;
     }
@@ -320,6 +332,7 @@ async fn install(
     crate::bootmenu::install_and_generate_zbm(
         runner.clone(),
         &mountpoint,
+        config.distribution(),
         config.init_system,
         &cancel,
         download_config,

@@ -220,14 +220,14 @@ pub async fn pick_kernel(
     config: &GlobalConfig,
     terminal: &mut ratatui::DefaultTerminal,
 ) -> Result<Option<(String, ZfsModuleMode)>> {
-    use archinstall_zfs_core::kernel::AVAILABLE_KERNELS;
     use archinstall_zfs_core::kernel::scanner::scan_all_kernels;
 
-    let results = scan_all_kernels().await;
+    let distro = config.distribution();
+    let results = scan_all_kernels(distro).await;
 
     let mut options = Vec::new();
     let mut selectable: Vec<(usize, &str, ZfsModuleMode)> = Vec::new();
-    for (i, (info, result)) in AVAILABLE_KERNELS.iter().zip(&results).enumerate() {
+    for (i, (info, result)) in distro.kernels.iter().zip(&results).enumerate() {
         let ver = result.kernel_version.as_deref().unwrap_or("?");
         if let Some(mode) = result.best_mode() {
             options.push(format!(
