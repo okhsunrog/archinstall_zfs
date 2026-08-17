@@ -1,20 +1,8 @@
 use std::path::Path;
 
-use color_eyre::eyre::{Result, bail};
+use color_eyre::eyre::Result;
 
 use super::cmd::CommandRunner;
-
-pub fn wait_for_db_lock(_runner: &dyn CommandRunner) -> Result<()> {
-    let lock_path = Path::new("/var/lib/pacman/db.lck");
-    for _ in 0..60 {
-        if !lock_path.exists() {
-            return Ok(());
-        }
-        tracing::info!("pacman db.lck exists, waiting...");
-        std::thread::sleep(std::time::Duration::from_secs(10));
-    }
-    bail!("pacman db.lck not released after 10 minutes");
-}
 
 /// KNOWN GAP: `SigLevel = Never` means archzfs packages — kernel modules —
 /// are installed without signature verification, with only the sync DB's

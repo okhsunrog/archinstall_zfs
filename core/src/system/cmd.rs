@@ -1,7 +1,5 @@
-use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::mpsc::Sender;
 
 use color_eyre::eyre::{Context, Result, bail};
 
@@ -22,9 +20,6 @@ pub trait CommandRunner: Send + Sync {
     fn run(&self, program: &str, args: &[&str]) -> Result<CmdOutput>;
 
     fn run_with_stdin(&self, program: &str, args: &[&str], stdin: &[u8]) -> Result<CmdOutput>;
-
-    fn run_streaming(&self, program: &str, args: &[&str], tx: &Sender<String>)
-    -> Result<CmdOutput>;
 }
 
 pub struct RealRunner;
@@ -96,47 +91,6 @@ impl CommandRunner for RealRunner {
         }
         Ok(result)
     }
-
-    fn run_streaming(
-        &self,
-        program: &str,
-        args: &[&str],
-        tx: &Sender<String>,
-    ) -> Result<CmdOutput> {
-        tracing::debug!(program, ?args, "running command (streaming)");
-        let mut child = Command::new(program)
-            .args(args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .wrap_err_with(|| format!("failed to spawn: {program}"))?;
-
-        let stdout = child.stdout.take().expect("stdout was piped");
-        let reader = BufReader::new(stdout);
-        let mut all_stdout = String::new();
-
-        for line in reader.lines() {
-            let line = line.wrap_err("failed to read stdout line")?;
-            let _ = tx.send(line.clone());
-            all_stdout.push_str(&line);
-            all_stdout.push('\n');
-        }
-
-        let output = child
-            .wait_with_output()
-            .wrap_err("failed to wait on child")?;
-
-        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-        if !stderr.is_empty() {
-            let _ = tx.send(format!("[stderr] {stderr}"));
-        }
-
-        Ok(CmdOutput {
-            stdout: all_stdout,
-            stderr,
-            exit_code: output.status.code().unwrap_or(-1),
-        })
-    }
 }
 
 pub fn chroot(runner: &dyn CommandRunner, target: &Path, cmd: &str) -> Result<CmdOutput> {
@@ -172,16 +126,6 @@ pub fn shell_quote(s: &str) -> String {
     }
     // Wrap in single quotes, escaping any embedded single quotes
     format!("'{}'", s.replace('\'', "'\\''"))
-}
-
-pub fn chroot_streaming(
-    runner: &dyn CommandRunner,
-    target: &Path,
-    cmd: &str,
-    tx: &Sender<String>,
-) -> Result<CmdOutput> {
-    let target_str = target.to_string_lossy();
-    runner.run_streaming("arch-chroot", &[&*target_str, "bash", "-c", cmd], tx)
 }
 
 pub fn check_exit(output: &CmdOutput, context: &str) -> Result<()> {
@@ -258,24 +202,6 @@ pub mod tests {
 
         fn run_with_stdin(&self, program: &str, args: &[&str], _stdin: &[u8]) -> Result<CmdOutput> {
             self.run(program, args)
-        }
-
-        fn run_streaming(
-            &self,
-            program: &str,
-            args: &[&str],
-            tx: &Sender<String>,
-        ) -> Result<CmdOutput> {
-            self.record(program, args);
-            let resp = self.next_response();
-            for line in resp.stdout.lines() {
-                let _ = tx.send(line.to_string());
-            }
-            Ok(CmdOutput {
-                stdout: resp.stdout,
-                stderr: resp.stderr,
-                exit_code: resp.exit_code,
-            })
         }
     }
 

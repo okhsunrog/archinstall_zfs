@@ -66,7 +66,10 @@ impl GlobalConfig {
         Ok(())
     }
 
-    pub fn to_json_string(&self) -> Result<String> {
+    /// Serialize including every password. Private on purpose: the only
+    /// caller is the redacting path below, and an accidental public use is a
+    /// secret written somewhere it should not be.
+    fn to_json_string(&self) -> Result<String> {
         serde_json::to_string_pretty(self).wrap_err("failed to serialize config")
     }
 
@@ -127,14 +130,6 @@ impl GlobalConfig {
             }
         }
     }
-
-    pub fn to_combined_json(&self) -> Result<String> {
-        let value = serde_json::to_value(self).wrap_err("failed to serialize config")?;
-        let combined = serde_json::json!({
-            ZFS_CONFIG_KEY: value
-        });
-        serde_json::to_string_pretty(&combined).wrap_err("failed to serialize combined config")
-    }
 }
 
 fn write_private_file(path: &Path, contents: &str, description: &str) -> Result<()> {
@@ -173,22 +168,6 @@ mod tests {
         let cfg = GlobalConfig::load_from_str(json).unwrap();
         assert_eq!(cfg.installation_mode, Some(InstallationMode::NewPool));
         assert_eq!(cfg.pool_name.as_deref(), Some("zfsroot"));
-    }
-
-    #[test]
-    fn test_to_combined_json() {
-        let cfg = GlobalConfig {
-            pool_name: Some("mypool".to_string()),
-            ..Default::default()
-        };
-
-        let json = cfg.to_combined_json().unwrap();
-        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(value.get("archinstall_zfs").is_some());
-        assert_eq!(
-            value["archinstall_zfs"]["pool_name"].as_str(),
-            Some("mypool")
-        );
     }
 
     #[test]
