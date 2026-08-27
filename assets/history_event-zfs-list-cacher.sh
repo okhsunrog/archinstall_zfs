@@ -12,20 +12,42 @@
 # Installed by the installer and marked immutable to avoid overwrites by zfs package updates.
 
 import os
+import re
 import sys
 import subprocess
 import fcntl
+import syslog
 import tempfile
 
-# Set to True to trace every history event to /tmp/zed_debug.log. Off by
-# default: this hook runs on every ZFS history event, so leaving it enabled
-# grows an unrotated file in /tmp for the life of the system.
+# Logging goes to syslog/journald under the identifier "zfs-list-cacher"
+# (read it with `journalctl -t zfs-list-cacher`). One summary line is emitted
+# per history event. Per-step tracing is enabled by ZED_LIST_CACHER_DEBUG=1 in
+# /etc/zfs/zed.d/zed.rc — zed does not export zed.rc to non-shell zedlets, so
+# it is parsed here — or by flipping DEBUG below.
 DEBUG = False
+ZED_RC = '/etc/zfs/zed.d/zed.rc'
+
+def debug_enabled():
+    if DEBUG or os.environ.get('ZED_LIST_CACHER_DEBUG') == '1':
+        return True
+    try:
+        with open(ZED_RC) as f:
+            for line in f:
+                if re.match(r'\s*ZED_LIST_CACHER_DEBUG\s*=\s*["\']?1["\']?\s*$', line):
+                    return True
+    except OSError:
+        pass
+    return False
+
+syslog.openlog('zfs-list-cacher', facility=syslog.LOG_DAEMON)
+_DEBUG = debug_enabled()
 
 def log(message):
-    if DEBUG:
-        with open('/tmp/zed_debug.log', 'a') as log:
-            log.write(f"{message}\n")
+    if _DEBUG:
+        syslog.syslog(syslog.LOG_DEBUG, message)
+
+def info(message):
+    syslog.syslog(syslog.LOG_INFO, message)
 
 def get_current_root():
     """Find the current root ZFS dataset using multiple methods"""
@@ -149,14 +171,17 @@ def filter_datasets(datasets, current_be, boot_envs):
     return filtered
 
 def write_cache(datasets, cache_file, pool):
-    """Replace the cache file atomically, and only if the content changed."""
+    """Replace the cache file atomically, and only if the content changed.
+
+    Returns True when the file was rewritten, False when it was already current.
+    """
     new_content = ''.join('\t'.join(dataset) + '\n' for dataset in datasets)
 
     try:
         with open(cache_file, 'r') as f:
             if f.read() == new_content:
                 log("Cache content unchanged, leaving file alone")
-                return
+                return False
     except FileNotFoundError:
         log("No existing cache file, creating new one")
     except OSError as exc:
@@ -177,6 +202,7 @@ def write_cache(datasets, cache_file, pool):
             os.fsync(f.fileno())
         os.chmod(tmp_file, 0o644)
         os.replace(tmp_file, cache_file)
+        return True
     except BaseException:
         # Never leave a partial cache behind for zfs-mount-generator to read.
         try:
@@ -186,7 +212,7 @@ def write_cache(datasets, cache_file, pool):
         raise
 
 def main():
-    log("\n=== New ZED cache update started ===")
+    log("=== New ZED cache update started ===")
 
     if os.environ.get('ZEVENT_SUBCLASS') != 'history_event':
         log("Not a history event, exiting")
@@ -200,7 +226,7 @@ def main():
 
     cache_file = f"/etc/zfs/zfs-list.cache/{pool}"
     if not os.access(cache_file, os.W_OK):
-        log("Cache file not writable, exiting")
+        info(f"pool={pool}: {cache_file} missing or not writable, cache not maintained")
         sys.exit(0)
 
     # Lock a dedicated file rather than the cache itself: the cache is now
@@ -213,7 +239,7 @@ def main():
 
         current_root = get_current_root()
         if not current_root:
-            log("Could not determine current root dataset, exiting")
+            info(f"pool={pool}: could not determine the current root dataset, cache left unchanged")
             sys.exit(0)
 
         current_be = current_root.rsplit('/', 1)[0]
@@ -221,20 +247,25 @@ def main():
 
         all_datasets = get_dataset_props(pool)
         if all_datasets is None:
-            log("Could not enumerate datasets, leaving cache unchanged")
+            info(f"pool={pool}: could not enumerate datasets, cache left unchanged")
             sys.exit(0)
         log(f"Found {len(all_datasets)} total datasets")
 
         boot_envs = find_boot_environments(pool)
         if boot_envs is None:
-            log("Could not identify boot environments, leaving cache unchanged")
+            info(f"pool={pool}: could not identify boot environments, cache left unchanged")
             sys.exit(0)
         log(f"Identified boot environments: {boot_envs}")
 
         filtered_datasets = filter_datasets(all_datasets, current_be, boot_envs)
         log(f"Writing {len(filtered_datasets)} datasets to cache")
+        for dataset in filtered_datasets:
+            log(f"  keep {dataset[0]} mountpoint={dataset[1]} canmount={dataset[2]}")
 
-        write_cache(filtered_datasets, cache_file, pool)
+        changed = write_cache(filtered_datasets, cache_file, pool)
+        info(f"pool={pool} be={current_be} boot_envs={len(boot_envs)} "
+             f"datasets={len(filtered_datasets)}/{len(all_datasets)} "
+             f"cache={'rewritten' if changed else 'unchanged'}")
 
     finally:
         fcntl.flock(lock_file, fcntl.LOCK_UN)
