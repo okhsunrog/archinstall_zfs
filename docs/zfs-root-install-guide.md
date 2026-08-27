@@ -798,6 +798,36 @@ done
 Note what is **absent**: `zfs-import-cache.service` (we chose `cachefile=none`) and
 `zfs-mount.service` (mounting is handled by `zfs-mount-generator`).
 
+`zfs-mount.service` is not merely redundant — it is harmful on a multi-BE pool.
+It runs `zfs mount -a`, which mounts *every* `canmount=on` dataset in the pool,
+including the other boot environments' `/home`, `/root`, `/var/lib/docker`… It
+creates their mountpoint directories inside the running BE and, where a
+directory is empty, succeeds. `overlay=off` only stops the ones that collide with
+something already mounted.
+
+**Disabling it once is not enough.** The distro's preset (`50-zfs.preset` ships
+`enable zfs-mount.service`) is re-applied by `systemd-preset` on every "first
+boot" — and a system whose `/etc/machine-id` is missing, empty or still reads
+`uninitialized` is on its first boot *every time*, because the ID is only
+committed once a boot completes. An installation that never got that far
+re-enables the service on each attempt. Pin the decision so presets cannot undo
+it, and give the target a machine ID before its first boot:
+
+```bash
+cat > /mnt/etc/systemd/system-preset/00-zfs-mount-generator.preset <<'EOF'
+disable zfs-mount.service
+disable zfs-share.service
+disable zfs-import-cache.service
+enable zfs-import-scan.service
+EOF
+systemd-machine-id-setup --root=/mnt      # refuses to touch "uninitialized": rm it first
+```
+
+Preset files are read in lexical order across `/etc` and `/usr/lib`, first match
+wins, so `00-` beats the distro's `50-zfs.preset`. The installer writes this file
+from the same lists it enables units from (`zfs_setup::zfs_preset_policy`,
+installed by `zfs_target_files::write_zfs_preset`), so the two cannot drift apart.
+
 ### `zfs-list.cache` and the boot-environment-aware ZED hook
 
 `zfs-mount-generator(8)` is a systemd generator that runs *before* the pool is

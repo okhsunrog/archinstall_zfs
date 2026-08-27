@@ -152,6 +152,21 @@ pub fn install_zed_cache_hook(runner: &dyn CommandRunner, target: &Path) -> Resu
     Ok(())
 }
 
+/// Install the systemd preset that pins the ZFS unit policy on the target.
+/// See [`crate::zfs_setup::zfs_preset_policy`] for why enabling the units
+/// once is not enough.
+pub fn write_zfs_preset(target: &Path) -> Result<()> {
+    let path = target.join(crate::zfs_setup::ZFS_PRESET_PATH);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .wrap_err_with(|| format!("failed to create preset dir: {}", parent.display()))?;
+    }
+    fs::write(&path, crate::zfs_setup::zfs_preset_policy())
+        .wrap_err_with(|| format!("failed to write ZFS preset: {}", path.display()))?;
+    tracing::info!(path = %path.display(), "installed ZFS systemd preset");
+    Ok(())
+}
+
 pub fn copy_misc_files(
     runner: &dyn CommandRunner,
     target: &Path,
@@ -227,6 +242,19 @@ mod tests {
     #[test]
     fn test_rewrite_cache_mountpoints_empty_input() {
         assert_eq!(rewrite_cache_mountpoints("", Path::new("/mnt")), "");
+    }
+
+    #[test]
+    fn test_write_zfs_preset() {
+        let dir = tempfile::tempdir().unwrap();
+        write_zfs_preset(dir.path()).unwrap();
+
+        let path = dir
+            .path()
+            .join("etc/systemd/system-preset/00-zfs-mount-generator.preset");
+        let content = fs::read_to_string(&path).unwrap();
+        assert_eq!(content, crate::zfs_setup::zfs_preset_policy());
+        assert!(content.ends_with('\n'));
     }
 
     #[test]

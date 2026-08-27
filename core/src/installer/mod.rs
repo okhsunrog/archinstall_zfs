@@ -687,10 +687,13 @@ impl Installer {
     fn finalize_zfs(&self) -> Result<()> {
         let be = self.boot_environment();
 
-        // Enable ZFS services
+        // Enable ZFS services, and pin that choice against presets — a
+        // first boot or `systemctl preset-all` would otherwise re-enable
+        // zfs-mount.service from the package's own preset.
         for service in crate::zfs_setup::ZFS_SERVICES {
             services::enable_service(&*self.runner, &self.target, service)?;
         }
+        crate::zfs_target_files::write_zfs_preset(&self.target)?;
 
         // TRIM strategy is configured outside Installer — it doesn't depend
         // on Alpm and is async (zfskit set_property). See

@@ -15,6 +15,58 @@ pub const ZFS_SERVICES: &[&str] = &[
     "zfs-zed.service",
 ];
 
+/// Units the installed system must keep disabled.
+///
+/// * `zfs-mount.service` runs `zfs mount -a`, which mounts every `canmount=on`
+///   dataset in the pool — including the other boot environments' `/home`,
+///   `/root`, … — inside the running one. Mounting is done by
+///   `zfs-mount-generator` from `zfs-list.cache`, which the ZED hook restricts
+///   to the booted BE.
+/// * `zfs-import-cache.service` needs `/etc/zfs/zpool.cache`; pools are created
+///   with `cachefile=none` and imported by `zfs-import-scan.service` instead.
+/// * `zfs-share.service` exports NFS/SMB shares nobody configured.
+pub const ZFS_DISABLED_SERVICES: &[&str] = &[
+    "zfs-mount.service",
+    "zfs-share.service",
+    "zfs-import-cache.service",
+];
+
+/// Where the preset policy is installed on the target. The `00-` prefix makes
+/// it sort before the ZFS package's `50-zfs.preset`; presets are matched first
+/// line wins across `/etc` and `/usr/lib`, so this file overrides it.
+pub const ZFS_PRESET_PATH: &str = "etc/systemd/system-preset/00-zfs-mount-generator.preset";
+
+/// The `systemd.preset(5)` policy matching [`ZFS_SERVICES`] and
+/// [`ZFS_DISABLED_SERVICES`].
+///
+/// `systemctl enable` at install time decides the state once; presets decide
+/// it again whenever systemd is asked to — `systemctl preset-all`, a package's
+/// post-install `systemctl preset`, and every "first boot" (a missing, empty or
+/// `uninitialized` `/etc/machine-id`). The stock `50-zfs.preset` enables
+/// `zfs-mount.service` and disables `zfs-import-scan.service`, so any of those
+/// events would silently undo the installer's choices. Pinning the policy here
+/// keeps them in force.
+pub fn zfs_preset_policy() -> String {
+    let mut out = String::from(
+        "# Written by archinstall_zfs. Mounting is handled by zfs-mount-generator from\n\
+         # /etc/zfs/zfs-list.cache; zfs-mount.service would also mount the datasets of\n\
+         # other boot environments sharing this pool. The pool has cachefile=none, so\n\
+         # it is imported by scanning. Sorts before the package's 50-zfs.preset; the\n\
+         # first matching line wins.\n",
+    );
+    for unit in ZFS_DISABLED_SERVICES {
+        out.push_str("disable ");
+        out.push_str(unit);
+        out.push('\n');
+    }
+    for unit in ZFS_SERVICES {
+        out.push_str("enable ");
+        out.push_str(unit);
+        out.push('\n');
+    }
+    out
+}
+
 pub fn load_zfs_module(runner: &dyn CommandRunner) -> Result<bool> {
     let output = runner.run("modprobe", &["zfs"])?;
     Ok(output.success())
@@ -219,6 +271,42 @@ pub fn initialize_zfs(
 mod tests {
     use super::*;
     use crate::system::cmd::tests::{CannedResponse, RecordingRunner};
+
+    /// The preset is derived from the same lists the installer enables from,
+    /// so it can only disagree with `systemctl enable` if a unit lands in both
+    /// lists — presets are "first match wins", and that would decide silently.
+    #[test]
+    fn zfs_preset_policy_matches_the_service_lists() {
+        for unit in ZFS_DISABLED_SERVICES {
+            assert!(
+                !ZFS_SERVICES.contains(unit),
+                "{unit} is both enabled and disabled"
+            );
+        }
+
+        let policy = zfs_preset_policy();
+        let directives: Vec<&str> = policy.lines().filter(|l| !l.starts_with('#')).collect();
+        assert_eq!(
+            directives.len(),
+            ZFS_SERVICES.len() + ZFS_DISABLED_SERVICES.len()
+        );
+        for unit in ZFS_DISABLED_SERVICES {
+            assert!(directives.contains(&format!("disable {unit}").as_str()));
+        }
+        for unit in ZFS_SERVICES {
+            assert!(directives.contains(&format!("enable {unit}").as_str()));
+        }
+    }
+
+    /// These two are the whole point: the package's 50-zfs.preset says the
+    /// opposite for both of them.
+    #[test]
+    fn zfs_preset_policy_overrides_the_package_defaults() {
+        let policy = zfs_preset_policy();
+        assert!(policy.contains("disable zfs-mount.service\n"));
+        assert!(policy.contains("enable zfs-import-scan.service\n"));
+        assert!(ZFS_PRESET_PATH.starts_with("etc/systemd/system-preset/00-"));
+    }
 
     #[test]
     fn test_load_zfs_module() {
