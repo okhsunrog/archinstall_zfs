@@ -379,6 +379,57 @@ cannot mount '/home': directory is not empty
 (`dataset_layout::mount_datasets_ordered` propagates it). A loud failure you can
 fix beats a silent one you discover months later.
 
+#### Early writers — who fills a mountpoint before it is mounted
+
+`overlay=off` only *detects* pollution; it does not prevent it. Until a child
+dataset is mounted, its mountpoint is an ordinary directory on the parent dataset
+(`/root` lives on `zroot/arch0/root`), and anything root-owned that runs before
+`local-fs.target` can drop files there. On an installed system the window is small
+but real, and it is not empty:
+
+* **systemd generators** run inside PID 1 *before any unit exists*, so no
+  `Before=`/`After=` ordering can put a mount ahead of them. A real case:
+  flatpak's `system-environment-generators/60-flatpak-system-only` (flatpak 1.18)
+  runs `flatpak --print-updated-env`, which creates `$XDG_CACHE_HOME` — with no
+  `HOME` set that resolves to `/root/.cache` — on every boot. With `overlay=on` this
+  was hidden for months; with `overlay=off` it is
+  `root.mount: … directory is not empty`. Fix: an `/etc/systemd/system-environment-generators/`
+  override of the same name that exports `XDG_CACHE_HOME=/run/flatpak-envgen-cache`
+  before exec'ing the original command (or mask it with a `/dev/null` symlink).
+* Units with `DefaultDependencies=no` that start alongside `sysinit.target`.
+* Post-mount writers that only matter once the mount has already failed:
+  systemd's own `tmpfiles.d/provision.conf` (`/root/.ssh`), a display manager's X
+  server running as root (`/root/.cache/mesa_shader_cache`).
+
+Diagnosing this from the journal is misleading: journald is restarted after
+switch-root, so every message from the generator phase carries the same
+timestamp. Use the file system and the manager's own clocks instead:
+
+```sh
+stat -c '%w %n' /root/.cache                  # birth time of the stray entry
+systemctl show -p GeneratorsStartTimestampMonotonic \
+                 -p GeneratorsFinishTimestampMonotonic
+systemctl show '*' -p Id,InactiveExitTimestampMonotonic   # per-unit start times
+# then strace the suspects with HOME unset, as PID 1 runs them:
+env -i PATH=/usr/bin strace -f -e trace=%file /usr/lib/systemd/system-environment-generators/NAME
+```
+
+The general defence is to make the underlying directories themselves refuse
+writes: `chattr +i` on the parent dataset's mountpoint directories. Mounting over
+an immutable directory works, `mkdir`/`creat` inside it fails with `EPERM`, and the
+flag lives in the inode, so it survives snapshots, rollbacks, clones into new BEs
+and `zfs send`. On a running system the parent's view is reachable through a bind
+mount:
+
+```sh
+mount --bind / /mnt/parent
+chattr +i /mnt/parent/{root,home,vm,var/lib/docker}    # must be empty first
+umount /mnt/parent
+```
+
+Remember to `chattr -i` before deleting or moving a mountpoint, and that each BE
+has its own set of directories on its own root dataset.
+
 ### `canmount=noauto` on `.../root`
 
 This is the property that makes multiple boot environments possible. Every BE's
@@ -1295,6 +1346,18 @@ Constant everywhere:
 The one genuinely distro-shaped decision is **`rootprefix`**, because it depends on
 which initramfs generator parses the command line, not on the distro name. Get it
 from the initramfs you actually built, not from the distro's reputation.
+
+Gentoo specifics learned the hard way:
+
+* `sys-apps/systemd` is built **without** `USE=cryptsetup` by default. Then there is
+  no `systemd-cryptsetup` and no `systemd-cryptsetup-generator`, `/etc/crypttab` is
+  silently ignored, and an `fstab` swap on `/dev/mapper/cryptswap` stalls boot for
+  the 90 s device timeout. Set `sys-apps/systemd cryptsetup` in `package.use`
+  before the first boot (and use `nofail,x-systemd.device-timeout=15s` on the swap
+  line regardless).
+* The `50-zfs.preset` / first-boot trap from [§14](#zfs-services) applies verbatim.
+* `sys-fs/zfs dist-kernel` in `package.use` keeps the module and the dracut image in
+  step with `gentoo-kernel` upgrades.
 
 ---
 
