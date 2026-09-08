@@ -65,6 +65,8 @@ pub fn setup(
     // One pump for the process, fed by the global subscriber. It starts here
     // rather than per installation so nothing emitted before or between runs
     // is lost, and so the receiver is not re-created behind the layer's back.
+    app.global::<InstallState>()
+        .set_log_messages(ModelRc::new(VecModel::<LogMessage>::default()));
     spawn_log_pump(app, log_rx);
 
     let active_cancel = Arc::new(Mutex::new(None::<CancellationToken>));
