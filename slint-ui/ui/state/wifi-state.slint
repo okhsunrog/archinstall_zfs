@@ -2,7 +2,7 @@
 // wifi popup / welcome-screen corner widget.
 //
 // The Rust controller (`slint-ui/src/controllers/wifi.rs`) owns the
-// async work — scanning, connecting, waiting for DHCP, subscribing to
+// async work — scanning, connecting, verifying internet access, subscribing to
 // iwd's `PropertiesChanged` signals — and pushes results here via
 // `upgrade_in_event_loop`. The Slint side only reads state and emits
 // user-intent callbacks.
@@ -17,6 +17,7 @@
 //   auth ──cancel-pick──▶ picking
 //   connecting ──iwd-ok──▶ verifying
 //   verifying ──online──▶ connected
+//   verifying ──timeout──▶ no-internet (Wi-Fi remains connected)
 //   * ──error──▶ error
 //   * ──close()──▶ idle  (controller aborts in-flight tasks)
 //
@@ -55,10 +56,10 @@ export global WifiState {
 
     // ── Status / feedback ──────────────────────────────────────────────
     // Free-form status line shown during scanning / connecting /
-    // verifying. Short, e.g. "Scanning on wlan0…" or "Waiting for DHCP…".
+    // verifying. Short, e.g. "Scanning on wlan0…" or "Checking internet access…".
     in property <string> status-text;
 
-    // Non-empty when phase == error. The popup shows this inline.
+    // Non-empty for error / no-internet. The popup shows this inline.
     in property <string> error-text;
 
     // ── Live connection info ───────────────────────────────────────────

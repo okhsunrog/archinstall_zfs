@@ -203,8 +203,10 @@ async fn install(
     // ── Phase 0: Pre-installation checks ───────────────────────
     tracing::info!("Phase 0: Pre-installation checks");
 
-    if !crate::system::net::check_internet() {
-        bail!("No internet connectivity. Connect to the network and retry.");
+    if !crate::system::net::check_internet().await {
+        bail!(
+            "Could not verify internet access via ping.archlinux.org. Check your connection, DNS or captive portal and retry."
+        );
     }
     tracing::info!("Internet connectivity OK");
 

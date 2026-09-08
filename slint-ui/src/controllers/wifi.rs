@@ -40,7 +40,7 @@ pub fn setup(app: &App) {
     setup_cancel_pick(app);
     setup_submit_password(app, in_flight.clone());
     setup_forget(app);
-    setup_disconnect(app);
+    setup_disconnect(app, in_flight.clone());
     setup_connect_hidden(app, in_flight);
 }
 
@@ -201,9 +201,10 @@ fn setup_forget(app: &App) {
     });
 }
 
-fn setup_disconnect(app: &App) {
+fn setup_disconnect(app: &App, in_flight: InFlight) {
     let weak = app.as_weak();
     app.global::<WifiState>().on_disconnect(move || {
+        abort_in_flight(&in_flight);
         let weak2 = weak.clone();
         tokio::spawn(async move {
             let _ = wifi::disconnect().await;
@@ -211,6 +212,7 @@ fn setup_disconnect(app: &App) {
                 let s = app.global::<WifiState>();
                 s.set_current_ssid(SharedString::default());
                 s.set_phase(WifiPhase::Picking);
+                app.global::<WelcomeState>().invoke_check_internet();
             });
         });
     });
@@ -314,9 +316,8 @@ fn start_connect(app: &App, in_flight: InFlight, ssid: String, passphrase: Optio
     });
 }
 
-/// Shared post-connect verification: on success, move to Verifying,
-/// wait ~4s for DHCP, then check the internet. On failure, move to
-/// Error.
+/// Association and internet access are separate states. Retry the HTTP probe
+/// while addresses, routes and DNS settle; never infer a DHCP failure from it.
 async fn drive_post_connect(
     weak: &slint::Weak<App>,
     ssid: String,
@@ -325,27 +326,30 @@ async fn drive_post_connect(
 ) {
     match result {
         Ok(()) => {
-            let weak2 = weak.clone();
-            let _ = weak2.upgrade_in_event_loop(|app| {
+            let ssid_connected = ssid.clone();
+            let phase_token = token.clone();
+            let _ = weak.upgrade_in_event_loop(move |app| {
+                if phase_token.is_cancelled() {
+                    return;
+                }
                 let s = app.global::<WifiState>();
+                s.set_current_ssid(SharedString::from(ssid_connected));
                 s.set_phase(WifiPhase::Verifying);
-                s.set_status_text(SharedString::from("Waiting for IP address…"));
+                s.set_status_text(SharedString::from("Checking internet access…"));
             });
 
-            // Wait for DHCP — cancellable.
-            let sleep = tokio::time::sleep(Duration::from_secs(4));
-            tokio::select! {
+            let online = tokio::select! {
+                biased;
                 _ = token.cancelled() => return,
-                _ = sleep => {}
-            }
-
-            let online = tokio::task::spawn_blocking(net::check_internet)
-                .await
-                .unwrap_or(false);
+                online = net::wait_for_internet(Duration::from_secs(20)) => online,
+            };
 
             if online {
                 let ssid_final = ssid.clone();
                 let _ = weak.upgrade_in_event_loop(move |app| {
+                    if token.is_cancelled() {
+                        return;
+                    }
                     let s = app.global::<WifiState>();
                     s.set_phase(WifiPhase::Connected);
                     s.set_current_ssid(SharedString::from(ssid_final));
@@ -359,18 +363,23 @@ async fn drive_post_connect(
                     app.global::<WelcomeState>().invoke_check_internet();
                 });
             } else {
-                let _ = weak.upgrade_in_event_loop(|app| {
+                let _ = weak.upgrade_in_event_loop(move |app| {
+                    if token.is_cancelled() { return; }
                     let s = app.global::<WifiState>();
-                    s.set_phase(WifiPhase::Error);
+                    s.set_phase(WifiPhase::NoInternet);
                     s.set_error_text(SharedString::from(
-                        "Connected to the network, but no IP address was assigned (DHCP timeout).",
+                        "Wi-Fi connected, but internet access could not be verified via ping.archlinux.org. Check network settings or sign in to the network.",
                     ));
+                    app.global::<WelcomeState>().invoke_check_internet();
                 });
             }
         }
         Err(e) => {
             let msg = e.to_string();
             let _ = weak.upgrade_in_event_loop(move |app| {
+                if token.is_cancelled() {
+                    return;
+                }
                 let s = app.global::<WifiState>();
                 s.set_phase(WifiPhase::Error);
                 s.set_error_text(SharedString::from(msg));

@@ -173,9 +173,9 @@ pub async fn scan_networks() -> Result<Vec<WifiNetwork>, WifiError> {
 /// Connect to `ssid` by triggering iwd's connect flow and providing
 /// `passphrase` via a registered one-shot agent.
 ///
-/// For open networks `passphrase` may be `None`. For secured networks
-/// `passphrase` must be `Some(...)`; omitting it returns
-/// `WifiError::PassphraseRequired`.
+/// Saved networks reuse iwd's credentials when `passphrase` is `None`.
+/// Unknown secured networks require a passphrase. An already-connected
+/// network is left connected, including when it was joined through iwctl.
 ///
 /// Returns once iwd reports the connect call complete — success means
 /// the station reached the Connected state at layer 2. Callers that
@@ -189,13 +189,24 @@ pub async fn connect(ssid: &str, passphrase: Option<String>) -> Result<(), WifiE
         .await?
         .ok_or_else(|| WifiError::NetworkNotFound(ssid.to_string()))?;
 
+    if network.connected().await.map_err(WifiError::Dbus)? {
+        return Ok(());
+    }
+
     let security: Security = network
         .network_type()
         .await
         .map(Security::from)
         .unwrap_or(Security::Open);
 
-    if security.requires_passphrase() && passphrase.is_none() {
+    if security.requires_passphrase()
+        && passphrase.is_none()
+        && network
+            .known_network()
+            .await
+            .map_err(WifiError::Dbus)?
+            .is_none()
+    {
         return Err(WifiError::PassphraseRequired(ssid.to_string()));
     }
 

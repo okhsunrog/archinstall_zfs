@@ -25,9 +25,7 @@ pub async fn run_wifi_setup(
 ) -> color_eyre::eyre::Result<bool> {
     // ── 1. Already online ───────────────────────────────────────────────────
     terminal.draw(render_checking)?;
-    // net::check_internet is still sync (quick TCP probe); keep spawn_blocking
-    // so the TUI event loop isn't stalled waiting on DNS / connect timeouts.
-    let online = tokio::task::spawn_blocking(net::check_internet).await?;
+    let online = net::check_internet().await;
     if online {
         return Ok(false);
     }
@@ -45,7 +43,7 @@ pub async fn run_wifi_setup(
     // ── 4. Ask user ─────────────────────────────────────────────────────────
     let result = run_select(
         terminal,
-        "No network connection detected",
+        "Could not verify internet access via ping.archlinux.org",
         &["Connect to WiFi", "Skip (continue without network)"],
         0,
     )?;
@@ -162,12 +160,9 @@ pub async fn run_wifi_setup(
             }
         }
 
-        // ── 9. Verify — wait for DHCP / IP assignment ───────────────────────
-        terminal.draw(|frame| render_status(frame, "Waiting for IP address…"))?;
-        tokio::time::sleep(std::time::Duration::from_secs(4)).await;
-
-        // Full internet reachability check (not just layer-2 association).
-        let online = tokio::task::spawn_blocking(net::check_internet).await?;
+        // ── 9. Verify — allow addresses, routes and DNS to settle ───────────
+        terminal.draw(|frame| render_status(frame, "Checking internet access…"))?;
+        let online = net::wait_for_internet(std::time::Duration::from_secs(20)).await;
         if online {
             let _ = run_select(
                 terminal,
@@ -179,17 +174,17 @@ pub async fn run_wifi_setup(
             return Ok(true);
         }
 
-        // IP not assigned yet — let the user decide
+        // Association succeeded; a failed HTTP probe does not diagnose DHCP.
         let result = run_select(
             terminal,
-            "Connected but no IP address assigned yet",
+            "WiFi connected, but internet access could not be verified. Check DNS or captive portal.",
             &["Wait and retry", "Continue anyway", "Skip WiFi"],
             0,
         )?;
         match result.selected {
             Some(0) => {
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                let online = tokio::task::spawn_blocking(net::check_internet).await?;
+                terminal.draw(|frame| render_status(frame, "Checking internet access…"))?;
+                let online = net::wait_for_internet(std::time::Duration::from_secs(20)).await;
                 if online {
                     return Ok(true);
                 }

@@ -523,7 +523,7 @@ export component WifiPopup inherits Rectangle {
                         text: WifiState.status-text != ""
                             ? WifiState.status-text
                             : (WifiState.phase == WifiPhase.verifying
-                                ? "Waiting for IP address…"
+                                ? "Checking internet access…"
                                 : "Connecting…");
                         color: Theme.c.subtext0;
                         font-size: Theme.font-base;
@@ -564,7 +564,8 @@ export component WifiPopup inherits Rectangle {
                 }
 
                 // — error — failure + retry actions —
-                if WifiState.phase == WifiPhase.error: VerticalLayout {
+                if WifiState.phase == WifiPhase.error
+                    || WifiState.phase == WifiPhase.no-internet: VerticalLayout {
                     alignment: center;
                     spacing: Theme.spacing-md;
 
@@ -580,7 +581,8 @@ export component WifiPopup inherits Rectangle {
                     }
 
                     Text {
-                        text: "Connection failed";
+                        text: WifiState.phase == WifiPhase.no-internet
+                            ? "Internet access not verified" : "Connection failed";
                         color: Theme.c.red;
                         font-size: Theme.font-lg;
                         font-weight: 600;
@@ -601,6 +603,7 @@ export component WifiPopup inherits Rectangle {
             // ───────────────── FOOTER (phase-driven buttons) ─────────────────
             if WifiState.phase == WifiPhase.auth
                 || WifiState.phase == WifiPhase.error
+                || WifiState.phase == WifiPhase.no-internet
                 || WifiState.phase == WifiPhase.connected: HorizontalLayout {
                     height: Theme.control-height;
                     alignment: end;
@@ -620,19 +623,22 @@ export component WifiPopup inherits Rectangle {
                 }
 
                 // Error phase: Back to the last list, or run a fresh scan.
-                if WifiState.phase == WifiPhase.error: StyledButton {
+                if WifiState.phase == WifiPhase.error
+                    || WifiState.phase == WifiPhase.no-internet: StyledButton {
                     label: "Back";
                     style: Theme.button-default;
                     clicked => { WifiState.cancel-pick(); }
                 }
-                if WifiState.phase == WifiPhase.error: StyledButton {
+                if WifiState.phase == WifiPhase.error
+                    || WifiState.phase == WifiPhase.no-internet: StyledButton {
                     label: "Rescan";
                     style: Theme.button-primary;
                     clicked => { WifiState.rescan(); }
                 }
 
                 // Connected phase: Disconnect button for quick access
-                if WifiState.phase == WifiPhase.connected: StyledButton {
+                if WifiState.phase == WifiPhase.connected
+                    || WifiState.phase == WifiPhase.no-internet: StyledButton {
                     label: "Disconnect";
                     style: Theme.button-default;
                     clicked => { WifiState.disconnect(); }
