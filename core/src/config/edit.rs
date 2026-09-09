@@ -175,6 +175,11 @@ pub fn apply_choice(config: &mut GlobalConfig, setting: ChoiceSetting, index: us
             };
             // Devices chosen under one mode mean nothing under another.
             if config.installation_mode != Some(mode) {
+                if mode == InstallationMode::ExistingPool
+                    || config.installation_mode == Some(InstallationMode::ExistingPool)
+                {
+                    config.pool_name = None;
+                }
                 config.disk = None;
                 config.efi_partition = None;
                 config.zfs_partition = None;
@@ -378,6 +383,22 @@ mod tests {
         assert_eq!(c.installation_mode, Some(InstallationMode::NewPool));
         assert!(c.disk.is_none());
         assert!(c.efi_partition.is_none());
+    }
+
+    #[test]
+    fn an_existing_pool_name_is_not_reused_as_a_new_pool_name() {
+        let mut c = cfg();
+        apply_choice(&mut c, ChoiceSetting::InstallationMode, 0);
+        c.pool_name = Some("newpool".into());
+        apply_choice(&mut c, ChoiceSetting::InstallationMode, 1);
+        assert_eq!(c.pool_name.as_deref(), Some("newpool"));
+        apply_choice(&mut c, ChoiceSetting::InstallationMode, 2);
+        assert!(c.pool_name.is_none());
+        c.pool_name = Some("existing".into());
+        apply_choice(&mut c, ChoiceSetting::InstallationMode, 2);
+        assert_eq!(c.pool_name.as_deref(), Some("existing"));
+        apply_choice(&mut c, ChoiceSetting::InstallationMode, 0);
+        assert!(c.pool_name.is_none());
     }
 
     #[test]
