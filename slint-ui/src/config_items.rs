@@ -2,81 +2,22 @@
 //! coming back from radio/select/text widgets to the canonical `GlobalConfig`.
 
 use slint::SharedString;
-use std::path::PathBuf;
 
 use archinstall_zfs_core::config::choices::Choice;
-use archinstall_zfs_core::config::edit::{
-    ChoiceSetting, DeviceSetting, EditorSetting, TextSetting,
-};
+use archinstall_zfs_core::config::edit::{ChoiceSetting, EditorSetting, TextSetting};
 use archinstall_zfs_core::config::types::{
-    CompressionAlgo, GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode,
+    GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode,
 };
-use archinstall_zfs_core::disk::device::DeviceChoice;
 
 use crate::ui::{ConfigItem, ItemType};
+#[cfg(test)]
+use archinstall_zfs_core::config::edit::DeviceSetting;
 
 pub const TOTAL_STEPS: usize = 7;
 
 pub const STEP_LABELS: [&str; TOTAL_STEPS] = [
     "Welcome", "Disk", "ZFS", "System", "Users", "Desktop", "Review",
 ];
-
-#[derive(Debug, Clone)]
-struct ChoiceRow {
-    path: PathBuf,
-    label: String,
-    icon: String,
-    model: String,
-    serial: String,
-    size: String,
-    transport: String,
-    media: String,
-    removable: bool,
-    persistent_path: String,
-    persistent_kind: String,
-    group_label: String,
-    group_model: String,
-    group_serial: String,
-    group_size: String,
-    group_transport: String,
-    group_media: String,
-    group_removable: bool,
-}
-
-impl From<DeviceChoice> for ChoiceRow {
-    fn from(choice: DeviceChoice) -> Self {
-        Self {
-            path: choice.path,
-            label: choice.label,
-            icon: choice.icon,
-            model: choice.model,
-            serial: choice.serial,
-            size: choice.size,
-            transport: choice.transport,
-            media: choice.media,
-            removable: choice.removable,
-            persistent_path: choice.persistent_path,
-            persistent_kind: choice.persistent_kind,
-            group_label: choice.group_label,
-            group_model: choice.group_model,
-            group_serial: choice.group_serial,
-            group_size: choice.group_size,
-            group_transport: choice.group_transport,
-            group_media: choice.group_media,
-            group_removable: choice.group_removable,
-        }
-    }
-}
-
-impl ChoiceRow {
-    fn group_key(&self) -> &str {
-        if self.group_label.is_empty() {
-            self.label.as_str()
-        } else {
-            self.group_label.as_str()
-        }
-    }
-}
 
 // ── Per-step item building ──────────────────────────
 
@@ -101,161 +42,244 @@ fn build_welcome_items(_c: &GlobalConfig) -> Vec<ConfigItem> {
 }
 
 fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
-    let mode = c.installation_mode;
-
-    let mut items = choice_group(
-        ChoiceSetting::InstallationMode,
-        "Installation mode",
-        mode.unwrap_or(InstallationMode::FullDisk),
-    );
-    for (row, description) in items
-        .iter_mut()
-        .filter(|row| row.item_type == ItemType::RadioOption)
-        .zip([
-            "Erase the selected disk and create a ZFS root pool",
-            "Create a ZFS pool using existing partitions",
-            "Install into an existing ZFS pool",
-        ])
-    {
-        row.description = description.into();
-    }
-
-    if matches!(mode, Some(InstallationMode::FullDisk) | None) {
-        let disks = disk_choices();
-        let selected = c
-            .disk
-            .as_ref()
-            .and_then(|sel| disks.iter().position(|choice| &choice.path == sel))
-            .map(|i| i as i32)
-            .unwrap_or(-1);
-        items.extend(radio_choice_group(
-            DeviceSetting::Disk,
-            "Disk",
-            &disks,
-            selected,
-        ));
-    }
-
-    if matches!(
-        mode,
-        Some(InstallationMode::NewPool) | Some(InstallationMode::ExistingPool)
-    ) {
-        let parts = partition_choices();
-
-        let efi_selected = c
-            .efi_partition
-            .as_ref()
-            .and_then(|sel| parts.iter().position(|choice| &choice.path == sel))
-            .map(|i| i as i32)
-            .unwrap_or(-1);
-        items.extend(radio_partition_choice_group(
-            DeviceSetting::EfiPartition,
-            "EFI partition",
-            &parts,
-            efi_selected,
-        ));
-
-        if matches!(mode, Some(InstallationMode::NewPool)) {
-            let zfs_selected = c
-                .zfs_partition
-                .as_ref()
-                .and_then(|sel| parts.iter().position(|choice| &choice.path == sel))
-                .map(|i| i as i32)
-                .unwrap_or(-1);
-            items.extend(radio_partition_choice_group(
-                DeviceSetting::ZfsPartition,
-                "ZFS partition",
-                &parts,
-                zfs_selected,
-            ));
+    let mut items = vec![section_header("Storage assignments")];
+    match c.installation_mode {
+        Some(InstallationMode::FullDisk) => {
+            items.push(storage_item("disk", "Disk to erase", c.disk.as_deref(), c))
         }
+        Some(InstallationMode::NewPool) | Some(InstallationMode::ExistingPool) => {
+            if c.installation_mode == Some(InstallationMode::ExistingPool) {
+                items.push(ConfigItem {
+                    key: "storage:pool".into(),
+                    label: "Existing ZFS pool".into(),
+                    value: c.pool_name.as_deref().unwrap_or("Choose a pool").into(),
+                    description: "Create a new boot environment in this pool".into(),
+                    item_type: ItemType::Storage,
+                    is_empty: c.pool_name.is_none(),
+                    ..Default::default()
+                });
+            }
+            items.push(storage_item(
+                "efi_partition",
+                "EFI boot partition",
+                c.efi_partition.as_deref(),
+                c,
+            ));
+            if c.installation_mode == Some(InstallationMode::NewPool) {
+                items.push(storage_item(
+                    "zfs_partition",
+                    "New ZFS pool",
+                    c.zfs_partition.as_deref(),
+                    c,
+                ));
+            }
+        }
+        None => {}
     }
-
     items
 }
 
+fn storage_item(
+    role: &str,
+    label: &str,
+    selected: Option<&std::path::Path>,
+    c: &GlobalConfig,
+) -> ConfigItem {
+    let choices = crate::storage::choices(role);
+    let choice = selected.and_then(|p| choices.iter().find(|d| d.path == p));
+    let consequence = match role {
+        "disk"
+            if matches!(
+                c.swap_mode,
+                SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
+            ) =>
+        {
+            "Erase all partitions; create EFI, ZFS and swap partitions"
+        }
+        "disk" => "Erase all partitions; create EFI and ZFS partitions",
+        "efi_partition" => "Reuse filesystem; write bootloader files",
+        "zfs_partition" => "Replace this partition's contents with a new ZFS pool",
+        _ => "Replace this partition's contents with swap",
+    };
+    let mut item = ConfigItem {
+        key: format!("storage:{role}").into(),
+        label: label.into(),
+        value: choice
+            .map(|d| d.label.clone())
+            .or_else(|| selected.map(|p| p.display().to_string()))
+            .unwrap_or_else(|| "Choose a device".into())
+            .into(),
+        description: consequence.into(),
+        destructive: role != "efi_partition",
+        item_type: ItemType::Storage,
+        is_empty: selected.is_none(),
+        ..Default::default()
+    };
+    if let Some(d) = choice {
+        item.detail_model = format!("{}  {}  {}", d.model, d.usage.filesystem, d.usage.label)
+            .trim()
+            .into();
+        item.detail_size = d.size.clone().into();
+        item.persistent_path = d.path.display().to_string().into();
+        let blocked = crate::storage::unavailable(d, role, c);
+        if !blocked.is_empty() {
+            item.description = format!("Unavailable: {blocked}").into();
+            item.destructive = true;
+        }
+    }
+    item
+}
+
+fn inline_text(key: TextSetting, label: &str, value: &str, description: &str) -> ConfigItem {
+    ConfigItem {
+        key: key.as_str().into(),
+        label: label.into(),
+        value: value.into(),
+        description: description.into(),
+        item_type: ItemType::InlineText,
+        ..Default::default()
+    }
+}
+fn compact_choice<T: Choice>(
+    key: ChoiceSetting,
+    label: &str,
+    current: T,
+    description: &str,
+) -> ConfigItem {
+    ConfigItem {
+        key: key.as_str().into(),
+        label: label.into(),
+        value: T::labels()[current.index()].into(),
+        choices: slint::ModelRc::new(slint::VecModel::from(
+            T::labels()
+                .into_iter()
+                .map(SharedString::from)
+                .collect::<Vec<_>>(),
+        )),
+        choice_index: current.index() as i32,
+        description: description.into(),
+        item_type: ItemType::CompactChoice,
+        ..Default::default()
+    }
+}
 fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
-    let mode = c.installation_mode;
-    let has_swap_partition = matches!(
-        c.swap_mode,
-        SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-    );
-
-    let mut items = vec![
-        section_header("Pool"),
-        ci_opt(
-            TextSetting::PoolName.as_str(),
-            "Pool name",
-            c.pool_name.as_deref(),
-            ItemType::Text,
+    let mut items = vec![section_header("Pool and boot environment")];
+    if c.installation_mode == Some(InstallationMode::ExistingPool) {
+        items.push(ConfigItem {
+            key: "storage:pool".into(),
+            label: "Existing pool".into(),
+            value: c.pool_name.as_deref().unwrap_or("Choose a pool").into(),
+            description: "Select the existing pool; its name will not be changed".into(),
+            is_empty: c.pool_name.is_none(),
+            item_type: ItemType::Storage,
+            ..Default::default()
+        });
+    } else {
+        items.push(inline_text(
+            TextSetting::PoolName,
+            "New pool name",
+            c.pool_name.as_deref().unwrap_or(""),
+            "",
+        ));
+    }
+    items.push(inline_text(
+        TextSetting::DatasetPrefix,
+        "Boot environment",
+        &c.dataset_prefix,
+        &format!(
+            "Create {}",
+            archinstall_zfs_core::boot_environment::BootEnvironment::new(
+                c.pool_name.as_deref().unwrap_or("?"),
+                &c.dataset_prefix
+            )
+            .base()
         ),
-        ci(
-            TextSetting::DatasetPrefix.as_str(),
-            "Dataset prefix",
-            &c.dataset_prefix,
-            ItemType::Text,
-        ),
-    ];
-
-    items.extend(choice_group_with_off(
-        ChoiceSetting::Compression,
-        "Compression",
-        c.compression,
-        CompressionAlgo::Off,
     ));
-
-    items.extend(choice_group(
+    items.push(section_header("Data protection"));
+    let mut encryption = compact_choice(
         ChoiceSetting::Encryption,
         "Encryption",
         c.zfs_encryption_mode,
-    ));
-
+        if c.installation_mode == Some(InstallationMode::ExistingPool) {
+            "Use the existing pool passphrase, or give the new boot environment its own encryption."
+        } else {
+            "Encrypt the entire pool, or just this boot environment."
+        },
+    );
+    if c.installation_mode == Some(InstallationMode::ExistingPool) {
+        let labels = [
+            "No additional encryption",
+            "Unlock encrypted pool",
+            "Encrypt new boot environment",
+        ];
+        encryption.choices = slint::ModelRc::new(slint::VecModel::from(
+            labels
+                .into_iter()
+                .map(SharedString::from)
+                .collect::<Vec<_>>(),
+        ));
+        encryption.value = labels[c.zfs_encryption_mode.index()].into();
+    }
+    items.push(encryption);
     if c.zfs_encryption_mode != ZfsEncryptionMode::None {
-        items.push(ci_opt(
-            TextSetting::EncryptionPassword.as_str(),
-            "Encryption password",
-            c.zfs_encryption_password.as_ref().map(|_| "Set"),
-            ItemType::Password,
-        ));
+        items.push(ConfigItem {
+            key: TextSetting::EncryptionPassword.as_str().into(),
+            label: "Encryption passphrase".into(),
+            value: if c.zfs_encryption_password.is_some() {
+                "Set — enter to replace"
+            } else {
+                "Required"
+            }
+            .into(),
+            description:
+                "At least 8 characters. Keep a copy: a lost passphrase cannot be recovered.".into(),
+            item_type: ItemType::InlinePassword,
+            ..Default::default()
+        });
     }
-
-    items.extend(choice_group_with_off(
+    items.push(section_header("Swap"));
+    items.push(compact_choice(
         ChoiceSetting::SwapMode,
-        "Swap",
+        "Swap method",
         c.swap_mode,
-        SwapMode::None,
+        "ZRAM uses compressed RAM. A swap partition uses disk space.",
     ));
-
-    if matches!(mode, Some(InstallationMode::FullDisk)) && has_swap_partition {
-        items.push(ci_opt(
-            TextSetting::SwapPartitionSize.as_str(),
-            "Swap size",
-            c.swap_partition_size.as_deref(),
-            ItemType::Text,
-        ));
+    if matches!(
+        c.swap_mode,
+        SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
+    ) {
+        if c.installation_mode == Some(InstallationMode::FullDisk) {
+            items.push(inline_text(
+                TextSetting::SwapPartitionSize,
+                "Swap size",
+                c.swap_partition_size.as_deref().unwrap_or(""),
+                "Created on the selected disk, for example 8G",
+            ));
+        } else {
+            items.push(storage_item(
+                "swap_partition",
+                "Swap partition",
+                c.swap_partition.as_deref(),
+                c,
+            ));
+        }
     }
-    if !matches!(mode, Some(InstallationMode::FullDisk) | None) && has_swap_partition {
-        let parts = partition_choices();
-        let swap_selected = c
-            .swap_partition
-            .as_ref()
-            .and_then(|sel| parts.iter().position(|choice| &choice.path == sel))
-            .map(|i| i as i32)
-            .unwrap_or(-1);
-        items.extend(radio_choice_group(
-            DeviceSetting::SwapPartition,
-            "Swap partition",
-            &parts,
-            swap_selected,
-        ));
-    }
-
-    items.extend(choice_group(
+    let mut compression = compact_choice(
+        ChoiceSetting::Compression,
+        "Compression",
+        c.compression,
+        "lz4 prioritizes speed; zstd levels trade CPU time for compression.",
+    );
+    compression.advanced = true;
+    items.push(compression);
+    let mut init = compact_choice(
         ChoiceSetting::InitSystem,
-        "Init system",
+        "Initramfs generator",
         c.init_system,
-    ));
-
+        "Builds the early boot image used to load the system.",
+    );
+    init.advanced = true;
+    items.push(init);
     items
 }
 
@@ -511,11 +535,64 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
 
 fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     let mut items = Vec::new();
+    let mut errors: Vec<String> = c
+        .validate_for_install()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    errors.extend(crate::storage::issues(c));
+    if !errors.is_empty() {
+        items.push(section_header("Complete setup before installing"));
+        for error in errors {
+            items.push(ConfigItem {
+                value: error.to_string().into(),
+                item_type: ItemType::Warning,
+                ..Default::default()
+            });
+        }
+    }
+    let mut storage_header = section_header("Storage changes during installation");
+    storage_header.key = "edit:1".into();
+    items.push(storage_header);
+    for mut item in build_disk_items(c)
+        .into_iter()
+        .filter(|i| i.item_type == ItemType::Storage)
+    {
+        item.key = "".into();
+        items.push(item);
+    }
+    if c.installation_mode != Some(InstallationMode::FullDisk)
+        && matches!(
+            c.swap_mode,
+            SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
+        )
+    {
+        let mut item = storage_item(
+            "swap_partition",
+            "Swap partition",
+            c.swap_partition.as_deref(),
+            c,
+        );
+        item.key = "".into();
+        items.push(item);
+    }
+    items.push(ConfigItem {
+        label: "Boot environment".into(),
+        value: archinstall_zfs_core::boot_environment::BootEnvironment::new(
+            c.pool_name.as_deref().unwrap_or("?"),
+            &c.dataset_prefix,
+        )
+        .base()
+        .into(),
+        description: "Create this environment and its child datasets".into(),
+        item_type: ItemType::Readonly,
+        ..Default::default()
+    });
 
-    for (step, &label) in STEP_LABELS.iter().enumerate().take(TOTAL_STEPS - 1).skip(1) {
-        // Each step becomes a section in the review screen.
-        items.push(section_header(label));
-
+    for (step, &label) in STEP_LABELS.iter().enumerate().take(TOTAL_STEPS - 1).skip(2) {
+        let mut header = section_header(label);
+        header.key = format!("edit:{step}").into();
+        items.push(header);
         let step_items = build_step_items(step, c);
         let mut i = 0;
         while i < step_items.len() {
@@ -576,7 +653,7 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                         ..Default::default()
                     });
                 }
-                ItemType::SectionHeader => {
+                ItemType::SectionHeader | ItemType::Storage => {
                     // Visual section divider — the step-level header above
                     // already groups things on the review screen, so the
                     // inner divider would just produce an empty Readonly
@@ -587,7 +664,15 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                     items.push(ConfigItem {
                         key: item.key.clone(),
                         label: item.label.clone(),
-                        value: item.value.clone(),
+                        value: if item.item_type == ItemType::InlinePassword {
+                            if c.zfs_encryption_password.is_some() {
+                                "Set".into()
+                            } else {
+                                "Required".into()
+                            }
+                        } else {
+                            item.value.clone()
+                        },
                         description: item.description.clone(),
                         item_type: ItemType::Readonly,
                         is_empty: item.is_empty,
@@ -596,18 +681,6 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                     i += 1;
                 }
             }
-        }
-    }
-
-    let errors = c.validate_for_install();
-    if !errors.is_empty() {
-        items.push(section_header("Validation"));
-        for error in &errors {
-            items.push(ConfigItem {
-                value: error.to_string().into(),
-                item_type: ItemType::Warning,
-                ..Default::default()
-            });
         }
     }
 
@@ -672,27 +745,6 @@ fn section_header(label: &str) -> ConfigItem {
     }
 }
 
-/// Emit a radio group: a `RadioHeader` followed by clickable `RadioOption`
-/// rows. The header is a distinct `ItemType` from a plain `SectionHeader`
-/// so the review screen knows to collapse the header + options into one
-/// summary row, while bare section headers (used as visual dividers) get
-/// dropped in review entirely.
-fn radio_group(key: &str, label: &str, options: &[&str], selected: i32) -> Vec<ConfigItem> {
-    radio_group_inner(key, label, options, selected, None)
-}
-
-/// Build a radio group from a [`Choice`] enum, so the order, the labels and
-/// the selected index all come from one table rather than being spelled out
-/// here and inverted again in [`apply_radio`].
-fn choice_group<T: Choice>(setting: ChoiceSetting, label: &str, current: T) -> Vec<ConfigItem> {
-    radio_group(
-        setting.as_str(),
-        label,
-        &T::labels(),
-        current.index() as i32,
-    )
-}
-
 /// [`choice_group`] for lists with a semantic "off" alternative, named by
 /// value rather than by index.
 fn choice_group_with_off<T: Choice>(
@@ -753,112 +805,6 @@ fn radio_group_inner(
     items
 }
 
-fn radio_choice_group(
-    setting: DeviceSetting,
-    label: &str,
-    options: &[ChoiceRow],
-    selected: i32,
-) -> Vec<ConfigItem> {
-    let mut items = vec![ConfigItem {
-        label: label.into(),
-        item_type: ItemType::RadioHeader,
-        ..Default::default()
-    }];
-    for (i, option) in options.iter().enumerate() {
-        items.push(ConfigItem {
-            key: device_key(setting, &option.path),
-            label: option.label.as_str().into(),
-            icon: option.icon.as_str().into(),
-            detail_model: option.model.as_str().into(),
-            detail_serial: option.serial.as_str().into(),
-            detail_size: option.size.as_str().into(),
-            detail_transport: option.transport.as_str().into(),
-            detail_media: option.media.as_str().into(),
-            is_removable: option.removable,
-            persistent_path: option.persistent_path.as_str().into(),
-            persistent_kind: option.persistent_kind.as_str().into(),
-            group_label: option.group_label.as_str().into(),
-            group_model: option.group_model.as_str().into(),
-            group_serial: option.group_serial.as_str().into(),
-            group_size: option.group_size.as_str().into(),
-            group_transport: option.group_transport.as_str().into(),
-            group_media: option.group_media.as_str().into(),
-            group_removable: option.group_removable,
-            value: if i as i32 == selected {
-                "selected".into()
-            } else {
-                SharedString::default()
-            },
-            item_type: ItemType::RadioOption,
-            ..Default::default()
-        });
-    }
-    items
-}
-
-fn radio_partition_choice_group(
-    setting: DeviceSetting,
-    label: &str,
-    options: &[ChoiceRow],
-    selected: i32,
-) -> Vec<ConfigItem> {
-    let mut items = vec![ConfigItem {
-        label: label.into(),
-        item_type: ItemType::RadioHeader,
-        ..Default::default()
-    }];
-    let mut current_group = "";
-
-    for (i, option) in options.iter().enumerate() {
-        let group_key = option.group_key();
-        if group_key != current_group {
-            current_group = group_key;
-            items.push(ConfigItem {
-                label: option.group_key().into(),
-                icon: "hard-drive".into(),
-                detail_model: option.group_model.as_str().into(),
-                detail_serial: option.group_serial.as_str().into(),
-                detail_size: option.group_size.as_str().into(),
-                detail_transport: option.group_transport.as_str().into(),
-                detail_media: option.group_media.as_str().into(),
-                is_removable: option.group_removable,
-                item_type: ItemType::RadioSubheader,
-                ..Default::default()
-            });
-        }
-
-        items.push(ConfigItem {
-            key: device_key(setting, &option.path),
-            label: option.label.as_str().into(),
-            detail_size: option.size.as_str().into(),
-            persistent_path: option.persistent_path.as_str().into(),
-            persistent_kind: option.persistent_kind.as_str().into(),
-            group_label: option.group_label.as_str().into(),
-            group_model: option.group_model.as_str().into(),
-            group_serial: option.group_serial.as_str().into(),
-            group_size: option.group_size.as_str().into(),
-            group_transport: option.group_transport.as_str().into(),
-            group_media: option.group_media.as_str().into(),
-            group_removable: option.group_removable,
-            value: if i as i32 == selected {
-                "selected".into()
-            } else {
-                SharedString::default()
-            },
-            item_type: ItemType::RadioOption,
-            ..Default::default()
-        });
-    }
-    items
-}
-
-// ── Section boundary marking ────────────────────────
-
-/// Walk a list of items after it's built and set `is_first_in_section` /
-/// `is_last_in_section` on each field row, based on adjacent SectionHeaders
-/// and Separators. Field types (text/select/password/toggle/radio-option/
-/// readonly) are part of section cards; everything else is a standalone
-/// element and gets neither flag set.
 fn mark_section_boundaries(items: &mut [ConfigItem]) {
     fn is_field(t: ItemType) -> bool {
         matches!(
@@ -901,7 +847,8 @@ pub fn next_selectable_index(items: &[ConfigItem], current: i32, dir: i32) -> i3
     for offset in 1..=len {
         let idx = ((current + dir * offset) % len + len) % len;
         let t = items[idx as usize].item_type;
-        if t != ItemType::Separator
+        if !(t == ItemType::Storage && items[idx as usize].key.is_empty())
+            && t != ItemType::Separator
             && t != ItemType::Readonly
             && t != ItemType::Warning
             && t != ItemType::SectionHeader
@@ -926,32 +873,9 @@ pub fn next_selectable_index(items: &[ConfigItem], current: i32, dir: i32) -> i3
 /// it. For a screen whose next step erases the chosen disk, selecting by
 /// identity rather than by position is the only version that is safe to be
 /// wrong about.
+#[cfg(test)]
 fn device_key(setting: DeviceSetting, path: &std::path::Path) -> SharedString {
     format!("device:{}:{}", setting.as_str(), path.display()).into()
-}
-
-fn disk_choices() -> Vec<ChoiceRow> {
-    if crate::preview::enabled() {
-        return crate::preview::disks()
-            .into_iter()
-            .map(ChoiceRow::from)
-            .collect();
-    }
-    archinstall_zfs_core::disk::device::disk_choices()
-        .map(|choices| choices.into_iter().map(ChoiceRow::from).collect())
-        .unwrap_or_default()
-}
-
-fn partition_choices() -> Vec<ChoiceRow> {
-    if crate::preview::enabled() {
-        return crate::preview::partitions()
-            .into_iter()
-            .map(ChoiceRow::from)
-            .collect();
-    }
-    archinstall_zfs_core::disk::device::partition_choices()
-        .map(|choices| choices.into_iter().map(ChoiceRow::from).collect())
-        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -1132,5 +1056,54 @@ mod tests {
         mark_section_boundaries(&mut items);
         assert!(items[0].is_first_in_section);
         assert!(items[0].is_last_in_section);
+    }
+}
+
+#[cfg(test)]
+mod storage_design_tests {
+    use super::*;
+    #[test]
+    fn assignments_do_not_expand_device_catalogues() {
+        for mode in [
+            InstallationMode::FullDisk,
+            InstallationMode::NewPool,
+            InstallationMode::ExistingPool,
+        ] {
+            let c = GlobalConfig {
+                installation_mode: Some(mode),
+                ..Default::default()
+            };
+            let items = build_disk_items(&c);
+            assert!(!items.iter().any(|i| matches!(
+                i.item_type,
+                ItemType::RadioOption | ItemType::RadioSubheader
+            )));
+            assert_eq!(
+                items
+                    .iter()
+                    .filter(|i| i.item_type == ItemType::Storage)
+                    .count(),
+                if mode == InstallationMode::FullDisk {
+                    1
+                } else {
+                    2
+                }
+            );
+        }
+    }
+    #[test]
+    fn review_uses_canonical_environment_path_and_never_copies_passphrases() {
+        let c = GlobalConfig {
+            installation_mode: Some(InstallationMode::NewPool),
+            pool_name: Some("tank".into()),
+            dataset_prefix: "newbe".into(),
+            zfs_encryption_mode: ZfsEncryptionMode::Dataset,
+            zfs_encryption_password: Some("do-not-display-this".into()),
+            ..Default::default()
+        };
+        let items = build_review_items(&c);
+        assert!(items.iter().any(|i| i.value == "tank/newbe"));
+        assert!(!items.iter().any(|i| i.value.contains("do-not-display")));
+        assert!(items.iter().any(|i| i.item_type == ItemType::Warning));
     }
 }

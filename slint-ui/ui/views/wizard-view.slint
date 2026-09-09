@@ -1,3 +1,7 @@
+import { StorageState } from "../state/storage-state.slint";
+import { SetupRow } from "../components/setup-row.slint";
+import { StorageMode } from "../components/storage-mode.slint";
+import { ItemType } from "../types.slint";
 // Wizard config screen — title bar, sidebar with step list, content area
 // with the per-step ConfigItemRow list, and a footer with Quit / Back / Next.
 
@@ -12,6 +16,7 @@ import { StyledButton } from "../components/styled-button.slint";
 
 export component WizardView inherits Rectangle {
     callback item-activated(string);
+    callback inline-edited(string, string);
     callback toggle-activated(string);
     callback install-requested();
     callback quit-requested();
@@ -29,7 +34,7 @@ export component WizardView inherits Rectangle {
     background: Theme.c.mantle;
 
     // Wizard-local FocusScope: handles arrow / j / k / Enter for the items
-    // list. Global shortcuts (Tab/Backtab/q/1–7) live in the App root scope
+    // list. Global shortcuts (q/1–7) live in the App root scope
     // and pick up events that this scope rejects.
     wizard-focus-scope := FocusScope {
         x: 0;
@@ -42,7 +47,7 @@ export component WizardView inherits Rectangle {
             && !PopupState.pkg-search-visible
             && !PopupState.multi-select-visible
             && !PopupState.wifi-visible
-            && !DemoState.popup-visible;
+            && !DemoState.popup-visible && !StorageState.visible;
 
         key-pressed(event) => {
             if event.text == Key.DownArrow || event.text == "j" {
@@ -63,6 +68,14 @@ export component WizardView inherits Rectangle {
     }
 
     init => { wizard-focus-scope.focus(); }
+    reveal-settings := Timer {
+        interval: 1ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            items-scroll.content-y = min(0px, items-scroll.height - settings-content.height);
+        }
+    }
 
     VerticalLayout {
         width: min(root.width, 1280px);
@@ -139,11 +152,11 @@ export component WizardView inherits Rectangle {
                     Text {
                         text: WizardState.current-step < WizardState.step-labels.length
                             ? WizardState.step-labels[WizardState.current-step] : "";
-                        color: Theme.c.mauve;
-                        font-size: 18px;
+                        color: Theme.c.text;
+                        font-size: 24px;
                         font-weight: FontWeight.semi-bold;
                         vertical-alignment: center;
-                        height: 32px;
+                        height: 40px;
                     }
 
                     // Config items list. Spacing is 0 so adjacent field
@@ -151,29 +164,73 @@ export component WizardView inherits Rectangle {
                     // connected card; section breaks come from the
                     // SectionHeader rows themselves having top padding.
                     items-scroll := ScrollView {
-                        VerticalLayout {
-                            spacing: 0px;
+                        property <int> revision: WizardState.page-revision;
+                        changed revision => { self.content-y = 0px; }
+                        settings-content := VerticalLayout {
+                            spacing: WizardState.current-step <= 2 ? 8px : 0px;
+                            alignment: start;
                             padding-left: 4px;
                             padding-right: 4px;
 
-                            for item[index] in WizardState.config-items: ConfigItemRow {
-                                item: item;
-                                index: index;
-                                focused-index: WizardState.focused-index;
-
-                                focus-requested(i) => { WizardState.focused-index = i; }
-                                ensure-visible(item-y, item-height) => {
-                                    if item-y + items-scroll.content-y < 0px {
-                                        items-scroll.content-y = -item-y;
-                                    } else if item-y + item-height + items-scroll.content-y > items-scroll.height {
-                                        items-scroll.content-y = items-scroll.height - item-y - item-height;
-                                    }
-                                }
+                            if WizardState.current-step == 1: Text {
+                                text: "Choose where to install. Storage changes are applied when installation starts.";
+                                color: Theme.c.subtext1;
+                                font-size: 14px;
+                                wrap: word-wrap;
+                            }
+                            if WizardState.current-step == 1: StorageMode {
                                 activated(key) => { root.item-activated(key); }
-                                toggled(key) => { root.toggle-activated(key); }
-                                action-clicked(key) => {
-                                    if key == "install" { root.install-requested(); }
-                                    if key == "quit" { root.quit-requested(); }
+                            }
+                            for item[index] in WizardState.config-items: Rectangle {
+                                vertical-stretch: 0;
+                                property <length> row-position: self.y;
+                                property <bool> setup: item.item-type == ItemType.storage || item.item-type == ItemType.inline-text || item.item-type == ItemType.inline-password || item.item-type == ItemType.compact-choice;
+                                VerticalLayout {
+                                    spacing: item.advanced ? 8px : 0px;
+                                    padding: 0px;
+                                    padding-bottom: setup && WizardState.current-step == 6 ? 8px : 0px;
+                                    if item.advanced && (index == 0 || !WizardState.config-items[index - 1].advanced): StyledButton {
+                                        label: WizardState.advanced ? "Hide additional settings" : "Additional settings";
+                                        outlined: true;
+                                        height: 40px;
+                                        changed has-focus => {
+                                            if self.has-focus && row-position + self.height + items-scroll.content-y > items-scroll.height {
+                                                items-scroll.content-y = items-scroll.height - row-position - self.height;
+                                            }
+                                        }
+                                        clicked => { WizardState.advanced = !WizardState.advanced; if WizardState.advanced { reveal-settings.running = true; } }
+                                    }
+                                    if setup && (!item.advanced || WizardState.advanced): SetupRow {
+                                        item: item;
+                                        row-index: index;
+                                        ensure-visible(h) => {
+                                            if row-position + items-scroll.content-y < 0px { items-scroll.content-y = -row-position; }
+                                            else if row-position + h + items-scroll.content-y > items-scroll.height { items-scroll.content-y = items-scroll.height - row-position - h; }
+                                        }
+                                        activated(key) => { root.item-activated(key); }
+                                        edited(key, value) => { root.inline-edited(key,value); }
+                                    }
+                                    if !setup: ConfigItemRow {
+                                        item: item;
+                                        index: index;
+                                        focused-index: WizardState.focused-index;
+
+                                        focus-requested(i) => { WizardState.focused-index = i; }
+                                        ensure-visible(item-y, item-height) => {
+                                            if row-position + items-scroll.content-y < 0px {
+                                                items-scroll.content-y = -row-position;
+                                            } else if row-position + item-height + items-scroll.content-y > items-scroll.height {
+                                                items-scroll.content-y = items-scroll.height - row-position - item-height;
+                                            }
+                                        }
+                                        activated(key) => { root.item-activated(key); }
+                                        toggled(key) => { root.toggle-activated(key); }
+                                        action-clicked(key) => {
+                                            if key == "install" { root.install-requested(); }
+                                            else if key == "quit" { root.quit-requested(); }
+                                            else { root.item-activated(key); }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -194,7 +251,8 @@ export component WizardView inherits Rectangle {
             // Quit button
             StyledButton {
                 label: "Quit";
-                style: Theme.button-ghost;
+                style: Theme.button-default;
+                outlined: true;
                 clicked => { root.quit-requested(); }
             }
 
@@ -216,7 +274,7 @@ export component WizardView inherits Rectangle {
 
             // Status text
             Text {
-                text: WizardState.status-text;
+                text: WizardState.validation-summary != "" && WizardState.current-step == 6 ? WizardState.validation-summary : WizardState.status-text;
                 color: Theme.c.overlay0;
                 font-size: 12px;
                 horizontal-alignment: left;
@@ -237,7 +295,7 @@ export component WizardView inherits Rectangle {
             if WizardState.current-step == WizardState.total-steps - 1: StyledButton {
                 label: DemoState.enabled ? "Installation disabled" : "Install \u{25b8}";
                 style: Theme.button-primary;
-                enabled: !DemoState.enabled;
+                enabled: !DemoState.enabled && WizardState.can-install;
                 clicked => { root.install-requested(); }
             }
         }

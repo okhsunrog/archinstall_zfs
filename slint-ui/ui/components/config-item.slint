@@ -1,3 +1,4 @@
+import { StyledButton } from "styled-button.slint";
 // Renders one row of the wizard's config-items list. The visual appearance
 // depends on the row's ItemType. Field types (text/select/password/toggle/
 // radio-option/readonly) are rendered as connected section cards: every
@@ -89,7 +90,7 @@ export component ConfigItemRow inherits Rectangle {
 
     height: is-separator ? 8px
           : is-warning ? max(32px, warning-text.preferred-height + 16px)
-          : is-section-header ? 36px
+          : is-section-header ? (item.key != "" ? 52px : 36px)
           : is-radio-subheader ? (has-secondary-text ? 48px : 40px)
           : is-grouped-radio-option ? (has-secondary-text ? 62px : 44px)
           : is-radio-option ? (has-choice-details ? 86px : has-secondary-text ? 62px : 44px)
@@ -138,17 +139,22 @@ export component ConfigItemRow inherits Rectangle {
     // ── Section header (small uppercase label above the connected card) ──
     if is-section-header: HorizontalLayout {
         padding-left: 4px;
-        padding-top: 14px;
+        padding-top: 8px;
         padding-bottom: 6px;
-        alignment: start;
+        spacing: 12px;
 
         Text {
-            text: item.label.to-uppercase();
-            color: Theme.c.overlay0;
-            font-size: 11px;
+            text: item.label;
+            color: Theme.c.subtext1;
+            font-size: 14px;
             font-weight: FontWeight.semi-bold;
-            letter-spacing: 0.6px;
-            vertical-alignment: bottom;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        if item.key != "": StyledButton {
+            label: "Edit"; accessible-label: "Edit " + item.label;
+            height: 36px; outlined: true;
+            clicked => { root.activated(item.key); }
         }
     }
 
@@ -387,18 +393,9 @@ export component ConfigItemRow inherits Rectangle {
         }
     }
     if is-readonly && !has-device-secondary-text: HorizontalLayout {
-        padding-left: 14px;
-        padding-right: 14px;
-        spacing: 12px;
-        Text {
-            text: item.label; color: Theme.c.subtext0; font-size: 13px;
-            vertical-alignment: center; horizontal-stretch: 0;
-        }
-        Text {
-            text: item.value; color: item.is-empty ? Theme.c.overlay0 : Theme.c.text;
-            font-size: 13px; vertical-alignment: center;
-            horizontal-alignment: right; horizontal-stretch: 1; overflow: elide;
-        }
+        padding-left: 12px; padding-right: 12px; spacing: 16px;
+        Text { text: item.label; color: Theme.c.subtext1; font-size: 14px; vertical-alignment: center; width: 180px; wrap: word-wrap; }
+        Text { text: item.value; color: Theme.c.text; font-size: 14px; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
     }
 
     // ── Normal config items (text, select, password, toggle) ──
@@ -463,6 +460,7 @@ export component ConfigItemRow inherits Rectangle {
         accessible-action-default => { root.activate(); }
     }
     row-ta := TouchArea {
+        enabled: !is-non-interactive;
         mouse-cursor: is-non-interactive ? default : pointer;
         clicked => { root.activate(); }
     }

@@ -10,6 +10,8 @@ export component StyledButton {
     in property <length> corner-radius: Theme.radius-sm;
     in property <length> label-size: Theme.font-md;
 
+    out property <bool> has-focus: touch-area.has-focus;
+    public function focus-button() { touch-area.focus(); }
     callback clicked <=> touch-area.clicked;
 
     min-width: max(80px, content-layout.min-width);
@@ -18,7 +20,7 @@ export component StyledButton {
     accessible-role: button;
     accessible-label: root.label;
     accessible-enabled: root.enabled;
-    accessible-action-default => { touch-area.clicked(); }
+    accessible-action-default => { if root.enabled { touch-area.clicked(); } }
 
     background-rect := Rectangle {
         background: root.style.background;

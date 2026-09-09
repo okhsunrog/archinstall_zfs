@@ -7,6 +7,12 @@
 import { ConfigItem } from "../types.slint";
 
 export global WizardState {
+    in property <int> storage-mode;
+    in property <string> environment-path;
+    in property <bool> can-install;
+    in property <string> validation-summary;
+    in-out property <bool> advanced;
+    in-out property <int> page-revision;
     // Per-step config items (rebuilt by Rust on step-changed).
     in property <[ConfigItem]> config-items;
 
@@ -38,6 +44,7 @@ export global WizardState {
     public function go-to(idx: int) {
         if idx >= 0 && idx < total-steps {
             current-step = idx;
+            page-revision += 1;
             if idx > max-visited {
                 max-visited = idx;
             }
@@ -54,6 +61,7 @@ export global WizardState {
     public function back() {
         if current-step > 0 {
             current-step -= 1;
+            page-revision += 1;
             step-changed(current-step);
         }
     }

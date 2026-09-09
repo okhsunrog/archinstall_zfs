@@ -1,0 +1,303 @@
+import { ListView, ScrollView } from "std-widgets.slint";
+import { Theme } from "../styling.slint";
+import { StorageState } from "../state/storage-state.slint";
+import { StyledButton } from "../components/styled-button.slint";
+import { StyledTextInput } from "../components/styled-text-input.slint";
+import { FocusTouchArea } from "../components/internal/state-layer.slint";
+
+export component StoragePicker inherits Rectangle {
+    property <bool> show-details;
+    background: #00000090;
+    // The surface owns keyboard events, including events rejected by search.
+    FocusScope {
+        width: 100%;
+        height: 100%;
+        key-pressed(e) => {
+            if e.text == Key.Escape { StorageState.cancel(); return accept; }
+            if e.text == Key.DownArrow { StorageState.move(1); return accept; }
+            if e.text == Key.UpArrow { StorageState.move(-1); return accept; }
+            if e.text == Key.Return && selection-focus.has-focus {
+                if confirm.enabled { StorageState.confirm(); }
+                return accept;
+            }
+            // Keep Tab inside the dialog; arrows navigate its selectable rows.
+            if e.text == Key.Tab {
+                if search.has-focus && refresh.enabled { refresh.focus-button(); }
+                else if search.has-focus || refresh.has-focus { selection-focus.focus(); }
+                else if cancel.has-focus && confirm.enabled { confirm.focus-button(); }
+                else if cancel.has-focus || confirm.has-focus { search.focus-input(); }
+                else if details.has-focus { cancel.focus-button(); }
+                else if details.enabled { details.focus-button(); }
+                else { cancel.focus-button(); }
+                return accept;
+            }
+            if e.text == Key.Backtab {
+                if search.has-focus && confirm.enabled { confirm.focus-button(); }
+                else if search.has-focus { cancel.focus-button(); }
+                else if confirm.has-focus { cancel.focus-button(); }
+                else if cancel.has-focus && details.enabled { details.focus-button(); }
+                else if cancel.has-focus || details.has-focus { selection-focus.focus(); }
+                else if refresh.has-focus || !refresh.enabled { search.focus-input(); }
+                else { refresh.focus-button(); }
+                return accept;
+            }
+            return reject;
+        }
+        selection-focus := FocusScope {
+            width: 0px;
+            height: 0px;
+        }
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(980px, parent.width - 32px);
+            height: min(700px, parent.height - 32px);
+            background: Theme.c.base;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: Theme.c.surface1;
+            VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+                Text {
+                    wrap: word-wrap;
+                    text: StorageState.title;
+                    color: Theme.c.text;
+                    font-size: 24px;
+                    font-weight: 600;
+                }
+
+                Text {
+                    text: StorageState.explanation;
+                    color: Theme.c.subtext1;
+                    font-size: 14px;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    spacing: 12px;
+                    search := StyledTextInput {
+                        accessible-label: "Search storage";
+                        horizontal-stretch: 1;
+                        height: 40px;
+                        placeholder: StorageState.role == "pool" ? "Search pool name or GUID" : "Search device, filesystem or label";
+                        text <=> StorageState.filter;
+                        edited(_) => { StorageState.filter-changed(); }
+                        init => { self.focus-input(); }
+                    }
+
+                    refresh := StyledButton {
+                        label: "Refresh";
+                        height: 40px;
+                        enabled: !StorageState.busy;
+                        clicked => { StorageState.refresh(); }
+                    }
+                }
+
+                if StorageState.busy: Text {
+                    text: "Scanning storage…";
+                    color: Theme.c.subtext1;
+                }
+                if StorageState.error != "": Text {
+                    text: StorageState.error;
+                    color: Theme.c.red;
+                    wrap: word-wrap;
+                }
+                if !StorageState.busy && StorageState.error == "" && StorageState.candidates.length == 0: Text {
+                    text: StorageState.filter == "" ? (StorageState.role == "pool" ? "No pools found. Check the devices, then refresh." : "No devices found. Connect a device, then refresh.") : "No matches. Try a device name or clear the search.";
+                    color: Theme.c.subtext1;
+                    wrap: word-wrap;
+                }
+                if StorageState.role != "pool": HorizontalLayout {
+                    padding-left: 32px;
+                    padding-right: 16px;
+                    spacing: 12px;
+                    Text {
+                        text: "Device";
+                        color: Theme.c.subtext1;
+                        horizontal-stretch: 1;
+                    }
+
+                    Text {
+                        text: "Size";
+                        color: Theme.c.subtext1;
+                        width: 84px;
+                        horizontal-alignment: right;
+                    }
+
+                    Text {
+                        text: StorageState.role == "disk" ? "Type" : "Filesystem";
+                        color: Theme.c.subtext1;
+                        width: 130px;
+                    }
+
+                    Text {
+                        text: StorageState.role == "disk" ? "Model / availability" : "Label / availability";
+                        color: Theme.c.subtext1;
+                        width: 220px;
+                    }
+                }
+                list := ListView {
+                    vertical-stretch: 1;
+                    for candidate[index] in StorageState.candidates: Rectangle {
+                        property <bool> first: index == 0 || StorageState.candidates[index - 1].group != candidate.group;
+                        property <bool> selected: StorageState.selected == candidate.key;
+                        property <length> heading: first ? 44px : 0px;
+                        height: heading + (candidate.unavailable != "" ? 76px : 56px);
+                        changed selected => {
+                            if self.selected {
+                                if self.y + list.content-y < 0px { list.content-y = -self.y; }
+                                else if self.y + self.height + list.content-y > list.height { list.content-y = list.height - self.y - self.height; }
+                            }
+                        }
+                        VerticalLayout {
+                            spacing: 0px;
+                            if first: Rectangle {
+                                height: 44px;
+                                background: Theme.c.surface0;
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    spacing: 12px;
+                                    Text {
+                                        text: candidate.group;
+                                        color: Theme.c.text;
+                                        font-weight: 600;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                    }
+
+                                    Text {
+                                        text: candidate.hardware;
+                                        color: Theme.c.subtext1;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                background: selected ? Theme.c.blue.with-alpha(0.16) : touch.has-hover ? Theme.c.surface0 : transparent;
+                                border-color: touch.has-focus ? Theme.c.blue : transparent;
+                                border-width: 2px;
+                                VerticalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 16px;
+                                    padding-top: 10px;
+                                    padding-bottom: 10px;
+                                    spacing: 5px;
+                                    HorizontalLayout {
+                                        spacing: 12px;
+                                        Text {
+                                            text: candidate.unavailable != "" ? "−" : selected ? "●" : "○";
+                                            color: selected ? Theme.c.blue : Theme.c.subtext1;
+                                            width: 16px;
+                                        }
+
+                                        Text {
+                                            text: candidate.name;
+                                            color: Theme.c.text;
+                                            font-size: 15px;
+                                            font-weight: 600;
+                                            overflow: elide;
+                                            horizontal-stretch: 1;
+                                        }
+
+                                        if StorageState.role != "pool": Text {
+                                            text: candidate.size;
+                                            color: Theme.c.text;
+                                            width: 84px;
+                                            horizontal-alignment: right;
+                                        }
+                                        if StorageState.role != "pool": Text {
+                                            text: candidate.filesystem;
+                                            color: Theme.c.subtext1;
+                                            width: 130px;
+                                            overflow: elide;
+                                        }
+                                        Text {
+                                            text: candidate.label;
+                                            color: Theme.c.subtext1;
+                                            width: StorageState.role == "pool" ? 300px : 220px;
+                                            overflow: elide;
+                                        }
+                                    }
+
+                                    if candidate.unavailable != "": Text {
+                                        text: candidate.unavailable;
+                                        color: Theme.c.yellow;
+                                        font-size: 13px;
+                                        overflow: elide;
+                                    }
+                                }
+
+                                touch := FocusTouchArea {
+                                    width: 100%;
+                                    height: 100%;
+                                    enabled: candidate.unavailable == "" && !StorageState.busy;
+                                    accessible-enabled: self.enabled;
+                                    accessible-role: list-item;
+                                    accessible-label: candidate.name + " " + candidate.label + " " + candidate.unavailable;
+                                    accessible-action-default => { if self.enabled { StorageState.choose(candidate.key); } }
+                                    clicked => { StorageState.choose(candidate.key); }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: 1px;
+                    background: Theme.c.surface1;
+                }
+
+                HorizontalLayout {
+                    spacing: 12px;
+                    Text {
+                        text: StorageState.selected-name == "" ? (StorageState.role == "pool" ? "Select a pool to continue" : "Select a device to continue") : "Selected: " + StorageState.selected-name;
+                        color: Theme.c.text;
+                        font-size: 15px;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    details := StyledButton {
+                        label: root.show-details ? "Hide details" : "Details";
+                        height: 36px;
+                        enabled: StorageState.selected != "";
+                        clicked => { root.show-details = !root.show-details; }
+                    }
+                }
+
+                if root.show-details && StorageState.selected-details != "": ScrollView {
+                    height: 80px;
+                    Text {
+                        text: StorageState.selected-details;
+                        color: Theme.c.subtext1;
+                        font-size: 13px;
+                        wrap: word-wrap;
+                    }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 12px;
+                    cancel := StyledButton {
+                        label: "Cancel";
+                        height: 40px;
+                        outlined: true;
+                        clicked => { StorageState.cancel(); }
+                    }
+
+                    confirm := StyledButton {
+                        label: StorageState.role == "pool" ? "Use this pool" : "Use this device";
+                        style: Theme.button-primary;
+                        height: 40px;
+                        enabled: StorageState.selected != "" && !StorageState.busy && StorageState.error == "";
+                        clicked => { StorageState.confirm(); }
+                    }
+                }
+            }
+        }
+    }
+}

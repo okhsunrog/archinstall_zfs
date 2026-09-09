@@ -26,6 +26,18 @@ use crate::ui::{
 };
 
 pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_scan: &KernelScan) {
+    let cfg = config.clone();
+    let weak = app.as_weak();
+    app.on_inline_edited(move |key, value| {
+        if let Some(setting) = TextSetting::parse(&key) {
+            let mut c = cfg.borrow_mut();
+            apply_text(&mut c, setting, &value);
+            // Keep the editor and caret alive while typing; only rebuild on navigation.
+            if let Some(app) = weak.upgrade() {
+                crate::refresh::refresh_validation(&app, &c);
+            }
+        }
+    });
     setup_step_changed(app, config);
     setup_item_activated(app, config, kernel_scan);
     setup_toggle(app, config);
@@ -51,6 +63,19 @@ fn setup_item_activated(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_sc
     let kscan = kernel_scan.clone();
     app.on_item_activated(move |key| {
         let Some(app) = weak.upgrade() else { return };
+
+        if let Some(role) = key.strip_prefix("storage:") {
+            app.global::<crate::ui::StorageState>()
+                .invoke_open(role.into());
+            return;
+        }
+        if let Some(step) = key
+            .strip_prefix("edit:")
+            .and_then(|s| s.parse::<i32>().ok())
+        {
+            app.global::<WizardState>().invoke_go_to(step);
+            return;
+        }
 
         // Device rows: "device:{setting}:{path}". Split on the first colon
         // only — persistent device paths contain colons of their own, as in
@@ -79,6 +104,7 @@ fn setup_item_activated(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_sc
                     let mut c = cfg.borrow_mut();
                     apply_choice(&mut c, setting, index);
                     refresh_items(&app, &c);
+                    crate::refresh::focus_item(&app, setting.as_str());
                 }
                 None => tracing::warn!(%key, "radio row names no known setting"),
             }
@@ -253,10 +279,17 @@ fn setup_keyboard_nav(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
     let cfg = config.clone();
     app.on_key_nav_down(move || {
         let Some(app) = weak.upgrade() else { return };
-        let items = build_step_items(
+        let mut items = build_step_items(
             app.global::<WizardState>().get_current_step() as usize,
             &cfg.borrow(),
         );
+        if !app.global::<WizardState>().get_advanced() {
+            for item in &mut items {
+                if item.advanced {
+                    item.item_type = ItemType::Readonly;
+                }
+            }
+        }
         let current = app.global::<WizardState>().get_focused_index();
         let next = next_selectable_index(&items, current, 1);
         app.global::<WizardState>().set_focused_index(next);
@@ -266,10 +299,17 @@ fn setup_keyboard_nav(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
     let cfg = config.clone();
     app.on_key_nav_up(move || {
         let Some(app) = weak.upgrade() else { return };
-        let items = build_step_items(
+        let mut items = build_step_items(
             app.global::<WizardState>().get_current_step() as usize,
             &cfg.borrow(),
         );
+        if !app.global::<WizardState>().get_advanced() {
+            for item in &mut items {
+                if item.advanced {
+                    item.item_type = ItemType::Readonly;
+                }
+            }
+        }
         let current = app.global::<WizardState>().get_focused_index();
         let next = next_selectable_index(&items, current, -1);
         app.global::<WizardState>().set_focused_index(next);

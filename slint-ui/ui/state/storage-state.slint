@@ -1,0 +1,34 @@
+export struct StorageCandidate {
+    key: string,
+    name: string,
+    group: string,
+    hardware: string,
+    size: string,
+    filesystem: string,
+    label: string,
+    details: string,
+    unavailable: string,
+}
+
+export global StorageState {
+    in-out property <bool> visible;
+    in-out property <bool> busy;
+    in-out property <int> generation;
+    in-out property <string> role;
+    in-out property <string> title;
+    in-out property <string> explanation;
+    in-out property <string> error;
+    in-out property <string> filter;
+    in-out property <string> selected;
+    in-out property <string> selected-name;
+    in-out property <string> selected-details;
+    in-out property <[StorageCandidate]> candidates;
+    callback open(string);
+    callback refresh();
+    callback filter-changed();
+    callback choose(string);
+    callback move(int);
+    callback confirm();
+    callback cancel();
+    callback inventory-changed();
+}

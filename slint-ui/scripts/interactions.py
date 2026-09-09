@@ -200,8 +200,8 @@ def installation_layout(p):
 
 
 def invalid(p):
-    p.click('Button', 'Install')
-    p.wait('Text', 'Validation:')
+    assert not p.data('get_element_properties', elementHandle=p.wait('Button', 'Install')['handle']).get('accessibleEnabled', False)
+    p.wait('Text', 'Complete setup before installing')
     assert p.element('Button', 'Cancel installation') is None
     p.screenshot('validation-blocks-installation')
 

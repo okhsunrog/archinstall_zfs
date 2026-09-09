@@ -24,7 +24,8 @@ Preview scenes: `welcome`, `offline`, `disk`, `new-pool`, `existing-pool`, `zfs`
 `inspect` (simulated pool import, export, and selection), and `invalid` (an
 incomplete configuration for validation checks).
 The three simulated drives include NVMe, SATA, and removable USB, with long serials
-and persistent paths. Each drive has two simulated partitions. The wizard starts
+and persistent paths. The SATA drive has four partitions; NVMe and USB have two each. Filesystem, label,
+EFI type, and installer-media usage are included. The wizard starts
 with a configured user, KDE Plasma, packages, and services; edits remain interactive.
 Wi-Fi uses the existing mock backend, including known, secured, open, and enterprise
 networks. Installation advances through simulated phases and supports cancellation.
@@ -54,6 +55,26 @@ uv run slint-ui/scripts/interactions.py --output /tmp/azfs-ui-interactions
 These cover editing, focus recovery, keyboard scrolling, Wi-Fi credentials,
 forget/reconnect/disconnect, enterprise errors, pool inspection, installation
 progress, completion, and cancellation. All input values are disposable fixtures.
+
+Exercise the storage decision flow, including search, disabled partitions,
+cancel/confirm, keyboard focus, encryption, swap, pool selection, and Review:
+
+```sh
+uv run slint-ui/scripts/storage_review.py --output /tmp/azfs-storage-review
+uv run slint-ui/scripts/storage_review.py --size 1920x1080 --scale 1.5 \
+  --output /tmp/azfs-storage-review-scaled
+uv run slint-ui/scripts/storage_review.py --keyboard-only --size 1920x1080 --scale 2 \
+  --output /tmp/azfs-storage-keyboard
+AZFS_PREVIEW_STORAGE=many uv run slint-ui/scripts/storage_review.py \
+  --fixture many --output /tmp/azfs-storage-many
+```
+
+`AZFS_PREVIEW_STORAGE` accepts `empty` (no disks), `many` (20 partitions per disk),
+and `missing` (unknown filesystems and labels). Pass the matching `--fixture`
+argument to the storage script. These overrides only affect preview fixtures.
+Storage discovery in the production picker is read-only; choosing an existing
+pool does not import it. Space and dataset details for unimported pools remain
+unknown until installation imports them.
 
 For additional interaction checks, use Slint MCP's `get_element_tree`, `click_element`,
 `set_element_value`, and `dispatch_key_event`. Check password entry, Wi-Fi connect,
