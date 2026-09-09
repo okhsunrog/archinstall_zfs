@@ -9,6 +9,8 @@ import "../../assets/fonts/LiberationMono-Regular.ttf";
 
 component InstallAction inherits StyledButton {
     height: Theme.control-height-lg;
+    corner-radius: Theme.radius-md;
+    label-size: Theme.font-base;
 }
 
 export component InstallView inherits VerticalLayout {
@@ -246,6 +248,7 @@ export component InstallView inherits VerticalLayout {
                 InstallAction {
                     label: "Quit";
                     style: { background: transparent, foreground: Theme.c.text };
+                    outlined: true;
                     clicked => { root.quit-requested(); }
                 }
                 Rectangle { horizontal-stretch: 1; }
