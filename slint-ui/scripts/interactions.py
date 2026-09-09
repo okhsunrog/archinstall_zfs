@@ -82,7 +82,8 @@ def desktop(p):
 
 
 def wifi(p):
-    p.click('Button', 'Network settings')
+    p.screenshot('welcome-offline')
+    p.click('Button', 'Wi-Fi & network')
     p.wait('ListItem', 'HomeNetwork')
     p.screenshot('wifi-picking')
     p.click('Button', 'Forget HomeNetwork')
@@ -103,7 +104,8 @@ def wifi(p):
     p.screenshot('wifi-connected')
     p.click('Button', 'Done')
     assert p.element('Groupbox', 'Network management') is None
-    p.click('Button', 'Network settings')
+    p.screenshot('welcome-connected')
+    p.click('Button', 'Wi-Fi & network')
     p.wait('Button', 'Disconnect')
     p.screenshot('wifi-management')
     p.click('Button', 'Disconnect')

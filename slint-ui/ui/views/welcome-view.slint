@@ -305,7 +305,8 @@ export component WelcomeView inherits Rectangle {
                     alignment: center;
                     spacing: 12px;
                     if WifiState.has-hardware: StyledButton {
-                        label: "Network settings";
+                        label: "Wi-Fi & network";
+                        icon-source: @image-url("../../assets/icons/wifi.svg");
                         height: 44px;
                         outlined: WelcomeState.net-ok;
                         style: WelcomeState.net-ok ? Theme.button-default : Theme.button-primary;

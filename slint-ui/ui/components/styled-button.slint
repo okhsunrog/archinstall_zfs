@@ -1,9 +1,11 @@
 import { Theme, ButtonStyle } from "../styling.slint";
 import { AnimationSettings } from "../styling.slint";
 import { StateLayer, FocusTouchArea } from "internal/state-layer.slint";
+import { Icon } from "icon.slint";
 
 export component StyledButton {
     in property <string> label;
+    in property <image> icon-source;
     in property <ButtonStyle> style: Theme.button-default;
     in property <bool> enabled: true;
     in property <bool> outlined: false;
@@ -42,6 +44,18 @@ export component StyledButton {
     content-layout := HorizontalLayout {
         padding-left: Theme.spacing-md;
         padding-right: Theme.spacing-md;
+        spacing: 8px;
+        alignment: center;
+
+        if root.icon-source.width > 0: VerticalLayout {
+            horizontal-stretch: 0;
+            alignment: center;
+            Icon {
+                source: root.icon-source;
+                size: 18px;
+                tint: root.style.foreground;
+            }
+        }
 
         Text {
             text: root.label;
