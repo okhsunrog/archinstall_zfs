@@ -72,6 +72,14 @@ SIGINT, SIGTERM, SIGHUP, and SIGQUIT to the GUI. Run this before starting any th
 The supervisor must remain alive for crash recovery; SIGKILL of both processes
 cannot run userspace cleanup.
 
+Slint is built from the `feat/linuxkms-integration` branch of the fork, with the
+exact revision recorded in `Cargo.lock`. This combines the independent Skia
+software, cursor damage, pointer input, and console isolation changes.
+
+When started from a VT, the installer enables tap-to-click for its GUI child.
+Set `SLINT_LIBINPUT_TAP_TO_CLICK=0` to disable it. Explicit values are preserved
+when returning from the post-install shell.
+
 Libinput uses neutral pointer acceleration by default. Override it with
 `SLINT_LIBINPUT_ACCEL_SPEED=0.3` (finite values from -1 to 1). Test the resulting
 feel on the target mouse or touchpad; headless rendering cannot validate it.
