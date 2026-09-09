@@ -332,7 +332,10 @@ pub fn show(app: &App, scene: Scene, size: Size) {
     }
     match scene {
         Scene::Install => progress(app, 1),
-        Scene::Done => progress(app, 2),
+        Scene::Done => {
+            progress(app, 2);
+            app.global::<InstallState>().set_shell_available(true);
+        }
         Scene::Failed => progress(app, 3),
         Scene::Cancelled => progress(app, 5),
         Scene::Inspect => inspect(app),

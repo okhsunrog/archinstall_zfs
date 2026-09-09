@@ -5,7 +5,7 @@ use slint::ComponentHandle;
 
 use crate::ui::{App, DemoState, InstallState};
 
-pub fn setup(app: &App) {
+pub fn setup(app: &App, completion: &crate::completion::State) {
     let weak = app.as_weak();
     app.window().on_close_requested(move || {
         let Some(app) = weak.upgrade() else {
@@ -33,6 +33,27 @@ pub fn setup(app: &App) {
             return;
         }
         let _ = app.window().hide();
+    });
+
+    let weak = app.as_weak();
+    let completion = completion.clone();
+    app.on_shell_requested(move || {
+        let Some(app) = weak.upgrade() else { return };
+        let state = app.global::<InstallState>();
+        if state.get_state() != 2 || !state.get_shell_available() { return; }
+        if crate::preview::enabled() {
+            state.set_shell_notice("Preview: shell closed, session cleaned up, completion screen restored. No system commands were run.".into());
+            return;
+        }
+        #[cfg(feature = "linuxkms")]
+        {
+            match crate::console_session::request_shell(&completion.lock().unwrap()) {
+                Ok(()) => { state.set_shell_available(false); let _ = app.window().hide(); }
+                Err(error) => state.set_shell_notice(format!("Could not open installed-system shell: {error}").into()),
+            }
+        }
+        #[cfg(not(feature = "linuxkms"))]
+        let _ = &completion;
     });
 
     let weak = app.as_weak();

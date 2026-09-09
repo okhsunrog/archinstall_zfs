@@ -131,6 +131,17 @@ def cancel(p):
     p.screenshot('installation-cancelled')
 
 
+def shell(p):
+    p.wait('Button', 'Quit')
+    p.wait('Button', 'Reboot')
+    p.screenshot('completion')
+    p.click('Button', 'Open installed system shell')
+    p.wait('Text', 'Preview: shell closed')
+    assert p.element('Button', 'Reboot') is not None
+    assert p.element('Button', 'Quit') is not None
+    p.screenshot('shell-returned')
+
+
 def invalid(p):
     p.click('Button', 'Install')
     p.wait('Text', 'Validation:')
@@ -143,7 +154,7 @@ def main():
     parser.add_argument('--binary', type=Path, default=Path('target/debug/azfs'))
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--sizes', nargs='+', default=['800x600@1', '1920x1080@2'])
-    flows = ['system', 'users', 'desktop', 'wifi', 'inspect', 'install', 'cancel', 'invalid']
+    flows = ['system', 'users', 'desktop', 'wifi', 'inspect', 'install', 'cancel', 'shell', 'invalid']
     parser.add_argument('--flows', nargs='+', choices=flows, default=flows)
     args = parser.parse_args()
     for spec in args.sizes:
@@ -151,7 +162,7 @@ def main():
         for flow in args.flows:
             output = args.output / spec / flow
             output.mkdir(parents=True, exist_ok=True)
-            scene = {'wifi': 'offline', 'install': 'review', 'cancel': 'install'}.get(flow, flow)
+            scene = {'wifi': 'offline', 'install': 'review', 'cancel': 'install', 'shell': 'done'}.get(flow, flow)
             p = Preview(args.binary.resolve(), scene, size, scale, output)
             try:
                 p.ready()

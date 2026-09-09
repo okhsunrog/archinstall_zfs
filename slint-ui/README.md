@@ -70,3 +70,7 @@ cannot run userspace cleanup.
 Libinput uses neutral pointer acceleration by default. Override it with
 `SLINT_LIBINPUT_ACCEL_SPEED=0.3` (finite values from -1 to 1). Test the resulting
 feel on the target mouse or touchpad; headless rendering cannot validate it.
+
+For the post-install chroot shell, automatic cleanup, completion-screen return,
+and disposable VM test fixture, see [Post-install shell](POST_INSTALL_SHELL.md).
+The `shell` interaction flow checks the simulated completion/return states.

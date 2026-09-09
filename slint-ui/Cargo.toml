@@ -44,8 +44,11 @@ clap.workspace = true
 color-eyre.workspace = true
 crossbeam-channel = "0.5.16"
 nix.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 slint = { git = "https://github.com/okhsunrog/slint.git", rev = "d6b44e120", default-features = false, features = ["std", "compat-1-2"], version = "1.18.0" }
 sublime_fuzzy.workspace = true
+tempfile = "3.27.0"
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
 tokio-util.workspace = true
 tracing.workspace = true

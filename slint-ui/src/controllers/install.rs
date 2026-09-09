@@ -57,6 +57,7 @@ pub fn setup(
     config: &Rc<RefCell<GlobalConfig>>,
     demo: bool,
     log_rx: crossbeam_channel::Receiver<(String, i32)>,
+    completion: &crate::completion::State,
 ) {
     if crate::preview::enabled() {
         crate::preview::install(app, config);
@@ -85,6 +86,7 @@ pub fn setup(
         }
     });
 
+    let completion = completion.clone();
     let weak = app.as_weak();
     let cfg = config.clone();
     let cancel_slot = active_cancel;
@@ -115,7 +117,14 @@ pub fn setup(
 
         let cancel = CancellationToken::new();
         *cancel_slot.lock().unwrap() = Some(cancel.clone());
-        spawn_install(&app, c, download_tx, cancel, cancel_slot.clone());
+        spawn_install(
+            &app,
+            c,
+            download_tx,
+            cancel,
+            cancel_slot.clone(),
+            completion.clone(),
+        );
     });
 }
 
@@ -304,12 +313,13 @@ fn spawn_install(
     download_tx: Arc<tokio::sync::watch::Sender<PackageProgress>>,
     cancel: CancellationToken,
     cancel_slot: Arc<Mutex<Option<CancellationToken>>>,
+    completion: crate::completion::State,
 ) {
     let weak = app.as_weak();
     tokio::spawn(async move {
         let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
             Arc::new(archinstall_zfs_core::system::cmd::RealRunner);
-        let result = archinstall_zfs_core::install::run_install(
+        let result = archinstall_zfs_core::install::run_install_with_target(
             runner,
             config,
             cancel.clone(),
@@ -318,7 +328,10 @@ fn spawn_install(
         .await;
 
         let phase = match &result {
-            Ok(()) => InstallPhase::Done,
+            Ok(target) => {
+                completion.lock().unwrap().target = target.clone();
+                InstallPhase::Done
+            }
             Err(InstallError::Cancelled) => InstallPhase::Cancelled,
             Err(error) => {
                 tracing::error!("{error}");
@@ -326,7 +339,12 @@ fn spawn_install(
             }
         };
         *cancel_slot.lock().unwrap() = None;
-        let _ = weak.upgrade_in_event_loop(move |app| set_phase(&app, phase));
+        let _ = weak.upgrade_in_event_loop(move |app| {
+            set_phase(&app, phase);
+            let complete = completion.lock().unwrap();
+            app.global::<InstallState>()
+                .set_shell_available(complete.target.is_some() && crate::completion::available());
+        });
     });
 }
 

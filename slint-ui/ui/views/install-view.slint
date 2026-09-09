@@ -10,6 +10,7 @@ import { StyledButton } from "../components/styled-button.slint";
 export component InstallView inherits VerticalLayout {
     callback quit-requested();
     callback reboot-requested();
+    callback shell-requested();
     callback cancel-requested();
 
     padding: 20px;
@@ -37,7 +38,7 @@ export component InstallView inherits VerticalLayout {
     Rectangle {
         height: InstallState.download-active ? 188px
             : (InstallState.state == 1 || InstallState.state == 4) ? 132px
-            : 104px;
+            : 112px;
         background: Theme.c.surface0;
         border-radius: 10px;
 
@@ -183,6 +184,12 @@ export component InstallView inherits VerticalLayout {
                     clicked => { root.quit-requested(); }
                 }
 
+                if InstallState.shell-available: StyledButton {
+                    label: "Open installed system shell";
+                    style: Theme.button-default;
+                    clicked => { root.shell-requested(); }
+                }
+
                 StyledButton {
                     label: "Reboot";
                     style: Theme.button-primary;
@@ -200,6 +207,14 @@ export component InstallView inherits VerticalLayout {
                 }
             }
         }
+    }
+    if InstallState.state == 2: Text {
+        text: InstallState.shell-notice != "" ? InstallState.shell-notice
+            : InstallState.shell-available ? "Quit returns to the live console. In the installed-system shell, type exit to return here; mounts are cleaned up automatically."
+            : "Quit returns to the live console without rebooting.";
+        color: Theme.c.subtext0;
+        font-size: 13px;
+        wrap: word-wrap;
     }
     Text {
         text: "Installation log";
