@@ -1,3 +1,7 @@
+import { Palette as StandardPalette } from "std-widgets.slint";
+import { StorageState, StorageCandidate } from "state/storage-state.slint";
+export { StorageState, StorageCandidate }
+import { StoragePicker } from "popups/storage-picker.slint";
 import { ListView, ScrollView } from "std-widgets.slint";
 
 import { Catppuccin, Theme } from "styling.slint";
@@ -43,10 +47,12 @@ import { InstallView } from "views/install-view.slint";
 // ── Main application ─────────────────────────────────
 
 export component App inherits Window {
+    default-font-size: 14px;
     in property <bool> preview-mode: false;
+    init => { StandardPalette.color-scheme = Catppuccin.is-dark ? ColorScheme.dark : ColorScheme.light; }
     property <bool> popup-open: PopupState.select-visible || PopupState.text-input-visible
         || PopupState.users-visible || PopupState.pkg-search-visible || PopupState.strlist-visible
-        || PopupState.multi-select-visible || PopupState.wifi-visible || DemoState.popup-visible;
+        || PopupState.multi-select-visible || PopupState.wifi-visible || DemoState.popup-visible || StorageState.visible;
     changed popup-open => {
         if !root.popup-open && InstallState.state == 0 { main-focus-scope.focus(); }
     }
@@ -72,6 +78,7 @@ export component App inherits Window {
 
     // Callbacks to Rust
     callback item-activated(string);
+    callback inline-edited(string,string);
     callback select-confirmed(string, int);
     callback select-filter-changed(string, string); // (select-key, filter-text)
     callback text-confirmed(string, string);
@@ -82,7 +89,7 @@ export component App inherits Window {
     callback reboot-requested();
     callback shell-requested();
     callback cancel-requested();
-    callback user-added(string, string, bool); // username, password, sudo
+    callback user-added(string, string, bool) -> bool; // username, password, sudo
     callback user-removed(int);
     callback user-sudo-toggled(int);
     callback key-nav-down();
@@ -94,14 +101,6 @@ export component App inherits Window {
                 if text == "j" || text == Key.DownArrow { key-nav-down(); return true; }
                 if text == "k" || text == Key.UpArrow { key-nav-up(); return true; }
                 if text == Key.Return { key-nav-activate(); return true; }
-            }
-            if text == Key.Tab {
-                WizardState.next();
-                return true;
-            }
-            if text == Key.Backtab {
-                WizardState.back();
-                return true;
             }
             if text == "q" {
                 quit-requested();
@@ -130,7 +129,7 @@ export component App inherits Window {
             && !PopupState.pkg-search-visible
             && !PopupState.strlist-visible
             && !PopupState.multi-select-visible
-            && !PopupState.wifi-visible;
+            && !PopupState.wifi-visible && !StorageState.visible;
         key-pressed(e) => {
             if root.handle-global-key(e.text) { return accept; }
             return reject;
@@ -162,6 +161,7 @@ export component App inherits Window {
         y: DemoState.enabled || root.preview-mode ? 32px : 0px;
         height: root.height - self.y;
         item-activated(key) => { item-activated(key); }
+        inline-edited(key,value) => { inline-edited(key,value); }
         toggle-activated(key) => { toggle-activated(key); }
         install-requested() => { install-requested(); }
         quit-requested() => { quit-requested(); }
@@ -231,7 +231,7 @@ export component App inherits Window {
         popup-visible: PopupState.users-visible;
 
         user-added(username, password, sudo) => {
-            root.user-added(username, password, sudo);
+            return root.user-added(username, password, sudo);
         }
         user-removed(index) => { root.user-removed(index); }
         user-sudo-toggled(index) => { root.user-sudo-toggled(index); }
@@ -305,4 +305,5 @@ export component App inherits Window {
             vertical-alignment: center;
         }
     }
+    if StorageState.visible: StoragePicker { }
 }

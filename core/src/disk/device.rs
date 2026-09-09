@@ -20,6 +20,16 @@ pub struct DevicePath {
     pub kind: DevicePathKind,
 }
 
+/// Filesystem identity and active use, kept separate from hardware identity.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct DeviceUsage {
+    pub filesystem: String,
+    pub label: String,
+    pub partition_type: String,
+    pub mountpoints: Vec<String>,
+    pub in_use: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockDevice {
     pub devnode: PathBuf,
@@ -30,6 +40,7 @@ pub struct BlockDevice {
     pub transport: Option<String>,
     pub rotational: Option<bool>,
     pub removable: bool,
+    pub usage: DeviceUsage,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +55,7 @@ pub struct BlockPartition {
     pub transport: Option<String>,
     pub rotational: Option<bool>,
     pub removable: bool,
+    pub usage: DeviceUsage,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,6 +78,7 @@ pub struct DeviceChoice {
     pub group_transport: String,
     pub group_media: String,
     pub group_removable: bool,
+    pub usage: DeviceUsage,
 }
 
 impl DeviceChoice {
@@ -128,6 +141,7 @@ impl From<BlockDevice> for DeviceChoice {
             group_transport: String::new(),
             group_media: String::new(),
             group_removable: false,
+            usage: device.usage.clone(),
         }
     }
 }
@@ -153,6 +167,7 @@ impl From<BlockPartition> for DeviceChoice {
             group_transport: partition.selection_group_transport(),
             group_media: partition.selection_group_media(),
             group_removable: partition.removable,
+            usage: partition.usage.clone(),
         }
     }
 }
@@ -296,7 +311,7 @@ struct LsblkOutput {
     blockdevices: Vec<LsblkDevice>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct LsblkDevice {
     path: Option<PathBuf>,
     #[serde(rename = "type")]
@@ -307,6 +322,11 @@ struct LsblkDevice {
     tran: Option<String>,
     rota: Option<Value>,
     rm: Option<Value>,
+    fstype: Option<String>,
+    label: Option<String>,
+    parttype: Option<String>,
+    #[serde(default)]
+    mountpoints: Vec<Option<String>>,
     #[serde(default)]
     children: Vec<LsblkDevice>,
 }
@@ -359,7 +379,7 @@ fn inspect_block_devices() -> Result<(LsblkOutput, HashMap<PathBuf, Vec<DevicePa
             "--json",
             "--bytes",
             "--output",
-            "PATH,TYPE,SIZE,MODEL,SERIAL,TRAN,ROTA,RM",
+            "PATH,TYPE,SIZE,MODEL,SERIAL,TRAN,ROTA,RM,FSTYPE,LABEL,PARTTYPE,MOUNTPOINTS",
         ])
         .output()
         .wrap_err("failed to run lsblk")?;
@@ -377,6 +397,29 @@ fn inspect_block_devices() -> Result<(LsblkOutput, HashMap<PathBuf, Vec<DevicePa
     Ok((parsed, aliases))
 }
 
+fn device_usage(node: &LsblkDevice) -> DeviceUsage {
+    fn in_use(node: &LsblkDevice) -> bool {
+        node.mountpoints.iter().flatten().any(|s| !s.is_empty())
+            || node
+                .children
+                .iter()
+                .any(|child| child.device_type.as_deref() != Some("part") || in_use(child))
+    }
+    DeviceUsage {
+        filesystem: node.fstype.clone().unwrap_or_default(),
+        label: node.label.clone().unwrap_or_default(),
+        partition_type: node.parttype.clone().unwrap_or_default(),
+        mountpoints: node
+            .mountpoints
+            .iter()
+            .flatten()
+            .filter(|s| !s.is_empty())
+            .cloned()
+            .collect(),
+        in_use: in_use(node),
+    }
+}
+
 fn collect_lsblk_disks(
     node: LsblkDevice,
     aliases: &HashMap<PathBuf, Vec<DevicePath>>,
@@ -390,7 +433,9 @@ fn collect_lsblk_disks(
         let mut device_aliases = aliases.get(&canonical).cloned().unwrap_or_default();
         device_aliases.sort_by_key(alias_preference_key);
 
+        let usage = device_usage(&node);
         devices.push(BlockDevice {
+            usage,
             devnode,
             aliases: device_aliases,
             model: clean_string(node.model),
@@ -438,7 +483,9 @@ fn collect_lsblk_partitions(
             .and_then(|parent| parent_details_by_devnode.get(&parent));
         let details = current_details.as_ref().or(flat_parent_details);
 
+        let usage = device_usage(&node);
         partitions.push(BlockPartition {
+            usage,
             devnode,
             aliases: partition_aliases,
             parent_devnode: details.map(|details| details.devnode.clone()),
@@ -707,6 +754,7 @@ mod tests {
             transport: None,
             rotational: None,
             removable: false,
+            usage: Default::default(),
         };
 
         assert_eq!(
@@ -729,6 +777,7 @@ mod tests {
             transport: None,
             rotational: None,
             removable: false,
+            usage: Default::default(),
         };
 
         assert_eq!(
@@ -748,6 +797,7 @@ mod tests {
             transport: None,
             rotational: None,
             removable: false,
+            usage: Default::default(),
         };
 
         assert_eq!(device.preferred_path().path, PathBuf::from("/dev/vda"));
@@ -767,6 +817,7 @@ mod tests {
             transport: Some("virtio".to_string()),
             rotational: Some(false),
             removable: false,
+            usage: Default::default(),
         };
 
         assert_eq!(device.selection_title(), "/dev/vda");
@@ -815,6 +866,7 @@ mod tests {
             transport: Some("virtio".to_string()),
             rotational: Some(false),
             removable: false,
+            usage: Default::default(),
         };
 
         assert_eq!(
@@ -864,6 +916,7 @@ mod tests {
             transport: Some("usb".to_string()),
             rotational: Some(false),
             removable: false,
+            usage: Default::default(),
         };
 
         assert_eq!(device.selection_icon(), "usb");
@@ -890,7 +943,9 @@ mod tests {
                 rota: None,
                 rm: None,
                 children: Vec::new(),
+                ..Default::default()
             }],
+            ..Default::default()
         };
 
         let aliases = HashMap::new();
@@ -926,6 +981,7 @@ mod tests {
             rota: Some(Value::Bool(false)),
             rm: Some(Value::Bool(false)),
             children: Vec::new(),
+            ..Default::default()
         };
         let partition = LsblkDevice {
             path: Some(PathBuf::from("/dev/nvme0n1p1")),
@@ -937,6 +993,7 @@ mod tests {
             rota: None,
             rm: None,
             children: Vec::new(),
+            ..Default::default()
         };
 
         let aliases = HashMap::new();
@@ -978,5 +1035,32 @@ mod tests {
             parent_devnode_for_partition(Path::new("/dev/mmcblk0p2")),
             Some(PathBuf::from("/dev/mmcblk0"))
         );
+    }
+}
+
+#[cfg(test)]
+mod usage_tests {
+    use super::*;
+    #[test]
+    fn filesystem_identity_and_nested_active_use_are_preserved() {
+        let node: LsblkDevice = serde_json::from_str(
+            r#"{
+            "path":"/dev/sda", "type":"disk", "children":[{
+                "path":"/dev/sda1", "type":"part", "fstype":"vfat", "label":"EFI",
+                "parttype":"c12a7328-f81f-11d2-ba4b-00a0c93ec93b", "mountpoints":[null,"/boot"]
+            }]}"#,
+        )
+        .unwrap();
+        assert!(device_usage(&node).in_use);
+        let usage = device_usage(&node.children[0]);
+        assert_eq!(usage.filesystem, "vfat");
+        assert_eq!(usage.label, "EFI");
+        assert_eq!(usage.mountpoints, ["/boot"]);
+        let inactive: LsblkDevice =
+            serde_json::from_str(r#"{"type":"part", "mountpoints":[null]}"#).unwrap();
+        assert!(!device_usage(&inactive).in_use);
+        let mapped: LsblkDevice =
+            serde_json::from_str(r#"{"type":"part", "children":[{"type":"crypt"}]}"#).unwrap();
+        assert!(device_usage(&mapped).in_use);
     }
 }

@@ -8,32 +8,20 @@ import { WelcomeState } from "../state/welcome-state.slint";
 import { WizardState } from "../state/wizard-state.slint";
 import { WifiState } from "../state/wifi-state.slint";
 import { Icon } from "../components/icon.slint";
-import { SignalBars } from "../components/signal-bars.slint";
+import { StyledButton } from "../components/styled-button.slint";
 
 export component WelcomeView inherits Rectangle {
     callback quit-requested();
     background: Theme.c.base;
 
-    Rectangle {
+    StyledButton {
         x: 16px;
         y: root.height - self.height - 16px;
         width: 88px;
-        height: 36px;
-        background: quit-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
-        border-radius: Theme.radius-sm;
-        accessible-role: button;
-        accessible-label: "Quit";
-        accessible-action-default => { root.quit-requested(); }
-        quit-ta := TouchArea {
-            clicked => { root.quit-requested(); }
-            mouse-cursor: pointer;
-        }
-        Text {
-            text: "Quit";
-            color: Theme.c.text;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
+        height: 40px;
+        label: "Quit";
+        outlined: true;
+        clicked => { root.quit-requested(); }
     }
 
     // ── Bottom-right connectivity widget ───────────────────────────────
@@ -78,7 +66,7 @@ export component WelcomeView inherits Rectangle {
                 size: 18px;
                 tint: WifiState.current-ssid != "" || WifiState.ethernet-connected ? Theme.c.green
                     : WifiState.iwd-running ? Theme.c.blue
-                    : Theme.c.overlay0;
+                    : Theme.c.subtext0;
             }
 
             // Label — SSID when connected, "Not connected" otherwise,
@@ -106,7 +94,7 @@ export component WelcomeView inherits Rectangle {
             alignment: center;
 
             VerticalLayout {
-                width: min(500px, root.width - 60px);
+                width: min(600px, root.width - 60px);
                 spacing: 24px;
                 alignment: center;
 
@@ -136,13 +124,13 @@ export component WelcomeView inherits Rectangle {
 
                     // Network status
                     Rectangle {
-                        height: 48px;
+                        height: 56px;
                         background: Theme.c.surface0;
                         border-radius: 10px;
 
                         HorizontalLayout {
                             padding-left: 16px;
-                            padding-right: 12px;
+                            padding-right: 16px;
                             spacing: 12px;
 
                             Text {
@@ -163,44 +151,16 @@ export component WelcomeView inherits Rectangle {
 
                             Text {
                                 text: WelcomeState.net-ok ? "Connected" : "Not connected";
-                                color: WelcomeState.net-ok ? Theme.c.green : Theme.c.overlay0;
-                                font-size: 13px;
+                                color: WelcomeState.net-ok ? Theme.c.green : Theme.c.subtext0;
+                                font-size: 14px;
                                 vertical-alignment: center;
-                            }
-
-                            if !WelcomeState.net-ok: VerticalLayout {
-                                alignment: center;
-                                horizontal-stretch: 0;
-
-                                Rectangle {
-                                    width: 90px;
-                                    height: 30px;
-                                    background: check-net-ta.has-hover ? Theme.c.surface1 : Theme.c.mantle;
-                                    border-radius: 6px;
-                                    accessible-role: button;
-                                    accessible-label: "Check again";
-                                    accessible-action-default => { WelcomeState.check-internet(); }
-
-                                    check-net-ta := TouchArea {
-                                        clicked => { WelcomeState.check-internet(); }
-                                        mouse-cursor: pointer;
-                                    }
-
-                                    Text {
-                                        text: "Check again";
-                                        color: Theme.c.blue;
-                                        font-size: 12px;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                }
                             }
                         }
                     }
 
                     // UEFI status
                     Rectangle {
-                        height: 48px;
+                        height: 56px;
                         background: Theme.c.surface0;
                         border-radius: 10px;
 
@@ -228,7 +188,7 @@ export component WelcomeView inherits Rectangle {
                             Text {
                                 text: WelcomeState.uefi-ok ? "Detected" : "Not detected (required)";
                                 color: WelcomeState.uefi-ok ? Theme.c.green : Theme.c.red;
-                                font-size: 13px;
+                                font-size: 14px;
                                 vertical-alignment: center;
                             }
                         }
@@ -236,7 +196,7 @@ export component WelcomeView inherits Rectangle {
 
                     // ZFS status
                     zfs-card := Rectangle {
-                        height: 48px;
+                        height: 56px;
                         background: Theme.c.surface0;
                         border-radius: 10px;
 
@@ -245,14 +205,14 @@ export component WelcomeView inherits Rectangle {
                             spacing: 0px;
 
                             HorizontalLayout {
-                                height: 48px;
+                                height: 56px;
                                 padding-left: 16px;
                                 padding-right: 16px;
                                 spacing: 12px;
 
                                 zfs-icon := Text {
                                     text: "\u{2717}";
-                                    color: Theme.c.overlay0;
+                                    color: Theme.c.subtext0;
                                     font-size: 18px;
                                     vertical-alignment: center;
                                     width: 24px;
@@ -273,9 +233,9 @@ export component WelcomeView inherits Rectangle {
                                 }
 
                                 zfs-status := Text {
-                                    text: "Waiting for network...";
-                                    color: Theme.c.overlay0;
-                                    font-size: 13px;
+                                    text: WelcomeState.net-ok ? "Not ready" : "Waiting for network";
+                                    color: Theme.c.subtext0;
+                                    font-size: 14px;
                                     vertical-alignment: center;
                                 }
                             }
@@ -289,7 +249,8 @@ export component WelcomeView inherits Rectangle {
                                 clip: true;
 
                                 Rectangle {
-                                    x: 0; y: 0;
+                                    x: 0;
+                                    y: 0;
                                     height: parent.height;
                                     width: parent.width * WelcomeState.zfs-install-pct / 100;
                                     background: Theme.c.blue;
@@ -307,10 +268,10 @@ export component WelcomeView inherits Rectangle {
                         // both somehow match.
                         states [
                             installing when WelcomeState.zfs-installing: {
-                                zfs-card.height: 72px;
+                                zfs-card.height: 80px;
                                 zfs-icon.text: "\u{21bb}";
                                 zfs-icon.color: Theme.c.blue;
-                                zfs-status.text: WelcomeState.zfs-install-status;
+                                zfs-status.text: "Preparing…";
                                 zfs-status.color: Theme.c.blue;
                             }
                             ready when WelcomeState.zfs-ok: {
@@ -323,53 +284,53 @@ export component WelcomeView inherits Rectangle {
                     }
                 }
 
-                // Start button
+                if !WelcomeState.zfs-ok && WelcomeState.zfs-install-status != "": Text {
+                    text: WelcomeState.zfs-install-status;
+                    color: WelcomeState.zfs-installing ? Theme.c.subtext1 : Theme.c.red;
+                    font-size: 14px;
+                    wrap: word-wrap;
+                    horizontal-alignment: center;
+                }
+                if !WelcomeState.all-checks-ok: Text {
+                    text: !WelcomeState.net-ok ? "Connect to the internet to prepare ZFS and start the installation."
+                        : !WelcomeState.uefi-ok ? "Restart the installer in UEFI mode to continue."
+                        : WelcomeState.zfs-installing ? "Preparing ZFS support. This may take a few minutes."
+                        : "ZFS is not ready. Check the preparation status before continuing.";
+                    color: Theme.c.subtext1;
+                    font-size: 14px;
+                    wrap: word-wrap;
+                    horizontal-alignment: center;
+                }
                 HorizontalLayout {
                     alignment: center;
-
-                    start-button := Rectangle {
-                        accessible-role: button;
-                        accessible-label: "Get Started";
-                        accessible-enabled: WelcomeState.all-checks-ok;
-                        accessible-action-default => {
-                            if WelcomeState.all-checks-ok { WizardState.go-to(1); }
-                        }
-                        width: 160px;
+                    spacing: 12px;
+                    if WifiState.has-hardware: StyledButton {
+                        label: "Wi-Fi & network";
+                        icon-source: @image-url("../../assets/icons/wifi.svg");
                         height: 44px;
-                        background: Theme.c.surface1;
-                        border-radius: 10px;
-
-                        start-ta := TouchArea {
-                            enabled: WelcomeState.all-checks-ok;
-                            mouse-cursor: self.enabled ? pointer : default;
-                            clicked => { WizardState.go-to(1); }
-                        }
-
-                        start-text := Text {
-                            text: "Get Started \u{2192}";
-                            color: Theme.c.overlay0;
-                            font-size: 15px;
-                            font-weight: FontWeight.semi-bold;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-
-                        states [
-                            ready when WelcomeState.all-checks-ok: {
-                                start-button.background: Theme.c.blue;
-                                start-text.color: Theme.c.base;
-                            }
-                            ready-hover when WelcomeState.all-checks-ok && start-ta.has-hover: {
-                                start-button.background: Theme.c.sky;
-                                start-text.color: Theme.c.base;
-                            }
-                        ]
+                        outlined: WelcomeState.net-ok;
+                        style: WelcomeState.net-ok ? Theme.button-default : Theme.button-primary;
+                        clicked => { WifiState.open(); }
+                    }
+                    if !WelcomeState.net-ok || (!WelcomeState.zfs-ok && !WelcomeState.zfs-installing): StyledButton {
+                        label: "Check again";
+                        height: 44px;
+                        outlined: true;
+                        clicked => { WelcomeState.check-internet(); }
+                    }
+                    if WelcomeState.net-ok: StyledButton {
+                        label: "Get Started →";
+                        accessible-label: "Get Started";
+                        height: 44px;
+                        style: Theme.button-primary;
+                        enabled: WelcomeState.all-checks-ok;
+                        clicked => { if WelcomeState.all-checks-ok { WizardState.go-to(1); } }
                     }
                 }
 
                 Text {
                     text: "v" + WelcomeState.app-version;
-                    color: Theme.c.overlay0;
+                    color: Theme.c.subtext0;
                     font-size: 11px;
                     horizontal-alignment: center;
                 }

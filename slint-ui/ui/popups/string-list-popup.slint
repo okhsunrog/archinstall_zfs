@@ -36,116 +36,154 @@ export component StringListPopup inherits Rectangle {
 
     if popup-visible: Rectangle {
         background: #00000080;
-        width: 100%; height: 100%;
+        width: 100%;
+        height: 100%;
 
         TouchArea {
             clicked => { closed(); }
             scroll-event(e) => { return accept; }
         }
 
-        Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: min(540px, parent.width - 40px);
-            height: min(self.preferred-height, parent.height - 80px);
-            background: Theme.c.mantle;
-            border-radius: Theme.radius-md;
-            border-color: Theme.c.surface1;
-            border-width: 1px;
-            clip: true;
-            accessible-role: groupbox;
-            accessible-label: root.title;
+        FocusScope {
+            width: 100%;
+            height: 100%;
+            key-pressed(e) => { if e.text == Key.Escape { root.closed(); return accept; } return reject; }
+            Rectangle {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: min(600px, parent.width - 40px);
+                height: min(self.preferred-height, parent.height - 80px);
+                background: Theme.c.mantle;
+                border-radius: Theme.radius-md;
+                border-color: Theme.c.surface1;
+                border-width: 1px;
+                clip: true;
+                accessible-role: groupbox;
+                accessible-label: root.title;
 
-            VerticalLayout {
-                padding: Theme.spacing-lg;
-                spacing: Theme.spacing-sm;
+                VerticalLayout {
+                    padding: 20px;
+                    spacing: 12px;
 
-                Text {
-                    text: root.title;
-                    color: Theme.c.blue;
-                    font-size: Theme.font-lg;
-                    font-weight: FontWeight.semi-bold;
-                    height: Theme.spacing-xl;
-                }
+                    Text {
+                        text: root.title;
+                        color: Theme.c.text;
+                        font-size: 24px;
+                        font-weight: FontWeight.semi-bold;
+                        wrap: word-wrap;
+                    }
 
+                    Text {
+                        text: "Enable these services at boot. Add their packages under Extra packages if needed.";
+                        color: Theme.c.subtext1;
+                        font-size: 14px;
+                        wrap: word-wrap;
+                    }
+
+                    if root.items.length == 0: Text {
+                        text: "No extra services selected.";
+                        color: Theme.c.subtext1;
+                        font-size: 14px;
+                    }
                 // Items list. ScrollView grows with content (preferred-height
                 // override) up to the popup's window-bounds cap, then scrolls
                 // overflow. See file header for the full rationale.
                 ScrollView {
-                    preferred-height: items-vbox.preferred-height;
-                    vertical-stretch: 1;
+                        preferred-height: items-vbox.preferred-height;
+                        vertical-stretch: 1;
 
-                    items-vbox := VerticalLayout {
-                        spacing: Theme.spacing-xs;
+                        items-vbox := VerticalLayout {
+                            spacing: Theme.spacing-xs;
 
-                        for item[index] in root.items: Rectangle {
-                            height: Theme.control-height;
-                            background: Theme.c.surface0;
-                            border-radius: Theme.radius-sm;
+                            for item[index] in root.items: Rectangle {
+                                height: 48px;
+                                background: Theme.c.surface0;
+                                border-radius: Theme.radius-sm;
 
-                            HorizontalLayout {
-                                padding-left: Theme.spacing-md;
-                                padding-right: Theme.spacing-sm;
-                                alignment: space-between;
+                                HorizontalLayout {
+                                    padding-left: Theme.spacing-md;
+                                    padding-right: Theme.spacing-sm;
+                                    alignment: space-between;
 
-                                Text {
-                                    text: item.text;
-                                    color: Theme.c.text;
-                                    font-size: Theme.font-base;
-                                    vertical-alignment: center;
-                                    horizontal-stretch: 1;
-                                }
+                                    Text {
+                                        text: item.text;
+                                        color: Theme.c.text;
+                                        font-size: 15px;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                    }
 
-                                VerticalLayout {
-                                    alignment: center;
-                                    DeleteButton {
-                                        clicked => { root.item-removed(index); }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        StyledButton {
+                                            label: "Remove";
+                                            outlined: true;
+                                            height: 36px;
+                                            accessible-label: "Remove service " + item.text;
+                                            clicked => { root.item-removed(index); }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
 
-                HorizontalLayout {
-                    spacing: Theme.spacing-sm;
+                    Text {
+                        text: "Service name";
+                        color: Theme.c.subtext1;
+                        font-size: 14px;
+                    }
 
-                    add-input := StyledTextInput {
-                        horizontal-stretch: 1;
-                        placeholder: "add new entry...";
-                        accepted(val) => {
-                            if val != "" {
-                                root.item-added(val);
-                                add-input.text = "";
+                    HorizontalLayout {
+                        spacing: 12px;
+
+                        add-input := StyledTextInput {
+                            horizontal-stretch: 1;
+                            placeholder: "e.g. sshd or cups";
+                            height: 40px;
+                            accessible-label: "Service name";
+                            accepted(val) => {
+                                if val != "" {
+                                    root.item-added(val);
+                                    add-input.text = "";
+                                }
+                            }
+                        }
+
+                        StyledButton {
+                            label: "Add";
+                            height: 40px;
+                            enabled: add-input.text != "";
+                            min-width: 60px;
+                            outlined: true;
+                            clicked => {
+                                if add-input.text != "" {
+                                    root.item-added(add-input.text);
+                                    add-input.text = "";
+                                    add-input.focus-input();
+                                }
                             }
                         }
                     }
 
-                    StyledButton {
-                        label: "Add";
-                        min-width: 60px;
-                        style: Theme.button-primary;
-                        clicked => {
-                            if add-input.text != "" {
-                                root.item-added(add-input.text);
-                                add-input.text = "";
-                                add-input.focus-input();
-                            }
+                    HorizontalLayout {
+                        alignment: end;
+                        StyledButton {
+                            label: "Done";
+                            height: 40px;
+                            style: Theme.button-primary;
+                            min-width: 60px;
+                            clicked => { root.closed(); }
                         }
                     }
-
-                    StyledButton {
-                        label: "Done";
-                        min-width: 60px;
-                        clicked => { root.closed(); }
-                    }
                 }
-            }
 
-            // Focus the input on first show. Placed at the popup-card level
+                // Focus the input on first show. Placed at the popup-card level
             // so it runs once when the `if popup-visible:` subtree is
             // instantiated, not on every layout init pass.
             init => { add-input.focus-input(); }
+            }
         }
     }
 }

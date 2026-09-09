@@ -358,8 +358,11 @@ async fn install(
     {
         let runner = runner.clone();
         let efi = efi_partition.clone();
-        tokio::task::spawn_blocking(move || crate::bootmenu::create_efi_entries(&*runner, &efi))
-            .await??;
+        let target = mountpoint.clone();
+        tokio::task::spawn_blocking(move || {
+            crate::bootmenu::create_efi_entries(&*runner, &efi, &target)
+        })
+        .await??;
     }
 
     // Last, so they are the final thing in the log the user is looking at

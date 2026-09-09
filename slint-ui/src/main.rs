@@ -9,6 +9,7 @@ mod format;
 mod installed_shell;
 mod preview;
 mod refresh;
+mod storage;
 mod tracing_layer;
 
 use std::cell::RefCell;
@@ -229,6 +230,7 @@ fn run_gui(
     controllers::welcome::setup(&app, &config, &kernel_scan, demo);
     controllers::lists::setup(&app, &config, &models);
     controllers::wizard::setup(&app, &config, &kernel_scan);
+    storage::setup(&app, &config);
     controllers::install::setup(&app, &config, demo, log_rx, &completion);
     controllers::wifi::setup(&app);
 

@@ -1,0 +1,20 @@
+[Unit]
+Description=Load an installer update from the Ventoy boot medium
+After=local-fs.target
+Wants=getty-pre.target
+Before=getty-pre.target display-manager.service
+ConditionPathIsDirectory=/run/archiso/cowspace
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/azfs-live-update
+RemainAfterExit=yes
+TimeoutStartSec=30s
+TimeoutStopSec=5s
+RuntimeDirectory=azfs-live-update
+PrivateMounts=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

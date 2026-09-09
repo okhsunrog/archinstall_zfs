@@ -1,15 +1,19 @@
 import { Theme, ButtonStyle } from "../styling.slint";
 import { AnimationSettings } from "../styling.slint";
 import { StateLayer, FocusTouchArea } from "internal/state-layer.slint";
+import { Icon } from "icon.slint";
 
 export component StyledButton {
     in property <string> label;
+    in property <image> icon-source;
     in property <ButtonStyle> style: Theme.button-default;
     in property <bool> enabled: true;
     in property <bool> outlined: false;
     in property <length> corner-radius: Theme.radius-sm;
-    in property <length> label-size: Theme.font-md;
+    in property <length> label-size: Theme.font-base;
 
+    out property <bool> has-focus: touch-area.has-focus;
+    public function focus-button() { touch-area.focus(); }
     callback clicked <=> touch-area.clicked;
 
     min-width: max(80px, content-layout.min-width);
@@ -18,7 +22,7 @@ export component StyledButton {
     accessible-role: button;
     accessible-label: root.label;
     accessible-enabled: root.enabled;
-    accessible-action-default => { touch-area.clicked(); }
+    accessible-action-default => { if root.enabled { touch-area.clicked(); } }
 
     background-rect := Rectangle {
         background: root.style.background;
@@ -40,6 +44,18 @@ export component StyledButton {
     content-layout := HorizontalLayout {
         padding-left: Theme.spacing-md;
         padding-right: Theme.spacing-md;
+        spacing: 8px;
+        alignment: center;
+
+        if root.icon-source.width > 0: VerticalLayout {
+            horizontal-stretch: 0;
+            alignment: center;
+            Icon {
+                source: root.icon-source;
+                size: 18px;
+                tint: root.style.foreground;
+            }
+        }
 
         Text {
             text: root.label;

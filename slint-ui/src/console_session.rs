@@ -222,6 +222,10 @@ fn supervise_console(
             }
         }
         command.env(CHILD_ENV, "1").env(CHANNEL_ENV, fd.to_string());
+        // The installer enables tapping explicitly; Slint preserves libinput defaults.
+        if std::env::var_os("SLINT_LIBINPUT_TAP_TO_CLICK").is_none() {
+            command.env("SLINT_LIBINPUT_TAP_TO_CLICK", "1");
+        }
         // SAFETY: pre_exec only performs async-signal-safe syscalls.
         unsafe { command.pre_exec(move || check(libc::fcntl(fd, libc::F_SETFD, 0))) };
         let mut child = spawn_command(&mut command)?;

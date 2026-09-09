@@ -113,6 +113,11 @@ enum Commands {
 
 #[derive(Parser, Clone)]
 struct TestOpts {
+    /// Testing ISO to boot. By default, use the newest *-testing-*.iso.
+    /// Custom images must allow passwordless root SSH on the ISO VM.
+    #[arg(long)]
+    iso: Option<PathBuf>,
+
     /// Path to base JSON config file (overrides layered on top)
     #[arg(long, default_value = "xtask/configs/default.json")]
     config: PathBuf,
@@ -415,8 +420,14 @@ fn seed_aur_sources(dir: &Path) {
 fn cmd_test_install(opts: TestOpts) -> Result<(), String> {
     check_prerequisites(&opts)?;
     let timeout = Duration::from_secs(opts.timeout);
+    let iso = match &opts.iso {
+        Some(path) if path.is_file() => path.clone(),
+        Some(path) => return Err(format!("ISO not found: {}", path.display())),
+        None => qemu::find_latest_testing_iso()?,
+    };
 
     eprintln!("=== test-install: Fresh disk + install ===");
+    eprintln!("Using testing ISO: {}", iso.display());
 
     // Fresh environment
     eprintln!("[1/4] Creating fresh disk and UEFI vars");
@@ -425,7 +436,6 @@ fn cmd_test_install(opts: TestOpts) -> Result<(), String> {
 
     // Boot ISO
     eprintln!("[2/4] Booting ISO VM on port {}", opts.iso_port);
-    let iso = qemu::find_latest_iso();
     let cache = prepare_cache(&opts)?;
     let mut vm = QemuVm::boot_iso(
         &opts.disk,

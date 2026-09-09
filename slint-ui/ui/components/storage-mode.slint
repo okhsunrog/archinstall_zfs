@@ -1,0 +1,48 @@
+import { Theme } from "../styling.slint";
+import { WizardState } from "../state/wizard-state.slint";
+import { FocusTouchArea } from "internal/state-layer.slint";
+export component StorageMode inherits Rectangle {
+    callback activated(string);
+    height: 106px;
+    HorizontalLayout {
+        spacing: 12px;
+        padding-top: 8px;
+        padding-bottom: 14px;
+        for label[index] in ["Erase a disk", "Use existing partitions", "Use an existing pool"]: Rectangle {
+            horizontal-stretch: 1;
+            background: WizardState.storage-mode == index ? Theme.c.blue.with-alpha(0.16) : Theme.c.surface0.with-alpha(0.55);
+            border-radius: 8px;
+            border-width: touch.has-focus ? 2px : 1px;
+            border-color: touch.has-focus || WizardState.storage-mode == index ? Theme.c.blue : Theme.c.surface1;
+            VerticalLayout {
+                padding: 12px;
+                spacing: 5px;
+                alignment: center;
+                Text {
+                    text: (WizardState.storage-mode == index ? "●  " : "○  ") + label;
+                    color: Theme.c.text;
+                    font-size: 15px;
+                    font-weight: 600;
+                    wrap: word-wrap;
+                }
+
+                Text {
+                    text: index == 0 ? "Create a new partition layout" : index == 1 ? "Create a new ZFS pool" : "Create a new boot environment";
+                    color: Theme.c.subtext1;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+            }
+
+            touch := FocusTouchArea {
+                width: 100%;
+                height: 100%;
+                accessible-role: radio-button;
+                accessible-label: label;
+                accessible-checked: WizardState.storage-mode == index;
+                accessible-action-default => { root.activated("radio:installation_mode:" + index); }
+                clicked => { root.activated("radio:installation_mode:" + index); }
+            }
+        }
+    }
+}

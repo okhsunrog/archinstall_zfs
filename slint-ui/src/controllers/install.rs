@@ -99,7 +99,12 @@ pub fn setup(
         }
         let c = cfg.borrow().clone();
 
-        let errors = c.validate_for_install();
+        let mut errors: Vec<String> = c
+            .validate_for_install()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        errors.extend(crate::storage::issues(&c));
         if !errors.is_empty() {
             app.global::<WizardState>()
                 .set_status_text(SharedString::from(format!("Validation: {}", errors[0])));

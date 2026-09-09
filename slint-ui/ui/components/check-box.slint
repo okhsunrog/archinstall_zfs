@@ -14,6 +14,7 @@ export component CheckBox inherits Rectangle {
     in-out property <bool> checked;
     in property <bool> enabled: true;
 
+    out property <bool> has-focus: touch-area.has-focus;
     callback toggled();
 
     height: 24px;
@@ -22,7 +23,7 @@ export component CheckBox inherits Rectangle {
     accessible-role: checkbox;
     accessible-checkable: true;
     accessible-checked <=> root.checked;
-    accessible-label <=> root.label;
+    accessible-label: root.label;
     accessible-enabled <=> root.enabled;
     accessible-action-default => { touch-area.clicked(); }
 
@@ -81,6 +82,8 @@ export component CheckBox inherits Rectangle {
     }
 
     states [
-        disabled when !root.enabled: { root.opacity: 0.5; }
+        disabled when !root.enabled: {
+            root.opacity: 0.5;
+        }
     ]
 }

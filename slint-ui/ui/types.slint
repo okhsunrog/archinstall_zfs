@@ -19,9 +19,17 @@ export enum ItemType {
     radio-header,
     radio-subheader,
     radio-option,
+    storage,
+    inline-text,
+    inline-password,
+    compact-choice,
 }
 
 export struct ConfigItem {
+    choices: [string],
+    choice-index: int,
+    advanced: bool,
+    destructive: bool,
     key: string,
     label: string,
     value: string,

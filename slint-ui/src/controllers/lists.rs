@@ -5,6 +5,10 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 
 use slint::{ComponentHandle, Model, SharedString};
 
@@ -66,17 +70,20 @@ fn setup_users(app: &App, config: &Rc<RefCell<GlobalConfig>>, models: &EditingMo
     let cfg = config.clone();
     let model = models.users.clone();
     app.on_user_added(move |username, password, sudo| {
-        let Some(app) = weak.upgrade() else { return };
+        let Some(app) = weak.upgrade() else { return false };
+        app.global::<EditingState>().set_user_error(SharedString::default());
         let username = username.to_string();
         if !archinstall_zfs_core::config::validation::is_valid_username(&username) {
-            return;
+            app.global::<EditingState>().set_user_error("Use up to 32 lowercase letters, digits, underscores or hyphens. Start with a letter or underscore.".into());
+            return false;
         }
         let mut c = cfg.borrow_mut();
         if c.users
             .as_ref()
             .is_some_and(|users| users.iter().any(|u| u.username == username))
         {
-            return;
+            app.global::<EditingState>().set_user_error("This username is already in the account list.".into());
+            return false;
         }
         let password = if password.is_empty() {
             None
@@ -98,6 +105,7 @@ fn setup_users(app: &App, config: &Rc<RefCell<GlobalConfig>>, models: &EditingMo
             has_sudo: sudo,
         });
         refresh_items(&app, &c);
+        true
     });
 
     let weak = app.as_weak();
@@ -175,28 +183,39 @@ fn setup_extra_services(app: &App, config: &Rc<RefCell<GlobalConfig>>, models: &
 }
 
 fn setup_packages(app: &App, config: &Rc<RefCell<GlobalConfig>>, models: &EditingModels) {
+    // Repository and AUR requests share an epoch so old results cannot replace a new query.
+    let search_epoch = Arc::new(AtomicU64::new(0));
+    let epoch = search_epoch.clone();
     // Repo search (alpm — runs blocking inside a tokio task)
     let weak = app.as_weak();
     let search_model = models.package_search.clone();
     app.on_pkg_search_changed(move |text| {
+        let request = epoch.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
         let Some(app) = weak.upgrade() else { return };
         let editing = app.global::<EditingState>();
+        editing.set_package_searching_aur(false);
+        search_model.set_vec(Vec::new());
+        editing.set_package_status_text(SharedString::default());
         if text.is_empty() {
-            search_model.set_vec(Vec::<PackageSearchResult>::new());
-            editing.set_package_status_text(SharedString::default());
             return;
         }
-        editing.set_package_searching_aur(false);
         if crate::preview::enabled() {
             search_model.set_vec(crate::preview::packages(&text, false));
             return;
         }
+        editing.set_package_status_text("Searching repositories…".into());
         let query = text.to_string();
         let weak2 = app.as_weak();
+        let epoch = epoch.clone();
         tokio::spawn(async move {
-            let results = archinstall_zfs_core::packages::search_repo(&query, 20)
-                .await
-                .unwrap_or_default();
+            let results = archinstall_zfs_core::packages::search_repo(&query, 20).await;
+            let (results, status) = match results {
+                Ok(results) => (results, SharedString::default()),
+                Err(error) => (
+                    Vec::new(),
+                    format!("Repository search failed: {error}").into(),
+                ),
+            };
             let items: Vec<PackageSearchResult> = results
                 .into_iter()
                 .map(|p| PackageSearchResult {
@@ -206,9 +225,11 @@ fn setup_packages(app: &App, config: &Rc<RefCell<GlobalConfig>>, models: &Editin
                 })
                 .collect();
             let _ = weak2.upgrade_in_event_loop(move |app| {
+                if epoch.load(Ordering::Relaxed) != request {
+                    return;
+                }
                 set_search_results(&app, items);
-                app.global::<EditingState>()
-                    .set_package_status_text(SharedString::default());
+                app.global::<EditingState>().set_package_status_text(status);
             });
         });
     });
@@ -216,18 +237,21 @@ fn setup_packages(app: &App, config: &Rc<RefCell<GlobalConfig>>, models: &Editin
     // AUR search
     let weak = app.as_weak();
     app.on_pkg_search_aur(move |text| {
+        let request = search_epoch.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
         let Some(app) = weak.upgrade() else { return };
         if text.is_empty() {
             return;
         }
         let editing = app.global::<EditingState>();
         editing.set_package_searching_aur(true);
+        set_search_results(&app, Vec::new());
         if crate::preview::enabled() {
             set_search_results(&app, crate::preview::packages(&text, true));
             editing.set_package_searching_aur(false);
             return;
         }
         editing.set_package_status_text(SharedString::from("Searching AUR..."));
+        let epoch = search_epoch.clone();
         let query = text.to_string();
         let weak2 = app.as_weak();
         tokio::spawn(async move {
@@ -242,6 +266,11 @@ fn setup_packages(app: &App, config: &Rc<RefCell<GlobalConfig>>, models: &Editin
                         })
                         .collect();
                     let _ = weak2.upgrade_in_event_loop(move |app| {
+                        if epoch.load(Ordering::Relaxed) != request {
+                            return;
+                        }
+                        app.global::<EditingState>()
+                            .set_package_searching_aur(false);
                         set_search_results(&app, items);
                         app.global::<EditingState>()
                             .set_package_status_text(SharedString::default());
@@ -250,6 +279,11 @@ fn setup_packages(app: &App, config: &Rc<RefCell<GlobalConfig>>, models: &Editin
                 Err(e) => {
                     let msg = format!("AUR error: {e}");
                     let _ = weak2.upgrade_in_event_loop(move |app| {
+                        if epoch.load(Ordering::Relaxed) != request {
+                            return;
+                        }
+                        app.global::<EditingState>()
+                            .set_package_searching_aur(false);
                         app.global::<EditingState>()
                             .set_package_status_text(SharedString::from(&msg));
                     });

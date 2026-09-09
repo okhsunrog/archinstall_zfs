@@ -33,6 +33,14 @@ pub fn enable() {
 pub enum Scene {
     Welcome,
     Offline,
+    NoUefi,
+    ZfsPreparing,
+    ZfsFailed,
+    WifiEmpty,
+    WifiUnavailable,
+    WifiNoInternet,
+    WifiVerifying,
+    Cancelling,
     Disk,
     NewPool,
     ExistingPool,
@@ -110,19 +118,40 @@ fn devices() -> Vec<BlockDevice> {
         transport: Some(bus.into()),
         rotational: Some(false),
         removable,
+        usage: archinstall_zfs_core::disk::device::DeviceUsage {
+            in_use: removable,
+            ..Default::default()
+        },
     })
     .collect()
 }
 
 pub fn disks() -> Vec<DeviceChoice> {
+    if storage_fixture() == "empty" {
+        return vec![];
+    }
     devices().into_iter().map(Into::into).collect()
 }
 
+fn storage_fixture() -> String {
+    std::env::var("AZFS_PREVIEW_STORAGE").unwrap_or_default()
+}
+
 pub fn partitions() -> Vec<DeviceChoice> {
+    if storage_fixture() == "empty" {
+        return vec![];
+    }
     devices()
         .into_iter()
         .flat_map(|disk| {
-            (1..=2).map(move |number| {
+            let count = if storage_fixture() == "many" {
+                20
+            } else if disk.transport.as_deref() == Some("sata") {
+                4
+            } else {
+                2
+            };
+            (1..=count).map(move |number| {
                 BlockPartition {
                     devnode: format!(
                         "{}{}{number}",
@@ -144,12 +173,50 @@ pub fn partitions() -> Vec<DeviceChoice> {
                     size_bytes: Some(if number == 1 {
                         1024 * 1024 * 1024
                     } else {
-                        disk.size_bytes.unwrap() - 1024 * 1024 * 1024
+                        (disk.size_bytes.unwrap() - 1024 * 1024 * 1024) / (count - 1)
                     }),
                     parent_size_bytes: disk.size_bytes,
                     transport: disk.transport.clone(),
                     rotational: disk.rotational,
                     removable: disk.removable,
+                    usage: archinstall_zfs_core::disk::device::DeviceUsage {
+                        filesystem: if storage_fixture() == "missing" {
+                            ""
+                        } else if number == 1 {
+                            "vfat"
+                        } else if number == 3 {
+                            "ntfs"
+                        } else {
+                            "ext4"
+                        }
+                        .into(),
+                        label: if storage_fixture() == "missing" {
+                            "".into()
+                        } else if number == 1 {
+                            "EFI".into()
+                        } else {
+                            format!(
+                                "{}-partition-{number}",
+                                if number == 3 {
+                                    "Windows"
+                                } else {
+                                    "Previous-Linux"
+                                }
+                            )
+                        },
+                        partition_type: if number == 1 {
+                            "c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
+                        } else {
+                            "0fc63daf-8483-4772-8e79-3d69d8477de4"
+                        }
+                        .into(),
+                        in_use: disk.removable,
+                        mountpoints: if disk.removable {
+                            vec!["/run/archiso/bootmnt".into()]
+                        } else {
+                            vec![]
+                        },
+                    },
                 }
                 .into()
             })
@@ -167,9 +234,9 @@ pub fn config(scene: Scene) -> GlobalConfig {
             Scene::ExistingPool => InstallationMode::ExistingPool,
             _ => InstallationMode::FullDisk,
         }),
-        disk: Some(disks()[0].path.clone()),
-        efi_partition: Some(partitions()[0].path.clone()),
-        zfs_partition: Some(partitions()[1].path.clone()),
+        disk: disks().first().map(|d| d.path.clone()),
+        efi_partition: partitions().first().map(|d| d.path.clone()),
+        zfs_partition: partitions().get(1).map(|d| d.path.clone()),
         pool_name: Some("zroot".into()),
         hostname: Some("arch-workstation".into()),
         locale: Some("en_US.UTF-8".into()),
@@ -349,7 +416,15 @@ pub fn show(app: &App, scene: Scene, size: Size) {
     app.window()
         .set_size(slint::PhysicalSize::new(size.0, size.1));
     let step = match scene {
-        Scene::Welcome | Scene::Offline => 0,
+        Scene::Welcome
+        | Scene::Offline
+        | Scene::NoUefi
+        | Scene::ZfsPreparing
+        | Scene::ZfsFailed
+        | Scene::WifiEmpty
+        | Scene::WifiUnavailable
+        | Scene::WifiNoInternet
+        | Scene::WifiVerifying => 0,
         Scene::Disk | Scene::NewPool | Scene::ExistingPool => 1,
         Scene::Zfs => 2,
         Scene::System => 3,
@@ -365,6 +440,43 @@ pub fn show(app: &App, scene: Scene, size: Size) {
             .set_ethernet_connected(false);
     }
     match scene {
+        Scene::NoUefi => app.global::<WelcomeState>().set_uefi_ok(false),
+        Scene::ZfsPreparing | Scene::ZfsFailed => {
+            let state = app.global::<WelcomeState>();
+            state.set_zfs_ok(false);
+            let preparing = matches!(scene, Scene::ZfsPreparing);
+            state.set_zfs_installing(preparing);
+            state.set_zfs_install_pct(45);
+            state.set_zfs_install_status(if preparing {
+                "Building the ZFS module for the running kernel…".into()
+            } else {
+                "Failed: could not retrieve ZFS packages. Check your network connection and try again.".into()
+            });
+        }
+        Scene::WifiEmpty
+        | Scene::WifiUnavailable
+        | Scene::WifiNoInternet
+        | Scene::WifiVerifying => {
+            use crate::ui::{WifiPhase, WifiState};
+            let wifi = app.global::<WifiState>();
+            app.global::<crate::ui::PopupState>().set_wifi_visible(true);
+            wifi.set_visible(true);
+            app.global::<WelcomeState>().set_net_ok(false);
+            wifi.set_networks(ModelRc::new(VecModel::default()));
+            wifi.set_ethernet_connected(false);
+            wifi.set_iwd_running(!matches!(scene, Scene::WifiUnavailable));
+            wifi.set_phase(match scene {
+                Scene::WifiNoInternet => WifiPhase::NoInternet,
+                Scene::WifiVerifying => WifiPhase::Verifying,
+                _ => WifiPhase::Picking,
+            });
+            wifi.set_status_text("Checking internet access…".into());
+            if matches!(scene, Scene::WifiNoInternet) {
+                wifi.set_current_ssid("HomeNetwork".into());
+                wifi.set_error_text("Connected to HomeNetwork, but the internet check did not succeed. Check the router or choose another network.".into());
+            }
+        }
+        Scene::Cancelling => progress(app, 4),
         Scene::Install => progress(app, 1),
         Scene::Done => {
             progress(app, 2);

@@ -1,0 +1,102 @@
+import { WizardState } from "../state/wizard-state.slint";
+import { ComboBox } from "std-widgets.slint";
+import { Theme } from "../styling.slint";
+import { ConfigItem, ItemType } from "../types.slint";
+import { StyledButton } from "styled-button.slint";
+import { StyledTextInput } from "styled-text-input.slint";
+
+export component SetupRow inherits Rectangle {
+    in property <ConfigItem> item;
+    in property <int> row-index;
+    callback ensure-visible(length);
+    callback activated(string);
+    callback edited(string, string);
+    background: Theme.c.surface0.with-alpha(0.55);
+    border-radius: 8px;
+    height: max(item.item-type == ItemType.storage ? 104px : 64px, contents.min-height);
+    vertical-stretch: 0;
+    contents := VerticalLayout {
+        padding: 12px;
+        spacing: 6px;
+        HorizontalLayout {
+            spacing: 16px;
+            Text {
+                text: item.label;
+                color: Theme.c.text;
+                font-size: 15px;
+                font-weight: 600;
+                width: 180px;
+                vertical-alignment: center;
+                wrap: word-wrap;
+            }
+
+            if item.item-type == ItemType.storage: Text {
+                text: item.value;
+                font-size: 15px;
+                color: item.is-empty ? Theme.c.subtext1 : Theme.c.text;
+                font-weight: 600;
+                horizontal-stretch: 1;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+            if item.item-type == ItemType.storage && item.detail-size != "": Text {
+                text: item.detail-size;
+                color: Theme.c.text;
+                vertical-alignment: center;
+                horizontal-alignment: right;
+                width: 90px;
+            }
+            if item.item-type == ItemType.storage && item.key != "": StyledButton {
+                label: item.is-empty ? "Choose" : "Change";
+                height: 40px;
+                outlined: true;
+                accessible-label: self.label + " " + item.label;
+                changed has-focus => { if self.has-focus { root.ensure-visible(root.y + root.height); } }
+                property <int> row-focus: WizardState.focused-index;
+                init => { if self.row-focus == root.row-index { self.focus-button(); } }
+                changed row-focus => { if self.row-focus == root.row-index { self.focus-button(); } }
+                clicked => { root.activated(item.key); }
+            }
+            if item.item-type == ItemType.inline-text || item.item-type == ItemType.inline-password: StyledTextInput {
+                height: 40px;
+                horizontal-stretch: 1;
+                font-size: 15px;
+                is-password: item.item-type == ItemType.inline-password;
+                placeholder: self.is-password ? item.value : item.label;
+                text: self.is-password ? "" : item.value;
+                accessible-label: item.label;
+                changed has-focus => { if self.has-focus { root.ensure-visible(root.y + root.height); } }
+                property <int> row-focus: WizardState.focused-index;
+                init => { if self.row-focus == root.row-index { self.focus-input(); } }
+                changed row-focus => { if self.row-focus == root.row-index { self.focus-input(); } }
+                edited(value) => { root.edited(item.key,value); }
+                accepted(value) => { root.edited(item.key,value); }
+            }
+            if item.item-type == ItemType.compact-choice: ComboBox {
+                height: 40px;
+                horizontal-stretch: 1;
+                model: item.choices;
+                current-index: item.choice-index;
+                accessible-label: item.label;
+                changed has-focus => { if self.has-focus { root.ensure-visible(root.y + root.height); } }
+                property <int> row-focus: WizardState.focused-index;
+                init => { if self.row-focus == root.row-index { self.focus(); } }
+                changed row-focus => { if self.row-focus == root.row-index { self.focus(); } }
+                selected(value) => { root.activated("radio:" + item.key + ":" + self.current-index); }
+            }
+        }
+
+        if item.detail-model != "": Text {
+            text: item.detail-model;
+            color: Theme.c.subtext1;
+            font-size: 13px;
+            overflow: elide;
+        }
+        if item.description != "": Text {
+            text: item.key == "dataset_prefix" ? "Create " + WizardState.environment-path : item.description;
+            font-size: 13px;
+            wrap: word-wrap;
+            color: item.item-type == ItemType.storage && !item.is-empty && item.destructive ? Theme.c.yellow : Theme.c.subtext1;
+        }
+    }
+}

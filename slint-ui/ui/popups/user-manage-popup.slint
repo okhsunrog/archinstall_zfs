@@ -1,221 +1,240 @@
 import { ScrollView } from "std-widgets.slint";
-import { Theme, Palette } from "../styling.slint";
+import { Theme } from "../styling.slint";
 import { UserEntry } from "../types.slint";
 import { StyledButton } from "../components/styled-button.slint";
 import { StyledTextInput } from "../components/styled-text-input.slint";
-import { Badge } from "../components/badge.slint";
-import { DeleteButton } from "../components/delete-button.slint";
 import { CheckBox } from "../components/check-box.slint";
 import { ProgressBar } from "../components/progress-bar.slint";
 import { PopupState } from "../state/popup-state.slint";
+import { EditingState } from "../state/editing-state.slint";
 
 export component UserManagePopup inherits Rectangle {
     in property <[UserEntry]> users;
     in property <bool> popup-visible;
-
-    callback user-added(string, string, bool);
+    callback user-added(string, string, bool) -> bool;
     callback user-removed(int);
     callback user-sudo-toggled(int);
-    // Forwarded to Rust on every keystroke in the password field. Rust runs
-    // it through zxcvbn (same handler as TextInputPopup) and writes the
-    // strength values back into PopupState.
     callback password-edited(string);
     callback closed();
 
     if popup-visible: Rectangle {
         background: #00000080;
-        width: 100%; height: 100%;
-
+        width: 100%;
+        height: 100%;
         TouchArea {
             clicked => { closed(); }
             scroll-event(e) => { return accept; }
         }
 
-        Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: min(520px, parent.width - 40px);
-            // Grow with content up to the window-bounds clamp. ScrollView's
-            // preferred-height override exposes the inner content height to
-            // this layout (same trick as StringListPopup).
-            height: min(self.preferred-height, parent.height - 80px);
-            background: Theme.c.mantle;
-            border-radius: Theme.radius-md;
-            border-color: Theme.c.surface1;
-            border-width: 1px;
-            clip: true;
-            accessible-role: groupbox;
-            accessible-label: "User accounts";
+        FocusScope {
+            width: 100%;
+            height: 100%;
+            key-pressed(e) => {
+                if e.text == Key.Escape { root.closed(); return accept; }
+                return reject;
+            }
+            Rectangle {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: min(640px, parent.width - 40px);
+                height: min(self.preferred-height, parent.height - 40px);
+                background: Theme.c.mantle;
+                border-radius: 12px;
+                border-color: Theme.c.surface1;
+                border-width: 1px;
+                clip: true;
+                accessible-role: groupbox;
+                accessible-label: "User accounts";
+                VerticalLayout {
+                    padding: 20px;
+                    spacing: 16px;
+                    Text {
+                        text: "User accounts";
+                        color: Theme.c.text;
+                        font-size: 24px;
+                        font-weight: 600;
+                    }
 
-            VerticalLayout {
-                padding: Theme.spacing-lg;
-                spacing: Theme.spacing-md;
-
-                // ── Title ──
-                Text {
-                    text: "User accounts";
-                    color: Theme.c.blue;
-                    font-size: Theme.font-lg;
-                    font-weight: FontWeight.semi-bold;
-                    height: Theme.spacing-xl;
-                }
-
-                // ── Existing users list ──
-                // Grows naturally with the model up to the popup's
-                // window-bounds cap; ScrollView's preferred-height override
-                // exposes content height to the parent layout. See
-                // StringListPopup file header for the full rationale.
-                if root.users.length > 0: ScrollView {
-                    preferred-height: users-vbox.preferred-height;
-                    vertical-stretch: 1;
-
-                    users-vbox := VerticalLayout {
-                        spacing: Theme.spacing-xs;
-
-                        for user[index] in root.users: Rectangle {
-                            height: Theme.control-height-lg - 4px;
-                            background: user-row-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
-                            border-radius: Theme.radius-sm;
-
-                            user-row-ta := TouchArea {
-                                clicked => { root.user-sudo-toggled(index); }
+                    form-scroll := ScrollView {
+                        function reveal(y: length, h: length) {
+                            if y + self.content-y < 0px { self.content-y = -y; }
+                            else if y + h + self.content-y > self.height { self.content-y = self.height - y - h; }
+                        }
+                        preferred-height: body.preferred-height;
+                        body := VerticalLayout {
+                            spacing: 12px;
+                            Text {
+                                text: "Administrators can run commands with sudo. Use a regular account for everyday work.";
+                                color: Theme.c.subtext1;
+                                font-size: 14px;
+                                wrap: word-wrap;
                             }
 
-                            HorizontalLayout {
-                                padding-left: Theme.spacing-md;
-                                padding-right: Theme.spacing-sm;
-                                spacing: Theme.spacing-sm;
-                                alignment: space-between;
-
+                            if root.users.length == 0: Text {
+                                text: "No user accounts yet. Add your first account below.";
+                                color: Theme.c.subtext1;
+                                font-size: 14px;
+                                wrap: word-wrap;
+                            }
+                            for user[index] in root.users: user-row := Rectangle {
+                                height: 56px;
+                                background: Theme.c.surface0;
+                                border-radius: 8px;
                                 HorizontalLayout {
-                                    spacing: Theme.spacing-sm;
-                                    alignment: start;
-
+                                    padding: 8px;
+                                    spacing: 12px;
                                     Text {
                                         text: user.username;
                                         color: Theme.c.text;
-                                        font-size: Theme.font-base;
+                                        font-size: 15px;
+                                        font-weight: 600;
                                         vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                        overflow: elide;
                                     }
 
-                                    // Wrap in a centering VerticalLayout —
-                                    // HorizontalLayout doesn't center
-                                    // fixed-size children on the cross axis
-                                    // by default, they get top-aligned.
-                                    if user.has-sudo: VerticalLayout {
-                                        alignment: center;
-                                        Badge { label: "sudo"; }
+                                    CheckBox {
+                                        label: "Administrator";
+                                        height: 40px;
+                                        width: 156px;
+                                        accessible-label: "Administrator " + user.username;
+                                        checked: user.has-sudo;
+                                        changed has-focus => { if self.has-focus { form-scroll.reveal(user-row.y, user-row.height); } }
+                                        toggled => { root.user-sudo-toggled(index); }
                                     }
 
-                                    if !user.has-sudo: Text {
-                                        text: "(click to toggle sudo)";
-                                        color: Theme.c.overlay0;
-                                        font-size: Theme.font-sm;
-                                        vertical-alignment: center;
-                                    }
-                                }
-
-                                VerticalLayout {
-                                    alignment: center;
-                                    DeleteButton {
+                                    StyledButton {
+                                        label: "Remove";
+                                        height: 40px;
+                                        outlined: true;
+                                        accessible-label: "Remove user " + user.username;
+                                        changed has-focus => { if self.has-focus { form-scroll.reveal(user-row.y, user-row.height); } }
                                         clicked => { root.user-removed(index); }
                                     }
                                 }
                             }
-                        }
-                    }
-                }
+                            Rectangle {
+                                height: 1px;
+                                background: Theme.c.surface1;
+                            }
 
-                if root.users.length > 0: Rectangle {
-                    height: 1px;
-                    background: Theme.c.surface1;
-                }
+                            Text {
+                                text: "New account";
+                                color: Theme.c.text;
+                                font-size: 16px;
+                                font-weight: 600;
+                            }
 
-                // ── Add user form ──
-                Text {
-                    text: "Add user";
-                    color: Theme.c.subtext0;
-                    font-size: Theme.font-md;
-                    font-weight: FontWeight.semi-bold;
-                    height: Theme.spacing-xl - Theme.spacing-xs;
-                }
+                            Text {
+                                text: "Username";
+                                color: Theme.c.subtext1;
+                                font-size: 14px;
+                            }
 
-                username-input := StyledTextInput {
-                    placeholder: "username";
-                }
-                init => { username-input.focus-input(); root.password-edited(""); }
+                            username-input := StyledTextInput {
+                                height: 40px;
+                                placeholder: "e.g. alex";
+                                accessible-label: "Username";
+                                edited(_) => { EditingState.user-error = ""; }
+                                changed has-focus => { if self.has-focus { form-scroll.reveal(self.y, self.height); } }
+                            }
 
-                password-input := StyledTextInput {
-                    placeholder: "password (optional)";
-                    is-password: true;
-                    edited(val) => { root.password-edited(val); }
-                }
+                            Text {
+                                text: "Password";
+                                color: Theme.c.subtext1;
+                                font-size: 14px;
+                            }
 
-                // Strength bar — only visible when there's a password and
-                // Rust has reported a strength score (>= 0).
-                if password-input.text != "" && PopupState.password-strength-score >= 0: VerticalLayout {
-                    spacing: Theme.spacing-xs;
+                            password-input := StyledTextInput {
+                                height: 40px;
+                                placeholder: "Set a sign-in password";
+                                accessible-label: "Account password";
+                                is-password: true;
+                                changed has-focus => { if self.has-focus { form-scroll.reveal(self.y, self.height); } }
+                                edited(val) => { root.password-edited(val); }
+                            }
 
-                    ProgressBar {
-                        value: PopupState.password-strength-score + 1;
-                        max: 5;
-                        fill-color: PopupState.password-strength-color;
-                    }
+                            if password-input.text == "": Text {
+                                text: "Without a password, password login is unavailable. Configure another sign-in method before using this account.";
+                                color: Theme.c.subtext1;
+                                font-size: 13px;
+                                wrap: word-wrap;
+                            }
+                            if password-input.text != "" && PopupState.password-strength-score >= 0: VerticalLayout {
+                                spacing: 6px;
+                                ProgressBar {
+                                    value: PopupState.password-strength-score + 1;
+                                    max: 5;
+                                    fill-color: PopupState.password-strength-color;
+                                }
 
-                    HorizontalLayout {
-                        alignment: center;
-                        spacing: Theme.spacing-md;
+                                Text {
+                                    text: PopupState.password-strength-label;
+                                    color: PopupState.password-strength-color;
+                                    font-size: 13px;
+                                    font-weight: 600;
+                                }
 
-                        Text {
-                            text: PopupState.password-strength-label;
-                            color: PopupState.password-strength-color;
-                            font-size: Theme.font-sm;
-                            font-weight: FontWeight.semi-bold;
-                        }
-
-                        if PopupState.password-strength-hint != "": Text {
-                            text: PopupState.password-strength-hint;
-                            color: Theme.c.overlay0;
-                            font-size: Theme.font-sm;
-                        }
-                    }
-                }
-
-                // ── Sudo opt-in + action buttons ──
-                sudo-check := CheckBox {
-                    label: "Grant sudo privileges";
-                    checked: true;
-                }
-
-                HorizontalLayout {
-                    spacing: Theme.spacing-sm;
-
-                    StyledButton {
-                        label: "Add user";
-                        style: Theme.button-primary;
-                        min-width: 100px;
-                        clicked => {
-                            if username-input.text != "" {
-                                root.user-added(username-input.text, password-input.text, sudo-check.checked);
-                                sudo-check.checked = true;
-                                username-input.text = "";
-                                password-input.text = "";
-                                username-input.focus-input();
-                                // Reset strength feedback for the next user.
-                                root.password-edited("");
+                                if PopupState.password-strength-hint != "": Text {
+                                    text: PopupState.password-strength-hint;
+                                    color: Theme.c.subtext1;
+                                    font-size: 13px;
+                                    wrap: word-wrap;
+                                }
+                            }
+                            sudo-check := CheckBox {
+                                label: "Administrator (sudo)";
+                                height: 40px;
+                                checked: true;
+                                changed has-focus => { if self.has-focus { form-scroll.reveal(self.y, self.height); } }
                             }
                         }
                     }
 
-                    // Spacer
-                    Rectangle { horizontal-stretch: 1; }
+                    if EditingState.user-error != "": Text {
+                        text: EditingState.user-error;
+                        color: Theme.c.red;
+                        font-size: 14px;
+                        wrap: word-wrap;
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        StyledButton {
+                            label: "Add user";
+                            height: 40px;
+                            style: username-input.text != "" ? Theme.button-primary : Theme.button-default;
+                            outlined: username-input.text == "";
+                            enabled: username-input.text != "";
+                            clicked => {
+                                if root.user-added(username-input.text, password-input.text, sudo-check.checked) {
+                                    username-input.text = "";
+                                    password-input.text = "";
+                                    sudo-check.checked = true;
+                                    root.password-edited("");
+                                    username-input.focus-input();
+                                }
+                            }
+                        }
 
-                    StyledButton {
-                        label: "Done";
-                        min-width: 80px;
-                        clicked => { root.closed(); }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                        }
+
+                        StyledButton {
+                            label: "Done";
+                            height: 40px;
+                            style: username-input.text == "" ? Theme.button-primary : Theme.button-default;
+                            outlined: username-input.text != "";
+                            clicked => {
+                                if username-input.text != "" || password-input.text != "" {
+                                    EditingState.user-error = "Click Add user to save this account, or clear the form to finish.";
+                                } else { root.closed(); }
+                            }
+                        }
                     }
                 }
+
+                init => { username-input.focus-input(); root.password-edited(""); EditingState.user-error = ""; }
             }
         }
     }

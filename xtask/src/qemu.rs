@@ -340,27 +340,36 @@ fn find_ovmf_vars_template() -> PathBuf {
     find_ovmf("OVMF_VARS")
 }
 
-pub fn find_latest_iso() -> PathBuf {
+pub fn find_latest_testing_iso() -> Result<PathBuf, String> {
     let out_dir = PathBuf::from("gen_iso/out");
     let mut isos: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(&out_dir)
-        .unwrap_or_else(|_| panic!("gen_iso/out not found. Run 'just iso-test' first."))
+        .map_err(|e| {
+            format!(
+                "cannot read {}: {e}. Run 'just iso-test' first.",
+                out_dir.display()
+            )
+        })?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| {
-            p.extension().is_some_and(|e| e == "iso")
-                && p.file_name()
-                    .and_then(|n| n.to_str())
-                    .is_some_and(|n| n.starts_with("archzfs-"))
-        })
+        .filter(|p| is_testing_iso(p))
         .filter_map(|p| {
             let mtime = std::fs::metadata(&p).ok()?.modified().ok()?;
             Some((mtime, p))
         })
         .collect();
     isos.sort_by_key(|(mtime, _)| *mtime);
-    isos.pop()
-        .map(|(_, p)| p)
-        .expect("No ISO found in gen_iso/out. Run 'just iso-test' or 'just iso-full' first.")
+    isos.pop().map(|(_, p)| p).ok_or_else(|| {
+        "No testing ISO found in gen_iso/out. Run 'just iso-test' first, or pass --iso explicitly."
+            .to_string()
+    })
+}
+
+fn is_testing_iso(path: &Path) -> bool {
+    path.extension().is_some_and(|extension| extension == "iso")
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("archzfs-") && name.contains("-testing-"))
 }
 
 pub fn create_fresh_disk(path: &Path) {
@@ -377,4 +386,24 @@ pub fn create_fresh_disk(path: &Path) {
 pub fn reset_uefi_vars(path: &Path) {
     let src = find_ovmf_vars_template();
     std::fs::copy(src, path).expect("failed to copy UEFI vars");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_testing_iso;
+    use std::path::Path;
+
+    #[test]
+    fn integration_harness_accepts_only_testing_isos() {
+        assert!(is_testing_iso(Path::new(
+            "archzfs-linux-lts-dkms-testing-2026.09.09-x86_64.iso"
+        )));
+        assert!(!is_testing_iso(Path::new(
+            "archzfs-linux-dkms-2026.09.09-x86_64.iso"
+        )));
+        assert!(!is_testing_iso(Path::new("other-testing-image.iso")));
+        assert!(!is_testing_iso(Path::new(
+            "archzfs-linux-lts-dkms-testing-2026.09.09-x86_64.img"
+        )));
+    }
 }

@@ -68,6 +68,9 @@ azfs-tui
 
 > Why recommended: the ISO already contains ZFS components and both installers, so startup is faster and avoids on-the-fly package installation.
 
+For development, [load an updated GUI binary from Ventoy](gen_iso/LIVE_UPDATE.md)
+at boot without rebuilding the ISO on every iteration.
+
 ### Safe LinuxKMS UI demo
 
 The ISO boot menu also offers **Arch Linux installer — safe LinuxKMS demo**.
@@ -126,6 +129,13 @@ Legacy configuration files containing inline passwords remain supported.
 | **Full Disk** | Complete disk takeover with automated partitioning. Clears GPT/MBR signatures, creates fresh GPT table, partitions (EFI 500MB, optional swap, remainder for ZFS) | Clean installs, single-purpose machines, maximum automation |
 | **New Pool** | Creates ZFS pool on an existing partition. Uses your existing partition layout, creates ZFS pool on selected partition | Dual-boot scenarios, custom partitioning schemes, preserving existing OS installations |
 | **Existing Pool** | Installs into an existing ZFS pool as a new boot environment. Creates new BE datasets within your existing pool structure | Experiments, testing different configurations, multiple Arch installations |
+
+`New Pool` can preserve an existing Windows installation when its ZFS partition
+has already been prepared. It reuses a selected FAT32 ESP without formatting it,
+keeps unrelated EFI files and boot entries, and registers ZFSBootMenu alongside
+the existing firmware entries. It does not yet shrink NTFS or create a combined
+Windows/Linux boot-manager menu; select the operating system in the UEFI firmware
+menu. Never use `Full Disk` for this scenario because it erases the selected disk.
 
 > **Pro tip**: Existing Pool mode is excellent for trying different desktop environments or system configurations without risk — each installation becomes its own boot environment selectable from ZFSBootMenu.
 
@@ -266,6 +276,12 @@ The only remaining shell calls are:
 
 ## Development
 
+Start with the [developer guide](docs/development.md) and
+[documentation index](docs/README.md). For GUI changes, follow
+[Slint coding and visual review](docs/slint-ui-review.md). The
+[Ventoy live-update guide](gen_iso/LIVE_UPDATE.md) explains how to deploy a new
+installer binary without rebuilding the base ISO.
+
 Two supported workflows depending on the host distro. Pick one.
 
 ### Option 1 — Arch native
@@ -285,7 +301,7 @@ just cargo-test
 just iso-test             # native mkarchiso (sudo)
 just iso-full
 just zfs-be-build         # writable bare-metal LinuxKMS demo BE on novafs
-just test-install         # QEMU regression test (requires cargo-build first)
+just test-install         # QEMU regression test (requires iso-test and cargo-build first)
 just qemu-install         # interactive boot of latest ISO
 ```
 
@@ -349,7 +365,7 @@ cargo check / cargo test / cargo run     # fast native iteration, rust-analyzer-
 just cargo-build-container   # Arch-glibc target/release/{azfs,azfs-tui,xtask}
 just iso-test-podman         # container-backed mkarchiso
 just iso-full-podman
-just test-install            # QEMU regression test (requires cargo-build-container first)
+just test-install            # QEMU regression test (requires iso-test-podman and cargo-build-container first)
 just qemu-install            # qemu runs on host either way
 ```
 
@@ -364,7 +380,12 @@ just builder-clean  # Remove podman image and cache volumes
 ```
 
 ### Testing
-The xtask test suite boots a QEMU VM, runs the installer, reboots from the installed disk, and verifies 13 system health checks (kernel, ZFS pool, sshd, fstab, initramfs, zram, mounts, hostid, ZED hook, bootfs, rootprefix, ZBM build, ZBM pacman hook).
+The xtask test suite boots the newest `*-testing-*.iso`, runs the installer,
+reboots from the installed disk, and verifies 13 system health checks (kernel,
+ZFS pool, sshd, fstab, initramfs, zram, mounts, hostid, ZED hook, bootfs,
+rootprefix, ZBM build, ZBM pacman hook). Production ISOs intentionally do not
+allow the passwordless root SSH login used by this harness. Pass `--iso PATH`
+only for a custom image configured with equivalent test access.
 
 Installer logs are automatically pulled from the VM to `test-install.log` for analysis.
 
