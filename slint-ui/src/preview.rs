@@ -110,6 +110,7 @@ fn devices() -> Vec<BlockDevice> {
         transport: Some(bus.into()),
         rotational: Some(false),
         removable,
+        usage: Default::default(),
     })
     .collect()
 }
@@ -150,6 +151,7 @@ pub fn partitions() -> Vec<DeviceChoice> {
                     transport: disk.transport.clone(),
                     rotational: disk.rotational,
                     removable: disk.removable,
+                    usage: Default::default(),
                 }
                 .into()
             })

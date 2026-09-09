@@ -24,6 +24,10 @@ pub enum ValidationError {
         path: PathBuf,
     },
     DiskRequired,
+    PartitionRoleConflict {
+        first: &'static str,
+        second: &'static str,
+    },
     EfiPartitionRequired(InstallationMode),
     ZfsPartitionRequired,
     /// Full-disk mode carves the swap partition itself and needs its size.
@@ -78,6 +82,9 @@ impl fmt::Display for ValidationError {
                  path, got: {}",
                 path.display()
             ),
+            Self::PartitionRoleConflict { first, second } => {
+                write!(f, "{first} and {second} must use different partitions")
+            }
             Self::DiskRequired => write!(f, "Full disk mode requires a disk selection (disk)"),
             Self::EfiPartitionRequired(mode) => {
                 write!(f, "{} mode requires an EFI partition (efi_partition)", mode)
@@ -175,6 +182,34 @@ impl GlobalConfig {
                 }
                 if wants_swap_partition && self.swap_partition.is_none() {
                     errors.push(ValidationError::SwapPartitionRequired(mode));
+                }
+            }
+        }
+
+        if mode != InstallationMode::FullDisk {
+            let roles = [
+                ("EFI", self.efi_partition.as_ref()),
+                (
+                    "ZFS",
+                    (mode == InstallationMode::NewPool)
+                        .then_some(self.zfs_partition.as_ref())
+                        .flatten(),
+                ),
+                (
+                    "Swap",
+                    wants_swap_partition
+                        .then_some(self.swap_partition.as_ref())
+                        .flatten(),
+                ),
+            ];
+            for (i, (first, a)) in roles.iter().enumerate() {
+                for (second, b) in &roles[i + 1..] {
+                    if let (Some(a), Some(b)) = (a, b)
+                        && std::fs::canonicalize(a).unwrap_or_else(|_| (*a).clone())
+                            == std::fs::canonicalize(b).unwrap_or_else(|_| (*b).clone())
+                    {
+                        errors.push(ValidationError::PartitionRoleConflict { first, second });
+                    }
                 }
             }
         }
@@ -666,5 +701,39 @@ mod tests {
             cfg.swap_partition.as_deref(),
             Some(std::path::Path::new("/dev/disk/by-id/legacy-disk-part3"))
         );
+    }
+}
+
+#[cfg(test)]
+mod partition_role_tests {
+    use super::*;
+    #[test]
+    fn duplicate_roles_are_rejected_but_inactive_roles_are_ignored() {
+        let mut c = GlobalConfig {
+            installation_mode: Some(InstallationMode::NewPool),
+            efi_partition: Some("/dev/sda1".into()),
+            zfs_partition: Some("/dev/sda1".into()),
+            ..Default::default()
+        };
+        assert!(
+            c.validate_for_install()
+                .iter()
+                .any(|e| matches!(e, ValidationError::PartitionRoleConflict { .. }))
+        );
+        c.installation_mode = Some(InstallationMode::ExistingPool);
+        assert!(
+            !c.validate_for_install()
+                .iter()
+                .any(|e| matches!(e, ValidationError::PartitionRoleConflict { .. }))
+        );
+        c.swap_mode = SwapMode::ZswapPartition;
+        c.swap_partition = c.efi_partition.clone();
+        assert!(c.validate_for_install().iter().any(|e| matches!(
+            e,
+            ValidationError::PartitionRoleConflict {
+                first: "EFI",
+                second: "Swap"
+            }
+        )));
     }
 }
