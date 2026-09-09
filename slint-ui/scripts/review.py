@@ -108,7 +108,7 @@ def main():
     parser.add_argument('--binary', type=Path, default=Path('target/debug/azfs'))
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--scenes', nargs='+', choices=SCENES, default=SCENES)
-    parser.add_argument('--sizes', nargs='+', default=['800x600@1', '1280x800@1', '1920x1080@1.5', '1920x1080@2'])
+    parser.add_argument('--sizes', nargs='+', default=['1920x1080@1', '800x600@1', '1280x800@1', '1920x1080@1.5', '1920x1080@2'])
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     labels = []

@@ -272,7 +272,7 @@ fn advance(weak: slint::Weak<App>) {
 fn progress(app: &App, state: i32) {
     let install = app.global::<InstallState>();
     install.set_state(state);
-    install.set_phase(5);
+    install.set_phase(if state == 2 { 14 } else { 5 });
     install.set_phase_label("Installing base system".into());
     install.set_download_active(state == 1);
     install.set_download_pct(62);
@@ -283,21 +283,55 @@ fn progress(app: &App, state: i32) {
         speed: "24.8 MiB/s".into(),
         state: 0,
     }])));
-    install.set_log_messages(ModelRc::new(VecModel::from(vec![
-        LogMessage {
-            text: "Preview: prepared simulated disk and ZFS datasets".into(),
-            level: 0,
-        },
-        LogMessage {
-            text: if state == 3 {
-                "Download failed: connection interrupted. No disks were modified."
-            } else {
-                "Preview: installing base packages"
-            }
-            .into(),
-            level: if state == 3 { 4 } else { 2 },
-        },
-    ])));
+    // Enough realistic output to review scrolling, wrapping and persistent actions.
+    // All messages describe the preview fixture; no commands are executed here.
+    let mut messages = vec![
+        "[INFO] Preview mode: simulated installation; no disks are modified.",
+        "[INFO] Internet connectivity OK",
+        "[INFO] UEFI boot detected",
+        "[INFO] ZFS initialized on host",
+        "[INFO] Preparing /dev/nvme0n1 and EFI system partition",
+        "[INFO] Creating pool zroot",
+        "[INFO] Creating zroot/arch0/root",
+        "[INFO] Creating zroot/arch0/data/home",
+        "[INFO] Creating zroot/arch0/data/root",
+        "[INFO] Creating zroot/arch0/vm",
+        "[INFO] Mounting EFI partition at /mnt/boot/efi",
+        "[INFO] Refreshing package databases",
+        "[INFO] Resolving dependencies for base, linux, linux-firmware and zfs-utils",
+        "[INFO] Downloading packages",
+    ];
+    if state == 2 {
+        messages.extend([
+            "[INFO] Package integrity checks passed",
+            "[INFO] Base system installed",
+            "[INFO] Configuring hostname, locale and timezone",
+            "[INFO] Creating user account previewuser",
+            "[INFO] Enabling NetworkManager.service",
+            "[INFO] Building initramfs with ZFS support",
+            "[INFO] Installing ZFSBootMenu to the EFI system partition",
+            "[INFO] Creating UEFI boot entry",
+            "[INFO] Unmounting installation filesystems",
+            "[INFO] Exporting pool zroot",
+            "[INFO] Installation complete!",
+        ]);
+    } else if state == 3 {
+        messages.push("[ERROR] Download failed: connection interrupted while retrieving linux-firmware. Check your network connection before retrying.");
+    } else if state == 5 {
+        messages.extend([
+            "[INFO] Cancellation requested",
+            "[INFO] Cleaning up the simulated installation",
+            "[INFO] Installation cancelled",
+        ]);
+    }
+    let messages: Vec<_> = messages
+        .into_iter()
+        .map(|text| LogMessage {
+            text: text.into(),
+            level: if text.starts_with("[ERROR]") { 4 } else { 2 },
+        })
+        .collect();
+    install.set_log_messages(ModelRc::new(VecModel::from(messages)));
 }
 
 pub fn show(app: &App, scene: Scene, size: Size) {
@@ -332,7 +366,10 @@ pub fn show(app: &App, scene: Scene, size: Size) {
     }
     match scene {
         Scene::Install => progress(app, 1),
-        Scene::Done => progress(app, 2),
+        Scene::Done => {
+            progress(app, 2);
+            app.global::<InstallState>().set_shell_available(true);
+        }
         Scene::Failed => progress(app, 3),
         Scene::Cancelled => progress(app, 5),
         Scene::Inspect => inspect(app),

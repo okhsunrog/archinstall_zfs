@@ -1,160 +1,232 @@
-// Install progress screen — scrolling log + a progress card with the current
-// phase, optional package-download details, cancellation while running, and
-// separate Quit/Reboot actions after success.
-
+// Installation output stays above the persistent status and action panel.
 import { ListView } from "std-widgets.slint";
 import { Theme } from "../styling.slint";
 import { InstallState } from "../state/install-state.slint";
 import { StyledButton } from "../components/styled-button.slint";
+import { Icon } from "../components/icon.slint";
+// Embedded so log alignment is identical on the ISO and in desktop previews.
+import "../../assets/fonts/LiberationMono-Regular.ttf";
+
+component InstallAction inherits StyledButton {
+    height: Theme.control-height-lg;
+    corner-radius: Theme.radius-md;
+    label-size: Theme.font-base;
+}
 
 export component InstallView inherits VerticalLayout {
     callback quit-requested();
     callback reboot-requested();
+    callback shell-requested();
     callback cancel-requested();
 
     padding: 20px;
-    spacing: 12px;
+    spacing: 16px;
+
+    private property <bool> running: InstallState.state == 1 || InstallState.state == 4;
+    private property <bool> follow-output: true;
+    private property <color> status-color: InstallState.state == 2 ? Theme.c.green
+        : InstallState.state == 3 ? Theme.c.red
+        : InstallState.state >= 4 ? Theme.c.yellow : Theme.c.blue;
 
     Text {
         text: "Installation";
-        color: Theme.c.blue;
-        font-size: 24px;
+        color: Theme.c.text;
+        font-size: 20px;
         font-weight: FontWeight.semi-bold;
-        height: 40px;
+        height: 28px;
         vertical-alignment: center;
     }
 
-    // Auto-pin to the bottom whenever a new log line lands. Computed from
-    // the live viewport height so it stays correct when the log overflows
-    // the visible area; clamped to 0 so a short log doesn't push above
-    // the top.
     property <int> scroll-trigger: InstallState.log-messages.length;
     changed scroll-trigger => {
-        log-view.content-y = -max(0px, log-view.content-height - log-view.height);
+        root.follow-latest();
+    }
+    function follow-latest() {
+        if root.follow-output {
+            log-view.content-y = -max(0px, log-view.content-height - log-view.visible-height);
+        }
     }
 
-    // Progress card (always visible during install)
-    Rectangle {
-        height: InstallState.download-active ? 188px
-            : (InstallState.state == 1 || InstallState.state == 4) ? 132px
-            : 104px;
-        background: Theme.c.surface0;
+    // The virtualized log is the only expanding area; actions never scroll away.
+    log-panel := Rectangle {
+        background: Theme.c.mantle;
         border-radius: 10px;
+        vertical-stretch: 1;
+        min-height: 100px;
 
         VerticalLayout {
-            padding: 14px;
-            spacing: 8px;
+            padding: 16px;
+            spacing: 12px;
 
-            // Global phase status
             HorizontalLayout {
-                spacing: 10px;
-
+                height: 28px;
                 Text {
-                    text: InstallState.state == 2 ? "\u{2713} Complete"
-                        : InstallState.state == 3 ? "\u{2717} Failed"
-                        : InstallState.state == 4 ? "Cancelling..."
-                        : InstallState.state == 5 ? "Cancelled"
-                        : InstallState.phase-label;
-                    color: InstallState.state == 2 ? Theme.c.green
-                        : InstallState.state == 3 ? Theme.c.red
-                        : InstallState.state >= 4 ? Theme.c.yellow
-                        : Theme.c.text;
-                    font-size: 14px;
-                    font-weight: FontWeight.semi-bold;
+                    text: "Installation log";
+                    color: Theme.c.subtext0;
+                    font-size: 13px;
                     vertical-alignment: center;
                     horizontal-stretch: 1;
                 }
+                if !root.follow-output: StyledButton {
+                    label: "Latest output";
+                    min-height: 28px;
+                    style: { background: Theme.c.surface0, foreground: Theme.c.text };
+                    clicked => {
+                        root.follow-output = true;
+                        root.follow-latest();
+                    }
+                }
+            }
+            Rectangle { height: 1px; background: Theme.c.surface0; }
+            log-view := ListView {
+                vertical-stretch: 1;
+                min-height: 0px;
+                changed content-height => { root.follow-latest(); }
+                changed visible-height => { root.follow-latest(); }
+                scrolled => {
+                    root.follow-output = self.content-y <= -max(0px, self.content-height - self.visible-height) + 2px;
+                }
+                for msg[index] in InstallState.log-messages: Rectangle {
+                    height: msg-text.preferred-height + 6px;
+                    HorizontalLayout {
+                        padding-right: 8px;
+                        msg-text := Text {
+                            text: msg.text;
+                            color: msg.level == 4 ? Theme.c.red
+                                 : msg.level == 3 ? Theme.c.yellow
+                                 : Theme.c.text;
+                            font-family: "Liberation Mono";
+                            font-size: 12px;
+                            wrap: word-wrap;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
-                Text {
-                    text: InstallState.state >= 2 ? ""
-                        : InstallState.phase + " / " + InstallState.total-phases;
-                    color: Theme.c.overlay0;
+    action-panel := Rectangle {
+        background: Theme.c.surface0;
+        border-radius: 12px;
+        vertical-stretch: 0;
+
+        VerticalLayout {
+            padding: 20px;
+            spacing: 16px;
+
+            HorizontalLayout {
+                spacing: 16px;
+                Rectangle {
+                    width: 44px;
+                    height: 44px;
+                    border-radius: 22px;
+                    background: root.status-color.with-alpha(0.12);
+                    Icon {
+                        size: 24px;
+                        tint: root.status-color;
+                        source: InstallState.state == 2 ? @image-url("../../assets/icons/check.svg")
+                            : root.running ? @image-url("../../assets/icons/refresh-cw.svg")
+                            : @image-url("../../assets/icons/x.svg");
+                    }
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: InstallState.state == 2 ? "Installation complete"
+                            : InstallState.state == 3 ? "Installation failed"
+                            : InstallState.state == 4 ? "Cancelling installation"
+                            : InstallState.state == 5 ? "Installation cancelled"
+                            : "Installing your system";
+                        color: Theme.c.text;
+                        font-size: 20px;
+                        font-weight: FontWeight.semi-bold;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: InstallState.state == 2 ? "Your system is ready. Reboot to start using it."
+                            : InstallState.state == 3 ? "Check the log above for the error before trying again."
+                            : InstallState.state == 4 ? "Please wait while the installer finishes cleanup."
+                            : InstallState.state == 5 ? "The installation stopped. You can return to the live console."
+                            : InstallState.phase-label;
+                        color: Theme.c.subtext0;
+                        font-size: 14px;
+                        wrap: word-wrap;
+                    }
+                }
+                if root.running: Text {
+                    text: InstallState.phase + " / " + InstallState.total-phases;
+                    color: Theme.c.subtext0;
                     font-size: 13px;
                     vertical-alignment: center;
                 }
             }
 
-            // Global progress bar
-            if InstallState.state == 1: Rectangle {
-                height: 8px;
+            if root.running: Rectangle {
+                height: 6px;
                 background: Theme.c.mantle;
-                border-radius: 4px;
+                border-radius: 3px;
                 clip: true;
-
                 Rectangle {
                     x: 0; y: 0;
                     height: parent.height;
-                    width: parent.width * InstallState.phase / InstallState.total-phases;
-                    background: Theme.c.blue;
-                    border-radius: 4px;
+                    width: parent.width * clamp(InstallState.phase / max(1, InstallState.total-phases), 0, 1);
+                    background: root.status-color;
+                    border-radius: 3px;
                 }
             }
 
-            // Package progress (download or install)
-            if InstallState.download-active: VerticalLayout {
-                spacing: 6px;
-
+            if InstallState.download-active && InstallState.state == 1: VerticalLayout {
+                spacing: 8px;
                 HorizontalLayout {
                     Text {
                         text: InstallState.download-status;
-                        color: Theme.c.teal;
+                        color: Theme.c.subtext0;
                         font-size: 12px;
-                        vertical-alignment: center;
+                        wrap: word-wrap;
                         horizontal-stretch: 1;
                     }
-
                     Text {
                         text: InstallState.download-pct + "%";
                         color: Theme.c.teal;
                         font-size: 12px;
                         font-weight: FontWeight.semi-bold;
-                        vertical-alignment: center;
                     }
                 }
-
                 Rectangle {
-                    height: 6px;
+                    height: 4px;
                     background: Theme.c.mantle;
-                    border-radius: 3px;
+                    border-radius: 2px;
                     clip: true;
-
                     Rectangle {
                         x: 0; y: 0;
                         height: parent.height;
-                        width: parent.width * InstallState.download-pct / 100;
+                        width: parent.width * clamp(InstallState.download-pct / 100, 0, 1);
                         background: Theme.c.teal;
-                        border-radius: 3px;
+                        border-radius: 2px;
                     }
                 }
-
                 ListView {
-                    for dl[index] in InstallState.download-items: Rectangle {
-                        height: 18px;
-
+                    height: min(3, InstallState.download-items.length) * 20px;
+                    for dl in InstallState.download-items: Rectangle {
+                        height: 20px;
                         HorizontalLayout {
-                            padding-left: 4px;
-                            padding-right: 4px;
-                            spacing: 8px;
-
+                            spacing: 12px;
                             Text {
                                 text: dl.filename;
-                                color: dl.state == 1 ? Theme.c.overlay0
-                                     : dl.state == 2 ? Theme.c.green
-                                     : Theme.c.text;
+                                color: Theme.c.subtext0;
                                 font-size: 11px;
-                                font-family: "monospace";
+                                font-family: "Liberation Mono";
                                 overflow: elide;
                                 horizontal-stretch: 1;
                                 vertical-alignment: center;
                             }
-
                             Text {
-                                text: dl.state == 1 ? "verifying..."
-                                     : dl.state == 2 ? "done"
-                                     : dl.pct + "% " + dl.speed;
-                                color: dl.state == 2 ? Theme.c.green : Theme.c.overlay0;
+                                text: dl.state == 1 ? "Verifying"
+                                    : dl.state == 2 ? "Done" : dl.pct + "%  " + dl.speed;
+                                color: dl.state == 2 ? Theme.c.green : Theme.c.subtext0;
                                 font-size: 11px;
-                                font-family: "monospace";
                                 vertical-alignment: center;
                             }
                         }
@@ -162,73 +234,53 @@ export component InstallView inherits VerticalLayout {
                 }
             }
 
-            if InstallState.state == 1 || InstallState.state == 4: HorizontalLayout {
-                alignment: end;
-
-                StyledButton {
-                    label: InstallState.state == 4 ? "Cancelling..." : "Cancel installation";
-                    style: Theme.button-default;
-                    enabled: InstallState.state == 1;
-                    clicked => { root.cancel-requested(); }
-                }
+            if InstallState.state == 2: Text {
+                text: InstallState.shell-notice != "" ? InstallState.shell-notice
+                    : InstallState.shell-available ? "Need a final adjustment? Open the installed system shell; type exit to return here."
+                    : "Quit returns to the live console without rebooting.";
+                color: Theme.c.subtext0;
+                font-size: 13px;
+                wrap: word-wrap;
             }
 
             if InstallState.state == 2: HorizontalLayout {
-                alignment: end;
-                spacing: Theme.spacing-sm;
-
-                StyledButton {
+                spacing: 12px;
+                InstallAction {
                     label: "Quit";
-                    style: Theme.button-default;
+                    style: { background: transparent, foreground: Theme.c.text };
+                    outlined: true;
                     clicked => { root.quit-requested(); }
                 }
-
-                StyledButton {
+                Rectangle { horizontal-stretch: 1; }
+                if InstallState.shell-available: InstallAction {
+                    label: "Open installed system shell";
+                    style: { background: Theme.c.surface1, foreground: Theme.c.text };
+                    clicked => { root.shell-requested(); }
+                }
+                InstallAction {
                     label: "Reboot";
+                    min-width: 112px;
                     style: Theme.button-primary;
                     clicked => { root.reboot-requested(); }
                 }
             }
-
+            if root.running: HorizontalLayout {
+                alignment: end;
+                InstallAction {
+                    label: InstallState.state == 4 ? "Cancelling..." : "Cancel installation";
+                    style: { background: Theme.c.surface1, foreground: Theme.c.text };
+                    enabled: InstallState.state == 1;
+                    clicked => { root.cancel-requested(); }
+                }
+            }
             if InstallState.state == 3 || InstallState.state == 5: HorizontalLayout {
                 alignment: end;
-
-                StyledButton {
+                InstallAction {
                     label: "Quit";
-                    style: Theme.button-default;
+                    style: { background: Theme.c.surface1, foreground: Theme.c.text };
                     clicked => { root.quit-requested(); }
                 }
             }
         }
     }
-    Text {
-        text: "Installation log";
-        color: Theme.c.subtext0;
-        font-size: 13px;
-        height: 24px;
-        vertical-alignment: center;
-    }
-    // Log area (fills available space)
-    log-view := ListView {
-        for msg[index] in InstallState.log-messages: Rectangle {
-            height: msg-text.preferred-height + 4px;
-
-            msg-text := Text {
-                text: msg.text;
-                color: msg.level == 4 ? Theme.c.red
-                     : msg.level == 3 ? Theme.c.yellow
-                     : msg.level == 2 ? Theme.c.green
-                     : msg.level == 1 ? Theme.c.blue
-                     : Theme.c.overlay0;
-                font-family: "monospace";
-                font-size: 12px;
-                x: 8px;
-                width: parent.width - 16px;
-                wrap: word-wrap;
-                vertical-alignment: center;
-            }
-        }
-    }
-
-
 }

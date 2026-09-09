@@ -8,6 +8,8 @@ export global InstallState {
     // 0 = config, 1 = installing, 2 = done, 3 = failed,
     // 4 = cancellation requested, 5 = cancelled and cleaned up
     in-out property <int> state: 0;
+    in property <bool> shell-available: false;
+    in property <string> shell-notice: "";
 
     in property <[LogMessage]> log-messages;
 

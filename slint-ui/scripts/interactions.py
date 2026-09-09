@@ -120,15 +120,83 @@ def inspect(p):
 def install(p):
     p.click('Button', 'Install')
     p.wait('Button', 'Cancel installation')
+    installation_layout(p)
     p.screenshot('installation-started')
     p.wait('Button', 'Reboot')
+    installation_layout(p)
     p.screenshot('installation-complete')
 
 
 def cancel(p):
     p.click('Button', 'Cancel installation')
-    p.wait('Text', 'Cancelled')
+    p.wait('Text', 'Installation cancelled')
+    installation_layout(p)
     p.screenshot('installation-cancelled')
+
+
+def shell(p):
+    p.wait('Button', 'Quit')
+    p.wait('Button', 'Reboot')
+    installation_layout(p)
+    p.screenshot('completion')
+    p.click('Button', 'Open installed system shell')
+    p.wait('Text', 'Preview: shell closed')
+    assert p.element('Button', 'Reboot') is not None
+    assert p.element('Button', 'Quit') is not None
+    installation_layout(p)
+    p.screenshot('shell-returned')
+
+
+def logs(p):
+    def element_id(name):
+        return next(e for e in p.tree()['elements'] if any(t.get('id') == name
+                    for t in e.get('typeNamesAndIds', [])))
+    log = element_id('InstallView::log-view')
+    last = p.wait('Text', '[INFO] Installation complete!')
+    assert last['absolutePosition']['y'] >= log['absolutePosition']['y']
+    assert last['absolutePosition']['y'] + last['size']['height'] <= log['absolutePosition']['y'] + log['size']['height']
+    thumb = next((e for e in p.tree()['elements'] if any(t.get('id') == 'ScrollBar::thumb'
+                  for t in e.get('typeNamesAndIds', []))), None)
+    if thumb is None:
+        # At Full HD the entire fixture can fit without scrolling.
+        first = p.wait('Text', '[INFO] Preview mode:')
+        assert first['absolutePosition']['y'] >= log['absolutePosition']['y']
+        assert p.element('Button', 'Latest output') is None
+        installation_layout(p)
+        p.screenshot('all-output-visible')
+        return
+    p.data('drag_element', elementHandle=thumb['handle'], target={
+        'x': thumb['absolutePosition']['x'] + thumb['size']['width'] / 2,
+        'y': log['absolutePosition']['y'] + 16,
+    })
+    p.wait('Button', 'Latest output')
+    time.sleep(.3)
+    installation_layout(p)
+    p.screenshot('reading-earlier-output')
+    p.click('Button', 'Latest output')
+    assert p.element('Button', 'Latest output') is None
+    last = p.wait('Text', '[INFO] Installation complete!')
+    assert last['absolutePosition']['y'] >= log['absolutePosition']['y']
+    p.screenshot('following-latest-output')
+
+
+def installation_layout(p):
+    tree = p.tree()['elements']
+    def panel(name):
+        return next(e for e in tree if any(t.get('id') == f'InstallView::{name}'
+                    for t in e.get('typeNamesAndIds', [])))
+    log = panel('log-panel')
+    actions = panel('action-panel')
+    y = actions['absolutePosition']['y']
+    assert log['absolutePosition']['y'] + log['size']['height'] <= y - 12
+    assert log['size']['height'] >= 100
+    assert abs(y + actions['size']['height'] - (p.size[1] / p.scale - 20)) < 2
+    buttons = [e for e in tree if e.get('accessibleRole') == 'Button'
+               and e.get('accessibleLabel') != 'Latest output']
+    for button in buttons:
+        assert button['size']['height'] >= 44
+        assert button['absolutePosition']['y'] >= y
+        assert button['absolutePosition']['y'] + button['size']['height'] <= y + actions['size']['height']
 
 
 def invalid(p):
@@ -142,8 +210,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, default=Path('target/debug/azfs'))
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--sizes', nargs='+', default=['800x600@1', '1920x1080@2'])
-    flows = ['system', 'users', 'desktop', 'wifi', 'inspect', 'install', 'cancel', 'invalid']
+    parser.add_argument('--sizes', nargs='+', default=['1920x1080@1', '800x600@1', '1920x1080@2'])
+    flows = ['system', 'users', 'desktop', 'wifi', 'inspect', 'install', 'cancel', 'shell', 'logs', 'invalid']
     parser.add_argument('--flows', nargs='+', choices=flows, default=flows)
     args = parser.parse_args()
     for spec in args.sizes:
@@ -151,7 +219,7 @@ def main():
         for flow in args.flows:
             output = args.output / spec / flow
             output.mkdir(parents=True, exist_ok=True)
-            scene = {'wifi': 'offline', 'install': 'review', 'cancel': 'install'}.get(flow, flow)
+            scene = {'wifi': 'offline', 'install': 'review', 'cancel': 'install', 'shell': 'done', 'logs': 'done'}.get(flow, flow)
             p = Preview(args.binary.resolve(), scene, size, scale, output)
             try:
                 p.ready()

@@ -6,6 +6,9 @@ export component StyledButton {
     in property <string> label;
     in property <ButtonStyle> style: Theme.button-default;
     in property <bool> enabled: true;
+    in property <bool> outlined: false;
+    in property <length> corner-radius: Theme.radius-sm;
+    in property <length> label-size: Theme.font-md;
 
     callback clicked <=> touch-area.clicked;
 
@@ -19,13 +22,15 @@ export component StyledButton {
 
     background-rect := Rectangle {
         background: root.style.background;
-        border-radius: Theme.radius-sm;
+        border-radius: root.corner-radius;
+        border-width: root.outlined ? 1px : 0px;
+        border-color: Theme.c.subtext0.with-alpha(0.65);
     }
 
     state-layer := StateLayer {
         width: 100%;
         height: 100%;
-        border-radius: Theme.radius-sm;
+        border-radius: root.corner-radius;
         enabled: root.enabled;
         pressed: touch-area.pressed;
         has-hover: touch-area.has-hover;
@@ -39,7 +44,7 @@ export component StyledButton {
         Text {
             text: root.label;
             color: root.style.foreground;
-            font-size: Theme.font-md;
+            font-size: root.label-size;
             font-weight: 600;
             horizontal-alignment: center;
             vertical-alignment: center;

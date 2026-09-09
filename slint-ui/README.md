@@ -8,8 +8,13 @@ editing controllers with simulated inventory and installation callbacks.
 SLINT_EMIT_DEBUG_INFO=1 cargo build -p archinstall-zfs-slint \
   --no-default-features --features desktop-mock,slint/mcp
 SLINT_BACKEND=headless SLINT_MCP_PORT=9315 target/debug/azfs \
-  --preview welcome --preview-size 1280x800
+  --preview welcome --preview-size 1920x1080 --ui-scale 1
 ```
+
+Use **1920×1080 at 100% scale** as the primary design and screenshot baseline.
+This is also the default preview size and the first configuration in the review
+and interaction scripts. Smaller windows and higher scales remain secondary
+checks for clipping and accessibility, not the main design reference.
 
 Omit `SLINT_BACKEND=headless` to interact in a desktop window. To reproduce a
 1920×1080 display with a 200% UI scale, use `--preview-size 1920x1080 --ui-scale 2`.
@@ -29,7 +34,7 @@ networks. Installation advances through simulated phases and supports cancellati
 package searches, installation, and reboot. No installation or storage commands are
 started. Logs are still written to `/tmp`.
 
-Capture all scenes at four display configurations:
+Capture all scenes at five display configurations, starting with Full HD at 100%:
 
 ```sh
 uv run slint-ui/scripts/review.py --output /tmp/azfs-ui-review
@@ -38,9 +43,9 @@ uv run slint-ui/scripts/review.py --output /tmp/azfs-ui-review
 The output contains PNG screenshots, JSON element trees, process logs, and an
 `index.html` gallery. Open the images and inspect them; successful capture does not
 establish that a layout is correct. Use `--scenes disk review` or
-`--sizes 800x600@1 1920x1080@2` to narrow a repeat run.
+`--sizes 1920x1080@1` to review only the primary configuration.
 
-Run repeatable interaction checks at 800×600 and 1920×1080 with 200% scale:
+Run repeatable interaction checks at Full HD with 100% and 200% scale and at 800×600:
 
 ```sh
 uv run slint-ui/scripts/interactions.py --output /tmp/azfs-ui-interactions
@@ -70,3 +75,10 @@ cannot run userspace cleanup.
 Libinput uses neutral pointer acceleration by default. Override it with
 `SLINT_LIBINPUT_ACCEL_SPEED=0.3` (finite values from -1 to 1). Test the resulting
 feel on the target mouse or touchpad; headless rendering cannot validate it.
+
+For the post-install chroot shell, automatic cleanup, completion-screen return,
+and disposable VM test fixture, see [Post-install shell](POST_INSTALL_SHELL.md).
+The `shell` interaction flow checks the simulated completion/return states.
+The `logs` flow verifies that completion opens at the latest output, scrolling
+back preserves earlier lines, and **Latest output** resumes following. Both
+flows check that the action panel stays below the log and inside the window.

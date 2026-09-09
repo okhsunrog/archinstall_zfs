@@ -1,9 +1,12 @@
+mod completion;
 mod config_items;
 #[cfg(feature = "linuxkms")]
 mod console_session;
 mod controllers;
 mod editing_models;
 mod format;
+#[cfg(feature = "linuxkms")]
+mod installed_shell;
 mod preview;
 mod refresh;
 mod tracing_layer;
@@ -58,7 +61,7 @@ struct Cli {
     preview: Option<preview::Scene>,
 
     /// Physical preview window size, for example 1920x1080.
-    #[arg(long, requires = "preview", default_value = "1280x800")]
+    #[arg(long, requires = "preview", default_value = "1920x1080")]
     preview_size: preview::Size,
 }
 
@@ -105,12 +108,13 @@ fn main() -> Result<()> {
     color_eyre::install()?;
     let cli = Cli::parse();
     #[cfg(feature = "linuxkms")]
-    if !cli.silent
-        && cli.preview.is_none()
-        && let Some(status) = console_session::supervise()?
-    {
-        std::process::exit(console_session::exit_code(status));
-    }
+    let resumed = if !cli.silent && cli.preview.is_none() {
+        console_session::supervise()?
+    } else {
+        None
+    };
+    #[cfg(not(feature = "linuxkms"))]
+    let resumed = None;
     if cli.preview.is_some() {
         color_eyre::eyre::ensure!(
             cfg!(feature = "desktop-mock"),
@@ -171,7 +175,7 @@ fn main() -> Result<()> {
                 )
                 .await?)
             } else {
-                run_gui(config, demo, log_rx, cli.preview, cli.preview_size)
+                run_gui(config, demo, log_rx, cli.preview, cli.preview_size, resumed)
             }
         })
 }
@@ -182,8 +186,37 @@ fn run_gui(
     log_rx: crossbeam_channel::Receiver<(String, i32)>,
     scene: Option<preview::Scene>,
     size: preview::Size,
+    resumed: Option<completion::Completion>,
 ) -> Result<()> {
     let app = App::new()?;
+    let completion = Arc::new(std::sync::Mutex::new(resumed.clone().unwrap_or_default()));
+    controllers::quit::setup(&app, &completion);
+    if let Some(resumed) = resumed {
+        completion::show(&app, &resumed);
+        // Resume only the result screen: no discovery, editable wizard or install callbacks.
+        let log = std::fs::read_to_string("/tmp/archinstall-zfs.log").unwrap_or_default();
+        let mut lines: Vec<_> = log
+            .lines()
+            .rev()
+            .filter(|line| {
+                line.contains(" INFO ") || line.contains(" WARN ") || line.contains("ERROR")
+            })
+            .take(2000)
+            .collect();
+        lines.reverse();
+        let messages: Vec<_> = lines
+            .into_iter()
+            .map(|text| LogMessage {
+                text: text.into(),
+                level: 0,
+            })
+            .collect();
+        app.global::<InstallState>()
+            .set_log_messages(slint::ModelRc::new(slint::VecModel::from(messages)));
+        app.run()?;
+        return Ok(());
+    }
+
     let config = Rc::new(RefCell::new(config));
     let kernel_scan = controllers::welcome::KernelScan::new();
 
@@ -196,9 +229,8 @@ fn run_gui(
     controllers::welcome::setup(&app, &config, &kernel_scan, demo);
     controllers::lists::setup(&app, &config, &models);
     controllers::wizard::setup(&app, &config, &kernel_scan);
-    controllers::install::setup(&app, &config, demo, log_rx);
+    controllers::install::setup(&app, &config, demo, log_rx, &completion);
     controllers::wifi::setup(&app);
-    controllers::quit::setup(&app);
 
     let demo_session = demo.then(controllers::demo::DemoSession::new);
     if let Some(session) = &demo_session {
