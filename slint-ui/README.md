@@ -74,3 +74,6 @@ feel on the target mouse or touchpad; headless rendering cannot validate it.
 For the post-install chroot shell, automatic cleanup, completion-screen return,
 and disposable VM test fixture, see [Post-install shell](POST_INSTALL_SHELL.md).
 The `shell` interaction flow checks the simulated completion/return states.
+The `logs` flow verifies that completion opens at the latest output, scrolling
+back preserves earlier lines, and **Latest output** resumes following. Both
+flows check that the action panel stays below the log and inside the window.
