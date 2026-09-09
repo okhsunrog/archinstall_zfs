@@ -175,10 +175,14 @@ const SOURCE_CACHE_DIR: &str = "var/cache/archinstall-zfs/sources";
 /// makepkg still verifies the checksums the PKGBUILD declares, so a stale file
 /// costs a download rather than a wrong build.
 fn configure_source_cache(target: &Path) -> Result<()> {
-    let Some(source) = std::env::var_os("ARCHINSTALL_ZFS_SRCDEST").filter(|v| !v.is_empty()) else {
+    let source = std::env::var_os("ARCHINSTALL_ZFS_SRCDEST");
+    configure_source_cache_from(target, source.as_deref().map(Path::new))
+}
+
+fn configure_source_cache_from(target: &Path, source: Option<&Path>) -> Result<()> {
+    let Some(source) = source.filter(|path| !path.as_os_str().is_empty()) else {
         return Ok(());
     };
-    let source = Path::new(&source);
     if !source.is_dir() {
         tracing::warn!(
             path = %source.display(),
@@ -340,11 +344,7 @@ mod tests {
         std::fs::write(medium.path().join("zfsbootmenu-v3.1.0.tar.gz"), b"tarball").unwrap();
         std::fs::create_dir(medium.path().join("a-directory")).unwrap();
 
-        // SAFETY: single-threaded test; the variable is read straight after.
-        unsafe { std::env::set_var("ARCHINSTALL_ZFS_SRCDEST", medium.path()) };
-        let result = configure_source_cache(target.path());
-        unsafe { std::env::remove_var("ARCHINSTALL_ZFS_SRCDEST") };
-        result.unwrap();
+        configure_source_cache_from(target.path(), Some(medium.path())).unwrap();
 
         let copied = target
             .path()
@@ -373,9 +373,7 @@ mod tests {
     fn without_a_source_cache_nothing_is_configured() {
         let target = tempfile::tempdir().unwrap();
 
-        // SAFETY: single-threaded test.
-        unsafe { std::env::remove_var("ARCHINSTALL_ZFS_SRCDEST") };
-        configure_source_cache(target.path()).unwrap();
+        configure_source_cache_from(target.path(), None).unwrap();
 
         assert!(!target.path().join("etc/makepkg.conf.d").exists());
     }
