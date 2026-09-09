@@ -138,9 +138,15 @@ arrangement and shutdown procedure are in [Boot debugging](debugging-boot.md).
 The disposable encrypted-install harness is separate from UI preview:
 
 ```sh
+just iso-test --mode dkms --kernel linux-lts
 just cargo-build
 just test-install-encrypted-pool --tmpfs --timeout 1800
 ```
+
+The install harness selects only `*-testing-*.iso` images because that profile
+enables the passwordless root SSH session used to upload and run the current
+installer binary. A newer full hardware ISO in `gen_iso/out` is ignored. Use
+`--iso PATH` only when a custom image provides the same SSH access.
 
 See [Post-install shell](../slint-ui/POST_INSTALL_SHELL.md) for the real VT/chroot
 round trip and fixture. The GUI child exits before the shell opens. The parent

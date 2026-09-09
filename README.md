@@ -301,7 +301,7 @@ just cargo-test
 just iso-test             # native mkarchiso (sudo)
 just iso-full
 just zfs-be-build         # writable bare-metal LinuxKMS demo BE on novafs
-just test-install         # QEMU regression test (requires cargo-build first)
+just test-install         # QEMU regression test (requires iso-test and cargo-build first)
 just qemu-install         # interactive boot of latest ISO
 ```
 
@@ -365,7 +365,7 @@ cargo check / cargo test / cargo run     # fast native iteration, rust-analyzer-
 just cargo-build-container   # Arch-glibc target/release/{azfs,azfs-tui,xtask}
 just iso-test-podman         # container-backed mkarchiso
 just iso-full-podman
-just test-install            # QEMU regression test (requires cargo-build-container first)
+just test-install            # QEMU regression test (requires iso-test-podman and cargo-build-container first)
 just qemu-install            # qemu runs on host either way
 ```
 
@@ -380,7 +380,12 @@ just builder-clean  # Remove podman image and cache volumes
 ```
 
 ### Testing
-The xtask test suite boots a QEMU VM, runs the installer, reboots from the installed disk, and verifies 13 system health checks (kernel, ZFS pool, sshd, fstab, initramfs, zram, mounts, hostid, ZED hook, bootfs, rootprefix, ZBM build, ZBM pacman hook).
+The xtask test suite boots the newest `*-testing-*.iso`, runs the installer,
+reboots from the installed disk, and verifies 13 system health checks (kernel,
+ZFS pool, sshd, fstab, initramfs, zram, mounts, hostid, ZED hook, bootfs,
+rootprefix, ZBM build, ZBM pacman hook). Production ISOs intentionally do not
+allow the passwordless root SSH login used by this harness. Pass `--iso PATH`
+only for a custom image configured with equivalent test access.
 
 Installer logs are automatically pulled from the VM to `test-install.log` for analysis.
 
