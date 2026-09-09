@@ -3,7 +3,7 @@
 //! show_select / show_text_input / show_*_popup helpers used by
 //! handle_item_activated.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
@@ -316,7 +316,7 @@ fn setup_select_filter(app: &App) {
         let filter = filter_text.to_lowercase();
 
         if key == "locale_select" {
-            let all_locales = archinstall_zfs_core::installer::locale::list_locales();
+            let all_locales = available_locales();
             let filtered = fuzzy_filter(&all_locales, &filter);
             let popup = app.global::<PopupState>();
             popup.set_select_options(ModelRc::new(VecModel::from(filtered)));
@@ -324,7 +324,7 @@ fn setup_select_filter(app: &App) {
         }
 
         if key == "keyboard_select" {
-            let all_keymaps = archinstall_zfs_core::installer::locale::list_keymaps();
+            let all_keymaps = available_keymaps();
             let filtered = fuzzy_filter(&all_keymaps, &filter);
             let popup = app.global::<PopupState>();
             popup.set_select_options(ModelRc::new(VecModel::from(filtered)));
@@ -357,43 +357,73 @@ fn fuzzy_filter(items: &[String], filter: &str) -> Vec<SelectOption> {
 
 fn setup_password_strength(app: &App) {
     let weak = app.as_weak();
+    let generation = Rc::new(Cell::new(0u64));
     app.on_text_input_edited(move |key, value| {
         let Some(app) = weak.upgrade() else { return };
-
         if key != "root_password" && key != "encryption_password" && key != "user_password" {
             return;
         }
+        let current = generation.get().wrapping_add(1);
+        generation.set(current);
+        app.global::<PopupState>().set_password_strength_score(-1);
         if value.is_empty() {
-            app.global::<PopupState>().set_password_strength_score(-1);
             return;
         }
-        let entropy = zxcvbn::zxcvbn(value.as_str(), &[]);
-        let score = u8::from(entropy.score());
-        let theme = app.global::<Theme>().get_c();
-        let (label, color) = match score {
-            0 => ("Very weak", theme.red),
-            1 => ("Weak", theme.peach),
-            2 => ("Fair", theme.yellow),
-            3 => ("Strong", theme.green),
-            _ => ("Very strong", theme.teal),
-        };
 
-        let hint = entropy
-            .feedback()
-            .and_then(|f| f.suggestions().first().map(|s| s.to_string()))
-            .unwrap_or_else(|| {
-                let crack_time = entropy
-                    .crack_times()
-                    .online_no_throttling_10_per_second()
-                    .to_string();
-                format!("~{crack_time} to crack")
+        let generation = generation.clone();
+        let weak = app.as_weak();
+        // Scoring initializes a large dictionary and can take hundreds of
+        // milliseconds. Keep it off the input/render thread and skip stale edits.
+        slint::Timer::single_shot(std::time::Duration::from_millis(120), move || {
+            if generation.get() != current {
+                return;
+            }
+            let value = value.to_string();
+            let task = tokio::task::spawn_blocking(move || {
+                let entropy = zxcvbn::zxcvbn(&value, &[]);
+                let hint = entropy
+                    .feedback()
+                    .and_then(|f| f.suggestions().first().map(|s| s.to_string()))
+                    .unwrap_or_else(|| {
+                        format!(
+                            "~{} to crack",
+                            entropy.crack_times().online_no_throttling_10_per_second()
+                        )
+                    });
+                (u8::from(entropy.score()), hint)
             });
-
-        let popup = app.global::<PopupState>();
-        popup.set_password_strength_score(score as i32);
-        popup.set_password_strength_label(SharedString::from(label));
-        popup.set_password_strength_hint(SharedString::from(hint));
-        popup.set_password_strength_color(color);
+            slint::spawn_local(async move {
+                let Ok((score, hint)) = task.await else {
+                    return;
+                };
+                if generation.get() != current {
+                    return;
+                }
+                let Some(app) = weak.upgrade() else { return };
+                let popup = app.global::<PopupState>();
+                let visible = if key == "user_password" {
+                    popup.get_users_visible()
+                } else {
+                    popup.get_text_input_visible() && popup.get_text_input_key() == key
+                };
+                if !visible {
+                    return;
+                }
+                let theme = app.global::<Theme>().get_c();
+                let (label, color) = match score {
+                    0 => ("Very weak", theme.red),
+                    1 => ("Weak", theme.peach),
+                    2 => ("Fair", theme.yellow),
+                    3 => ("Strong", theme.green),
+                    _ => ("Very strong", theme.teal),
+                };
+                popup.set_password_strength_score(score as i32);
+                popup.set_password_strength_label(label.into());
+                popup.set_password_strength_hint(hint.into());
+                popup.set_password_strength_color(color);
+            })
+            .expect("Slint event loop is available");
+        });
     });
 }
 
@@ -474,7 +504,13 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
             // Use the cached scan results if available; otherwise block-scan now.
             let fresh: Vec<archinstall_zfs_core::kernel::scanner::CompatibilityResult>;
             let distro = config.distribution();
-            let options = if let Some(opts) = kernel_scan.with(distro, |cached| {
+            let options = if crate::preview::enabled() {
+                distro
+                    .kernels
+                    .iter()
+                    .map(|k| format!("{} — compatible", k.name))
+                    .collect()
+            } else if let Some(opts) = kernel_scan.with(distro, |cached| {
                 cached.map(|r| build_kernel_options(distro, r))
             }) {
                 opts
@@ -540,7 +576,11 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
             // Build the GPU driver options list. Order matches the TUI
             // picker (None first, then drivers in display order). The
             // suggested driver based on detected hardware is annotated.
-            let suggestion = suggested_driver(&detect_gpus());
+            let suggestion = if crate::preview::enabled() {
+                None
+            } else {
+                suggested_driver(&detect_gpus())
+            };
             let drivers: &[Option<GfxDriver>] = &[
                 None,
                 Some(GfxDriver::AllOpenSource),
@@ -599,7 +639,7 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
             show_select(app, "timezone_region", "Timezone region", &regions, 0);
         }
         EditorSetting::Locale => {
-            let locales = archinstall_zfs_core::installer::locale::list_locales();
+            let locales = available_locales();
             let locale_strs: Vec<&str> = locales.iter().map(|s| s.as_str()).collect();
             let current_idx = config
                 .locale
@@ -620,7 +660,7 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
             show_users_popup(app);
         }
         EditorSetting::Keyboard => {
-            let keymaps = archinstall_zfs_core::installer::locale::list_keymaps();
+            let keymaps = available_keymaps();
             let keymap_strs: Vec<&str> = keymaps.iter().map(|s| s.as_str()).collect();
             let current_idx = keymaps
                 .iter()
@@ -636,9 +676,9 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
                 true,
             );
         }
-        // The pool picker and the package list are the terminal interface's;
-        // here those rows are typed into and handled above.
-        EditorSetting::PoolName | EditorSetting::Packages => {}
+        EditorSetting::Packages => show_package_search(app),
+        // Pool names are handled by TextSetting above.
+        EditorSetting::PoolName => {}
     }
 }
 
@@ -740,4 +780,22 @@ fn show_package_search(app: &App) {
     editing.set_package_searching_aur(false);
     editing.set_package_status_text(SharedString::default());
     app.global::<PopupState>().set_pkg_search_visible(true);
+}
+
+fn available_locales() -> Vec<String> {
+    if crate::preview::enabled() {
+        ["en_US.UTF-8", "de_DE.UTF-8", "ru_RU.UTF-8", "ja_JP.UTF-8"]
+            .map(String::from)
+            .to_vec()
+    } else {
+        archinstall_zfs_core::installer::locale::list_locales()
+    }
+}
+
+fn available_keymaps() -> Vec<String> {
+    if crate::preview::enabled() {
+        ["us", "de", "ru", "jp106"].map(String::from).to_vec()
+    } else {
+        archinstall_zfs_core::installer::locale::list_keymaps()
+    }
 }

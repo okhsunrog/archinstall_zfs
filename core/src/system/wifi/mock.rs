@@ -30,7 +30,7 @@
 //! requires a passphrase; the mock treats any non-empty string as
 //! correct and any empty or missing string as `PassphraseRequired`.
 
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use futures::stream;
@@ -42,7 +42,7 @@ use super::{KnownNetworkInfo, Security, StationState, StationStateStream, WifiEr
 /// Global mutable state for the mock backend. A single `Mutex<State>`
 /// is fine because the installer has exactly one wifi client and we
 /// never hit any lock contention worth measuring.
-static STATE: Mutex<State> = Mutex::new(State::new());
+static STATE: LazyLock<Mutex<State>> = LazyLock::new(|| Mutex::new(State::new()));
 
 struct State {
     connected_ssid: Option<String>,
@@ -53,10 +53,10 @@ struct State {
 }
 
 impl State {
-    const fn new() -> Self {
+    fn new() -> Self {
         Self {
             connected_ssid: None,
-            known: Vec::new(),
+            known: vec!["HomeNetwork".into()],
         }
     }
 }
@@ -66,10 +66,7 @@ fn canned_networks() -> Vec<WifiNetwork> {
         let g = STATE.lock().unwrap();
         g.known.clone()
     };
-    // Preseed HomeNetwork as known on every scan so the first run
-    // after process start already shows the Known badge without
-    // needing a previous connect.
-    let is_known = |ssid: &str| ssid == "HomeNetwork" || known.iter().any(|s| s == ssid);
+    let is_known = |ssid: &str| known.iter().any(|s| s == ssid);
 
     vec![
         WifiNetwork {
@@ -220,22 +217,15 @@ pub async fn watch_station_state() -> Result<StationStateStream, WifiError> {
 
 pub async fn list_known_networks() -> Result<Vec<KnownNetworkInfo>, WifiError> {
     let g = STATE.lock().unwrap();
-    // Always include HomeNetwork (seeded) plus anything connected in
-    // this process's lifetime.
-    let mut out = vec![KnownNetworkInfo {
-        ssid: "HomeNetwork".into(),
-        security: Security::Psk,
-        hidden: false,
-    }];
-    for ssid in &g.known {
-        if ssid != "HomeNetwork" {
-            out.push(KnownNetworkInfo {
-                ssid: ssid.clone(),
-                security: Security::Psk,
-                hidden: false,
-            });
-        }
-    }
+    let mut out: Vec<_> = g
+        .known
+        .iter()
+        .map(|ssid| KnownNetworkInfo {
+            ssid: ssid.clone(),
+            security: Security::Psk,
+            hidden: false,
+        })
+        .collect();
     out.sort_by(|a, b| a.ssid.cmp(&b.ssid));
     Ok(out)
 }

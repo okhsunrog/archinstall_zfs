@@ -187,6 +187,10 @@ fn setup_packages(app: &App, config: &Rc<RefCell<GlobalConfig>>, models: &Editin
             return;
         }
         editing.set_package_searching_aur(false);
+        if crate::preview::enabled() {
+            search_model.set_vec(crate::preview::packages(&text, false));
+            return;
+        }
         let query = text.to_string();
         let weak2 = app.as_weak();
         tokio::spawn(async move {
@@ -218,6 +222,11 @@ fn setup_packages(app: &App, config: &Rc<RefCell<GlobalConfig>>, models: &Editin
         }
         let editing = app.global::<EditingState>();
         editing.set_package_searching_aur(true);
+        if crate::preview::enabled() {
+            set_search_results(&app, crate::preview::packages(&text, true));
+            editing.set_package_searching_aur(false);
+            return;
+        }
         editing.set_package_status_text(SharedString::from("Searching AUR..."));
         let query = text.to_string();
         let weak2 = app.as_weak();

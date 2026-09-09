@@ -12,3 +12,4 @@ test-install.log
 # `echo 'use flake' > .envrc && direnv allow`; not a project convention).
 .envrc
 .direnv/
+__pycache__/

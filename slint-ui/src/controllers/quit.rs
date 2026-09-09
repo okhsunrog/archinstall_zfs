@@ -39,6 +39,9 @@ pub fn setup(app: &App) {
     app.on_reboot_requested(move || {
         let Some(app) = weak.upgrade() else { return };
         let _ = app.window().hide();
+        if crate::preview::enabled() {
+            return;
+        }
         let _ = std::process::Command::new("systemctl")
             .arg("reboot")
             .spawn();

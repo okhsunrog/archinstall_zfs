@@ -79,6 +79,11 @@ export component WifiPopup inherits Rectangle {
                 return accept;
             }
 
+            if ev.text == Key.Return && WifiState.phase == WifiPhase.connected {
+                WifiState.close();
+                return accept;
+            }
+
             // Below here: only relevant in the picking phase (list
             // navigation). Auth phase delegates Enter to the text
             // input itself so show-password toggles and normal text
@@ -121,7 +126,9 @@ export component WifiPopup inherits Rectangle {
     // Centered card
     Rectangle {
         width: min(560px, parent.width - 64px);
-        height: min(620px, parent.height - 64px);
+        height: min(WifiState.phase == WifiPhase.connected ? 340px
+            : WifiState.phase == WifiPhase.picking || WifiState.phase == WifiPhase.scanning ? 520px
+            : 400px, parent.height - 48px);
         background: Theme.c.base;
         border-radius: Theme.radius-lg;
         border-width: 1px;
@@ -139,8 +146,8 @@ export component WifiPopup inherits Rectangle {
 
             // ───────────────── HEADER ─────────────────
             HorizontalLayout {
+                height: 40px;
                 spacing: Theme.spacing-sm;
-                alignment: start;
 
                 Icon {
                     source: @image-url("../../assets/icons/wifi.svg");
@@ -157,16 +164,11 @@ export component WifiPopup inherits Rectangle {
                     horizontal-stretch: 1;
                 }
 
-                // Rescan only meaningful in picking phase.
-                if WifiState.phase == WifiPhase.picking: StyledButton {
-                    label: "Rescan";
-                    style: Theme.button-ghost;
-                    clicked => { WifiState.rescan(); }
-                }
-
                 StyledButton {
                     label: "Close";
-                    style: Theme.button-ghost;
+                    width: 88px;
+                    height: 40px;
+                    style: Theme.button-default;
                     clicked => { WifiState.close(); }
                 }
             }
@@ -381,8 +383,11 @@ export component WifiPopup inherits Rectangle {
 
                                 // Forget action for known networks
                                 if net.known: Rectangle {
-                                    width: 28px;
-                                    height: 28px;
+                                    width: 32px;
+                                    height: 32px;
+                                    accessible-role: button;
+                                    accessible-label: "Forget " + net.ssid;
+                                    accessible-action-default => { WifiState.forget(idx); }
                                     y: (parent.height - self.height) / 2;
                                     background: forget-ta.has-hover
                                         ? Theme.c.red : transparent;
@@ -440,12 +445,16 @@ export component WifiPopup inherits Rectangle {
                                 horizontal-stretch: 1;
                             }
 
-                            SignalBars {
-                                percent: WifiState.selected-index >= 0
-                                    && WifiState.selected-index < WifiState.networks.length
-                                    ? WifiState.networks[WifiState.selected-index].signal-percent
-                                    : 0;
-                                lit: Theme.c.subtext0;
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 0;
+                                SignalBars {
+                                    percent: WifiState.selected-index >= 0
+                                        && WifiState.selected-index < WifiState.networks.length
+                                        ? WifiState.networks[WifiState.selected-index].signal-percent
+                                        : 0;
+                                    lit: Theme.c.subtext0;
+                                }
                             }
                         }
                     }
@@ -595,17 +604,18 @@ export component WifiPopup inherits Rectangle {
                         font-size: Theme.font-sm;
                         horizontal-alignment: center;
                         wrap: word-wrap;
-                        width: 400px;
+                        width: min(400px, parent.width);
                     }
                 }
             }
 
             // ───────────────── FOOTER (phase-driven buttons) ─────────────────
             if WifiState.phase == WifiPhase.auth
+                || WifiState.phase == WifiPhase.picking
                 || WifiState.phase == WifiPhase.error
                 || WifiState.phase == WifiPhase.no-internet
                 || WifiState.phase == WifiPhase.connected: HorizontalLayout {
-                    height: Theme.control-height;
+                    height: 40px;
                     alignment: end;
                     spacing: Theme.spacing-sm;
 
@@ -636,12 +646,32 @@ export component WifiPopup inherits Rectangle {
                     clicked => { WifiState.rescan(); }
                 }
 
-                // Connected phase: Disconnect button for quick access
-                if WifiState.phase == WifiPhase.connected
+                if WifiState.phase == WifiPhase.picking: StyledButton {
+                    label: "Rescan";
+                    style: Theme.button-default;
+                    clicked => { WifiState.rescan(); }
+                }
+
+                // Disconnect belongs to network management, not the success action.
+                if (WifiState.phase == WifiPhase.picking && WifiState.current-ssid != "")
                     || WifiState.phase == WifiPhase.no-internet: StyledButton {
                     label: "Disconnect";
                     style: Theme.button-default;
                     clicked => { WifiState.disconnect(); }
+                }
+
+                if WifiState.phase == WifiPhase.connected: StyledButton {
+                    label: "Other networks";
+                    style: Theme.button-default;
+                    clicked => { WifiState.rescan(); }
+                }
+
+                if WifiState.phase == WifiPhase.connected
+                    || WifiState.phase == WifiPhase.picking: StyledButton {
+                    label: "Done";
+                    min-width: 100px;
+                    style: Theme.button-primary;
+                    clicked => { WifiState.close(); }
                 }
             }
         }

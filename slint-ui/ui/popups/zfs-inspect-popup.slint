@@ -74,42 +74,60 @@ export component ZfsInspectPopup inherits Rectangle {
                 ListView {
                     height: 180px;
                     for pool[index] in DemoState.pools: Rectangle {
-                        height: 48px;
+                        height: 64px;
                         background: Math.mod(index, 2) == 0 ? Theme.c.surface0 : Theme.c.base;
                         border-radius: Theme.radius-sm;
                         HorizontalLayout {
                             padding-left: Theme.spacing-md;
                             padding-right: Theme.spacing-sm;
+                            padding-top: Theme.spacing-sm;
+                            padding-bottom: Theme.spacing-sm;
                             spacing: Theme.spacing-sm;
-                            Text {
-                                text: pool.name;
-                                color: Theme.c.text;
-                                font-family: "monospace";
-                                vertical-alignment: center;
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 4px;
                                 horizontal-stretch: 1;
+                                Text {
+                                    text: pool.name;
+                                    color: Theme.c.text;
+                                    font-family: "monospace";
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: pool.imported
+                                        ? (pool.owned ? "read-only demo import" : "already imported")
+                                        : "available · " + pool.state;
+                                    color: pool.owned ? Theme.c.green : Theme.c.overlay0;
+                                    font-size: Theme.font-sm;
+                                    overflow: elide;
+                                }
                             }
-                            Text {
-                                text: pool.imported
-                                    ? (pool.owned ? "read-only demo import" : "already imported")
-                                    : "available · " + pool.state;
-                                color: pool.owned ? Theme.c.green : Theme.c.overlay0;
-                                font-size: Theme.font-sm;
-                                vertical-alignment: center;
+                            VerticalLayout {
+                                alignment: center;
+                                StyledButton {
+                                    label: "Use";
+                                    width: 64px;
+                                    height: 32px;
+                                    enabled: !DemoState.busy;
+                                    clicked => { DemoState.select-pool(pool.name); }
+                                }
                             }
-                            StyledButton {
-                                label: "Use";
-                                enabled: !DemoState.busy;
-                                clicked => { DemoState.select-pool(pool.name); }
-                            }
-                            if !pool.imported: StyledButton {
-                                label: "Import read-only";
-                                enabled: !DemoState.busy;
-                                clicked => { DemoState.import-readonly(pool.name); }
-                            }
-                            if pool.owned: StyledButton {
-                                label: "Export";
-                                enabled: !DemoState.busy;
-                                clicked => { DemoState.export-pool(pool.name); }
+                            Rectangle {
+                                width: 132px;
+                                if !pool.imported: StyledButton {
+                                    width: 100%;
+                                    height: 32px;
+                                    label: "Import read-only";
+                                    enabled: !DemoState.busy;
+                                    clicked => { DemoState.import-readonly(pool.name); }
+                                }
+                                if pool.owned: StyledButton {
+                                    width: 100%;
+                                    height: 32px;
+                                    label: "Export";
+                                    enabled: !DemoState.busy;
+                                    clicked => { DemoState.export-pool(pool.name); }
+                                }
                             }
                         }
                     }

@@ -58,6 +58,10 @@ pub fn setup(
     demo: bool,
     log_rx: crossbeam_channel::Receiver<(String, i32)>,
 ) {
+    if crate::preview::enabled() {
+        crate::preview::install(app, config);
+        return;
+    }
     // The markup starts at this phase too; setting it here keeps the value
     // owned in one place rather than agreeing by coincidence.
     set_phase(app, InstallPhase::Configuring);

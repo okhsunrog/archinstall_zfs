@@ -60,6 +60,10 @@ impl KernelScan {
 }
 
 pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_scan: &KernelScan, demo: bool) {
+    if crate::preview::enabled() {
+        crate::preview::welcome(app);
+        return;
+    }
     run_initial_checks(app, demo);
 
     let weak = app.as_weak();
