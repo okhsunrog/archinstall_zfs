@@ -23,6 +23,7 @@ class Preview:
         self.output = output
         self.label = f'{scene}-{size}-{scale}x'
         self.scale = float(scale)
+        self.size = tuple(map(int, size.split('x')))
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', 0))
             self.port = sock.getsockname()[1]
@@ -32,7 +33,7 @@ class Preview:
 
     def call(self, name, **arguments):
         request = urllib.request.Request(f'http://127.0.0.1:{self.port}/mcp', data=json.dumps({'jsonrpc':'2.0', 'id':1, 'method':'tools/call', 'params': {'name':name, 'arguments':arguments}}).encode(), headers={'Content-Type':'application/json', 'Accept':'application/json, text/event-stream'})
-        response = json.load(urllib.request.urlopen(request, timeout=5))
+        response = json.load(urllib.request.urlopen(request, timeout=30))
         if 'error' in response or response.get('result', {}).get('isError'):
             raise RuntimeError(response)
         return response['result']['content']
@@ -50,6 +51,7 @@ class Preview:
                 properties = self.data('get_window_properties', windowHandle=self.window)
                 self.root = properties['rootElementHandle']
                 assert abs(properties['scaleFactor'] - self.scale) < .001, properties
+                assert (properties['size']['width'], properties['size']['height']) == self.size, properties
                 (self.output / f'{self.label}-window.json').write_text(json.dumps(properties, indent=2))
                 return
             except (urllib.error.URLError, IndexError, TimeoutError):
