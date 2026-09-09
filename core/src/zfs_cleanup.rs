@@ -1,6 +1,6 @@
 //! End-of-install ZFS cleanup. Runs after the installer pipeline finishes
 //! its non-ZFS work (pacstrap, chroot config, ZBM install) — unmounts
-//! filesystems and exports the pool with escalating force.
+//! filesystems and exports only the operation-owned pool.
 //!
 //! Lives in core (rather than each UI crate) so the TUI and Slint installers
 //! share the same logic and don't depend on zfskit directly.
@@ -16,58 +16,130 @@ pub async fn pool_is_imported(pool_name: &str) -> Result<bool> {
     Ok(pools.iter().any(|pool| pool.name == pool_name))
 }
 
-/// Sequence used by both the TUI and Slint install pipelines: try to unmount
-/// everything, then export the pool. Each unmount attempt is best-effort and
-/// followed by a `sync(2)` and a 1-second sleep — old behavior carried from
-/// the original Python installer, intended to give the kernel time to settle
-/// after VFS state changes.
-///
-/// The four escalation steps:
-///   1. `zfs umount -a` — let ZFS try the bulk path
-///   2. `zfs umount <root>` — explicit per-dataset
-///   3. `zfs umount -af` — bulk + force
-///   4. `zfs umount -f <root>` — explicit + force
-///
-/// After unmount attempts, `zpool export` with a `-f` retry on failure.
-///
-/// Errors from individual ZFS commands are intentionally swallowed; only the
-/// final export's failure mode is retried with force. Failure of the forced
-/// export is returned to the caller: reporting successful cleanup while the
-/// installer-owned pool remains imported would be unsafe.
-pub async fn cleanup_pool_after_install(pool_name: &str, root_dataset: &str) -> Result<()> {
-    let zfs = zfskit::Zfs::new();
-    let root_handle = zfs.dataset(root_dataset)?;
+/// Resources owned by one operation. The root mount is checked before recursive
+/// unmount, and only an explicitly owned pool may be exported. Cleanup is retryable.
+#[derive(Debug)]
+pub struct OwnedMounts {
+    pub root: std::path::PathBuf,
+    pub root_dataset: String,
+    pub pool_to_export: Option<String>,
+}
 
-    for attempt in 1..=4 {
-        let _ = match attempt {
-            1 => zfs.unmount_all(false).await,
-            2 => {
-                root_handle
-                    .unmount(&zfskit::dataset::UnmountOptions::default())
-                    .await
+impl OwnedMounts {
+    pub fn cleanup(&mut self, runner: &dyn crate::system::cmd::CommandRunner) -> Result<()> {
+        use crate::system::cmd::check_exit;
+        use color_eyre::eyre::ensure;
+        ensure!(
+            self.root.is_absolute() && self.root != std::path::Path::new("/"),
+            "Refusing cleanup of an unsafe root"
+        );
+        let root = self.root.to_string_lossy();
+        let mount = runner.run(
+            "findmnt",
+            &[
+                "--mountpoint",
+                &root,
+                "--noheadings",
+                "--raw",
+                "--output",
+                "SOURCE",
+            ],
+        )?;
+        match mount.exit_code {
+            0 => {
+                ensure!(
+                    mount.stdout.trim() == self.root_dataset,
+                    "Mount at {} is not owned by this operation: {}",
+                    root,
+                    mount.stdout.trim()
+                );
+                let output = runner.run("umount", &["--recursive", &root])?;
+                check_exit(&output, "unmount operation's filesystems")?;
             }
-            3 => zfs.unmount_all(true).await,
-            4 => {
-                root_handle
-                    .unmount(&zfskit::dataset::UnmountOptions { force: true })
-                    .await
-            }
-            _ => unreachable!(),
-        };
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        let _ = tokio::task::spawn_blocking(nix::unistd::sync).await;
+            1 if mount.stdout.trim().is_empty() && mount.stderr.trim().is_empty() => {}
+            _ => check_exit(&mount, "inspect operation's mount")?,
+        }
+        if let Some(pool) = &self.pool_to_export {
+            let output = runner.run("zpool", &["export", pool])?;
+            check_exit(&output, "export operation's pool")?;
+            self.pool_to_export = None;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::system::cmd::tests::{CannedResponse, RecordingRunner};
+
+    fn ok(s: &str) -> CannedResponse {
+        CannedResponse {
+            stdout: s.into(),
+            ..Default::default()
+        }
+    }
+    fn fail(s: &str) -> CannedResponse {
+        CannedResponse {
+            stderr: s.into(),
+            exit_code: 1,
+            ..Default::default()
+        }
     }
 
-    let pool = zfs.pool(pool_name)?;
-    if pool
-        .export(&zfskit::pool::ExportOptions::default())
-        .await
-        .is_err()
-    {
-        tracing::warn!("zpool export failed, trying force");
-        pool.export(&zfskit::pool::ExportOptions { force: true })
-            .await?;
+    fn mounts() -> OwnedMounts {
+        OwnedMounts {
+            root: "/run/azfs-test".into(),
+            root_dataset: "pool/arch0/root".into(),
+            pool_to_export: Some("pool".into()),
+        }
     }
 
-    Ok(())
+    #[test]
+    fn busy_mount_preserves_export_for_retry() {
+        let runner = RecordingRunner::new(vec![ok("pool/arch0/root\n"), fail("busy")]);
+        let mut mounts = mounts();
+        assert!(mounts.cleanup(&runner).is_err());
+        assert_eq!(mounts.pool_to_export.as_deref(), Some("pool"));
+        assert!(runner.calls().iter().all(|c| c.program != "zpool"));
+    }
+
+    #[test]
+    fn foreign_root_is_never_unmounted() {
+        let runner = RecordingRunner::new(vec![ok("other/root\n")]);
+        assert!(mounts().cleanup(&runner).is_err());
+        assert_eq!(runner.calls().len(), 1);
+    }
+
+    #[test]
+    fn no_global_or_forced_cleanup_and_success_is_retryable() {
+        let runner = RecordingRunner::new(vec![
+            ok("pool/arch0/root\n"),
+            ok(""),
+            ok(""),
+            CannedResponse {
+                stdout: "".into(),
+                stderr: "".into(),
+                exit_code: 1,
+            },
+        ]);
+        let mut mounts = mounts();
+        mounts.cleanup(&runner).unwrap();
+        mounts.cleanup(&runner).unwrap();
+        assert!(mounts.pool_to_export.is_none());
+        assert_eq!(
+            runner
+                .calls()
+                .iter()
+                .filter(|c| c.program == "zpool")
+                .count(),
+            1
+        );
+        assert!(
+            runner
+                .calls()
+                .iter()
+                .all(|c| !c.args.iter().any(|a| a == "-a" || a == "-f"))
+        );
+    }
 }

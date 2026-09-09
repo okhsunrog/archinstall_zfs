@@ -21,3 +21,5 @@ pub mod zfs_setup;
 pub mod zfs_target_files;
 pub mod zfs_trim;
 pub mod zrepl;
+
+pub mod installed_system;

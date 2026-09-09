@@ -15,7 +15,7 @@
 //! libalpm (whose handle is `!Send`) run inside `spawn_blocking`, while ZFS
 //! operations and HTTP are awaited directly.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -74,6 +74,19 @@ pub async fn run_install(
     cancel: CancellationToken,
     progress_tx: Option<ProgressSender>,
 ) -> Result<(), InstallError> {
+    run_install_with_target(runner, config, cancel, progress_tx)
+        .await
+        .map(|_| ())
+}
+
+/// Return a non-secret resume target only after successful installation and cleanup.
+/// Failure to capture the optional target does not invalidate an installed system.
+pub async fn run_install_with_target(
+    runner: Arc<dyn CommandRunner>,
+    config: GlobalConfig,
+    cancel: CancellationToken,
+    progress_tx: Option<ProgressSender>,
+) -> Result<Option<crate::installed_system::InstalledSystem>, InstallError> {
     let problems = config.validate_for_install();
     if !problems.is_empty() {
         return Err(InstallError::InvalidConfig(problems));
@@ -96,14 +109,17 @@ pub async fn run_install(
     )
     .await;
 
-    cleanup
-        .run(&*runner, &pool_name, &root_dataset, result.is_ok())
-        .await?;
+    let succeeded = result.is_ok();
+    tokio::task::spawn_blocking(move || {
+        cleanup.run(&*runner, &pool_name, &root_dataset, succeeded)
+    })
+    .await
+    .map_err(|error| InstallError::Failed(error.into()))??;
 
     // A cancelled run fails wherever it happened to be — inside a download,
     // between phases, part-way through a chroot command — so the token is what
     // says whether the failure was asked for.
-    result.map_err(|error| {
+    let target = result.map_err(|error| {
         if cancel.is_cancelled() {
             InstallError::Cancelled
         } else {
@@ -111,7 +127,7 @@ pub async fn run_install(
         }
     })?;
     tracing::info!("Installation complete!");
-    Ok(())
+    Ok(target)
 }
 
 /// What the pipeline got far enough to create, and therefore what has to be
@@ -120,7 +136,6 @@ struct CleanupState {
     /// The pipeline started creating or importing the pool, so it is this
     /// installation's to export.
     pool_setup_started: AtomicBool,
-    efi_mounted: AtomicBool,
     /// The pool was already imported before the pipeline ran, so it belongs to
     /// the live environment and must be left alone. Defaults to true so a pool
     /// whose initial ownership could not be established is never exported.
@@ -131,7 +146,6 @@ impl Default for CleanupState {
     fn default() -> Self {
         Self {
             pool_setup_started: AtomicBool::new(false),
-            efi_mounted: AtomicBool::new(false),
             pool_preexisting: AtomicBool::new(true),
         }
     }
@@ -144,7 +158,7 @@ impl CleanupState {
     /// success while the installer still holds the pool would leave the user
     /// to discover it at reboot — but only logged after a failed one, where it
     /// would otherwise mask the error that actually stopped the install.
-    async fn run(
+    fn run(
         &self,
         runner: &dyn CommandRunner,
         pool_name: &str,
@@ -160,12 +174,12 @@ impl CleanupState {
         tracing::info!("Phase 14: Cleanup");
         tracing::info!(target: "metrics", event = "phase_start", num = 14u32, name = "Cleanup");
 
-        if self.efi_mounted.load(Ordering::Acquire) {
-            nix::unistd::sync();
-            let _ = crate::disk::partition::umount_efi(runner, Path::new(MOUNTPOINT));
-        }
-
-        let result = crate::zfs_cleanup::cleanup_pool_after_install(pool_name, root_dataset).await;
+        let mut mounts = crate::zfs_cleanup::OwnedMounts {
+            root: MOUNTPOINT.into(),
+            root_dataset: root_dataset.into(),
+            pool_to_export: Some(pool_name.into()),
+        };
+        let result = mounts.cleanup(runner);
         match result {
             Ok(()) => Ok(()),
             Err(error) if install_succeeded => Err(error),
@@ -183,7 +197,7 @@ async fn install(
     cancel: CancellationToken,
     progress_tx: Option<ProgressSender>,
     cleanup: Arc<CleanupState>,
-) -> Result<()> {
+) -> Result<Option<crate::installed_system::InstalledSystem>> {
     let mountpoint = PathBuf::from(MOUNTPOINT);
     let pool_name = config
         .pool_name
@@ -290,7 +304,6 @@ async fn install(
         })
         .await??;
     }
-    cleanup.efi_mounted.store(true, Ordering::Release);
 
     // ── Phases 4-12: Installer pipeline ────────────────────────
     // One blocking task for all of it: AlpmContext holds a `!Send` handle and
@@ -358,7 +371,19 @@ async fn install(
         }
     }
 
-    Ok(())
+    let target = crate::installed_system::InstalledSystem::capture(
+        &*runner,
+        &pool_name,
+        config.dataset_prefix.as_str(),
+        &efi_partition,
+    );
+    match target {
+        Ok(target) => Ok(Some(target)),
+        Err(error) => {
+            tracing::warn!(%error, "Installed-system shell will be unavailable");
+            Ok(None)
+        }
+    }
 }
 
 fn ensure_not_cancelled(cancel: &CancellationToken) -> Result<()> {
@@ -381,7 +406,6 @@ mod tests {
         // pool_setup_started is false: the run failed before phase 2.
         cleanup
             .run(&runner, "zroot", "zroot/arch0/root", false)
-            .await
             .expect("nothing to clean up");
 
         assert!(
@@ -394,7 +418,6 @@ mod tests {
     async fn a_pool_owned_by_the_live_environment_is_left_imported() {
         let cleanup = CleanupState::default();
         cleanup.pool_setup_started.store(true, Ordering::Release);
-        cleanup.efi_mounted.store(true, Ordering::Release);
         // Imported before the installer ran — exporting it would pull the pool
         // out from under whoever mounted it.
         cleanup.pool_preexisting.store(true, Ordering::Release);
@@ -402,7 +425,6 @@ mod tests {
 
         cleanup
             .run(&runner, "zroot", "zroot/arch0/root", true)
-            .await
             .expect("pre-existing pool is left alone");
 
         assert!(runner.calls().is_empty());
@@ -413,7 +435,6 @@ mod tests {
         let cleanup = CleanupState::default();
         assert!(cleanup.pool_preexisting.load(Ordering::Acquire));
         assert!(!cleanup.pool_setup_started.load(Ordering::Acquire));
-        assert!(!cleanup.efi_mounted.load(Ordering::Acquire));
     }
 
     #[tokio::test]
