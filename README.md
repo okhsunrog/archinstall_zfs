@@ -130,6 +130,13 @@ Legacy configuration files containing inline passwords remain supported.
 | **New Pool** | Creates ZFS pool on an existing partition. Uses your existing partition layout, creates ZFS pool on selected partition | Dual-boot scenarios, custom partitioning schemes, preserving existing OS installations |
 | **Existing Pool** | Installs into an existing ZFS pool as a new boot environment. Creates new BE datasets within your existing pool structure | Experiments, testing different configurations, multiple Arch installations |
 
+`New Pool` can preserve an existing Windows installation when its ZFS partition
+has already been prepared. It reuses a selected FAT32 ESP without formatting it,
+keeps unrelated EFI files and boot entries, and registers ZFSBootMenu alongside
+the existing firmware entries. It does not yet shrink NTFS or create a combined
+Windows/Linux boot-manager menu; select the operating system in the UEFI firmware
+menu. Never use `Full Disk` for this scenario because it erases the selected disk.
+
 > **Pro tip**: Existing Pool mode is excellent for trying different desktop environments or system configurations without risk — each installation becomes its own boot environment selectable from ZFSBootMenu.
 
 ### Kernel support

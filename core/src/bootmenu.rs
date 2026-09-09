@@ -1,5 +1,6 @@
-use std::fs;
-use std::path::Path;
+use std::fs::{self, File, OpenOptions};
+use std::io::{BufReader, Read, Write};
+use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::{Context, Result};
 use serde::Serialize;
@@ -49,6 +50,7 @@ struct ZbmEfi {
 #[derive(Serialize)]
 #[serde(rename_all = "PascalCase")]
 struct ZbmKernel {
+    prefix: String,
     command_line: String,
 }
 
@@ -72,6 +74,9 @@ fn write_zbm_config(target: &Path, init_system: InitSystem) -> Result<()> {
             enabled: true,
         },
         kernel: ZbmKernel {
+            // Keep the filename stable: the NVRAM entries and fallback copy
+            // below deliberately point at this name.
+            prefix: "vmlinuz".into(),
             command_line: "zbm.import_policy=hostid zbm.timeout=10 ro quiet loglevel=0".into(),
         },
     };
@@ -110,6 +115,99 @@ fn install_zbm_pacman_hook(target: &Path) -> Result<()> {
     fs::create_dir_all(&hooks_dir)?;
     fs::write(hooks_dir.join("95-zfsbootmenu.hook"), ZBM_PACMAN_HOOK)?;
     tracing::info!("installed ZBM pacman hook");
+    Ok(())
+}
+
+fn files_equal(a: &Path, b: &Path) -> Result<bool> {
+    let a_meta = fs::metadata(a)?;
+    let b_meta = fs::metadata(b)?;
+    if a_meta.len() != b_meta.len() {
+        return Ok(false);
+    }
+
+    let mut a = BufReader::new(File::open(a)?);
+    let mut b = BufReader::new(File::open(b)?);
+    let mut a_buf = [0_u8; 64 * 1024];
+    let mut b_buf = [0_u8; 64 * 1024];
+    loop {
+        let a_len = a.read(&mut a_buf)?;
+        let b_len = b.read(&mut b_buf)?;
+        if a_len != b_len || a_buf[..a_len] != b_buf[..b_len] {
+            return Ok(false);
+        }
+        if a_len == 0 {
+            return Ok(true);
+        }
+    }
+}
+
+fn copy_file_atomically(source: &Path, destination: &Path) -> Result<()> {
+    let parent = destination
+        .parent()
+        .ok_or_else(|| color_eyre::eyre::eyre!("EFI destination has no parent directory"))?;
+    let source_len = fs::metadata(source)?.len();
+    let fs_info = nix::sys::statvfs::statvfs(parent)?;
+    let available = fs_info
+        .blocks_available()
+        .saturating_mul(fs_info.fragment_size());
+    if available < source_len {
+        color_eyre::eyre::bail!(
+            "EFI system partition has {} MiB free, but the ZFSBootMenu fallback needs {} MiB",
+            available / (1024 * 1024),
+            source_len.div_ceil(1024 * 1024)
+        );
+    }
+
+    let temporary = destination.with_extension(format!("EFI.azfs-{}.tmp", std::process::id()));
+    let result = (|| -> Result<()> {
+        let mut input = File::open(source)?;
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        std::io::copy(&mut input, &mut output)?;
+        output.flush()?;
+        output.sync_all()?;
+        fs::rename(&temporary, destination)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result.wrap_err_with(|| {
+        format!(
+            "failed to atomically install EFI fallback {}",
+            destination.display()
+        )
+    })
+}
+
+fn install_fallback(target: &Path) -> Result<()> {
+    let zbm_dir = target.join("boot/efi/EFI/zbm");
+    let source = zbm_dir.join("vmlinuz.EFI");
+    if !source.is_file() {
+        color_eyre::eyre::bail!(
+            "generate-zbm did not create the configured EFI image {}",
+            source.display()
+        );
+    }
+
+    let fallback_dir = target.join("boot/efi/EFI/BOOT");
+    fs::create_dir_all(&fallback_dir)?;
+    let fallback = fallback_dir.join("BOOTX64.EFI");
+    let previous = zbm_dir.join("vmlinuz-backup.EFI");
+    let owned_previous =
+        fallback.is_file() && previous.is_file() && files_equal(&fallback, &previous)?;
+    if fallback.exists() && !files_equal(&fallback, &source)? && !owned_previous {
+        tracing::warn!(
+            path = %fallback.display(),
+            "preserving an existing EFI fallback that is not owned by ZFSBootMenu"
+        );
+        return Ok(());
+    }
+
+    copy_file_atomically(&source, &fallback)?;
+    tracing::info!("installed ZFSBootMenu as EFI/BOOT/BOOTX64.EFI fallback");
     Ok(())
 }
 
@@ -178,36 +276,7 @@ pub async fn install_and_generate_zbm(
         let output = chroot_cmd(&*r, &t, "generate-zbm", &[])?;
         check_exit(&output, "generate-zbm")?;
 
-        let efi_src = t.join("boot/efi/EFI/zbm/vmlinuz.EFI");
-        let fallback_dir = t.join("boot/efi/EFI/BOOT");
-        fs::create_dir_all(&fallback_dir)?;
-        if efi_src.exists() {
-            fs::copy(&efi_src, fallback_dir.join("BOOTX64.EFI"))
-                .wrap_err("failed to copy ZBM EFI to fallback path")?;
-            tracing::info!("copied ZBM EFI to EFI/BOOT/BOOTX64.EFI fallback");
-        } else {
-            tracing::warn!("generate-zbm output not found at expected path, checking alternatives");
-            let zbm_dir = t.join("boot/efi/EFI/zbm");
-            if zbm_dir.exists() {
-                for entry in fs::read_dir(&zbm_dir)? {
-                    let entry = entry?;
-                    let path = entry.path();
-                    if path
-                        .extension()
-                        .is_some_and(|e| e.eq_ignore_ascii_case("efi"))
-                        && !path.to_string_lossy().contains("backup")
-                    {
-                        fs::copy(&path, fallback_dir.join("BOOTX64.EFI"))
-                            .wrap_err("failed to copy ZBM EFI to fallback path")?;
-                        tracing::info!(
-                            src = %path.display(),
-                            "copied ZBM EFI to EFI/BOOT/BOOTX64.EFI fallback"
-                        );
-                        break;
-                    }
-                }
-            }
-        }
+        install_fallback(&t)?;
 
         tracing::info!("ZFSBootMenu built and installed locally");
         Ok(())
@@ -218,47 +287,130 @@ pub async fn install_and_generate_zbm(
 /// Create efibootmgr entries pointing to the locally-built ZBM EFI bundle.
 /// Since the cmdline is already embedded in the EFI by generate-zbm,
 /// we don't need to pass -u here.
-pub fn create_efi_entries(runner: &dyn CommandRunner, efi_partition: &Path) -> Result<()> {
-    let efi_str = efi_partition.to_string_lossy();
+struct EfiLocation {
+    disk: PathBuf,
+    partition: u32,
+    partuuid: String,
+}
 
-    // Check for existing entries
-    let existing = runner.run("efibootmgr", &["-v"])?;
-    let existing_text = existing.stdout.clone();
+fn resolve_efi_location(runner: &dyn CommandRunner, efi_partition: &Path) -> Result<EfiLocation> {
+    let efi = efi_partition.to_string_lossy();
+    let output = runner.run(
+        "lsblk",
+        &[
+            "--noheadings",
+            "--raw",
+            "--paths",
+            "--output",
+            "PKNAME,PARTN,PARTUUID",
+            &efi,
+        ],
+    )?;
+    check_exit(&output, "resolve EFI disk and partition")?;
+    let fields: Vec<_> = output.stdout.split_whitespace().collect();
+    if fields.len() != 3 {
+        color_eyre::eyre::bail!(
+            "cannot resolve EFI disk, partition number and PARTUUID for {}",
+            efi_partition.display()
+        );
+    }
+    Ok(EfiLocation {
+        disk: fields[0].into(),
+        partition: fields[1].parse().wrap_err("invalid EFI partition number")?,
+        partuuid: fields[2].to_ascii_lowercase(),
+    })
+}
 
-    // Add main entry if not exists
-    if !existing_text.contains("ZFSBootMenu") {
-        let output = runner.run(
-            "efibootmgr",
-            &[
-                "-c",
-                "-d",
-                &efi_str,
-                "-L",
-                "ZFSBootMenu",
-                "-l",
-                "\\EFI\\zbm\\vmlinuz.EFI",
-            ],
-        )?;
-        check_exit(&output, "efibootmgr create ZFSBootMenu entry")?;
+fn boot_entry(line: &str) -> Option<(&str, &str, &str)> {
+    let rest = line.strip_prefix("Boot")?;
+    let number = rest.get(..4)?;
+    if !number.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let rest = rest.get(4..)?.strip_prefix('*').unwrap_or(&rest[4..]);
+    let device_start = rest.find("HD(")?;
+    Some((number, rest[..device_start].trim(), &rest[device_start..]))
+}
+
+fn entry_matches(device_path: &str, location: &EfiLocation, loader: &str) -> bool {
+    let normalized = device_path.to_ascii_lowercase().replace('/', "\\");
+    normalized.contains(&format!(
+        "hd({},gpt,{},",
+        location.partition, location.partuuid
+    )) && normalized.contains(&format!("file({})", loader.to_ascii_lowercase()))
+}
+
+fn ensure_efi_entry(
+    runner: &dyn CommandRunner,
+    existing: &str,
+    location: &EfiLocation,
+    label: &str,
+    loader: &str,
+    required: bool,
+) -> Result<()> {
+    let mut found = false;
+    for (number, entry_label, device_path) in existing.lines().filter_map(boot_entry) {
+        if entry_label != label {
+            continue;
+        }
+        if !found && entry_matches(device_path, location, loader) {
+            found = true;
+            continue;
+        }
+        let output = runner.run("efibootmgr", &["-b", number, "-B"])?;
+        if let Err(error) = check_exit(&output, "remove stale EFI boot entry") {
+            if required {
+                return Err(error);
+            }
+            tracing::warn!(%error, label, "failed to remove stale optional EFI entry");
+        }
+    }
+    if found {
+        return Ok(());
     }
 
-    // Add backup entry if backup exists
-    if !existing_text.contains("ZFSBootMenu (Backup)") {
-        let output = runner.run(
-            "efibootmgr",
-            &[
-                "-c",
-                "-d",
-                &efi_str,
-                "-L",
-                "ZFSBootMenu (Backup)",
-                "-l",
-                "\\EFI\\zbm\\vmlinuz-backup.EFI",
-            ],
+    let disk = location.disk.to_string_lossy();
+    let partition = location.partition.to_string();
+    let output = runner.run(
+        "efibootmgr",
+        &[
+            "-c", "-d", &disk, "-p", &partition, "-L", label, "-l", loader,
+        ],
+    )?;
+    if required {
+        check_exit(&output, "create ZFSBootMenu EFI entry")?;
+    } else if !output.success() {
+        tracing::warn!(label, "failed to create optional EFI boot entry");
+    }
+    Ok(())
+}
+
+pub fn create_efi_entries(
+    runner: &dyn CommandRunner,
+    efi_partition: &Path,
+    target: &Path,
+) -> Result<()> {
+    let location = resolve_efi_location(runner, efi_partition)?;
+
+    let existing = runner.run("efibootmgr", &["-v"])?;
+    check_exit(&existing, "read EFI boot entries")?;
+    ensure_efi_entry(
+        runner,
+        &existing.stdout,
+        &location,
+        "ZFSBootMenu",
+        "\\EFI\\zbm\\vmlinuz.EFI",
+        true,
+    )?;
+    if target.join("boot/efi/EFI/zbm/vmlinuz-backup.EFI").is_file() {
+        ensure_efi_entry(
+            runner,
+            &existing.stdout,
+            &location,
+            "ZFSBootMenu (Backup)",
+            "\\EFI\\zbm\\vmlinuz-backup.EFI",
+            false,
         )?;
-        if !output.success() {
-            tracing::warn!("failed to create ZBM backup boot entry (non-fatal)");
-        }
     }
 
     tracing::info!("created ZFSBootMenu EFI boot entries");
@@ -349,6 +501,7 @@ mod tests {
         assert!(config.contains("zbm.timeout=10"));
         assert!(config.contains("Versions: false"));
         assert!(config.contains("Enabled: true"));
+        assert!(config.contains("Prefix: vmlinuz"));
     }
 
     #[test]
@@ -398,24 +551,152 @@ mod tests {
     }
 
     #[test]
-    fn test_create_efi_entries_no_u_flag() {
+    fn test_fallback_preserves_an_unowned_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let zbm = dir.path().join("boot/efi/EFI/zbm");
+        let boot = dir.path().join("boot/efi/EFI/BOOT");
+        fs::create_dir_all(&zbm).unwrap();
+        fs::create_dir_all(&boot).unwrap();
+        fs::write(zbm.join("vmlinuz.EFI"), b"new zbm").unwrap();
+        fs::write(boot.join("BOOTX64.EFI"), b"another bootloader").unwrap();
+
+        install_fallback(dir.path()).unwrap();
+
+        assert_eq!(
+            fs::read(boot.join("BOOTX64.EFI")).unwrap(),
+            b"another bootloader"
+        );
+    }
+
+    #[test]
+    fn test_fallback_updates_the_previous_zbm_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let zbm = dir.path().join("boot/efi/EFI/zbm");
+        let boot = dir.path().join("boot/efi/EFI/BOOT");
+        fs::create_dir_all(&zbm).unwrap();
+        fs::create_dir_all(&boot).unwrap();
+        fs::write(zbm.join("vmlinuz.EFI"), b"new zbm").unwrap();
+        fs::write(zbm.join("vmlinuz-backup.EFI"), b"old zbm").unwrap();
+        fs::write(boot.join("BOOTX64.EFI"), b"old zbm").unwrap();
+
+        install_fallback(dir.path()).unwrap();
+
+        assert_eq!(fs::read(boot.join("BOOTX64.EFI")).unwrap(), b"new zbm");
+    }
+
+    fn target_with_zbm(backup: bool) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let zbm = dir.path().join("boot/efi/EFI/zbm");
+        fs::create_dir_all(&zbm).unwrap();
+        fs::write(zbm.join("vmlinuz.EFI"), b"main").unwrap();
+        if backup {
+            fs::write(zbm.join("vmlinuz-backup.EFI"), b"backup").unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn test_create_efi_entries_uses_the_selected_disk_and_partition() {
         // With locally-built ZBM, cmdline is embedded - no -u needed
+        let target = target_with_zbm(true);
         let runner = RecordingRunner::new(vec![
             CannedResponse {
-                stdout: "BootCurrent: 0000\n".into(), // no existing ZFSBootMenu entries
+                stdout: "/dev/nvme0n1 7 AABB-CCDD\n".into(),
+                ..Default::default()
+            },
+            CannedResponse {
+                stdout: "BootCurrent: 0000\n".into(),
                 ..Default::default()
             },
             CannedResponse::default(), // efibootmgr -c (main)
             CannedResponse::default(), // efibootmgr -c (backup)
         ]);
 
-        create_efi_entries(&runner, Path::new("/dev/sda1")).unwrap();
+        create_efi_entries(
+            &runner,
+            Path::new("/dev/disk/by-id/disk-part7"),
+            target.path(),
+        )
+        .unwrap();
 
         let calls = runner.calls();
-        // Main entry should NOT have -u flag (cmdline embedded in EFI)
-        let main_call = &calls[1];
+        let main_call = &calls[2];
         assert!(!main_call.args.contains(&"-u".to_string()));
-        assert!(main_call.args.contains(&"ZFSBootMenu".to_string()));
+        assert!(
+            main_call
+                .args
+                .windows(2)
+                .any(|a| a == ["-d", "/dev/nvme0n1"])
+        );
+        assert!(main_call.args.windows(2).any(|a| a == ["-p", "7"]));
         assert!(main_call.args.iter().any(|a| a.contains("vmlinuz.EFI")));
+    }
+
+    #[test]
+    fn test_matching_entries_are_kept() {
+        let target = target_with_zbm(true);
+        let runner = RecordingRunner::new(vec![
+            CannedResponse {
+                stdout: "/dev/sda 1 aabb-ccdd\n".into(),
+                ..Default::default()
+            },
+            CannedResponse {
+                stdout: concat!(
+                    "Boot0001* ZFSBootMenu\tHD(1,GPT,AABB-CCDD,0x800,0x1000)/File(\\EFI\\zbm\\vmlinuz.EFI)\n",
+                    "Boot0002* ZFSBootMenu (Backup)\tHD(1,GPT,AABB-CCDD,0x800,0x1000)/File(\\EFI\\zbm\\vmlinuz-backup.EFI)\n"
+                )
+                .into(),
+                ..Default::default()
+            },
+        ]);
+
+        create_efi_entries(&runner, Path::new("/dev/sda1"), target.path()).unwrap();
+
+        assert_eq!(runner.calls().len(), 2);
+    }
+
+    #[test]
+    fn test_backup_entry_does_not_hide_a_missing_main_entry() {
+        let target = target_with_zbm(true);
+        let runner = RecordingRunner::new(vec![
+            CannedResponse {
+                stdout: "/dev/sda 1 aabb-ccdd\n".into(),
+                ..Default::default()
+            },
+            CannedResponse {
+                stdout: "Boot0002* ZFSBootMenu (Backup)\tHD(1,GPT,AABB-CCDD,0x800,0x1000)/File(\\EFI\\zbm\\vmlinuz-backup.EFI)\n".into(),
+                ..Default::default()
+            },
+            CannedResponse::default(),
+        ]);
+
+        create_efi_entries(&runner, Path::new("/dev/sda1"), target.path()).unwrap();
+
+        let calls = runner.calls();
+        assert_eq!(calls.len(), 3);
+        assert!(calls[2].args.windows(2).any(|a| a == ["-L", "ZFSBootMenu"]));
+    }
+
+    #[test]
+    fn test_stale_same_name_entry_is_replaced() {
+        let target = target_with_zbm(false);
+        let runner = RecordingRunner::new(vec![
+            CannedResponse {
+                stdout: "/dev/sda 3 aabb-ccdd\n".into(),
+                ..Default::default()
+            },
+            CannedResponse {
+                stdout: "Boot00AF* ZFSBootMenu\tHD(1,GPT,DEAD-BEEF,0x800,0x1000)/File(\\EFI\\zbm\\vmlinuz.EFI)\n".into(),
+                ..Default::default()
+            },
+            CannedResponse::default(),
+            CannedResponse::default(),
+        ]);
+
+        create_efi_entries(&runner, Path::new("/dev/sda3"), target.path()).unwrap();
+
+        let calls = runner.calls();
+        assert_eq!(calls[2].args, ["-b", "00AF", "-B"]);
+        assert!(calls[3].args.windows(2).any(|a| a == ["-p", "3"]));
     }
 }
