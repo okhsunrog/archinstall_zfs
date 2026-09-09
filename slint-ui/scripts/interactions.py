@@ -155,7 +155,16 @@ def logs(p):
     last = p.wait('Text', '[INFO] Installation complete!')
     assert last['absolutePosition']['y'] >= log['absolutePosition']['y']
     assert last['absolutePosition']['y'] + last['size']['height'] <= log['absolutePosition']['y'] + log['size']['height']
-    thumb = element_id('ScrollBar::thumb')
+    thumb = next((e for e in p.tree()['elements'] if any(t.get('id') == 'ScrollBar::thumb'
+                  for t in e.get('typeNamesAndIds', []))), None)
+    if thumb is None:
+        # At Full HD the entire fixture can fit without scrolling.
+        first = p.wait('Text', '[INFO] Preview mode:')
+        assert first['absolutePosition']['y'] >= log['absolutePosition']['y']
+        assert p.element('Button', 'Latest output') is None
+        installation_layout(p)
+        p.screenshot('all-output-visible')
+        return
     p.data('drag_element', elementHandle=thumb['handle'], target={
         'x': thumb['absolutePosition']['x'] + thumb['size']['width'] / 2,
         'y': log['absolutePosition']['y'] + 16,
@@ -201,7 +210,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, default=Path('target/debug/azfs'))
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--sizes', nargs='+', default=['800x600@1', '1920x1080@2'])
+    parser.add_argument('--sizes', nargs='+', default=['1920x1080@1', '800x600@1', '1920x1080@2'])
     flows = ['system', 'users', 'desktop', 'wifi', 'inspect', 'install', 'cancel', 'shell', 'logs', 'invalid']
     parser.add_argument('--flows', nargs='+', choices=flows, default=flows)
     args = parser.parse_args()

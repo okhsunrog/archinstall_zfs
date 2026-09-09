@@ -61,7 +61,7 @@ struct Cli {
     preview: Option<preview::Scene>,
 
     /// Physical preview window size, for example 1920x1080.
-    #[arg(long, requires = "preview", default_value = "1280x800")]
+    #[arg(long, requires = "preview", default_value = "1920x1080")]
     preview_size: preview::Size,
 }
 
