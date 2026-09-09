@@ -18,6 +18,7 @@ export component WizardView inherits Rectangle {
 
     // Wizard-local keyboard navigation. Emitted from `wizard-focus-scope`
     // and bound to Rust's on_key_nav_* handlers in app.slint.
+    callback global-key(string) -> bool;
     callback key-nav-down();
     callback key-nav-up();
     callback key-nav-activate();
@@ -38,7 +39,10 @@ export component WizardView inherits Rectangle {
             && !PopupState.text-input-visible
             && !PopupState.users-visible
             && !PopupState.strlist-visible
-            && !PopupState.pkg-search-visible;
+            && !PopupState.pkg-search-visible
+            && !PopupState.multi-select-visible
+            && !PopupState.wifi-visible
+            && !DemoState.popup-visible;
 
         key-pressed(event) => {
             if event.text == Key.DownArrow || event.text == "j" {
@@ -53,6 +57,7 @@ export component WizardView inherits Rectangle {
                 root.key-nav-activate();
                 return accept;
             }
+            if root.global-key(event.text) { return accept; }
             return reject;
         }
     }
@@ -60,6 +65,8 @@ export component WizardView inherits Rectangle {
     init => { wizard-focus-scope.focus(); }
 
     VerticalLayout {
+        width: min(root.width, 1280px);
+        x: (root.width - self.width) / 2;
         padding: 0px;
         spacing: 0px;
 
@@ -101,15 +108,14 @@ export component WizardView inherits Rectangle {
                 spacing: 2px;
                 alignment: start;
 
-                for label[index] in WizardState.step-labels: SidebarItem {
-                    visible: index > 0;
-                    label: label;
-                    state: WizardState.step-state-at(index);
-                    step-index: index;
+                for index in WizardState.total-steps - 1: SidebarItem {
+                    label: WizardState.step-labels[index + 1];
+                    state: WizardState.step-state-at(index + 1);
+                    step-index: index + 1;
 
                     clicked => {
-                        if index <= WizardState.max-visited {
-                            WizardState.go-to(index);
+                        if index + 1 <= WizardState.max-visited {
+                            WizardState.go-to(index + 1);
                         }
                     }
                 }
@@ -144,7 +150,7 @@ export component WizardView inherits Rectangle {
                     // rows in the same section touch and stitch into one
                     // connected card; section breaks come from the
                     // SectionHeader rows themselves having top padding.
-                    ScrollView {
+                    items-scroll := ScrollView {
                         VerticalLayout {
                             spacing: 0px;
                             padding-left: 4px;
@@ -156,6 +162,13 @@ export component WizardView inherits Rectangle {
                                 focused-index: WizardState.focused-index;
 
                                 focus-requested(i) => { WizardState.focused-index = i; }
+                                ensure-visible(item-y, item-height) => {
+                                    if item-y + items-scroll.content-y < 0px {
+                                        items-scroll.content-y = -item-y;
+                                    } else if item-y + item-height + items-scroll.content-y > items-scroll.height {
+                                        items-scroll.content-y = items-scroll.height - item-y - item-height;
+                                    }
+                                }
                                 activated(key) => { root.item-activated(key); }
                                 toggled(key) => { root.toggle-activated(key); }
                                 action-clicked(key) => {
@@ -171,13 +184,12 @@ export component WizardView inherits Rectangle {
 
         // Footer — full window width, sits on the shell color
         HorizontalLayout {
-            height: 56px;
+            height: 64px;
             padding-left: 16px;
             padding-right: 16px;
             padding-top: 12px;
             padding-bottom: 12px;
             spacing: 8px;
-            alignment: center;
 
             // Quit button
             StyledButton {
@@ -207,9 +219,10 @@ export component WizardView inherits Rectangle {
                 text: WizardState.status-text;
                 color: Theme.c.overlay0;
                 font-size: 12px;
-                horizontal-alignment: center;
+                horizontal-alignment: left;
                 vertical-alignment: center;
                 horizontal-stretch: 1;
+                overflow: elide;
             }
 
             // Next button (all steps except the final Review step)

@@ -44,10 +44,7 @@ clap.workspace = true
 color-eyre.workspace = true
 crossbeam-channel = "0.5.16"
 nix.workspace = true
-slint = { git = "https://github.com/okhsunrog/slint.git", rev = "1d33287ec016e2e971912bfd648c1838a2c38032", default-features = false, features = [
-    "std",
-    "compat-1-2",
-] }
+slint = { git = "https://github.com/okhsunrog/slint.git", rev = "d6b44e120", default-features = false, features = ["std", "compat-1-2"], version = "1.18.0" }
 sublime_fuzzy.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
 tokio-util.workspace = true
@@ -58,4 +55,4 @@ zfskit = "0.2.0"
 zxcvbn.workspace = true
 
 [build-dependencies]
-slint-build = { git = "https://github.com/okhsunrog/slint.git", rev = "1d33287ec016e2e971912bfd648c1838a2c38032" }
+slint-build = { git = "https://github.com/okhsunrog/slint.git", rev = "d6b44e120", version = "1.18.0" }

@@ -12,29 +12,16 @@ export component InstallView inherits VerticalLayout {
     callback reboot-requested();
     callback cancel-requested();
 
-    padding: 12px;
-    spacing: 8px;
+    padding: 20px;
+    spacing: 12px;
 
-    // Log area (fills available space)
-    log-view := ListView {
-        for msg[index] in InstallState.log-messages: Rectangle {
-            height: msg-text.preferred-height + 4px;
-
-            msg-text := Text {
-                text: msg.text;
-                color: msg.level == 4 ? Theme.c.red
-                     : msg.level == 3 ? Theme.c.yellow
-                     : msg.level == 2 ? Theme.c.green
-                     : msg.level == 1 ? Theme.c.blue
-                     : Theme.c.overlay0;
-                font-family: "monospace";
-                font-size: 12px;
-                x: 8px;
-                width: parent.width - 16px;
-                wrap: word-wrap;
-                vertical-alignment: center;
-            }
-        }
+    Text {
+        text: "Installation";
+        color: Theme.c.blue;
+        font-size: 24px;
+        font-weight: FontWeight.semi-bold;
+        height: 40px;
+        vertical-alignment: center;
     }
 
     // Auto-pin to the bottom whenever a new log line lands. Computed from
@@ -43,14 +30,14 @@ export component InstallView inherits VerticalLayout {
     // the top.
     property <int> scroll-trigger: InstallState.log-messages.length;
     changed scroll-trigger => {
-        log-view.viewport-y = -max(0px, log-view.viewport-height - log-view.height);
+        log-view.content-y = -max(0px, log-view.content-height - log-view.height);
     }
 
     // Progress card (always visible during install)
     Rectangle {
-        height: InstallState.download-active ? 232px
+        height: InstallState.download-active ? 188px
             : (InstallState.state == 1 || InstallState.state == 4) ? 132px
-            : 80px;
+            : 104px;
         background: Theme.c.surface0;
         border-radius: 10px;
 
@@ -214,4 +201,34 @@ export component InstallView inherits VerticalLayout {
             }
         }
     }
+    Text {
+        text: "Installation log";
+        color: Theme.c.subtext0;
+        font-size: 13px;
+        height: 24px;
+        vertical-alignment: center;
+    }
+    // Log area (fills available space)
+    log-view := ListView {
+        for msg[index] in InstallState.log-messages: Rectangle {
+            height: msg-text.preferred-height + 4px;
+
+            msg-text := Text {
+                text: msg.text;
+                color: msg.level == 4 ? Theme.c.red
+                     : msg.level == 3 ? Theme.c.yellow
+                     : msg.level == 2 ? Theme.c.green
+                     : msg.level == 1 ? Theme.c.blue
+                     : Theme.c.overlay0;
+                font-family: "monospace";
+                font-size: 12px;
+                x: 8px;
+                width: parent.width - 16px;
+                wrap: word-wrap;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+
 }

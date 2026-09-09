@@ -108,6 +108,17 @@ fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         "Installation mode",
         mode.unwrap_or(InstallationMode::FullDisk),
     );
+    for (row, description) in items
+        .iter_mut()
+        .filter(|row| row.item_type == ItemType::RadioOption)
+        .zip([
+            "Erase the selected disk and create a ZFS root pool",
+            "Create a ZFS pool using existing partitions",
+            "Install into an existing ZFS pool",
+        ])
+    {
+        row.description = description.into();
+    }
 
     if matches!(mode, Some(InstallationMode::FullDisk) | None) {
         let disks = disk_choices();
@@ -501,7 +512,7 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
 fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     let mut items = Vec::new();
 
-    for (step, &label) in STEP_LABELS.iter().enumerate().take(TOTAL_STEPS - 1) {
+    for (step, &label) in STEP_LABELS.iter().enumerate().take(TOTAL_STEPS - 1).skip(1) {
         // Each step becomes a section in the review screen.
         items.push(section_header(label));
 
@@ -920,12 +931,24 @@ fn device_key(setting: DeviceSetting, path: &std::path::Path) -> SharedString {
 }
 
 fn disk_choices() -> Vec<ChoiceRow> {
+    if crate::preview::enabled() {
+        return crate::preview::disks()
+            .into_iter()
+            .map(ChoiceRow::from)
+            .collect();
+    }
     archinstall_zfs_core::disk::device::disk_choices()
         .map(|choices| choices.into_iter().map(ChoiceRow::from).collect())
         .unwrap_or_default()
 }
 
 fn partition_choices() -> Vec<ChoiceRow> {
+    if crate::preview::enabled() {
+        return crate::preview::partitions()
+            .into_iter()
+            .map(ChoiceRow::from)
+            .collect();
+    }
     archinstall_zfs_core::disk::device::partition_choices()
         .map(|choices| choices.into_iter().map(ChoiceRow::from).collect())
         .unwrap_or_default()

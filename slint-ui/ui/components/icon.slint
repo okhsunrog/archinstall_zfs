@@ -15,7 +15,8 @@
 
 import { Theme } from "../styling.slint";
 
-export component Icon inherits Image {
+export component Icon inherits Rectangle {
+    in property <image> source;
     // Square edge length. Defaults to `font-lg` (16px) which matches
     // the inline-with-text use case — icons next to a standard label.
     in property <length> size: Theme.font-lg;
@@ -26,8 +27,16 @@ export component Icon inherits Image {
     in property <brush> tint: Theme.c.text;
 
     width: size;
-    height: size;
-    colorize: tint;
-    image-fit: contain;
+    min-height: size;
+    preferred-height: size;
     accessible-role: none;
+
+    // The slot follows the row height; the image stays square and centered.
+    Image {
+        source: root.source;
+        width: root.size;
+        height: root.size;
+        colorize: root.tint;
+        image-fit: contain;
+    }
 }

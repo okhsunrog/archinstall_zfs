@@ -85,7 +85,7 @@ libusb-compat
 linux-atm
 linux-firmware
 {% if kernel == "linux" %}
-broadcom-wl
+broadcom-wl-dkms
 b43-fwcutter
 {% endif %}
 {% if use_precompiled_zfs %}
@@ -94,9 +94,10 @@ zfs-utils
 {% else %}
 zfs-dkms
 zfs-utils
-{% if include_headers %}
-{{ headers }}
 {% endif %}
+{# Broadcom also needs headers when ZFS uses a precompiled module. #}
+{% if include_headers or kernel == "linux" %}
+{{ headers }}
 {% endif %}
 linux-firmware-marvell
 livecd-sounds

@@ -2,7 +2,7 @@
 //! the on_check_internet retry handler, the background ZFS-init job, and the
 //! background kernel compatibility scan.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -60,37 +60,57 @@ impl KernelScan {
 }
 
 pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_scan: &KernelScan, demo: bool) {
-    run_initial_checks(app, config, kernel_scan, demo);
+    if crate::preview::enabled() {
+        crate::preview::welcome(app);
+        return;
+    }
+    run_initial_checks(app, demo);
 
     let weak = app.as_weak();
     let cfg = config.clone();
     let kscan = kernel_scan.clone();
+    let in_flight = Rc::new(RefCell::new(None::<tokio::task::AbortHandle>));
+    let generation = Rc::new(Cell::new(0_u64));
     app.global::<WelcomeState>().on_check_internet(move || {
-        let Some(app) = weak.upgrade() else { return };
-        let net = archinstall_zfs_core::system::net::check_internet();
-        app.global::<WelcomeState>().set_net_ok(net);
-        if net {
-            if !demo
-                && !app.global::<WelcomeState>().get_zfs_ok()
-                && !app.global::<WelcomeState>().get_zfs_installing()
-            {
-                start_zfs_init(&app, &cfg.borrow());
-            }
-            let distro = cfg.borrow().distribution();
-            if !kscan.has(distro) {
-                start_kernel_scan(&kscan, distro);
-            }
+        let request = generation.get().wrapping_add(1);
+        generation.set(request);
+        if let Some(previous) = in_flight.borrow_mut().take() {
+            previous.abort();
         }
+        let task = tokio::spawn(archinstall_zfs_core::system::net::check_internet());
+        *in_flight.borrow_mut() = Some(task.abort_handle());
+        let weak = weak.clone();
+        let cfg = cfg.clone();
+        let kscan = kscan.clone();
+        let generation = generation.clone();
+        // Await Tokio's network task without blocking Slint; the configuration
+        // stays on the UI thread and is read only after the request finishes.
+        slint::spawn_local(async move {
+            let Ok(net) = task.await else { return };
+            if generation.get() != request {
+                return;
+            }
+            let Some(app) = weak.upgrade() else { return };
+            app.global::<WelcomeState>().set_net_ok(net);
+            if net {
+                if !demo
+                    && !app.global::<WelcomeState>().get_zfs_ok()
+                    && !app.global::<WelcomeState>().get_zfs_installing()
+                {
+                    start_zfs_init(&app, &cfg.borrow());
+                }
+                let distro = cfg.borrow().distribution();
+                if !kscan.has(distro) {
+                    start_kernel_scan(&kscan, distro);
+                }
+            }
+        })
+        .expect("Slint event loop is available");
     });
+    app.global::<WelcomeState>().invoke_check_internet();
 }
 
-fn run_initial_checks(
-    app: &App,
-    config: &Rc<RefCell<GlobalConfig>>,
-    kernel_scan: &KernelScan,
-    demo: bool,
-) {
-    let net = archinstall_zfs_core::system::net::check_internet();
+fn run_initial_checks(app: &App, demo: bool) {
     let uefi = archinstall_zfs_core::system::sysinfo::has_uefi();
     let mut zfs_mod = archinstall_zfs_core::zfs_setup::check_zfs_module(
         &archinstall_zfs_core::system::cmd::RealRunner,
@@ -109,16 +129,8 @@ fn run_initial_checks(
 
     let welcome = app.global::<WelcomeState>();
     welcome.set_app_version(env!("CARGO_PKG_VERSION").into());
-    welcome.set_net_ok(net);
     welcome.set_uefi_ok(uefi);
     welcome.set_zfs_ok(zfs_mod && zfs_utils);
-
-    if net {
-        if !demo && !(zfs_mod && zfs_utils) {
-            start_zfs_init(app, &config.borrow());
-        }
-        start_kernel_scan(kernel_scan, config.borrow().distribution());
-    }
 }
 
 fn start_zfs_init(app: &App, config: &GlobalConfig) {

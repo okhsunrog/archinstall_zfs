@@ -1,7 +1,10 @@
 mod config_items;
+#[cfg(feature = "linuxkms")]
+mod console_session;
 mod controllers;
 mod editing_models;
 mod format;
+mod preview;
 mod refresh;
 mod tracing_layer;
 
@@ -49,6 +52,14 @@ struct Cli {
     /// destructive storage operations.
     #[arg(long, global = true)]
     demo: bool,
+
+    /// Review a simulated installation-ready system (desktop-mock builds only).
+    #[arg(long, conflicts_with_all = ["demo", "silent", "config", "secrets"])]
+    preview: Option<preview::Scene>,
+
+    /// Physical preview window size, for example 1920x1080.
+    #[arg(long, requires = "preview", default_value = "1280x800")]
+    preview_size: preview::Size,
 }
 
 /// Install the process-wide tracing subscriber.
@@ -90,20 +101,36 @@ fn setup_logging(ui_log_tx: crossbeam_channel::Sender<(String, i32)>) -> Result<
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     color_eyre::install()?;
     let cli = Cli::parse();
-    let demo = cli.demo || archinstall_zfs_core::demo::enabled_from_kernel_cmdline();
+    #[cfg(feature = "linuxkms")]
+    if !cli.silent
+        && cli.preview.is_none()
+        && let Some(status) = console_session::supervise()?
+    {
+        std::process::exit(console_session::exit_code(status));
+    }
+    if cli.preview.is_some() {
+        color_eyre::eyre::ensure!(
+            cfg!(feature = "desktop-mock"),
+            "--preview requires a desktop-mock build"
+        );
+        preview::enable();
+    }
+    let demo = !preview::enabled()
+        && (cli.demo || archinstall_zfs_core::demo::enabled_from_kernel_cmdline());
 
     // Bounded: the UI cannot keep up with trace-level output, and dropping
     // lines it will never render is preferable to slowing the installation.
     let (log_tx, log_rx) = crossbeam_channel::bounded::<(String, i32)>(512);
     setup_logging(log_tx)?;
 
-    if let Some(scale) = cli.ui_scale
-        && scale > 0.0
-    {
+    if let Some(scale) = cli.ui_scale {
+        color_eyre::eyre::ensure!(
+            scale.is_finite() && scale > 0.0,
+            "UI scale must be finite and positive"
+        );
         // Must be set before any Slint window is created.
         // SAFETY: single-threaded at this point in startup.
         unsafe {
@@ -111,7 +138,9 @@ async fn main() -> Result<()> {
         }
     }
 
-    let mut config = if let Some(ref path) = cli.config {
+    let mut config = if preview::enabled() {
+        preview::config(cli.preview.unwrap())
+    } else if let Some(ref path) = cli.config {
         GlobalConfig::load_from_file(path)?
     } else {
         GlobalConfig::default()
@@ -120,32 +149,39 @@ async fn main() -> Result<()> {
         config.apply_secrets_from_file(path)?;
     }
 
-    if cli.silent {
-        use color_eyre::eyre::bail;
-        if demo {
-            bail!("--silent is unavailable in safe demo mode");
-        }
-        if cli.config.is_none() {
-            bail!("--silent requires --config");
-        }
-        let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
-            Arc::new(archinstall_zfs_core::system::cmd::RealRunner);
-        Ok(archinstall_zfs_core::install::run_install(
-            runner,
-            config,
-            tokio_util::sync::CancellationToken::new(),
-            None,
-        )
-        .await?)
-    } else {
-        run_gui(config, demo, log_rx)
-    }
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(async move {
+            if cli.silent {
+                use color_eyre::eyre::bail;
+                if demo {
+                    bail!("--silent is unavailable in safe demo mode");
+                }
+                if cli.config.is_none() {
+                    bail!("--silent requires --config");
+                }
+                let runner: Arc<dyn archinstall_zfs_core::system::cmd::CommandRunner> =
+                    Arc::new(archinstall_zfs_core::system::cmd::RealRunner);
+                Ok(archinstall_zfs_core::install::run_install(
+                    runner,
+                    config,
+                    tokio_util::sync::CancellationToken::new(),
+                    None,
+                )
+                .await?)
+            } else {
+                run_gui(config, demo, log_rx, cli.preview, cli.preview_size)
+            }
+        })
 }
 
 fn run_gui(
     config: GlobalConfig,
     demo: bool,
     log_rx: crossbeam_channel::Receiver<(String, i32)>,
+    scene: Option<preview::Scene>,
+    size: preview::Size,
 ) -> Result<()> {
     let app = App::new()?;
     let config = Rc::new(RefCell::new(config));
@@ -167,6 +203,10 @@ fn run_gui(
     let demo_session = demo.then(controllers::demo::DemoSession::new);
     if let Some(session) = &demo_session {
         controllers::demo::setup(&app, &config, session);
+    }
+
+    if let Some(scene) = scene {
+        preview::show(&app, scene, size);
     }
 
     app.run()?;

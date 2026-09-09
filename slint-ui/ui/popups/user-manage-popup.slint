@@ -143,6 +143,7 @@ export component UserManagePopup inherits Rectangle {
                 username-input := StyledTextInput {
                     placeholder: "username";
                 }
+                init => { username-input.focus-input(); root.password-edited(""); }
 
                 password-input := StyledTextInput {
                     placeholder: "password (optional)";

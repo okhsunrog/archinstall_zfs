@@ -60,7 +60,7 @@ export component TextInputPopup inherits Rectangle {
                     accepted(val) => { root.confirmed(val); }
                 }
 
-                init => { input.focus-input(); }
+                init => { input.focus-input(); root.text-edited(root.input-text); }
 
                 // Password strength bar
                 if root.is-password && root.strength-score >= 0: VerticalLayout {
