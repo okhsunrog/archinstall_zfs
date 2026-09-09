@@ -1,3 +1,4 @@
+import { CheckBox } from "check-box.slint";
 import { StyledButton } from "styled-button.slint";
 // Renders one row of the wizard's config-items list. The visual appearance
 // depends on the row's ItemType. Field types (text/select/password/toggle/
@@ -73,6 +74,7 @@ export component ConfigItemRow inherits Rectangle {
     property <bool> is-radio-option: item.item-type == ItemType.radio-option;
     property <bool> is-grouped-radio-option: is-radio-option && item.group-label != "";
     property <bool> is-readonly: item.item-type == ItemType.readonly;
+    property <bool> is-editor: item.item-type == ItemType.text || item.item-type == ItemType.select || item.item-type == ItemType.password || is-toggle;
     property <bool> is-toggle: item.item-type == ItemType.toggle;
     property <bool> has-choice-details: item.icon != "" || is-grouped-radio-option;
     property <bool> has-device-secondary-text: item.detail-model != ""
@@ -89,15 +91,16 @@ export component ConfigItemRow inherits Rectangle {
         || is-radio-subheader;
 
     height: is-separator ? 8px
-          : is-warning ? max(32px, warning-text.preferred-height + 16px)
-          : is-section-header ? (item.key != "" ? 52px : 36px)
-          : is-radio-subheader ? (has-secondary-text ? 48px : 40px)
-          : is-grouped-radio-option ? (has-secondary-text ? 62px : 44px)
-          : is-radio-option ? (has-choice-details ? 86px : has-secondary-text ? 62px : 44px)
-          : is-action ? 40px
-          : is-readonly && has-device-secondary-text ? 92px
-          : is-readonly && has-secondary-text ? 52px
-          : 44px;
+        : is-warning ? max(32px, warning-text.preferred-height + 16px)
+        : is-section-header ? (item.key != "" ? 52px : 36px)
+        : is-radio-subheader ? (has-secondary-text ? 48px : 40px)
+        : is-grouped-radio-option ? (has-secondary-text ? 62px : 44px)
+        : is-radio-option ? (has-choice-details ? 86px : has-secondary-text ? 62px : 44px)
+        : is-action ? 40px
+        : is-editor ? max(56px, editor-content.min-height)
+        : is-readonly && has-device-secondary-text ? 92px
+        : is-readonly && has-secondary-text ? 52px
+        : 44px;
 
     // Section card background — only field rows draw it. Corner radius is
     // applied conditionally per-corner so adjacent rows in the same section
@@ -151,9 +154,12 @@ export component ConfigItemRow inherits Rectangle {
             vertical-alignment: center;
             horizontal-stretch: 1;
         }
+
         if item.key != "": StyledButton {
-            label: "Edit"; accessible-label: "Edit " + item.label;
-            height: 36px; outlined: true;
+            label: "Edit";
+            accessible-label: "Edit " + item.label;
+            height: 36px;
+            outlined: true;
             clicked => { root.activated(item.key); }
         }
     }
@@ -173,6 +179,7 @@ export component ConfigItemRow inherits Rectangle {
             font-size: 14px;
             vertical-alignment: center;
         }
+
         warning-text := Text {
             text: item.value;
             color: Theme.c.yellow;
@@ -303,6 +310,7 @@ export component ConfigItemRow inherits Rectangle {
                     horizontal-stretch: 1;
                     overflow: elide;
                 }
+
                 if item.detail-size != "": Text {
                     text: item.detail-size;
                     color: Theme.c.text;
@@ -322,6 +330,7 @@ export component ConfigItemRow inherits Rectangle {
                     horizontal-stretch: 1;
                     overflow: elide;
                 }
+
                 Text {
                     text: item.detail-transport.to-uppercase() + (item.is-removable ? " · Removable" : " · " + item.detail-media);
                     color: item.is-removable ? Theme.c.yellow : Theme.c.subtext0;
@@ -373,78 +382,119 @@ export component ConfigItemRow inherits Rectangle {
         spacing: 5px;
         HorizontalLayout {
             spacing: 12px;
-            Text { text: item.label; color: Theme.c.subtext0; font-size: 13px; }
+            Text {
+                text: item.label;
+                color: Theme.c.subtext0;
+                font-size: 13px;
+            }
+
             Text {
                 text: item.detail-model != "" ? item.detail-model : item.value;
-                color: Theme.c.text; font-size: 13px; font-weight: FontWeight.semi-bold;
-                horizontal-stretch: 1; horizontal-alignment: right; overflow: elide;
+                color: Theme.c.text;
+                font-size: 13px;
+                font-weight: FontWeight.semi-bold;
+                horizontal-stretch: 1;
+                horizontal-alignment: right;
+                overflow: elide;
             }
-            Text { text: item.detail-size; color: Theme.c.text; font-size: 13px; }
+
+            Text {
+                text: item.detail-size;
+                color: Theme.c.text;
+                font-size: 13px;
+            }
         }
+
         Text {
             text: item.value + (item.detail-serial != "" ? " · SN " + item.detail-serial : "")
                 + (item.is-removable ? " · Removable" : "");
             color: item.is-removable ? Theme.c.yellow : Theme.c.subtext0;
-            font-size: 12px; overflow: elide;
+            font-size: 12px;
+            overflow: elide;
         }
+
         Text {
             text: item.persistent-path;
-            color: Theme.c.overlay0; font-size: 11px; overflow: elide;
+            color: Theme.c.overlay0;
+            font-size: 11px;
+            overflow: elide;
         }
     }
     if is-readonly && !has-device-secondary-text: HorizontalLayout {
-        padding-left: 12px; padding-right: 12px; spacing: 16px;
-        Text { text: item.label; color: Theme.c.subtext1; font-size: 14px; vertical-alignment: center; width: 180px; wrap: word-wrap; }
-        Text { text: item.value; color: Theme.c.text; font-size: 14px; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
-    }
-
-    // ── Normal config items (text, select, password, toggle) ──
-    //
-    // Layout: label on the left at its natural width, value column on the
-    // right with stretch + elide. When the value is long ("one, two, three,
-    // ...") it truncates with `…` instead of overflowing the row past the
-    // right padding.
-    if item.item-type == ItemType.text || item.item-type == ItemType.select
-        || item.item-type == ItemType.password || is-toggle: HorizontalLayout {
-        padding-left: 14px;
-        padding-right: 14px;
-        spacing: 12px;
-
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 16px;
         Text {
             text: item.label;
             color: Theme.c.subtext1;
             font-size: 14px;
             vertical-alignment: center;
-            horizontal-stretch: 0;
+            width: 180px;
+            wrap: word-wrap;
         }
 
-        HorizontalLayout {
-            spacing: 6px;
+        Text {
+            text: item.value;
+            color: Theme.c.text;
+            font-size: 14px;
+            vertical-alignment: center;
             horizontal-stretch: 1;
+            overflow: elide;
+        }
+    }
 
-
-
+    // Keep values beside their labels; explicit controls expose the action.
+    editor-content := VerticalLayout {
+        visible: is-editor;
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        spacing: 6px;
+        HorizontalLayout {
+            spacing: 16px;
             Text {
-                text: item.value;
-                color: item.is-empty ? Theme.c.overlay0 : Theme.c.green;
-                font-size: 14px;
+                text: item.label;
+                color: Theme.c.text;
+                font-size: 15px;
+                font-weight: 600;
+                width: 180px;
                 vertical-alignment: center;
-                horizontal-alignment: right;
+                wrap: word-wrap;
+            }
+
+            if !is-toggle: Text {
+                text: item.value;
+                color: Theme.c.text;
+                font-size: 15px;
+                vertical-alignment: center;
                 horizontal-stretch: 1;
                 overflow: elide;
             }
-            if is-toggle: RadioDot {
-                width: 14px;
-                dot-size: 10px;
-                filled: item.value == "Enabled";
-                dot-color: item.value == "Enabled" ? Theme.c.green : Theme.c.overlay0;
-                horizontal-stretch: 0;
+            if is-toggle: CheckBox {
+                height: 40px;
+                horizontal-stretch: 1;
+                label: item.value;
+                accessible-label: item.label;
+                checked: item.value == "Enabled";
+                changed has-focus => { if self.has-focus { root.focus-requested(index); root.ensure-visible(root.y, root.height); } }
+                toggled => { root.activate(); }
             }
-            if !is-toggle: Text {
-                text: "›"; color: Theme.c.overlay0; font-size: 18px;
-                width: 14px; vertical-alignment: center;
+            if !is-toggle: StyledButton {
+                label: item.key == "users" || item.key == "packages" || item.key == "extra_services" || item.key == "optional_packages" ? "Manage" : "Change";
+                accessible-label: item.label;
+                height: 40px;
+                outlined: true;
+                changed has-focus => { if self.has-focus { root.focus-requested(index); root.ensure-visible(root.y, root.height); } }
+                clicked => { root.activate(); }
             }
+        }
 
+        if item.description != "": Text {
+            text: item.description;
+            color: Theme.c.subtext1;
+            font-size: 13px;
+            wrap: word-wrap;
         }
     }
 
@@ -454,13 +504,13 @@ export component ConfigItemRow inherits Rectangle {
         else if is-toggle { root.toggled(item.key); }
         else if !is-non-interactive { root.activated(item.key); }
     }
-    if !is-non-interactive: Rectangle {
+    if !is-non-interactive && !is-editor: Rectangle {
         accessible-role: button;
         accessible-label: item.label + (has-choice-details ? " " + item.detail-model + " " + item.persistent-path : "");
         accessible-action-default => { root.activate(); }
     }
     row-ta := TouchArea {
-        enabled: !is-non-interactive;
+        enabled: !is-non-interactive && !is-editor;
         mouse-cursor: is-non-interactive ? default : pointer;
         clicked => { root.activate(); }
     }

@@ -69,612 +69,628 @@ export component WifiPopup inherits Rectangle {
     // The whole subtree is gated by `if popup-visible:` above, so this
     // scope only exists while the popup is open — no enabled gate needed.
     focus-scope := FocusScope {
-        key-pressed(ev) => {
-            if ev.text == Key.Escape {
-                if WifiState.phase == WifiPhase.auth {
-                    WifiState.cancel-pick();
-                } else {
-                    WifiState.close();
+            key-pressed(ev) => {
+                if ev.text == Key.Escape {
+                    if WifiState.phase == WifiPhase.auth {
+                        WifiState.cancel-pick();
+                    } else {
+                        WifiState.close();
+                    }
+                    return accept;
                 }
-                return accept;
-            }
-
-            if ev.text == Key.Return && WifiState.phase == WifiPhase.connected {
-                WifiState.close();
-                return accept;
-            }
+                if ev.text == Key.Return && WifiState.phase == WifiPhase.connected {
+                    WifiState.close();
+                    return accept;
+                }
 
             // Below here: only relevant in the picking phase (list
             // navigation). Auth phase delegates Enter to the text
             // input itself so show-password toggles and normal text
             // editing keep working.
             if WifiState.phase != WifiPhase.picking {
+                    return reject;
+                }
+                if ev.text == Key.DownArrow || ev.text == "j" {
+                    if WifiState.networks.length > 0 {
+                        WifiState.selected-index =
+                            min(WifiState.networks.length - 1, WifiState.selected-index + 1);
+                        if WifiState.selected-index < 0 {
+                            WifiState.selected-index = 0;
+                        }
+                    }
+                    return accept;
+                }
+                if ev.text == Key.UpArrow || ev.text == "k" {
+                    if WifiState.selected-index > 0 {
+                        WifiState.selected-index = WifiState.selected-index - 1;
+                    }
+                    return accept;
+                }
+                if ev.text == Key.Return {
+                    if WifiState.selected-index >= 0
+                        && WifiState.selected-index < WifiState.networks.length {
+                        WifiState.pick(WifiState.selected-index);
+                    }
+                    return accept;
+                }
+                if ev.text == "r" {
+                    WifiState.rescan();
+                    return accept;
+                }
                 return reject;
             }
-
-            if ev.text == Key.DownArrow || ev.text == "j" {
-                if WifiState.networks.length > 0 {
-                    WifiState.selected-index =
-                        min(WifiState.networks.length - 1, WifiState.selected-index + 1);
-                    if WifiState.selected-index < 0 {
-                        WifiState.selected-index = 0;
-                    }
-                }
-                return accept;
-            }
-            if ev.text == Key.UpArrow || ev.text == "k" {
-                if WifiState.selected-index > 0 {
-                    WifiState.selected-index = WifiState.selected-index - 1;
-                }
-                return accept;
-            }
-            if ev.text == Key.Return {
-                if WifiState.selected-index >= 0
-                    && WifiState.selected-index < WifiState.networks.length {
-                    WifiState.pick(WifiState.selected-index);
-                }
-                return accept;
-            }
-            if ev.text == "r" {
-                WifiState.rescan();
-                return accept;
-            }
-            return reject;
         }
-    }
 
-    // Centered card
+        // Centered card
     Rectangle {
-        width: min(560px, parent.width - 64px);
-        height: min(WifiState.phase == WifiPhase.connected ? 340px
-            : WifiState.phase == WifiPhase.picking || WifiState.phase == WifiPhase.scanning ? 520px
-            : 400px, parent.height - 48px);
-        background: Theme.c.base;
-        border-radius: Theme.radius-lg;
-        border-width: 1px;
-        border-color: Theme.c.surface0;
-        clip: true;
-        accessible-role: groupbox;
-        accessible-label: "Network management";
+            width: min(600px, parent.width - 64px);
+            height: min(WifiState.phase == WifiPhase.connected ? 340px
+                : WifiState.phase == WifiPhase.picking || WifiState.phase == WifiPhase.scanning ? 520px
+                : 400px, parent.height - 48px);
+            background: Theme.c.base;
+            border-radius: Theme.radius-lg;
+            border-width: 1px;
+            border-color: Theme.c.surface0;
+            clip: true;
+            accessible-role: groupbox;
+            accessible-label: "Network management";
 
-        // Swallow clicks so the backdrop TouchArea does not see them.
+            // Swallow clicks so the backdrop TouchArea does not see them.
         TouchArea { }
 
-        VerticalLayout {
-            padding: Theme.spacing-lg;
-            spacing: Theme.spacing-md;
+            VerticalLayout {
+                padding: Theme.spacing-lg;
+                spacing: Theme.spacing-md;
 
-            // ───────────────── HEADER ─────────────────
+                // ───────────────── HEADER ─────────────────
             HorizontalLayout {
-                height: 40px;
-                spacing: Theme.spacing-sm;
-
-                Icon {
-                    source: @image-url("../../assets/icons/wifi.svg");
-                    size: 22px;
-                    tint: WifiState.current-ssid != "" ? Theme.c.green : Theme.c.blue;
-                }
-
-                Text {
-                    text: "Network";
-                    color: Theme.c.text;
-                    font-size: Theme.font-xl;
-                    font-weight: 600;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                }
-
-                StyledButton {
-                    label: "Close";
-                    width: 88px;
                     height: 40px;
-                    style: Theme.button-default;
-                    clicked => { WifiState.close(); }
-                }
-            }
+                    spacing: Theme.spacing-sm;
 
-            // ───────────────── ETHERNET ROW ─────────────────
+                    Icon {
+                        source: @image-url("../../assets/icons/wifi.svg");
+                        size: 22px;
+                        tint: WifiState.current-ssid != "" ? Theme.c.green : Theme.c.blue;
+                    }
+
+                    Text {
+                        text: "Network";
+                        color: Theme.c.text;
+                        font-size: 24px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+
+                    StyledButton {
+                        label: "Close";
+                        outlined: true;
+                        width: 88px;
+                        height: 40px;
+                        style: Theme.button-default;
+                        clicked => { WifiState.close(); }
+                    }
+                }
+
+                // ───────────────── ETHERNET ROW ─────────────────
             // Always shown — a quick-read status for wired connectivity
             // so the user never has to wonder whether their ethernet is
             // up. Read-only: we don't configure static IPs.
             Rectangle {
-                height: Theme.control-height-lg;
-                background: Theme.c.surface0;
-                border-radius: Theme.radius-md;
-
-                HorizontalLayout {
-                    padding-left: Theme.spacing-md;
-                    padding-right: Theme.spacing-md;
-                    spacing: Theme.spacing-md;
-
-                    Icon {
-                        source: @image-url("../../assets/icons/ethernet-port.svg");
-                        size: 18px;
-                        tint: WifiState.ethernet-connected
-                            ? Theme.c.green : Theme.c.overlay0;
-                    }
-
-                    Text {
-                        text: "Ethernet";
-                        color: Theme.c.text;
-                        font-size: Theme.font-base;
-                        vertical-alignment: center;
-                        horizontal-stretch: 0;
-                        width: 80px;
-                    }
-
-                    Text {
-                        text: WifiState.ethernet-connected
-                            ? (WifiState.ethernet-ipv4 != ""
-                                ? WifiState.ethernet-ipv4
-                                : "Connected")
-                            : "Not connected";
-                        color: WifiState.ethernet-connected
-                            ? Theme.c.green : Theme.c.overlay0;
-                        font-size: Theme.font-sm;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                    }
-                }
-            }
-
-            // ───────────────── BODY (phase-driven) ─────────────────
-            Rectangle {
-                horizontal-stretch: 1;
-                vertical-stretch: 1;
-                background: transparent;
-                clip: true;
-
-                // — scanning / idle — centered spinner —
-                if WifiState.phase == WifiPhase.scanning
-                    || WifiState.phase == WifiPhase.idle: VerticalLayout {
-                    alignment: center;
-                    spacing: Theme.spacing-md;
+                    height: Theme.control-height-lg;
+                    background: Theme.c.surface0;
+                    border-radius: Theme.radius-md;
 
                     HorizontalLayout {
-                        height: 28px;
-                        alignment: center;
+                        padding-left: Theme.spacing-md;
+                        padding-right: Theme.spacing-md;
+                        spacing: Theme.spacing-md;
 
                         Icon {
-                            source: @image-url("../../assets/icons/refresh-cw.svg");
-                            size: 28px;
-                            tint: Theme.c.blue;
+                            source: @image-url("../../assets/icons/ethernet-port.svg");
+                            size: 18px;
+                            tint: WifiState.ethernet-connected
+                                ? Theme.c.green : Theme.c.overlay0;
+                        }
+
+                        Text {
+                            text: "Ethernet";
+                            color: Theme.c.text;
+                            font-size: Theme.font-base;
+                            vertical-alignment: center;
+                            horizontal-stretch: 0;
+                            width: 80px;
+                        }
+
+                        Text {
+                            text: WifiState.ethernet-connected
+                                ? (WifiState.ethernet-ipv4 != ""
+                                ? WifiState.ethernet-ipv4
+                                : "Connected")
+                                : "Not connected";
+                            color: WifiState.ethernet-connected
+                                ? Theme.c.green : Theme.c.overlay0;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                    }
+                }
+
+                // ───────────────── BODY (phase-driven) ─────────────────
+            Rectangle {
+                    horizontal-stretch: 1;
+                    vertical-stretch: 1;
+                    background: transparent;
+                    clip: true;
+
+                    // — scanning / idle — centered spinner —
+                if WifiState.phase == WifiPhase.scanning
+                        || WifiState.phase == WifiPhase.idle: VerticalLayout {
+                        alignment: center;
+                        spacing: Theme.spacing-md;
+
+                        HorizontalLayout {
+                            height: 28px;
+                            alignment: center;
+
+                            Icon {
+                                source: @image-url("../../assets/icons/refresh-cw.svg");
+                                size: 28px;
+                                tint: Theme.c.blue;
                             // Drives the rotation off `animation-tick()` so the
                             // icon spins continuously while this branch is live.
                             transform-rotation: 360deg * mod(animation-tick(), 1.2s) / 1.2s;
-                        }
-                    }
-
-                    Text {
-                        text: WifiState.status-text != ""
-                            ? WifiState.status-text
-                            : "Scanning for networks…";
-                        color: Theme.c.subtext0;
-                        font-size: Theme.font-base;
-                        horizontal-alignment: center;
-                    }
-                }
-
-                // — picking — scrollable network list —
-                if WifiState.phase == WifiPhase.picking: ScrollView {
-                    width: 100%;
-                    height: 100%;
-                    vertical-stretch: 1;
-
-                    networks-list := VerticalLayout {
-                        spacing: Theme.spacing-xs;
-
-                        if WifiState.networks.length == 0: Rectangle {
-                            height: 80px;
-                            Text {
-                                text: "No networks found. Try Rescan.";
-                                color: Theme.c.overlay0;
-                                font-size: Theme.font-sm;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
                             }
                         }
 
-                        for net[idx] in WifiState.networks: Rectangle {
-                            height: Theme.control-height-lg;
+                        Text {
+                            text: WifiState.status-text != ""
+                                ? WifiState.status-text
+                                : "Scanning for networks…";
+                            color: Theme.c.subtext0;
+                            font-size: Theme.font-base;
+                            horizontal-alignment: center;
+                        }
+                    }
+
+                    // — picking — scrollable network list —
+                if WifiState.phase == WifiPhase.picking && WifiState.networks.length == 0: VerticalLayout {
+                    alignment: center;
+                    spacing: 12px;
+                    padding: 20px;
+                    Text {
+                        text: !WifiState.has-hardware ? "No Wi-Fi adapter detected"
+                            : !WifiState.iwd-running ? "Wi-Fi is unavailable"
+                            : "No networks found";
+                        color: Theme.c.text;
+                        font-size: 20px;
+                        font-weight: 600;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: !WifiState.has-hardware || !WifiState.iwd-running
+                            ? "Connect an Ethernet cable, or check Wi-Fi in the live system console."
+                            : "Check that your access point is on and within range, then scan again.";
+                        color: Theme.c.subtext0;
+                        font-size: 14px;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                }
+
+                if WifiState.phase == WifiPhase.picking && WifiState.networks.length > 0: ScrollView {
+                        width: 100%;
+                        height: 100%;
+                        vertical-stretch: 1;
+
+                        networks-list := VerticalLayout {
+                            spacing: Theme.spacing-xs;
+
+                            for net[idx] in WifiState.networks: Rectangle {
+                                height: Theme.control-height-lg;
                             // Background priority: keyboard-focused row wins,
                             // then hover, then resting surface color.
                             background: (idx == WifiState.selected-index)
-                                ? Theme.c.surface1
-                                : row-ta.has-hover
+                                    ? Theme.c.surface1
+                                    : row-ta.has-hover
                                     ? Theme.c.surface1
                                     : Theme.c.surface0;
-                            border-radius: Theme.radius-md;
+                                border-radius: Theme.radius-md;
                             // Green outline for the currently-connected SSID,
                             // blue outline for the keyboard-focused row so
                             // users can tell which one will activate on Enter.
                             border-width: (net.ssid == WifiState.current-ssid
-                                || idx == WifiState.selected-index) ? 1px : 0px;
-                            border-color: (net.ssid == WifiState.current-ssid)
-                                ? Theme.c.green
-                                : Theme.c.blue;
+                                    || idx == WifiState.selected-index) ? 1px : 0px;
+                                border-color: (net.ssid == WifiState.current-ssid)
+                                    ? Theme.c.green
+                                    : Theme.c.blue;
 
-                            accessible-role: list-item;
-                            accessible-label: net.ssid + ", "
-                                + net.signal-percent + " percent signal, "
-                                + (net.security == WifiSecurity.open
+                                accessible-role: list-item;
+                                accessible-label: net.ssid + ", "
+                                    + net.signal-percent + " percent signal, "
+                                    + (net.security == WifiSecurity.open
                                     ? "open"
                                     : net.security == WifiSecurity.enterprise
-                                        ? "enterprise"
-                                        : "secured")
-                                + (net.known ? ", known" : "");
+                                    ? "enterprise"
+                                    : "secured")
+                                    + (net.known ? ", known" : "");
 
-                            row-ta := TouchArea {
-                                clicked => {
-                                    WifiState.selected-index = idx;
-                                    WifiState.pick(idx);
+                                row-ta := TouchArea {
+                                    clicked => {
+                                        WifiState.selected-index = idx;
+                                        WifiState.pick(idx);
+                                    }
+                                    mouse-cursor: pointer;
                                 }
-                                mouse-cursor: pointer;
+
+                                HorizontalLayout {
+                                    padding-left: Theme.spacing-md;
+                                    padding-right: Theme.spacing-sm;
+                                    spacing: Theme.spacing-md;
+
+                                    // Signal strength bars
+                                VerticalLayout {
+                                        alignment: center;
+                                        width: 28px;
+
+                                        SignalBars {
+                                            percent: net.signal-percent;
+                                            lit: (net.ssid == WifiState.current-ssid)
+                                                ? Theme.c.green
+                                                : Theme.c.subtext0;
+                                        }
+                                    }
+
+                                    // SSID
+                                Text {
+                                        text: net.ssid;
+                                        color: Theme.c.text;
+                                        font-size: Theme.font-base;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                        overflow: elide;
+                                    }
+
+                                    // "Known" badge
+                                if net.known: Rectangle {
+                                        width: 52px;
+                                        height: 20px;
+                                        background: Theme.c.surface1;
+                                        border-radius: 10px;
+                                        y: (parent.height - self.height) / 2;
+
+                                        Text {
+                                            text: "Known";
+                                            color: Theme.c.blue;
+                                            font-size: 12px;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    // Security label + lock icon
+                                HorizontalLayout {
+                                        spacing: 4px;
+                                        alignment: center;
+                                        width: 70px;
+
+                                        if net.security == WifiSecurity.psk
+                                            || net.security == WifiSecurity.wep: Icon {
+                                            source: @image-url("../../assets/icons/lock.svg");
+                                            size: 12px;
+                                            tint: Theme.c.overlay0;
+                                        }
+
+                                        Text {
+                                            text: net.security == WifiSecurity.open ? "Open"
+                                                : net.security == WifiSecurity.wep ? "WEP"
+                                                : net.security == WifiSecurity.psk ? "WPA"
+                                                : "Enterprise";
+                                            color: Theme.c.overlay0;
+                                            font-size: 12px;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    // Forget action for known networks
+                                if net.known: Rectangle {
+                                        width: 32px;
+                                        height: 32px;
+                                        accessible-role: button;
+                                        accessible-label: "Forget " + net.ssid;
+                                        accessible-action-default => { WifiState.forget(idx); }
+                                        y: (parent.height - self.height) / 2;
+                                        background: forget-ta.has-hover
+                                            ? Theme.c.red : transparent;
+                                        border-radius: Theme.radius-sm;
+
+                                        forget-ta := TouchArea {
+                                            clicked => { WifiState.forget(idx); }
+                                            mouse-cursor: pointer;
+                                        }
+
+                                        Icon {
+                                            source: @image-url("../../assets/icons/trash-2.svg");
+                                            size: 14px;
+                                            tint: forget-ta.has-hover
+                                                ? Theme.c.base : Theme.c.overlay0;
+                                        }
+                                    }
+                                }
                             }
+                        }
+                    }
+
+                    // — auth — password entry for the selected network —
+                if WifiState.phase == WifiPhase.auth: VerticalLayout {
+                        spacing: Theme.spacing-md;
+                        padding-top: Theme.spacing-sm;
+                        alignment: start;
+
+                        // Selected-network summary card
+                    Rectangle {
+                            height: Theme.control-height-lg;
+                            background: Theme.c.surface0;
+                            border-radius: Theme.radius-md;
 
                             HorizontalLayout {
                                 padding-left: Theme.spacing-md;
-                                padding-right: Theme.spacing-sm;
+                                padding-right: Theme.spacing-md;
                                 spacing: Theme.spacing-md;
 
-                                // Signal strength bars
-                                VerticalLayout {
-                                    alignment: center;
-                                    width: 28px;
-
-                                    SignalBars {
-                                        percent: net.signal-percent;
-                                        lit: (net.ssid == WifiState.current-ssid)
-                                            ? Theme.c.green
-                                            : Theme.c.subtext0;
-                                    }
+                                Icon {
+                                    source: @image-url("../../assets/icons/lock.svg");
+                                    size: 16px;
+                                    tint: Theme.c.blue;
                                 }
 
-                                // SSID
                                 Text {
-                                    text: net.ssid;
+                                    text: WifiState.selected-index >= 0
+                                        && WifiState.selected-index < WifiState.networks.length
+                                        ? WifiState.networks[WifiState.selected-index].ssid
+                                        : "";
                                     color: Theme.c.text;
                                     font-size: Theme.font-base;
+                                    font-weight: 600;
                                     vertical-alignment: center;
                                     horizontal-stretch: 1;
-                                    overflow: elide;
                                 }
 
-                                // "Known" badge
-                                if net.known: Rectangle {
-                                    width: 52px;
-                                    height: 20px;
-                                    background: Theme.c.surface1;
-                                    border-radius: 10px;
-                                    y: (parent.height - self.height) / 2;
-
-                                    Text {
-                                        text: "Known";
-                                        color: Theme.c.blue;
-                                        font-size: Theme.font-xs;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                }
-
-                                // Security label + lock icon
-                                HorizontalLayout {
-                                    spacing: 4px;
+                                VerticalLayout {
                                     alignment: center;
-                                    width: 70px;
-
-                                    if net.security == WifiSecurity.psk
-                                        || net.security == WifiSecurity.wep: Icon {
-                                        source: @image-url("../../assets/icons/lock.svg");
-                                        size: 12px;
-                                        tint: Theme.c.overlay0;
-                                    }
-
-                                    Text {
-                                        text: net.security == WifiSecurity.open ? "Open"
-                                            : net.security == WifiSecurity.wep ? "WEP"
-                                            : net.security == WifiSecurity.psk ? "WPA"
-                                            : "Enterprise";
-                                        color: Theme.c.overlay0;
-                                        font-size: Theme.font-xs;
-                                        vertical-alignment: center;
-                                    }
-                                }
-
-                                // Forget action for known networks
-                                if net.known: Rectangle {
-                                    width: 32px;
-                                    height: 32px;
-                                    accessible-role: button;
-                                    accessible-label: "Forget " + net.ssid;
-                                    accessible-action-default => { WifiState.forget(idx); }
-                                    y: (parent.height - self.height) / 2;
-                                    background: forget-ta.has-hover
-                                        ? Theme.c.red : transparent;
-                                    border-radius: Theme.radius-sm;
-
-                                    forget-ta := TouchArea {
-                                        clicked => { WifiState.forget(idx); }
-                                        mouse-cursor: pointer;
-                                    }
-
-                                    Icon {
-                                        source: @image-url("../../assets/icons/trash-2.svg");
-                                        size: 14px;
-                                        tint: forget-ta.has-hover
-                                            ? Theme.c.base : Theme.c.overlay0;
+                                    horizontal-stretch: 0;
+                                    SignalBars {
+                                        percent: WifiState.selected-index >= 0
+                                            && WifiState.selected-index < WifiState.networks.length
+                                            ? WifiState.networks[WifiState.selected-index].signal-percent
+                                            : 0;
+                                        lit: Theme.c.subtext0;
                                     }
                                 }
                             }
                         }
+
+                        Text {
+                            text: "Password";
+                            color: Theme.c.subtext0;
+                            font-size: 14px;
+                        }
+
+                        // Password input + show-password eye toggle
+                    HorizontalLayout {
+                            spacing: Theme.spacing-sm;
+
+                            pw-input := StyledTextInput {
+                                height: 40px;
+                                text <=> WifiState.password;
+                                is-password: !WifiState.show-password;
+                                placeholder: "Enter network passphrase";
+                                horizontal-stretch: 1;
+                                accepted(v) => { WifiState.submit-password(); }
+                            }
+
+                            Rectangle {
+                                width: 40px;
+                                height: 40px;
+                                background: eye-ta.has-hover
+                                    ? Theme.c.surface1 : Theme.c.surface0;
+                                border-radius: Theme.radius-sm;
+                                border-width: 1px;
+                                border-color: Theme.c.surface1;
+
+                                eye-ta := TouchArea {
+                                    clicked => {
+                                        WifiState.show-password = !WifiState.show-password;
+                                    }
+                                    mouse-cursor: pointer;
+                                }
+
+                                Icon {
+                                    source: WifiState.show-password
+                                        ? @image-url("../../assets/icons/eye-off.svg")
+                                        : @image-url("../../assets/icons/eye.svg");
+                                    size: 16px;
+                                    tint: Theme.c.subtext0;
+                                }
+                            }
+                        }
+
+                        if WifiState.error-text != "": Text {
+                            text: WifiState.error-text;
+                            color: Theme.c.red;
+                            font-size: 14px;
+                        }
                     }
-                }
 
-                // — auth — password entry for the selected network —
-                if WifiState.phase == WifiPhase.auth: VerticalLayout {
-                    spacing: Theme.spacing-md;
-                    padding-top: Theme.spacing-sm;
-                    alignment: start;
-
-                    // Selected-network summary card
-                    Rectangle {
-                        height: Theme.control-height-lg;
-                        background: Theme.c.surface0;
-                        border-radius: Theme.radius-md;
+                    // — connecting / verifying — spinner + status —
+                if WifiState.phase == WifiPhase.connecting
+                        || WifiState.phase == WifiPhase.verifying: VerticalLayout {
+                        alignment: center;
+                        spacing: Theme.spacing-md;
 
                         HorizontalLayout {
-                            padding-left: Theme.spacing-md;
-                            padding-right: Theme.spacing-md;
-                            spacing: Theme.spacing-md;
+                            height: 28px;
+                            alignment: center;
 
                             Icon {
-                                source: @image-url("../../assets/icons/lock.svg");
-                                size: 16px;
+                                source: @image-url("../../assets/icons/refresh-cw.svg");
+                                size: 28px;
                                 tint: Theme.c.blue;
-                            }
-
-                            Text {
-                                text: WifiState.selected-index >= 0
-                                    && WifiState.selected-index < WifiState.networks.length
-                                    ? WifiState.networks[WifiState.selected-index].ssid
-                                    : "";
-                                color: Theme.c.text;
-                                font-size: Theme.font-base;
-                                font-weight: 600;
-                                vertical-alignment: center;
-                                horizontal-stretch: 1;
-                            }
-
-                            VerticalLayout {
-                                alignment: center;
-                                horizontal-stretch: 0;
-                                SignalBars {
-                                    percent: WifiState.selected-index >= 0
-                                        && WifiState.selected-index < WifiState.networks.length
-                                        ? WifiState.networks[WifiState.selected-index].signal-percent
-                                        : 0;
-                                    lit: Theme.c.subtext0;
-                                }
+                                transform-rotation: 360deg * mod(animation-tick(), 1.2s) / 1.2s;
                             }
                         }
-                    }
 
-                    Text {
-                        text: "Password";
-                        color: Theme.c.subtext0;
-                        font-size: Theme.font-sm;
-                    }
-
-                    // Password input + show-password eye toggle
-                    HorizontalLayout {
-                        spacing: Theme.spacing-sm;
-
-                        pw-input := StyledTextInput {
-                            text <=> WifiState.password;
-                            is-password: !WifiState.show-password;
-                            placeholder: "Enter network passphrase";
-                            horizontal-stretch: 1;
-                            accepted(v) => { WifiState.submit-password(); }
-                        }
-
-                        Rectangle {
-                            width: Theme.control-height;
-                            height: Theme.control-height;
-                            background: eye-ta.has-hover
-                                ? Theme.c.surface1 : Theme.c.surface0;
-                            border-radius: Theme.radius-sm;
-                            border-width: 1px;
-                            border-color: Theme.c.surface1;
-
-                            eye-ta := TouchArea {
-                                clicked => {
-                                    WifiState.show-password = !WifiState.show-password;
-                                }
-                                mouse-cursor: pointer;
-                            }
-
-                            Icon {
-                                source: WifiState.show-password
-                                    ? @image-url("../../assets/icons/eye-off.svg")
-                                    : @image-url("../../assets/icons/eye.svg");
-                                size: 16px;
-                                tint: Theme.c.subtext0;
-                            }
-                        }
-                    }
-
-                    if WifiState.error-text != "": Text {
-                        text: WifiState.error-text;
-                        color: Theme.c.red;
-                        font-size: Theme.font-sm;
-                    }
-                }
-
-                // — connecting / verifying — spinner + status —
-                if WifiState.phase == WifiPhase.connecting
-                    || WifiState.phase == WifiPhase.verifying: VerticalLayout {
-                    alignment: center;
-                    spacing: Theme.spacing-md;
-
-                    HorizontalLayout {
-                        height: 28px;
-                        alignment: center;
-
-                        Icon {
-                            source: @image-url("../../assets/icons/refresh-cw.svg");
-                            size: 28px;
-                            tint: Theme.c.blue;
-                            transform-rotation: 360deg * mod(animation-tick(), 1.2s) / 1.2s;
-                        }
-                    }
-
-                    Text {
-                        text: WifiState.status-text != ""
-                            ? WifiState.status-text
-                            : (WifiState.phase == WifiPhase.verifying
+                        Text {
+                            text: WifiState.status-text != ""
+                                ? WifiState.status-text
+                                : (WifiState.phase == WifiPhase.verifying
                                 ? "Checking internet access…"
                                 : "Connecting…");
-                        color: Theme.c.subtext0;
-                        font-size: Theme.font-base;
-                        horizontal-alignment: center;
+                            color: Theme.c.subtext0;
+                            font-size: Theme.font-base;
+                            horizontal-alignment: center;
+                        }
                     }
-                }
 
-                // — connected — success card —
+                    // — connected — success card —
                 if WifiState.phase == WifiPhase.connected: VerticalLayout {
-                    alignment: center;
-                    spacing: Theme.spacing-md;
-
-                    HorizontalLayout {
-                        height: 36px;
                         alignment: center;
+                        spacing: Theme.spacing-md;
 
-                        Icon {
-                            source: @image-url("../../assets/icons/check.svg");
-                            size: 36px;
-                            tint: Theme.c.green;
+                        HorizontalLayout {
+                            height: 36px;
+                            alignment: center;
+
+                            Icon {
+                                source: @image-url("../../assets/icons/check.svg");
+                                size: 36px;
+                                tint: Theme.c.green;
+                            }
+                        }
+
+                        Text {
+                            text: "Connected";
+                            color: Theme.c.green;
+                            font-size: Theme.font-xl;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                        }
+
+                        Text {
+                            text: WifiState.current-ssid;
+                            color: Theme.c.text;
+                            font-size: Theme.font-base;
+                            horizontal-alignment: center;
                         }
                     }
 
-                    Text {
-                        text: "Connected";
-                        color: Theme.c.green;
-                        font-size: Theme.font-xl;
-                        font-weight: 600;
-                        horizontal-alignment: center;
-                    }
-
-                    Text {
-                        text: WifiState.current-ssid;
-                        color: Theme.c.text;
-                        font-size: Theme.font-base;
-                        horizontal-alignment: center;
-                    }
-                }
-
-                // — error — failure + retry actions —
+                    // — error — failure + retry actions —
                 if WifiState.phase == WifiPhase.error
-                    || WifiState.phase == WifiPhase.no-internet: VerticalLayout {
-                    alignment: center;
-                    spacing: Theme.spacing-md;
-
-                    HorizontalLayout {
-                        height: 36px;
+                        || WifiState.phase == WifiPhase.no-internet: VerticalLayout {
                         alignment: center;
+                        spacing: Theme.spacing-md;
 
-                        Icon {
-                            source: @image-url("../../assets/icons/x.svg");
-                            size: 36px;
-                            tint: Theme.c.red;
+                        HorizontalLayout {
+                            height: 36px;
+                            alignment: center;
+
+                            Icon {
+                                source: @image-url("../../assets/icons/x.svg");
+                                size: 36px;
+                                tint: Theme.c.red;
+                            }
+                        }
+
+                        Text {
+                            text: WifiState.phase == WifiPhase.no-internet
+                                ? "Internet access not verified" : "Connection failed";
+                            color: Theme.c.red;
+                            font-size: 20px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                        }
+
+                        if WifiState.error-text != "": Text {
+                            text: WifiState.error-text;
+                            color: Theme.c.subtext0;
+                            font-size: 14px;
+                            horizontal-alignment: center;
+                            wrap: word-wrap;
+                            width: min(400px, parent.width);
                         }
                     }
-
-                    Text {
-                        text: WifiState.phase == WifiPhase.no-internet
-                            ? "Internet access not verified" : "Connection failed";
-                        color: Theme.c.red;
-                        font-size: Theme.font-lg;
-                        font-weight: 600;
-                        horizontal-alignment: center;
-                    }
-
-                    if WifiState.error-text != "": Text {
-                        text: WifiState.error-text;
-                        color: Theme.c.subtext0;
-                        font-size: Theme.font-sm;
-                        horizontal-alignment: center;
-                        wrap: word-wrap;
-                        width: min(400px, parent.width);
-                    }
                 }
-            }
 
-            // ───────────────── FOOTER (phase-driven buttons) ─────────────────
+                // ───────────────── FOOTER (phase-driven buttons) ─────────────────
             if WifiState.phase == WifiPhase.auth
-                || WifiState.phase == WifiPhase.picking
-                || WifiState.phase == WifiPhase.error
-                || WifiState.phase == WifiPhase.no-internet
-                || WifiState.phase == WifiPhase.connected: HorizontalLayout {
+                    || WifiState.phase == WifiPhase.picking
+                    || WifiState.phase == WifiPhase.error
+                    || WifiState.phase == WifiPhase.no-internet
+                    || WifiState.phase == WifiPhase.connected: HorizontalLayout {
                     height: 40px;
                     alignment: end;
                     spacing: Theme.spacing-sm;
 
-                // Auth phase: Cancel + Connect
+                    // Auth phase: Cancel + Connect
                 if WifiState.phase == WifiPhase.auth: StyledButton {
-                    label: "Cancel";
-                    style: Theme.button-default;
-                    clicked => { WifiState.cancel-pick(); }
-                }
-                if WifiState.phase == WifiPhase.auth: StyledButton {
-                    label: "Connect";
-                    style: Theme.button-primary;
-                    enabled: WifiState.password != "";
-                    clicked => { WifiState.submit-password(); }
-                }
+                        label: "Cancel";
+                        style: Theme.button-default;
+                        clicked => { WifiState.cancel-pick(); }
+                    }
+                    if WifiState.phase == WifiPhase.auth: StyledButton {
+                        label: "Connect";
+                        style: Theme.button-primary;
+                        enabled: WifiState.password != "";
+                        clicked => { WifiState.submit-password(); }
+                    }
 
-                // Error phase: Back to the last list, or run a fresh scan.
-                if WifiState.phase == WifiPhase.error
-                    || WifiState.phase == WifiPhase.no-internet: StyledButton {
-                    label: "Back";
-                    style: Theme.button-default;
-                    clicked => { WifiState.cancel-pick(); }
-                }
-                if WifiState.phase == WifiPhase.error
-                    || WifiState.phase == WifiPhase.no-internet: StyledButton {
-                    label: "Rescan";
-                    style: Theme.button-primary;
-                    clicked => { WifiState.rescan(); }
-                }
+                    // Error phase: Back to the last list, or run a fresh scan.
+                    if WifiState.phase == WifiPhase.error
+                        || WifiState.phase == WifiPhase.no-internet: StyledButton {
+                        label: "Rescan";
+                        style: Theme.button-default;
+                        outlined: true;
+                        clicked => { WifiState.rescan(); }
+                    }
 
-                if WifiState.phase == WifiPhase.picking: StyledButton {
-                    label: "Rescan";
-                    style: Theme.button-default;
-                    clicked => { WifiState.rescan(); }
-                }
+                    if WifiState.phase == WifiPhase.picking: StyledButton {
+                        label: "Rescan";
+                        style: Theme.button-default;
+                        clicked => { WifiState.rescan(); }
+                    }
 
-                // Disconnect belongs to network management, not the success action.
+                    // Disconnect belongs to network management, not the success action.
                 if (WifiState.phase == WifiPhase.picking && WifiState.current-ssid != "")
-                    || WifiState.phase == WifiPhase.no-internet: StyledButton {
-                    label: "Disconnect";
-                    style: Theme.button-default;
-                    clicked => { WifiState.disconnect(); }
-                }
+                        || WifiState.phase == WifiPhase.no-internet: StyledButton {
+                        label: "Disconnect";
+                        style: Theme.button-default;
+                        clicked => { WifiState.disconnect(); }
+                    }
 
-                if WifiState.phase == WifiPhase.connected: StyledButton {
-                    label: "Other networks";
-                    style: Theme.button-default;
-                    clicked => { WifiState.rescan(); }
-                }
+                    if WifiState.phase == WifiPhase.connected: StyledButton {
+                        label: "Other networks";
+                        style: Theme.button-default;
+                        clicked => { WifiState.rescan(); }
+                    }
 
-                if WifiState.phase == WifiPhase.connected
-                    || WifiState.phase == WifiPhase.picking: StyledButton {
-                    label: "Done";
-                    min-width: 100px;
-                    style: Theme.button-primary;
-                    clicked => { WifiState.close(); }
+                    if WifiState.phase == WifiPhase.error
+                        || WifiState.phase == WifiPhase.no-internet: StyledButton {
+                        label: "Back to networks";
+                        style: Theme.button-primary;
+                        clicked => { WifiState.cancel-pick(); }
+                    }
+
+                    if WifiState.phase == WifiPhase.connected
+                        || WifiState.phase == WifiPhase.picking: StyledButton {
+                        label: "Done";
+                        min-width: 100px;
+                        style: Theme.button-primary;
+                        clicked => { WifiState.close(); }
+                    }
                 }
             }
         }
-    }
     }
 }

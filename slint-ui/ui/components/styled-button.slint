@@ -8,7 +8,7 @@ export component StyledButton {
     in property <bool> enabled: true;
     in property <bool> outlined: false;
     in property <length> corner-radius: Theme.radius-sm;
-    in property <length> label-size: Theme.font-md;
+    in property <length> label-size: Theme.font-base;
 
     out property <bool> has-focus: touch-area.has-focus;
     public function focus-button() { touch-area.focus(); }

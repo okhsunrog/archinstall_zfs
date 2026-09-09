@@ -9,6 +9,7 @@
 import { UserEntry, PackageEntry, PackageSearchResult, SelectOption, MultiSelectOption } from "../types.slint";
 
 export global EditingState {
+    in-out property <string> user-error;
     in property <[UserEntry]> users;
     in property <[SelectOption]> extra-services;
     in property <[PackageEntry]> packages-selected;

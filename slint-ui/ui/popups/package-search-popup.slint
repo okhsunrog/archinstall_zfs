@@ -3,7 +3,6 @@ import { Theme } from "../styling.slint";
 import { PackageSearchResult, PackageEntry } from "../types.slint";
 import { StyledButton } from "../components/styled-button.slint";
 import { StyledTextInput } from "../components/styled-text-input.slint";
-import { Badge } from "../components/badge.slint";
 
 export component PackageSearchPopup inherits Rectangle {
     in property <[PackageSearchResult]> search-results;
@@ -11,7 +10,6 @@ export component PackageSearchPopup inherits Rectangle {
     in property <bool> popup-visible;
     in property <bool> searching-aur: false;
     in property <string> status-text;
-
     callback search-changed(string);
     callback search-aur(string);
     callback package-added(int);
@@ -20,192 +18,191 @@ export component PackageSearchPopup inherits Rectangle {
 
     if popup-visible: Rectangle {
         background: #00000080;
-        width: 100%; height: 100%;
-
+        width: 100%;
+        height: 100%;
         TouchArea {
             clicked => { closed(); }
             scroll-event(e) => { return accept; }
         }
 
-        Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: min(600px, parent.width - 40px);
-            height: min(parent.height - 60px, 520px);
-            background: Theme.c.mantle;
-            border-radius: Theme.radius-md;
-            border-color: Theme.c.surface1;
-            border-width: 1px;
-            clip: true;
-            accessible-role: groupbox;
-            accessible-label: "Package search";
-
-            VerticalLayout {
-                padding: Theme.spacing-lg;
-                spacing: Theme.spacing-sm;
-
-                Text {
-                    text: root.searching-aur ? "AUR search" : "Package search";
-                    color: Theme.c.blue;
-                    font-size: Theme.font-lg;
-                    font-weight: FontWeight.semi-bold;
-                }
-
-                HorizontalLayout {
-                    spacing: Theme.spacing-sm;
-
-                    pkg-search-input := StyledTextInput {
-                        horizontal-stretch: 1;
-                        font-size: Theme.font-base;
-                        placeholder: "type to search packages...";
-                        height: Theme.control-height;
-                        edited(text) => { root.search-changed(text); }
+        FocusScope {
+            width: 100%;
+            height: 100%;
+            key-pressed(e) => { if e.text == Key.Escape { root.closed(); return accept; } return reject; }
+            Rectangle {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: min(760px, parent.width - 40px);
+                height: min(700px, parent.height - 40px);
+                background: Theme.c.mantle;
+                border-radius: 12px;
+                border-color: Theme.c.surface1;
+                border-width: 1px;
+                clip: true;
+                accessible-role: groupbox;
+                accessible-label: "Package search";
+                VerticalLayout {
+                    padding: 20px;
+                    spacing: 12px;
+                    Text {
+                        text: "Extra packages";
+                        color: Theme.c.text;
+                        font-size: 24px;
+                        font-weight: 600;
                     }
-
-                    init => { pkg-search-input.focus-input(); }
-
-                    // AUR search button
-                    Rectangle {
-                        width: 60px;
-                        height: Theme.control-height;
-                        background: aur-btn-ta.has-hover ? Theme.c.mauve : Theme.c.surface0;
-                        border-radius: Theme.radius-sm;
-                        border-color: root.searching-aur ? Theme.c.mauve : Theme.c.surface1;
-                        border-width: 1px;
-
-                        aur-btn-ta := TouchArea {
-                            clicked => { root.search-aur(pkg-search-input.text); }
-                        }
-
-                        Text {
-                            text: "AUR";
-                            color: aur-btn-ta.has-hover ? Theme.c.base : (root.searching-aur ? Theme.c.mauve : Theme.c.subtext0);
-                            font-size: Theme.font-md;
-                            font-weight: FontWeight.semi-bold;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
-
-                if root.status-text != "": Text {
-                    text: root.status-text;
-                    color: Theme.c.overlay0;
-                    font-size: Theme.font-sm;
-                    height: Theme.spacing-lg;
-                }
-
-                ListView {
-                    vertical-stretch: 1;
-
-                    for result[index] in root.search-results: Rectangle {
-                        height: Theme.control-height;
-                        background: result-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
-                        border-radius: Theme.radius-sm;
-
-                        result-ta := TouchArea {
-                            clicked => {
-                                root.package-added(index);
-                                pkg-search-input.text = "";
-                                pkg-search-input.focus-input();
-                            }
-                        }
-
-                        HorizontalLayout {
-                            padding-left: Theme.spacing-md;
-                            padding-right: Theme.spacing-md;
-                            spacing: Theme.spacing-sm;
-
-                            Text {
-                                text: result.name;
-                                color: Theme.c.text;
-                                font-size: Theme.font-md;
-                                vertical-alignment: center;
-                            }
-
-                            VerticalLayout {
-                                alignment: center;
-                                Badge {
-                                    label: result.repo;
-                                    bg: result.repo == "aur" ? Theme.c.mauve : Theme.c.blue;
-                                }
-                            }
-
-                            Text {
-                                text: result.description;
-                                color: Theme.c.overlay0;
-                                font-size: Theme.font-sm;
-                                vertical-alignment: center;
-                                overflow: elide;
-                                horizontal-stretch: 1;
-                            }
-                        }
-                    }
-                }
-
-                if root.selected-packages.length > 0: Rectangle {
-                    height: 1px;
-                    background: Theme.c.surface1;
-                }
-
-                if root.selected-packages.length > 0: VerticalLayout {
-                    spacing: Theme.spacing-xs;
 
                     Text {
-                        text: "Selected";
-                        color: Theme.c.subtext0;
-                        font-size: Theme.font-sm;
-                        font-weight: FontWeight.semi-bold;
-                        height: Theme.spacing-lg;
+                        text: "Search repositories as you type, or search the AUR for community packages.";
+                        color: Theme.c.subtext1;
+                        font-size: 14px;
+                        wrap: word-wrap;
                     }
 
-                    // Wrapping chip cloud — FlexboxLayout flows chips onto
-                    // multiple lines instead of a single overflowing row.
-                    chips-flow := FlexboxLayout {
-                        flex-direction: row;
-                        flex-wrap: wrap;
-                        spacing: Theme.spacing-xs + 2px;
+                    HorizontalLayout {
+                        spacing: 12px;
+                        search := StyledTextInput {
+                            horizontal-stretch: 1;
+                            height: 40px;
+                            placeholder: "Search package names";
+                            accessible-label: "Search packages";
+                            edited(text) => { root.search-changed(text); }
+                            init => { self.focus-input(); root.search-changed(""); }
+                        }
 
-                        for pkg[index] in root.selected-packages: Rectangle {
-                            width: pkg-chip-layout.preferred-width;
-                            height: Theme.control-height-sm - 4px;
-                            background: pkg-del-ta.has-hover ? Theme.c.red : Theme.c.surface0;
-                            border-radius: Theme.radius-sm;
+                        StyledButton {
+                            label: root.searching-aur ? "Searching…" : "Search AUR";
+                            height: 40px;
+                            outlined: true;
+                            enabled: search.text != "" && !root.searching-aur;
+                            clicked => { root.search-aur(search.text); }
+                        }
+                    }
 
-                            pkg-del-ta := TouchArea {
-                                clicked => { root.package-removed(index); }
-                            }
+                    if root.status-text != "": Text {
+                        text: root.status-text;
+                        color: Theme.c.subtext1;
+                        font-size: 14px;
+                        wrap: word-wrap;
+                    }
+                    if root.search-results.length == 0 && root.status-text == "": Text {
+                        text: search.text == "" ? "Type a name to find packages to add." : "No matching packages. Try another name or search the AUR.";
+                        color: Theme.c.subtext1;
+                        font-size: 14px;
+                        wrap: word-wrap;
+                    }
+                    ListView {
+                        vertical-stretch: 1;
+                        for result[index] in root.search-results: Rectangle {
+                            height: max(76px, row.min-height);
+                            background: Theme.c.surface0;
+                            border-radius: 8px;
+                            row := HorizontalLayout {
+                                padding: 12px;
+                                spacing: 12px;
+                                VerticalLayout {
+                                    horizontal-stretch: 1;
+                                    spacing: 4px;
+                                    alignment: center;
+                                    HorizontalLayout {
+                                        spacing: 12px;
+                                        Text {
+                                            text: result.name;
+                                            color: Theme.c.text;
+                                            font-size: 15px;
+                                            font-weight: 600;
+                                            overflow: elide;
+                                            horizontal-stretch: 1;
+                                        }
 
-                            pkg-chip-layout := HorizontalLayout {
-                                padding-left: Theme.spacing-sm;
-                                padding-right: Theme.spacing-sm;
-                                spacing: Theme.spacing-xs;
+                                        Text {
+                                            text: result.repo;
+                                            color: Theme.c.subtext1;
+                                            font-size: 13px;
+                                        }
+                                    }
 
-                                Text {
-                                    text: pkg.name;
-                                    color: pkg-del-ta.has-hover ? Theme.c.base : Theme.c.text;
-                                    font-size: Theme.font-sm;
-                                    vertical-alignment: center;
+                                    Text {
+                                        text: result.description;
+                                        color: Theme.c.subtext1;
+                                        font-size: 13px;
+                                        wrap: word-wrap;
+                                    }
                                 }
 
-                                Text {
-                                    text: pkg.repo == "aur" ? "[aur]" : "[repo]";
-                                    color: pkg-del-ta.has-hover ? Theme.c.base : Theme.c.overlay0;
-                                    font-size: 10px;
-                                    vertical-alignment: center;
+                                VerticalLayout {
+                                    alignment: center;
+                                    StyledButton {
+                                        label: "Add";
+                                        height: 40px;
+                                        outlined: true;
+                                        accessible-label: "Add package " + result.name;
+                                        clicked => { root.package-added(index); search.text = ""; root.search-changed(""); search.focus-input(); }
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                HorizontalLayout {
-                    alignment: end;
+                    Rectangle {
+                        height: 1px;
+                        background: Theme.c.surface1;
+                    }
 
-                    StyledButton {
-                        label: "Done";
-                        style: Theme.button-primary;
-                        clicked => { root.closed(); }
+                    Text {
+                        text: "Selected packages · " + root.selected-packages.length;
+                        color: Theme.c.text;
+                        font-size: 15px;
+                        font-weight: 600;
+                    }
+
+                    if root.selected-packages.length == 0: Text {
+                        text: "No extra packages selected. Your profile already includes its base packages.";
+                        color: Theme.c.subtext1;
+                        font-size: 13px;
+                        wrap: word-wrap;
+                    }
+                    if root.selected-packages.length > 0: ListView {
+                        height: min(144px, root.selected-packages.length * 48px);
+                        for pkg[index] in root.selected-packages: Rectangle {
+                            height: 48px;
+                            background: Theme.c.surface0;
+                            HorizontalLayout {
+                                padding: 6px;
+                                spacing: 12px;
+                                Text {
+                                    text: pkg.name;
+                                    color: Theme.c.text;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                    overflow: elide;
+                                }
+
+                                Text {
+                                    text: pkg.repo == "aur" ? "AUR" : "Repository";
+                                    color: Theme.c.subtext1;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                }
+
+                                StyledButton {
+                                    label: "Remove";
+                                    height: 36px;
+                                    outlined: true;
+                                    accessible-label: "Remove package " + pkg.name;
+                                    clicked => { root.package-removed(index); }
+                                }
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        alignment: end;
+                        StyledButton {
+                            label: "Done";
+                            height: 40px;
+                            style: Theme.button-primary;
+                            clicked => { root.closed(); }
+                        }
                     }
                 }
             }

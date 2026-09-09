@@ -32,6 +32,26 @@ pub fn build_step_items(step: usize, c: &GlobalConfig) -> Vec<ConfigItem> {
         6 => build_review_items(c),
         _ => vec![],
     };
+    if step != 6 {
+        for item in &mut items {
+            let description = match item.key.as_str() {
+                "root_password" => {
+                    "Controls direct login as root. A regular administrator account can use sudo instead."
+                }
+                "users" => {
+                    "Create a daily-use account and choose who can run administrator commands with sudo."
+                }
+                "profile" => {
+                    "Choose a desktop environment, a window manager, or a console-only system."
+                }
+                "display_manager" => {
+                    "The graphical sign-in screen. The profile default is used unless you override it."
+                }
+                _ => continue,
+            };
+            item.description = description.into();
+        }
+    }
     mark_section_boundaries(&mut items);
     items
 }
@@ -285,7 +305,7 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
 
 fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     vec![
-        section_header("System"),
+        section_header("Base system"),
         // Before the kernel row on purpose: which kernels exist is the
         // distribution's answer, so choosing one first is the order that makes
         // sense on screen.
@@ -321,7 +341,7 @@ fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             &c.parallel_downloads.to_string(),
             ItemType::Text,
         ),
-        section_header("Locale"),
+        section_header("Language and region"),
         ci_opt("locale", "Locale", c.locale.as_deref(), ItemType::Select),
         ci_opt(
             EditorSetting::Timezone.as_str(),
@@ -385,11 +405,14 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
 
     let profile_name = profile_def.as_ref().map(|p| p.display_name.to_string());
     let mut items = vec![
-        section_header("Desktop"),
+        section_header("Environment"),
         ConfigItem {
             key: "profile".into(),
             label: "Profile".into(),
-            value: profile_name.clone().unwrap_or_else(|| "None".into()).into(),
+            value: profile_name
+                .clone()
+                .unwrap_or_else(|| "Console only".into())
+                .into(),
             item_type: ItemType::Select,
             is_empty: profile_name.is_none(),
             ..Default::default()
@@ -434,23 +457,23 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             ..Default::default()
         });
 
-        // Seat access (Wayland compositors). Its own section card via
-        // radio_group, like Audio.
+        // Seat access is only relevant to Wayland compositor profiles.
         if p.needs_seat_access() {
-            items.extend(choice_group_with_off(
+            items.push(compact_choice(
                 ChoiceSetting::SeatAccess,
                 "Seat access",
                 sel.seat_access,
-                None,
+                "How the compositor accesses input and display devices.",
             ));
         }
     }
 
-    items.extend(choice_group_with_off(
+    items.push(section_header("Sound"));
+    items.push(compact_choice(
         ChoiceSetting::Audio,
         "Audio",
         c.audio,
-        None,
+        "Choose the sound server installed with the system.",
     ));
 
     items.push(section_header("Hardware"));
@@ -743,66 +766,6 @@ fn section_header(label: &str) -> ConfigItem {
         item_type: ItemType::SectionHeader,
         ..Default::default()
     }
-}
-
-/// [`choice_group`] for lists with a semantic "off" alternative, named by
-/// value rather than by index.
-fn choice_group_with_off<T: Choice>(
-    setting: ChoiceSetting,
-    label: &str,
-    current: T,
-    off: T,
-) -> Vec<ConfigItem> {
-    radio_group_with_off(
-        setting.as_str(),
-        label,
-        &T::labels(),
-        current.index() as i32,
-        off.index(),
-    )
-}
-
-/// Variant of [`radio_group`] that marks one option as the semantic "off"
-/// state (e.g. compression "off", audio "None"). The off row's `is_empty`
-/// flag is propagated to the review screen's collapsed Readonly row when
-/// it's the selected option, so it renders muted instead of green.
-fn radio_group_with_off(
-    key: &str,
-    label: &str,
-    options: &[&str],
-    selected: i32,
-    off_index: usize,
-) -> Vec<ConfigItem> {
-    radio_group_inner(key, label, options, selected, Some(off_index))
-}
-
-fn radio_group_inner(
-    key: &str,
-    label: &str,
-    options: &[&str],
-    selected: i32,
-    off_index: Option<usize>,
-) -> Vec<ConfigItem> {
-    let mut items = vec![ConfigItem {
-        label: label.into(),
-        item_type: ItemType::RadioHeader,
-        ..Default::default()
-    }];
-    for (i, opt) in options.iter().enumerate() {
-        items.push(ConfigItem {
-            key: format!("radio:{key}:{i}").into(),
-            label: (*opt).into(),
-            value: if i as i32 == selected {
-                "selected".into()
-            } else {
-                SharedString::default()
-            },
-            item_type: ItemType::RadioOption,
-            is_empty: off_index == Some(i),
-            ..Default::default()
-        });
-    }
-    items
 }
 
 fn mark_section_boundaries(items: &mut [ConfigItem]) {

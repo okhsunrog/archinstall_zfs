@@ -143,16 +143,34 @@ fn setup_select_confirmed(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_
                 let cities = archinstall_zfs_core::installer::locale::list_timezone_cities(region);
                 let city_strs: Vec<&str> = cities.iter().map(|s| s.as_str()).collect();
                 let tz_key = format!("timezone_city:{region}");
-                show_select(&app, &tz_key, &format!("{region} /"), &city_strs, 0);
+                let current = cfg
+                    .borrow()
+                    .timezone
+                    .as_deref()
+                    .and_then(|tz| tz.strip_prefix(&format!("{region}/")))
+                    .and_then(|city| cities.iter().position(|c| c == city))
+                    .map(|i| i as i32)
+                    .unwrap_or(-1);
+                show_select_with_filter(
+                    &app,
+                    &tz_key,
+                    &format!("Timezone · {region}"),
+                    &city_strs,
+                    current,
+                    true,
+                );
             }
             return;
         }
 
         if key.starts_with("timezone_city:") {
             let region = key.strip_prefix("timezone_city:").unwrap();
-            let cities = archinstall_zfs_core::installer::locale::list_timezone_cities(region);
-            if let Some(city) = cities.get(idx as usize) {
-                cfg.borrow_mut().timezone = Some(format!("{region}/{city}"));
+            if let Some(city) = app
+                .global::<PopupState>()
+                .get_select_options()
+                .row_data(idx as usize)
+            {
+                cfg.borrow_mut().timezone = Some(format!("{region}/{}", city.text));
                 refresh_items(&app, &cfg.borrow());
             }
             return;
@@ -354,6 +372,13 @@ fn setup_select_filter(app: &App) {
     app.on_select_filter_changed(move |key, filter_text| {
         let Some(app) = weak.upgrade() else { return };
         let filter = filter_text.to_lowercase();
+
+        if let Some(region) = key.strip_prefix("timezone_city:") {
+            let cities = archinstall_zfs_core::installer::locale::list_timezone_cities(region);
+            let popup = app.global::<PopupState>();
+            popup.set_select_options(ModelRc::new(VecModel::from(fuzzy_filter(&cities, &filter))));
+            popup.set_select_index(-1);
+        }
 
         if key == "locale_select" {
             let all_locales = available_locales();
@@ -579,7 +604,7 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
         }
         EditorSetting::Profile => {
             let profiles = archinstall_zfs_core::profile::all_profiles();
-            let mut names: Vec<String> = vec!["None".to_string()];
+            let mut names: Vec<String> = vec!["Console only".to_string()];
             names.extend(profiles.iter().map(|p| p.display_name.to_string()));
             let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
             let current = config
@@ -676,7 +701,14 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
         }
         EditorSetting::Timezone => {
             let regions = archinstall_zfs_core::installer::locale::list_timezone_regions();
-            show_select(app, "timezone_region", "Timezone region", &regions, 0);
+            let current = config
+                .timezone
+                .as_deref()
+                .and_then(|tz| tz.split_once('/'))
+                .and_then(|(region, _)| regions.iter().position(|r| *r == region))
+                .map(|i| i as i32)
+                .unwrap_or(-1);
+            show_select(app, "timezone_region", "Timezone region", &regions, current);
         }
         EditorSetting::Locale => {
             let locales = available_locales();
@@ -690,7 +722,7 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
             show_select_with_filter(
                 app,
                 "locale_select",
-                "Locale (type to filter)",
+                "Locale",
                 &locale_strs,
                 current_idx,
                 true,
@@ -710,7 +742,7 @@ fn handle_item_activated(app: &App, key: &str, config: &GlobalConfig, kernel_sca
             show_select_with_filter(
                 app,
                 "keyboard_select",
-                "Keyboard layout (type to filter)",
+                "Keyboard layout",
                 &keymap_strs,
                 current_idx,
                 true,

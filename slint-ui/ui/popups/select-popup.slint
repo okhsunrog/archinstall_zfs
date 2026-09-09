@@ -1,6 +1,7 @@
 import { ListView } from "std-widgets.slint";
 import { Theme } from "../styling.slint";
 import { SelectOption } from "../types.slint";
+import { StyledButton } from "../components/styled-button.slint";
 import { StyledTextInput } from "../components/styled-text-input.slint";
 
 export component SelectPopup inherits Rectangle {
@@ -22,7 +23,8 @@ export component SelectPopup inherits Rectangle {
 
     if popup-visible: Rectangle {
         background: #00000080;
-        width: 100%; height: 100%;
+        width: 100%;
+        height: 100%;
 
         TouchArea {
             clicked => { closed(); }
@@ -34,6 +36,8 @@ export component SelectPopup inherits Rectangle {
         // visible the input itself owns text-typing keys, so we only
         // intercept the navigation set.
         focus-scope := FocusScope {
+            width: 100%;
+            height: 100%;
             key-pressed(ev) => {
                 if ev.text == Key.Escape {
                     root.closed();
@@ -50,7 +54,7 @@ export component SelectPopup inherits Rectangle {
                     if root.options.length > 0 {
                         root.selected-index = min(
                             root.options.length - 1,
-                            max(0, root.selected-index) + 1);
+                            root.selected-index + 1);
                     }
                     return accept;
                 }
@@ -62,78 +66,102 @@ export component SelectPopup inherits Rectangle {
                 }
                 return reject;
             }
-        }
 
-        Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: min(500px, parent.width - 40px);
-            height: min(parent.height - 80px, 500px);
-            background: Theme.c.mantle;
-            border-radius: Theme.radius-md;
-            border-color: Theme.c.surface1;
-            border-width: 1px;
-            clip: true;
-            accessible-role: groupbox;
-            accessible-label: root.title;
+            Rectangle {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: min(600px, parent.width - 40px);
+                height: min(parent.height - 40px, root.show-filter ? 500px : min(600px, max(240px, root.options.length * 44px + 172px)));
+                background: Theme.c.mantle;
+                border-radius: Theme.radius-md;
+                border-color: Theme.c.surface1;
+                border-width: 1px;
+                clip: true;
+                accessible-role: groupbox;
+                accessible-label: root.title;
 
-            VerticalLayout {
-                padding: Theme.spacing-lg;
-                spacing: Theme.spacing-sm;
+                VerticalLayout {
+                    padding: 20px;
+                    spacing: 12px;
 
-                Text {
-                    text: root.title;
-                    color: Theme.c.blue;
-                    font-size: Theme.font-lg;
-                    font-weight: FontWeight.semi-bold;
-                    height: Theme.spacing-xl;
-                }
+                    Text {
+                        text: root.title;
+                        color: Theme.c.text;
+                        font-size: 24px;
+                        font-weight: FontWeight.semi-bold;
+                        wrap: word-wrap;
+                    }
 
-                // Focus the filter input on open if present so the user
+                    // Focus the filter input on open if present so the user
                 // can type straight away. The `init` lives on the input
                 // itself because ids inside `if`-conditional elements
                 // aren't reachable from outer-scope handlers.
                 if root.show-filter: filter-input := StyledTextInput {
-                    height: Theme.control-height-sm;
-                    border-color: Theme.c.blue;
-                    edited(text) => { root.filter-changed(text); }
-                    init => { filter-input.focus-input(); }
-                }
+                        height: 40px;
+                        placeholder: "Type to filter choices";
+                        accessible-label: "Filter choices";
+                        border-color: Theme.c.blue;
+                        edited(text) => { root.filter-changed(text); }
+                        init => { filter-input.focus-input(); }
+                    }
 
-                // No filter → grab the FocusScope so arrow / Enter
+                    // No filter → grab the FocusScope so arrow / Enter
                 // navigation is live without an extra click.
                 if !root.show-filter: Rectangle {
-                    height: 0px;
-                    init => { focus-scope.focus(); }
-                }
+                        height: 0px;
+                        init => { focus-scope.focus(); }
+                    }
 
-                ListView {
-                    for option[index] in root.options: Rectangle {
-                        height: Theme.control-height-sm;
-                        background: item-ta.has-hover ? Theme.c.surface1
-                                  : index == root.selected-index ? Theme.c.surface0
-                                  : transparent;
-                        border-radius: Theme.radius-sm;
-                        accessible-role: list-item;
-                        accessible-label: option.text;
-                        accessible-item-selected: index == root.selected-index;
-                        accessible-item-index: index;
-                        accessible-item-count: root.options.length;
-
-                        item-ta := TouchArea {
-                            clicked => { root.accepted(index); }
+                    if root.options.length == 0: Text {
+                        text: "No matching choices. Try a different search.";
+                        color: Theme.c.subtext1;
+                        font-size: 14px;
+                        wrap: word-wrap;
+                    }
+                    choices := ListView {
+                        property <int> cursor: root.selected-index;
+                        changed cursor => {
+                            if self.cursor * 44px + self.content-y < 0px { self.content-y = -self.cursor * 44px; }
+                            else if (self.cursor + 1) * 44px + self.content-y > self.height { self.content-y = self.height - (self.cursor + 1) * 44px; }
                         }
+                        for option[index] in root.options: Rectangle {
+                            height: 44px;
+                            background: item-ta.has-hover ? Theme.c.surface1
+                                : index == root.selected-index ? Theme.c.surface0
+                                : transparent;
+                            border-radius: Theme.radius-sm;
+                            accessible-role: list-item;
+                            accessible-label: option.text;
+                            accessible-item-selected: index == root.selected-index;
+                            accessible-item-index: index;
+                            accessible-item-count: root.options.length;
+                            accessible-action-default => { root.accepted(index); }
 
-                        HorizontalLayout {
-                            padding-left: Theme.spacing-md;
-                            alignment: start;
-
-                            Text {
-                                text: index == root.selected-index ? "> " + option.text : "  " + option.text;
-                                color: index == root.selected-index ? Theme.c.green : Theme.c.text;
-                                font-size: Theme.font-base;
-                                vertical-alignment: center;
+                            item-ta := TouchArea {
+                                clicked => { root.accepted(index); }
                             }
+
+                            HorizontalLayout {
+                                padding-left: Theme.spacing-md;
+                                alignment: start;
+
+                                Text {
+                                    text: option.text;
+                                    color: index == root.selected-index ? Theme.c.blue : Theme.c.text;
+                                    font-size: 15px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        alignment: end;
+                        StyledButton {
+                            label: "Cancel";
+                            height: 40px;
+                            outlined: true;
+                            clicked => { root.closed(); }
                         }
                     }
                 }

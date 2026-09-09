@@ -16,7 +16,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCENES = 'welcome offline disk new-pool existing-pool zfs system users desktop review install done failed cancelled inspect invalid'.split()
+SCENES = 'welcome offline no-uefi zfs-preparing zfs-failed wifi-empty wifi-unavailable wifi-no-internet wifi-verifying cancelling disk new-pool existing-pool zfs system users desktop review install done failed cancelled inspect invalid'.split()
 
 class Preview:
     def __init__(self, binary, scene, size, scale, output):
@@ -108,7 +108,7 @@ def main():
     parser.add_argument('--binary', type=Path, default=Path('target/debug/azfs'))
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--scenes', nargs='+', choices=SCENES, default=SCENES)
-    parser.add_argument('--sizes', nargs='+', default=['1920x1080@1', '800x600@1', '1280x800@1', '1920x1080@1.5', '1920x1080@2'])
+    parser.add_argument('--sizes', nargs='+', default=['1920x1080@1', '1366x768@1', '1280x800@1', '1920x1080@1.5', '1920x1080@2'])
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     labels = []

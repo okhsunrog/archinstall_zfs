@@ -89,7 +89,7 @@ export component App inherits Window {
     callback reboot-requested();
     callback shell-requested();
     callback cancel-requested();
-    callback user-added(string, string, bool); // username, password, sudo
+    callback user-added(string, string, bool) -> bool; // username, password, sudo
     callback user-removed(int);
     callback user-sudo-toggled(int);
     callback key-nav-down();
@@ -231,7 +231,7 @@ export component App inherits Window {
         popup-visible: PopupState.users-visible;
 
         user-added(username, password, sudo) => {
-            root.user-added(username, password, sudo);
+            return root.user-added(username, password, sudo);
         }
         user-removed(index) => { root.user-removed(index); }
         user-sudo-toggled(index) => { root.user-sudo-toggled(index); }

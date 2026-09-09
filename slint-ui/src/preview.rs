@@ -33,6 +33,14 @@ pub fn enable() {
 pub enum Scene {
     Welcome,
     Offline,
+    NoUefi,
+    ZfsPreparing,
+    ZfsFailed,
+    WifiEmpty,
+    WifiUnavailable,
+    WifiNoInternet,
+    WifiVerifying,
+    Cancelling,
     Disk,
     NewPool,
     ExistingPool,
@@ -408,7 +416,15 @@ pub fn show(app: &App, scene: Scene, size: Size) {
     app.window()
         .set_size(slint::PhysicalSize::new(size.0, size.1));
     let step = match scene {
-        Scene::Welcome | Scene::Offline => 0,
+        Scene::Welcome
+        | Scene::Offline
+        | Scene::NoUefi
+        | Scene::ZfsPreparing
+        | Scene::ZfsFailed
+        | Scene::WifiEmpty
+        | Scene::WifiUnavailable
+        | Scene::WifiNoInternet
+        | Scene::WifiVerifying => 0,
         Scene::Disk | Scene::NewPool | Scene::ExistingPool => 1,
         Scene::Zfs => 2,
         Scene::System => 3,
@@ -424,6 +440,43 @@ pub fn show(app: &App, scene: Scene, size: Size) {
             .set_ethernet_connected(false);
     }
     match scene {
+        Scene::NoUefi => app.global::<WelcomeState>().set_uefi_ok(false),
+        Scene::ZfsPreparing | Scene::ZfsFailed => {
+            let state = app.global::<WelcomeState>();
+            state.set_zfs_ok(false);
+            let preparing = matches!(scene, Scene::ZfsPreparing);
+            state.set_zfs_installing(preparing);
+            state.set_zfs_install_pct(45);
+            state.set_zfs_install_status(if preparing {
+                "Building the ZFS module for the running kernel…".into()
+            } else {
+                "Failed: could not retrieve ZFS packages. Check your network connection and try again.".into()
+            });
+        }
+        Scene::WifiEmpty
+        | Scene::WifiUnavailable
+        | Scene::WifiNoInternet
+        | Scene::WifiVerifying => {
+            use crate::ui::{WifiPhase, WifiState};
+            let wifi = app.global::<WifiState>();
+            app.global::<crate::ui::PopupState>().set_wifi_visible(true);
+            wifi.set_visible(true);
+            app.global::<WelcomeState>().set_net_ok(false);
+            wifi.set_networks(ModelRc::new(VecModel::default()));
+            wifi.set_ethernet_connected(false);
+            wifi.set_iwd_running(!matches!(scene, Scene::WifiUnavailable));
+            wifi.set_phase(match scene {
+                Scene::WifiNoInternet => WifiPhase::NoInternet,
+                Scene::WifiVerifying => WifiPhase::Verifying,
+                _ => WifiPhase::Picking,
+            });
+            wifi.set_status_text("Checking internet access…".into());
+            if matches!(scene, Scene::WifiNoInternet) {
+                wifi.set_current_ssid("HomeNetwork".into());
+                wifi.set_error_text("Connected to HomeNetwork, but the internet check did not succeed. Check the router or choose another network.".into());
+            }
+        }
+        Scene::Cancelling => progress(app, 4),
         Scene::Install => progress(app, 1),
         Scene::Done => {
             progress(app, 2);

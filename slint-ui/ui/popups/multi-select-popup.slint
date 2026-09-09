@@ -12,6 +12,7 @@
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../styling.slint";
 import { MultiSelectOption } from "../types.slint";
+import { FocusTouchArea } from "../components/internal/state-layer.slint";
 import { StyledButton } from "../components/styled-button.slint";
 
 export component MultiSelectPopup inherits Rectangle {
@@ -24,116 +25,136 @@ export component MultiSelectPopup inherits Rectangle {
 
     if popup-visible: Rectangle {
         background: #00000080;
-        width: 100%; height: 100%;
+        width: 100%;
+        height: 100%;
 
         TouchArea {
             clicked => { closed(); }
             scroll-event(e) => { return accept; }
         }
 
-        Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: min(540px, parent.width - 40px);
-            height: min(self.preferred-height, parent.height - 80px);
-            background: Theme.c.mantle;
-            border-radius: Theme.radius-md;
-            border-color: Theme.c.surface1;
-            border-width: 1px;
-            clip: true;
-            accessible-role: groupbox;
-            accessible-label: root.title;
+        FocusScope {
+            width: 100%;
+            height: 100%;
+            key-pressed(e) => { if e.text == Key.Escape { root.closed(); return accept; } return reject; }
+            Rectangle {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: min(640px, parent.width - 40px);
+                height: min(self.preferred-height, parent.height - 80px);
+                background: Theme.c.mantle;
+                border-radius: Theme.radius-md;
+                border-color: Theme.c.surface1;
+                border-width: 1px;
+                clip: true;
+                accessible-role: groupbox;
+                accessible-label: root.title;
 
-            VerticalLayout {
-                padding: Theme.spacing-lg;
-                spacing: Theme.spacing-sm;
+                VerticalLayout {
+                    padding: 20px;
+                    spacing: 12px;
 
-                Text {
-                    text: root.title;
-                    color: Theme.c.blue;
-                    font-size: Theme.font-lg;
-                    font-weight: FontWeight.semi-bold;
-                    height: Theme.spacing-xl;
-                }
+                    Text {
+                        text: root.title;
+                        color: Theme.c.text;
+                        font-size: 24px;
+                        font-weight: FontWeight.semi-bold;
+                        wrap: word-wrap;
+                    }
 
-                // ScrollView pattern: preferred-height override exposes
+                    // ScrollView pattern: preferred-height override exposes
                 // content height to the parent layout, vertical-stretch
                 // (std default) absorbs the deficit when capped.
                 ScrollView {
-                    preferred-height: items-vbox.preferred-height;
-                    vertical-stretch: 1;
+                        preferred-height: items-vbox.preferred-height;
+                        vertical-stretch: 1;
 
-                    items-vbox := VerticalLayout {
-                        spacing: Theme.spacing-xs;
+                        items-vbox := VerticalLayout {
+                            spacing: Theme.spacing-xs;
 
-                        for option[index] in root.options: Rectangle {
-                            height: Theme.control-height;
-                            background: row-ta.has-hover ? Theme.c.surface1 : Theme.c.surface0;
-                            border-radius: Theme.radius-sm;
+                            for option[index] in root.options: Rectangle {
+                                height: max(68px, row-content.min-height);
+                                accessible-role: checkbox;
+                                accessible-label: option.text;
+                                accessible-checked: option.checked;
+                                accessible-checkable: true;
+                                accessible-action-default => { root.toggled(index); }
+                                background: row-ta.has-hover || row-ta.has-focus ? Theme.c.surface1 : Theme.c.surface0;
+                                border-radius: Theme.radius-sm;
 
-                            row-ta := TouchArea {
-                                clicked => { root.toggled(index); }
-                            }
+                                row-ta := FocusTouchArea {
+                                    width: 100%;
+                                    height: 100%;
+                                    clicked => { root.toggled(index); }
+                                }
 
-                            HorizontalLayout {
-                                padding-left: Theme.spacing-md;
-                                padding-right: Theme.spacing-md;
-                                spacing: Theme.spacing-sm;
+                                row-content := HorizontalLayout {
+                                    padding-top: 10px;
+                                    padding-bottom: 10px;
+                                    padding-left: Theme.spacing-md;
+                                    padding-right: Theme.spacing-md;
+                                    spacing: 12px;
 
-                                // Inline checkbox visual. Click is owned
+                                    // Inline checkbox visual. Click is owned
                                 // by the row's TouchArea above so we don't
                                 // need an interactive CheckBox here.
                                 VerticalLayout {
-                                    alignment: center;
-                                    horizontal-stretch: 0;
+                                        alignment: center;
+                                        horizontal-stretch: 0;
 
-                                    Rectangle {
-                                        width: 16px;
-                                        height: 16px;
-                                        background: option.checked ? Theme.c.blue : transparent;
-                                        border-color: option.checked ? Theme.c.blue : Theme.c.overlay0;
-                                        border-width: 1.5px;
-                                        border-radius: 3px;
+                                        Rectangle {
+                                            width: 16px;
+                                            height: 16px;
+                                            background: option.checked ? Theme.c.blue : transparent;
+                                            border-color: option.checked ? Theme.c.blue : Theme.c.overlay0;
+                                            border-width: 1.5px;
+                                            border-radius: 3px;
 
-                                        if option.checked: Text {
-                                            text: "\u{2713}";
-                                            color: Theme.c.base;
-                                            font-size: 12px;
-                                            font-weight: FontWeight.bold;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
+                                            if option.checked: Text {
+                                                text: "\u{2713}";
+                                                color: Theme.c.base;
+                                                font-size: 12px;
+                                                font-weight: FontWeight.bold;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
                                         }
                                     }
-                                }
 
-                                Text {
-                                    text: option.text;
-                                    color: Theme.c.text;
-                                    font-size: Theme.font-base;
-                                    vertical-alignment: center;
-                                }
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 4px;
+                                        alignment: center;
+                                        Text {
+                                            text: option.text;
+                                            color: Theme.c.text;
+                                            font-size: 15px;
+                                            font-weight: 600;
+                                            overflow: elide;
+                                        }
 
-                                if option.description != "": Text {
-                                    text: option.description;
-                                    color: Theme.c.overlay0;
-                                    font-size: Theme.font-sm;
-                                    vertical-alignment: center;
-                                    overflow: elide;
-                                    horizontal-stretch: 1;
+                                        if option.description != "": Text {
+                                            text: option.description;
+                                            color: Theme.c.subtext1;
+                                            font-size: 13px;
+                                            wrap: word-wrap;
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                HorizontalLayout {
-                    alignment: end;
+                    HorizontalLayout {
+                        alignment: end;
 
-                    StyledButton {
-                        label: "Done";
-                        min-width: 80px;
-                        style: Theme.button-primary;
-                        clicked => { root.closed(); }
+                        StyledButton {
+                            label: "Done";
+                            height: 40px;
+                            min-width: 80px;
+                            style: Theme.button-primary;
+                            clicked => { root.closed(); }
+                        }
                     }
                 }
             }

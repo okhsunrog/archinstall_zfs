@@ -19,8 +19,10 @@ checks for clipping and accessibility, not the main design reference.
 Omit `SLINT_BACKEND=headless` to interact in a desktop window. To reproduce a
 1920×1080 display with a 200% UI scale, use `--preview-size 1920x1080 --ui-scale 2`.
 
-Preview scenes: `welcome`, `offline`, `disk`, `new-pool`, `existing-pool`, `zfs`,
-`system`, `users`, `desktop`, `review`, `install`, `done`, `failed`, `cancelled`,
+Preview scenes: `welcome`, `offline`, `no-uefi`, `zfs-preparing`, `zfs-failed`,
+`wifi-empty`, `wifi-unavailable`, `wifi-no-internet`, `wifi-verifying`,
+`disk`, `new-pool`, `existing-pool`, `zfs`, `system`, `users`, `desktop`, `review`,
+`install`, `done`, `failed`, `cancelling`, `cancelled`,
 `inspect` (simulated pool import, export, and selection), and `invalid` (an
 incomplete configuration for validation checks).
 The three simulated drives include NVMe, SATA, and removable USB, with long serials
@@ -46,7 +48,7 @@ The output contains PNG screenshots, JSON element trees, process logs, and an
 establish that a layout is correct. Use `--scenes disk review` or
 `--sizes 1920x1080@1` to review only the primary configuration.
 
-Run repeatable interaction checks at Full HD with 100% and 200% scale and at 800×600:
+Run repeatable interaction checks at Full HD with 100% and 200% scale and at 1366×768:
 
 ```sh
 uv run slint-ui/scripts/interactions.py --output /tmp/azfs-ui-interactions
@@ -55,6 +57,20 @@ uv run slint-ui/scripts/interactions.py --output /tmp/azfs-ui-interactions
 These cover editing, focus recovery, keyboard scrolling, Wi-Fi credentials,
 forget/reconnect/disconnect, enterprise errors, pool inspection, installation
 progress, completion, and cancellation. All input values are disposable fixtures.
+
+Review the remaining editor decisions and their error/empty states at the same three configurations:
+
+```sh
+uv run slint-ui/scripts/design_review.py --output /tmp/azfs-design-review
+```
+
+This adds account validation without losing entered values, administrator controls,
+unsaved-account feedback, timezone city search, locale/keyboard filtering,
+optional packages, display manager and GPU choices, Wayland/console profiles,
+service removal, and repository/AUR package selection. These scripts drive real
+callbacks and save individual screenshots; their assertions supplement visual
+inspection rather than scoring the design. The review findings and boundaries
+are recorded in [Design review](DESIGN_REVIEW.md).
 
 Exercise the storage decision flow, including search, disabled partitions,
 cancel/confirm, keyboard focus, encryption, swap, pool selection, and Review:

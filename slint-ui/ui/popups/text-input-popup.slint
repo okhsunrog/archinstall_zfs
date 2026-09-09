@@ -19,91 +19,101 @@ export component TextInputPopup inherits Rectangle {
 
     if popup-visible: Rectangle {
         background: #00000080;
-        width: 100%; height: 100%;
+        width: 100%;
+        height: 100%;
 
         TouchArea {
             clicked => { closed(); }
             scroll-event(e) => { return accept; }
         }
 
-        Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: min(500px, parent.width - 40px);
-            height: self.preferred-height;
-            background: Theme.c.mantle;
-            border-radius: Theme.radius-md;
-            border-color: Theme.c.surface1;
-            border-width: 1px;
-            accessible-role: groupbox;
-            accessible-label: root.title;
+        FocusScope {
+            width: 100%;
+            height: 100%;
+            key-pressed(e) => { if e.text == Key.Escape { root.closed(); return accept; } return reject; }
+            Rectangle {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: min(560px, parent.width - 40px);
+                height: self.preferred-height;
+                background: Theme.c.mantle;
+                border-radius: Theme.radius-md;
+                border-color: Theme.c.surface1;
+                border-width: 1px;
+                accessible-role: groupbox;
+                accessible-label: root.title;
 
-            VerticalLayout {
-                padding: Theme.spacing-lg;
-                spacing: Theme.spacing-md;
+                VerticalLayout {
+                    padding: 20px;
+                    spacing: Theme.spacing-md;
 
-                Text {
-                    text: root.title;
-                    color: Theme.c.blue;
-                    font-size: Theme.font-lg;
-                    font-weight: FontWeight.semi-bold;
-                }
+                    Text {
+                        text: root.title;
+                        color: Theme.c.text;
+                        font-size: 24px;
+                        font-weight: FontWeight.semi-bold;
+                    }
 
-                input := StyledTextInput {
-                    is-password: root.is-password;
-                    font-size: Theme.font-base;
-                    text: root.input-text;
-                    border-color: Theme.c.blue;
-                    height: Theme.control-height;
+                    input := StyledTextInput {
+                        is-password: root.is-password;
+                        font-size: Theme.font-base;
+                        text: root.input-text;
+                        border-color: Theme.c.text;
+                        height: 40px;
+                        accessible-label: root.title;
 
-                    edited(val) => { root.text-edited(val); }
-                    accepted(val) => { root.confirmed(val); }
-                }
+                        edited(val) => { root.text-edited(val); }
+                        accepted(val) => { root.confirmed(val); }
+                    }
 
-                init => { input.focus-input(); root.text-edited(root.input-text); }
+                    init => { input.focus-input(); root.text-edited(root.input-text); }
 
                 // Password strength bar
                 if root.is-password && root.strength-score >= 0: VerticalLayout {
-                    spacing: Theme.spacing-xs;
+                        spacing: Theme.spacing-xs;
 
-                    ProgressBar {
-                        value: root.strength-score + 1;
-                        max: 5;
-                        fill-color: root.strength-color;
+                        ProgressBar {
+                            value: root.strength-score + 1;
+                            max: 5;
+                            fill-color: root.strength-color;
+                        }
+
+                        VerticalLayout {
+                            spacing: Theme.spacing-md;
+
+                            Text {
+                                text: root.strength-label;
+                                color: root.strength-color;
+                                font-size: Theme.font-sm;
+                                font-weight: FontWeight.semi-bold;
+                            }
+
+                            if root.strength-hint != "": Text {
+                                text: root.strength-hint;
+                                color: Theme.c.subtext1;
+                                font-size: 13px;
+                                wrap: word-wrap;
+                            }
+                        }
                     }
 
                     HorizontalLayout {
-                        alignment: center;
-                        spacing: Theme.spacing-md;
+                        spacing: Theme.spacing-sm;
+                        alignment: end;
 
-                        Text {
-                            text: root.strength-label;
-                            color: root.strength-color;
-                            font-size: Theme.font-sm;
-                            font-weight: FontWeight.semi-bold;
+                        StyledButton {
+                            label: "Cancel";
+                            height: 40px;
+                            outlined: true;
+                            clicked => { root.closed(); }
                         }
 
-                        if root.strength-hint != "": Text {
-                            text: root.strength-hint;
-                            color: Theme.c.overlay0;
-                            font-size: Theme.font-sm;
+                        StyledButton {
+                            label: "Save";
+                            height: 40px;
+                            style: Theme.button-primary;
+                            clicked => { root.confirmed(input.text); }
                         }
-                    }
-                }
-
-                HorizontalLayout {
-                    spacing: Theme.spacing-sm;
-                    alignment: end;
-
-                    StyledButton {
-                        label: "Cancel";
-                        clicked => { root.closed(); }
-                    }
-
-                    StyledButton {
-                        label: "OK";
-                        style: Theme.button-primary;
-                        clicked => { root.confirmed(input.text); }
                     }
                 }
             }

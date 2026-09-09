@@ -7,14 +7,25 @@ import time
 from review import Preview
 
 
+def reveal_by_tab(p, role, label):
+    """Navigate real focusable controls so an offscreen target scrolls into view."""
+    for _ in range(50):
+        e = p.element(role, label)
+        if e and 100 <= e['absolutePosition']['y'] and e['absolutePosition']['y'] + e['size']['height'] < p.size[1] / p.scale - 70:
+            return
+        p.key('\t')
+    raise AssertionError(f'Cannot reach {label} by Tab')
+
+
 def system(p):
     p.click('Button', 'Hostname')
     p.fill(0, 'arch-workstation-long-name')
     p.screenshot('hostname')
-    p.click('Button', 'OK')
+    p.click('Button', 'Save')
     p.click('Button', 'Kernel')
     p.screenshot('kernel')
     p.click('ListItem', 'linux — compatible')
+    reveal_by_tab(p, 'Button', 'Locale')
     p.click('Button', 'Locale')
     p.fill(0, 'ru_RU')
     p.screenshot('locale-filter')
@@ -54,14 +65,14 @@ def desktop(p):
     p.click('Button', 'Optional packages')
     p.screenshot('optional-packages')
     p.click('Button', 'Done')
-    for _ in range(9):
-        p.key('j')
+    reveal_by_tab(p, 'Button', 'Extra packages')
     p.screenshot('desktop-scrolled')
     p.click('Button', 'Extra packages')
     p.fill(0, 'fire')
     p.wait('Text', 'firefox')
     p.screenshot('packages')
     p.click('Button', 'Done')
+    reveal_by_tab(p, 'Button', 'Extra services')
     p.click('Button', 'Extra services')
     p.fill(0, 'cups')
     p.click('Button', 'Add')
@@ -210,7 +221,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, default=Path('target/debug/azfs'))
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--sizes', nargs='+', default=['1920x1080@1', '800x600@1', '1920x1080@2'])
+    parser.add_argument('--sizes', nargs='+', default=['1920x1080@1', '1366x768@1', '1920x1080@2'])
     flows = ['system', 'users', 'desktop', 'wifi', 'inspect', 'install', 'cancel', 'shell', 'logs', 'invalid']
     parser.add_argument('--flows', nargs='+', choices=flows, default=flows)
     args = parser.parse_args()

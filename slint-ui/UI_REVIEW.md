@@ -1,5 +1,9 @@
 # UI and LinuxKMS review — 2026-09-09
 
+This is the historical first pass, before the later storage and editor redesigns.
+For the subsequent design findings, current coverage, and validation boundaries,
+see [Design review](DESIGN_REVIEW.md).
+
 The original LinuxKMS build reproduced the reported console input leak in an
 UEFI QEMU guest: text entered while the GUI was running became a shell command
 after the GUI closed. A disposable marker-file command was used, never a real
