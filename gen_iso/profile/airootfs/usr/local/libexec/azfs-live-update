@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# Replace the live installer in its RAM overlay, before any login shell starts.
+set -euo pipefail
+
+log() { printf 'azfs-live-update: %s\n' "$*"; }
+
+partition_number() {
+    cat "/sys/class/block/${1##*/}/partition"
+}
+
+find_update_partition() {
+    # Follow the ISO mapping, not a filesystem label shared by unrelated disks.
+    # Ventoy keeps this mapping when archiso copies the root image to RAM too.
+    local topology type path disk="" partitions
+    topology=$(lsblk --inverse --noheadings --raw --paths --output TYPE,PATH /dev/mapper/ventoy) || return 1
+    while read -r type path; do
+        if [[ "$type" == disk ]]; then
+            [[ -z "$disk" || "$disk" == "$path" ]] || return 1
+            disk=$path
+        fi
+    done <<< "$topology"
+    [[ -n "$disk" ]] || return 1
+    partitions=$(lsblk --noheadings --raw --paths --output TYPE,PATH "$disk") || return 1
+    while read -r type path; do
+        if [[ "$type" == part ]] && [[ $(partition_number "$path") == 1 ]]; then
+            printf '%s\n' "$path"
+            return 0
+        fi
+    done <<< "$partitions"
+    return 1
+}
+
+mount_source() {
+    local partition=$1 table sectors device
+    # Recent Ventoy releases hold the partition open exclusively. They provide
+    # a linear mapping of the full partition for filesystem access instead.
+    if table=$(dmsetup table -- "${partition##*/}" 2>/dev/null); then
+        sectors=$(blockdev --getsz "$partition") || return 1
+        device=$(lsblk --nodeps --noheadings --raw --output MAJ:MIN "$partition") || return 1
+        [[ "$table" == "0 $sectors linear $device 0" ]] || return 1
+        printf '/dev/mapper/%s\n' "${partition##*/}"
+    else
+        printf '%s\n' "$partition"
+    fi
+}
+
+install_update() (
+    # A subshell owns the temporary file even if validation fails or is killed.
+    set -euo pipefail
+    local source=$1 destination=$2 staged="" digest
+    trap '[[ -z "$staged" ]] || rm -f -- "$staged"' EXIT
+    trap 'exit 143' TERM
+    [[ -f "$source" && ! -L "$source" && -s "$source" ]] || {
+        log "Invalid update file; keeping the built-in installer."
+        exit 1
+    }
+    staged=$(mktemp "${destination}.update.XXXXXX")
+    cp --reflink=never -- "$source" "$staged"
+    chmod 0755 "$staged"
+    [[ $(od -An -tx1 -N4 "$staged" | tr -d ' \n') == 7f454c46 ]] || {
+        log "Update is not an ELF executable; keeping the built-in installer."
+        exit 1
+    }
+    # Exercise the dynamic loader and CLI without opening the UI or touching disks.
+    if ! timeout --kill-after=2s 10s "$staged" --help >/dev/null; then
+        log "Update cannot start on this ISO; keeping the built-in installer."
+        exit 1
+    fi
+    digest=$(sha256sum "$staged")
+    mv -fT -- "$staged" "$destination"
+    staged=""
+    log "Installed $destination from $source (sha256 ${digest%% *})."
+)
+
+is_live_root() {
+    [[ -d /run/archiso/cowspace ]] && [[ $(findmnt -n -o FSTYPE /) == overlay ]]
+}
+
+main() {
+    local partition source mount_dir=/run/azfs-live-update/media
+    if ! is_live_root; then
+        log "Not an archiso RAM overlay; skipping."
+        return 0
+    fi
+    if [[ ! -b /dev/mapper/ventoy ]]; then
+        log "Not booted through Ventoy; using the built-in installer."
+        return 0
+    fi
+    partition=$(find_update_partition) || {
+        log "Cannot identify the Ventoy data partition; keeping the built-in installer."
+        return 1
+    }
+    source=$(mount_source "$partition") || {
+        log "Unexpected mapping for $partition; keeping the built-in installer."
+        return 1
+    }
+    mkdir -p "$mount_dir"
+    # This is a private service mount; never unmount an existing archiso mount.
+    log "Reading updates from $source."
+    mount -o ro,nosuid,nodev,noexec -- "$source" "$mount_dir"
+    trap 'umount /run/azfs-live-update/media || true' EXIT
+    trap 'exit 143' TERM
+    if [[ ! -e "$mount_dir/azfs-update/azfs" ]]; then
+        log "No /azfs-update/azfs on the boot medium; using the built-in installer."
+        return 0
+    fi
+    install_update "$mount_dir/azfs-update/azfs" /usr/local/bin/azfs
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+    main "$@"
+fi

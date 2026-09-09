@@ -73,6 +73,10 @@ check: fmt-check lint cargo-test check-features audit
 
 # ─── ISO Building ──────────────────────────────────────
 
+# Test the live ISO's binary replacement and boot-medium selection.
+test-live-update:
+    uv run python gen_iso/test_live_update.py
+
 # Internal: render profile templates using the prebuilt xtask binary.
 # Requires cargo-build or cargo-build-container to have run first.
 _render-profile MODE="precompiled" KERNEL="linux-lts" FAST="":

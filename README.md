@@ -68,6 +68,9 @@ azfs-tui
 
 > Why recommended: the ISO already contains ZFS components and both installers, so startup is faster and avoids on-the-fly package installation.
 
+For development, [load an updated GUI binary from Ventoy](gen_iso/LIVE_UPDATE.md)
+at boot without rebuilding the ISO on every iteration.
+
 ### Safe LinuxKMS UI demo
 
 The ISO boot menu also offers **Arch Linux installer — safe LinuxKMS demo**.
