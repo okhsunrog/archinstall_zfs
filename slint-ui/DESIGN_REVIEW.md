@@ -1,5 +1,8 @@
 # Installer design review — 2026-09-09
 
+This is a dated result, not a claim that later changes have been reviewed.
+For the current procedure, see [Slint coding and visual review](../docs/slint-ui-review.md).
+
 This pass follows the storage redesign and reviews the remaining screens as
 user interfaces: hierarchy, decision clarity, action placement, density, and
 feedback. The primary reference is 1920×1080 at 100%. Secondary checks use

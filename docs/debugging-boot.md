@@ -1,6 +1,10 @@
 # Debugging Boot Issues in QEMU
 
-Guide for diagnosing why an installed system doesn't boot after `archinstall-zfs-rs` installation.
+Guide for diagnosing boot behavior after `archinstall_zfs` installation and
+testing the live ISO. See the [developer guide](development.md) for the broader
+workflow. Installed-system repair examples below belong inside a disposable test
+guest: pool names, mount paths and hostids are fixture values, not instructions
+to modify the development host.
 
 ## Quick Diagnosis Workflow
 
@@ -12,7 +16,9 @@ Guide for diagnosing why an installed system doesn't boot after `archinstall-zfs
 
 ## Boot with VNC + QEMU Monitor
 
-The serial console is useless for ZFSBootMenu (it renders to the framebuffer, not serial). Use VNC + the QEMU monitor for screenshots:
+For the graphical boot path, serial output alone does not show the framebuffer.
+Use VNC and the QEMU monitor for screenshots; retain serial logs for stages that
+actually emit them. Run the VM in a tracked terminal/session:
 
 ```bash
 OVMF_CODE=$(find /usr/share/edk2 /usr/share/edk2-ovmf -name "OVMF_CODE*.4m.fd" ! -name "*secboot*" -print -quit)
@@ -29,8 +35,7 @@ qemu-system-x86_64 -enable-kvm -cpu host -m 4096 -smp 2 \
     -drive "if=pflash,format=raw,unit=0,file=$OVMF_CODE,read-only=on" \
     -drive "if=pflash,format=raw,unit=1,file=$VARS" \
     -drive "file=$DISK,format=qcow2,if=none,id=disk0" \
-    -device "virtio-blk-pci,drive=disk0,serial=archzfs-test-disk" \
-    -daemonize
+    -device "virtio-blk-pci,drive=disk0,serial=archzfs-test-disk"
 ```
 
 Take a screenshot after ~30 seconds:
@@ -44,10 +49,66 @@ Send Enter key to ZFSBootMenu (if stuck at menu):
 echo "sendkey ret" | socat - UNIX-CONNECT:/tmp/qemu-mon.sock
 ```
 
-Kill the VM:
+Prefer shutting down inside the guest. To stop this disposable test VM through
+its own monitor (an immediate power cut; do not use during a write under test):
 ```bash
-kill $(pgrep -f qemu-system)
+echo "quit" | socat - UNIX-CONNECT:/tmp/qemu-mon.sock
 ```
+
+Use a unique monitor socket for each concurrent VM. Never kill all QEMU processes
+by name; another process may belong to an unrelated installation test.
+
+## Testing a physical Ventoy drive without writing to it
+
+First identify the USB by model, serial and partition layout, finish all host
+writes, and unmount its partitions. Use the verified **whole-disk** by-id path,
+not a partition. This example exposes the physical device read-only as backing
+storage and puts guest writes into a fresh local qcow2 overlay. Making the entire
+virtual USB read-only can instead prevent Ventoy's device-mapper setup.
+
+Run from a Bash terminal, replacing the placeholder before proceeding. The OVMF
+paths are for Arch's edk2 package; use matching code/vars files on other hosts.
+
+```bash
+USB_DEVICE=/dev/disk/by-id/usb-REPLACE_WITH_VERIFIED_DEVICE
+test -b "$USB_DEVICE" || exit 1
+mkdir -p target
+VM_DIR=$(mktemp -d "$PWD/target/ventoy-boot.XXXXXX")
+cp /usr/share/edk2/x64/OVMF_VARS.4m.fd "$VM_DIR/OVMF_VARS.fd"
+sudo qemu-img create -f qcow2 -F raw -b "$USB_DEVICE" "$VM_DIR/usb-cow.qcow2"
+sudo qemu-system-x86_64 -enable-kvm -machine q35 -cpu host -m 4096 -smp 4 \
+    -drive if=pflash,format=raw,readonly=on,file=/usr/share/edk2/x64/OVMF_CODE.4m.fd \
+    -drive "if=pflash,format=raw,file=$VM_DIR/OVMF_VARS.fd" \
+    -blockdev "driver=host_device,node-name=usbbase,filename=$USB_DEVICE,read-only=on" \
+    -blockdev driver=raw,node-name=base,file=usbbase,read-only=on \
+    -blockdev "driver=file,node-name=cowfile,filename=$VM_DIR/usb-cow.qcow2" \
+    -blockdev driver=qcow2,node-name=usb,file=cowfile,backing=base \
+    -device qemu-xhci -device usb-storage,drive=usb,bootindex=1 \
+    -display vnc=127.0.0.1:1 -vga std \
+    -serial "file:$VM_DIR/serial.log" \
+    -monitor "unix:$VM_DIR/monitor.sock,server=on,wait=off" -no-reboot
+```
+
+Use `host_device` for the physical block device, and `file` for the local overlay.
+Do not mount/write the physical USB on the host while this VM is running. Keep
+the process tracked and record `VM_DIR` for accessing its log and monitor from
+another terminal. Guest writes do not update the flash drive.
+
+In Ventoy, boot the intended ISO and test the
+[live-update service](../gen_iso/LIVE_UPDATE.md). If the image uses the
+`_VTGRUB2.iso` suffix, Ventoy selects its GRUB2 boot mode. In the guest, inspect:
+
+```sh
+systemctl status azfs-live-update.service --no-pager
+journalctl -b -u azfs-live-update.service --no-pager
+sha256sum /usr/local/bin/azfs
+azfs --demo
+```
+
+After collecting evidence, power off the guest and wait for the QEMU process to
+exit before ejecting the USB. Use a fresh overlay for an independent test run;
+an existing overlay retains guest changes. This validates boot from the physical
+drive in virtual hardware, not boot or touchpad behavior on the target laptop.
 
 ## UEFI Vars and Boot Order
 

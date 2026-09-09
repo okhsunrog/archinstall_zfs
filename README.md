@@ -269,6 +269,12 @@ The only remaining shell calls are:
 
 ## Development
 
+Start with the [developer guide](docs/development.md) and
+[documentation index](docs/README.md). For GUI changes, follow
+[Slint coding and visual review](docs/slint-ui-review.md). The
+[Ventoy live-update guide](gen_iso/LIVE_UPDATE.md) explains how to deploy a new
+installer binary without rebuilding the base ISO.
+
 Two supported workflows depending on the host distro. Pick one.
 
 ### Option 1 — Arch native

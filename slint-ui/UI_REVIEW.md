@@ -1,8 +1,9 @@
 # UI and LinuxKMS review — 2026-09-09
 
 This is the historical first pass, before the later storage and editor redesigns.
-For the subsequent design findings, current coverage, and validation boundaries,
-see [Design review](DESIGN_REVIEW.md).
+For the subsequent design findings and their validation boundaries, see
+[Design review](DESIGN_REVIEW.md). For the current process and display matrix,
+see [Slint coding and visual review](../docs/slint-ui-review.md).
 
 The original LinuxKMS build reproduced the reported console input leak in an
 UEFI QEMU guest: text entered while the GUI was running became a shell command
@@ -37,7 +38,8 @@ The installer changes address:
 - Password-strength scoring moved off the UI thread, with debouncing and stale
   result checks after editing, clearing, and reopening dialogs.
 
-`scripts/review.py` captures the actual Slint components for all preview scenes
+At the time of this pass, `scripts/review.py` captured the actual Slint components
+for all preview scenes
 at 800×600 and 1280×800 with scale 1, and 1920×1080 with scales 1.5 and 2.
 Window metadata is saved and the actual scale is asserted: the headless backend
 requires an explicit scale-change event, unlike desktop backends.
