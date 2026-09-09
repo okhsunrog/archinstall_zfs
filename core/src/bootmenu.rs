@@ -1,5 +1,5 @@
-use std::fs::{self, File, OpenOptions};
-use std::io::{BufReader, Read, Write};
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::{Context, Result};
@@ -69,7 +69,7 @@ fn write_zbm_config(target: &Path, init_system: InitSystem) -> Result<()> {
         },
         components: ZbmComponents { enabled: false },
         efi: ZbmEfi {
-            image_dir: "/boot/efi/EFI/zbm".into(),
+            image_dir: "/var/lib/zfsbootmenu".into(),
             versions: false,
             enabled: true,
         },
@@ -106,108 +106,30 @@ Target = zfs-utils
 [Action]
 Description = Regenerating ZFSBootMenu...
 When = PostTransaction
-Exec = /usr/bin/generate-zbm
+Exec = /usr/local/sbin/azfs-update-zbm
 Depends = zfsbootmenu
 "#;
 
 fn install_zbm_pacman_hook(target: &Path) -> Result<()> {
+    for (path, contents) in [
+        (
+            "usr/local/libexec/azfs-install-zbm",
+            include_str!("../assets/azfs-install-zbm"),
+        ),
+        (
+            "usr/local/sbin/azfs-update-zbm",
+            include_str!("../assets/azfs-update-zbm"),
+        ),
+    ] {
+        let path = target.join(path);
+        fs::create_dir_all(path.parent().unwrap())?;
+        fs::write(&path, contents)?;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755))?;
+    }
     let hooks_dir = target.join("etc/pacman.d/hooks");
     fs::create_dir_all(&hooks_dir)?;
     fs::write(hooks_dir.join("95-zfsbootmenu.hook"), ZBM_PACMAN_HOOK)?;
     tracing::info!("installed ZBM pacman hook");
-    Ok(())
-}
-
-fn files_equal(a: &Path, b: &Path) -> Result<bool> {
-    let a_meta = fs::metadata(a)?;
-    let b_meta = fs::metadata(b)?;
-    if a_meta.len() != b_meta.len() {
-        return Ok(false);
-    }
-
-    let mut a = BufReader::new(File::open(a)?);
-    let mut b = BufReader::new(File::open(b)?);
-    let mut a_buf = [0_u8; 64 * 1024];
-    let mut b_buf = [0_u8; 64 * 1024];
-    loop {
-        let a_len = a.read(&mut a_buf)?;
-        let b_len = b.read(&mut b_buf)?;
-        if a_len != b_len || a_buf[..a_len] != b_buf[..b_len] {
-            return Ok(false);
-        }
-        if a_len == 0 {
-            return Ok(true);
-        }
-    }
-}
-
-fn copy_file_atomically(source: &Path, destination: &Path) -> Result<()> {
-    let parent = destination
-        .parent()
-        .ok_or_else(|| color_eyre::eyre::eyre!("EFI destination has no parent directory"))?;
-    let source_len = fs::metadata(source)?.len();
-    let fs_info = nix::sys::statvfs::statvfs(parent)?;
-    let available = fs_info
-        .blocks_available()
-        .saturating_mul(fs_info.fragment_size());
-    if available < source_len {
-        color_eyre::eyre::bail!(
-            "EFI system partition has {} MiB free, but the ZFSBootMenu fallback needs {} MiB",
-            available / (1024 * 1024),
-            source_len.div_ceil(1024 * 1024)
-        );
-    }
-
-    let temporary = destination.with_extension(format!("EFI.azfs-{}.tmp", std::process::id()));
-    let result = (|| -> Result<()> {
-        let mut input = File::open(source)?;
-        let mut output = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)?;
-        std::io::copy(&mut input, &mut output)?;
-        output.flush()?;
-        output.sync_all()?;
-        fs::rename(&temporary, destination)?;
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    result.wrap_err_with(|| {
-        format!(
-            "failed to atomically install EFI fallback {}",
-            destination.display()
-        )
-    })
-}
-
-fn install_fallback(target: &Path) -> Result<()> {
-    let zbm_dir = target.join("boot/efi/EFI/zbm");
-    let source = zbm_dir.join("vmlinuz.EFI");
-    if !source.is_file() {
-        color_eyre::eyre::bail!(
-            "generate-zbm did not create the configured EFI image {}",
-            source.display()
-        );
-    }
-
-    let fallback_dir = target.join("boot/efi/EFI/BOOT");
-    fs::create_dir_all(&fallback_dir)?;
-    let fallback = fallback_dir.join("BOOTX64.EFI");
-    let previous = zbm_dir.join("vmlinuz-backup.EFI");
-    let owned_previous =
-        fallback.is_file() && previous.is_file() && files_equal(&fallback, &previous)?;
-    if fallback.exists() && !files_equal(&fallback, &source)? && !owned_previous {
-        tracing::warn!(
-            path = %fallback.display(),
-            "preserving an existing EFI fallback that is not owned by ZFSBootMenu"
-        );
-        return Ok(());
-    }
-
-    copy_file_atomically(&source, &fallback)?;
-    tracing::info!("installed ZFSBootMenu as EFI/BOOT/BOOTX64.EFI fallback");
     Ok(())
 }
 
@@ -273,10 +195,8 @@ pub async fn install_and_generate_zbm(
         install_zbm_pacman_hook(&t)?;
 
         tracing::info!("running generate-zbm to build EFI bundle");
-        let output = chroot_cmd(&*r, &t, "generate-zbm", &[])?;
-        check_exit(&output, "generate-zbm")?;
-
-        install_fallback(&t)?;
+        let output = chroot_cmd(&*r, &t, "/usr/local/sbin/azfs-update-zbm", &[])?;
+        check_exit(&output, "generate and install ZFSBootMenu")?;
 
         tracing::info!("ZFSBootMenu built and installed locally");
         Ok(())
@@ -500,6 +420,7 @@ mod tests {
         assert!(config.contains("InitCPIO: false"));
         assert!(config.contains("zbm.timeout=10"));
         assert!(config.contains("Versions: false"));
+        assert!(config.contains("ImageDir: /var/lib/zfsbootmenu"));
         assert!(config.contains("Enabled: true"));
         assert!(config.contains("Prefix: vmlinuz"));
     }
@@ -540,7 +461,7 @@ mod tests {
         let hook_path = dir.path().join("etc/pacman.d/hooks/95-zfsbootmenu.hook");
         assert!(hook_path.exists());
         let content = fs::read_to_string(&hook_path).unwrap();
-        assert!(content.contains("generate-zbm"));
+        assert!(content.contains("azfs-update-zbm"));
         assert!(content.contains("zfs.ko"));
         assert!(content.contains("pkgbase"));
         // A new ZBM or zfs-utils release changes neither the kernel nor
@@ -548,40 +469,6 @@ mod tests {
         assert!(content.contains("Type = Package"));
         assert!(content.contains("Target = zfsbootmenu"));
         assert!(content.contains("Target = zfs-utils"));
-    }
-
-    #[test]
-    fn test_fallback_preserves_an_unowned_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let zbm = dir.path().join("boot/efi/EFI/zbm");
-        let boot = dir.path().join("boot/efi/EFI/BOOT");
-        fs::create_dir_all(&zbm).unwrap();
-        fs::create_dir_all(&boot).unwrap();
-        fs::write(zbm.join("vmlinuz.EFI"), b"new zbm").unwrap();
-        fs::write(boot.join("BOOTX64.EFI"), b"another bootloader").unwrap();
-
-        install_fallback(dir.path()).unwrap();
-
-        assert_eq!(
-            fs::read(boot.join("BOOTX64.EFI")).unwrap(),
-            b"another bootloader"
-        );
-    }
-
-    #[test]
-    fn test_fallback_updates_the_previous_zbm_copy() {
-        let dir = tempfile::tempdir().unwrap();
-        let zbm = dir.path().join("boot/efi/EFI/zbm");
-        let boot = dir.path().join("boot/efi/EFI/BOOT");
-        fs::create_dir_all(&zbm).unwrap();
-        fs::create_dir_all(&boot).unwrap();
-        fs::write(zbm.join("vmlinuz.EFI"), b"new zbm").unwrap();
-        fs::write(zbm.join("vmlinuz-backup.EFI"), b"old zbm").unwrap();
-        fs::write(boot.join("BOOTX64.EFI"), b"old zbm").unwrap();
-
-        install_fallback(dir.path()).unwrap();
-
-        assert_eq!(fs::read(boot.join("BOOTX64.EFI")).unwrap(), b"new zbm");
     }
 
     fn target_with_zbm(backup: bool) -> tempfile::TempDir {

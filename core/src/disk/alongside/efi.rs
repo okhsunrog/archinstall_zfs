@@ -1,8 +1,8 @@
 use super::*;
 
-/// Pass the actual generated image size. Never decide to create a second ESP
-/// from a guessed bundle size. Existing files are conservatively not credited
-/// as reclaimable; the installer does not own other bootloaders' files.
+/// Planning uses a 100 MiB image allowance, informed by published EFI assets.
+/// Actual installation verifies the generated file before replacing anything.
+/// Existing files are not credited as reclaimable: they may be other loaders.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BootSpace {
     pub image_bytes: u64,
@@ -10,16 +10,26 @@ pub struct BootSpace {
     pub fallback: bool,
 }
 
+impl Default for BootSpace {
+    fn default() -> Self {
+        Self {
+            image_bytes: 100 * MIB,
+            backup: false,
+            fallback: false,
+        }
+    }
+}
+
 impl BootSpace {
     pub fn required_bytes(self) -> Result<u64> {
         ensure!(
             self.image_bytes > 0,
-            "Build or select the ZFSBootMenu image before calculating EFI space"
+            "ZFSBootMenu image allowance must be nonzero"
         );
-        // Main image plus one replacement, and only explicitly enabled copies.
+        // One image, and only explicitly enabled persistent copies.
         // Reserve a modest allowance for cluster rounding and directory entries.
         self.image_bytes
-            .checked_mul(2 + u64::from(self.backup) + u64::from(self.fallback))
+            .checked_mul(1 + u64::from(self.backup) + u64::from(self.fallback))
             .and_then(|size| size.checked_add(8 * MIB))
             .ok_or_else(|| eyre!("EFI space calculation overflow"))
     }
@@ -59,7 +69,7 @@ impl EfiChoice {
                     fallback: false,
                     ..budget
                 })?,
-                "The existing EFI partition fits the main image and an update. Reuse it; disable optional copies if necessary. A second ESP is offered only when the minimum configuration does not fit."
+                "The existing EFI partition fits the main image with headroom. Reuse it; disable optional copies if necessary. A second ESP is offered only when the minimum configuration does not fit."
             ),
         }
         Ok(())
@@ -138,7 +148,7 @@ mod tests {
             backup: false,
             fallback: false,
         };
-        assert_eq!(budget.required_bytes().unwrap(), 2 * 50_681_856 + 8 * MIB);
+        assert_eq!(budget.required_bytes().unwrap(), 50_681_856 + 8 * MIB);
         assert_eq!(
             BootSpace {
                 backup: true,
@@ -146,7 +156,7 @@ mod tests {
             }
             .required_bytes()
             .unwrap(),
-            3 * 50_681_856 + 8 * MIB
+            2 * 50_681_856 + 8 * MIB
         );
         assert!(
             BootSpace {

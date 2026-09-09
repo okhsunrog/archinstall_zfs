@@ -718,8 +718,8 @@ Global:
 Components:
   Enabled: false             # no separate kernel+initramfs pair…
 EFI:
-  ImageDir: /boot/efi/EFI/zbm
-  Versions: false            # …one bundle, overwritten in place
+  ImageDir: /var/lib/zfsbootmenu
+  Versions: false            # current and previous build stay on root
   Enabled: true              # …a single bundled UEFI executable
 Kernel:
   CommandLine: zbm.import_policy=hostid zbm.timeout=10 ro quiet loglevel=0
@@ -729,9 +729,9 @@ Kernel:
   `vmlinuz.EFI`. The command line is *baked into the executable*, which matters
   because some firmware silently discards the `-u` load-options of an
   `efibootmgr` entry.
-* `Versions: false` → `generate-zbm` overwrites in place and renames the previous
-  image to `vmlinuz-backup.EFI`, giving you exactly one known-good fallback rather
-  than an ESP slowly filling with versioned images.
+* `Versions: false` keeps the previous generated image on the root filesystem,
+  outside the ESP. The publisher additionally preserves the previously installed
+  loader as `/var/lib/zfsbootmenu/previous-installed.EFI`.
 * `zbm.import_policy=hostid` → if the pool's recorded hostid does not match, ZBM
   adopts it rather than refusing. This is the forgiving-but-safe middle ground
   between `strict` and `force`.
@@ -739,17 +739,25 @@ Kernel:
   **This only works if the pool's `bootfs` property is set** — without it ZBM waits
   for input forever.
 
-Build and install the bundle:
+The installer installs `azfs-update-zbm` and `azfs-install-zbm` from
+[`core/assets`](../core/assets). After installation, rebuild and publish with:
 
 ```bash
-arch-chroot /mnt generate-zbm
-install -Dm0644 /mnt/boot/efi/EFI/zbm/vmlinuz.EFI \
-                /mnt/boot/efi/EFI/BOOT/BOOTX64.EFI
+azfs-update-zbm
+# From live media with the target mounted:
+arch-chroot /mnt azfs-update-zbm
 ```
 
-The copy to `EFI/BOOT/BOOTX64.EFI` is the removable-media fallback path. If NVRAM
-is cleared, the board is replaced, or the disk is moved to another machine, the
-firmware still finds a boot loader.
+The wrapper builds on the root filesystem, validates the generated EFI header,
+and publishes `/boot/efi/EFI/zbm/vmlinuz.EFI`. If space permits, it writes and
+verifies a temporary file before renaming. On a small ESP it saves the old loader
+on root, removes it from the ESP and writes the new one. Power loss during that
+short replacement window can require recovery from a USB stick. Two simultaneous
+images and a permanent backup on the ESP are not required.
+
+An optional copy at `EFI/BOOT/BOOTX64.EFI` helps when firmware entries are lost.
+The publisher preserves any existing foreign fallback and skips this duplicate
+when space is insufficient. Normal boot uses the main firmware entry below.
 
 A pacman hook keeps it fresh — `/mnt/etc/pacman.d/hooks/95-zfsbootmenu.hook`:
 
@@ -771,7 +779,7 @@ Target = zfs-utils
 [Action]
 Description = Regenerating ZFSBootMenu...
 When = PostTransaction
-Exec = /usr/bin/generate-zbm
+Exec = /usr/local/sbin/azfs-update-zbm
 Depends = zfsbootmenu
 ```
 
@@ -785,7 +793,6 @@ unrelated kernel update happened to rebuild it.
 
 ```bash
 efibootmgr -c -d "$DISK" -p 1 -L "ZFSBootMenu"          -l '\EFI\zbm\vmlinuz.EFI'
-efibootmgr -c -d "$DISK" -p 1 -L "ZFSBootMenu (Backup)" -l '\EFI\zbm\vmlinuz-backup.EFI'
 ```
 
 No `-u` load options: the command line is already embedded in the bundle.

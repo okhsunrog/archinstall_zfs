@@ -122,11 +122,7 @@ fn main() -> Result<()> {
             32 * GIB
         },
     };
-    let budget = BootSpace {
-        image_bytes: 50_681_856,
-        backup: false,
-        fallback: false,
-    };
+    let budget = BootSpace::default();
     request
         .efi
         .validate_space(&inspect_efi(&RealRunner, &before, 1, &filesystems)?, budget)?;

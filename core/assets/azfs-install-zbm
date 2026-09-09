@@ -1,0 +1,91 @@
+#!/usr/bin/bash
+# Publish an already generated image. No persistent backup is stored on the ESP.
+set -euo pipefail
+umask 077
+stage=${1:-/var/lib/zfsbootmenu}
+esp=${2:-/boot/efi}
+source_file=$stage/vmlinuz.EFI
+destination=$esp/EFI/zbm/vmlinuz.EFI
+recovery=$stage/previous-installed.EFI
+temporary=
+trap 'if [[ -n $temporary ]]; then rm -f -- "$temporary"; fi' EXIT
+fail() { printf 'ZFSBootMenu update failed: %s\n' "$*" >&2; exit 1; }
+
+[[ $(findmnt -n -o FSTYPE --target "$esp") == vfat ]] || fail "ESP is not mounted as FAT at $esp"
+[[ $(stat -c %d "$stage") != "$(stat -c %d "$esp")" ]] || fail "Build and recovery files must be outside the ESP"
+exec 9>"$stage/.install.lock"
+flock -n 9 || fail "Another ZFSBootMenu update is running"
+[[ -f $source_file && ! -L $source_file ]] || fail "No generated EFI image at $source_file"
+size=$(stat -c %s "$source_file")
+[[ $size -gt 4096 && $(od -An -tx1 -N2 "$source_file" | tr -d ' \n') == 4d5a ]] || fail "Generated image is not an EFI executable"
+# Check PE32+ / x86-64 / EFI application headers before touching the old loader.
+pe_offset=$(od -An -tu4 -j60 -N4 "$source_file" | tr -d ' \n')
+[[ $pe_offset =~ ^[0-9]+$ ]] || fail "Invalid PE header offset"
+(( pe_offset >= 64 && pe_offset + 94 <= size )) || fail "Invalid PE header offset"
+[[ $(od -An -tx1 -j"$pe_offset" -N6 "$source_file" | tr -d ' \n') == 504500006486 ]] || fail "Expected an x86-64 PE executable"
+[[ $(od -An -tx1 -j"$((pe_offset + 24))" -N2 "$source_file" | tr -d ' \n') == 0b02 ]] || fail "Expected PE32+"
+[[ $(od -An -tx1 -j"$((pe_offset + 92))" -N2 "$source_file" | tr -d ' \n') == 0a00 ]] || fail "Expected an EFI application"
+mkdir -p -- "${destination%/*}"
+[[ ! -L $destination ]] || fail "Refusing a symbolic-link destination"
+
+free_bytes() {
+    local blocks unit
+    read -r blocks unit < <(stat -f -c '%a %S' "$esp")
+    printf '%s\n' "$((blocks * unit))"
+}
+
+old_size=0
+if [[ -f $destination ]]; then
+    old_size=$(stat -c %s "$destination")
+    # Do not lose the last recovery copy on a repeated no-op update.
+    if cmp -s -- "$source_file" "$destination"; then exit 0; fi
+    cp -- "$destination" "$recovery.tmp"
+    cmp -s -- "$destination" "$recovery.tmp" || fail "Recovery copy verification failed"
+    sync -f "$recovery.tmp"
+    mv -f -- "$recovery.tmp" "$recovery"
+    sync -f "$stage"
+fi
+
+available=$(free_bytes)
+fallback=$esp/EFI/BOOT/BOOTX64.EFI
+# An optional, verified copy must not make the required update impossible.
+if (( available + old_size < size + 65536 )) && [[ -f $recovery && -f $fallback ]] && cmp -s -- "$recovery" "$fallback"; then
+    rm -- "$fallback"
+    sync -f "$esp"
+    available=$(free_bytes)
+fi
+if (( available < size + 65536 )); then
+    (( old_size > 0 && available + old_size >= size + 65536 )) || fail "New image does not fit; existing loader has been preserved"
+    printf 'ESP has room for one image. Previous loader saved at %s; replacing it directly.\n' "$recovery"
+    rm -- "$destination"
+    sync -f "$esp"
+fi
+temporary=$(mktemp "${destination%/*}/.zbm-update.XXXXXXXX")
+cp -- "$source_file" "$temporary"
+cmp -s -- "$source_file" "$temporary" || fail "Written image verification failed; recovery copy: $recovery"
+sync -f "$temporary"
+mv -f -- "$temporary" "$destination"
+temporary=
+sync -f "$esp"
+
+# A fallback is useful but optional. Never overwrite another loader or fail a
+# successful main-image update merely because a duplicate does not fit.
+if [[ -e $fallback ]]; then
+    if cmp -s -- "$source_file" "$fallback"; then exit 0; fi
+    if [[ ! -f $recovery ]] || ! cmp -s -- "$recovery" "$fallback"; then
+        printf 'Preserving existing EFI fallback.\n'
+        exit 0
+    fi
+fi
+if (( $(free_bytes) < size + 65536 )); then
+    printf 'Skipping optional EFI fallback update: insufficient free space.\n'
+    exit 0
+fi
+mkdir -p -- "${fallback%/*}"
+temporary=$(mktemp "${fallback%/*}/.zbm-update.XXXXXXXX")
+cp -- "$source_file" "$temporary"
+cmp -s -- "$source_file" "$temporary" || fail "Fallback verification failed; main loader is installed"
+sync -f "$temporary"
+mv -f -- "$temporary" "$fallback"
+temporary=
+sync -f "$esp"
