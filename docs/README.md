@@ -3,6 +3,7 @@
 | Document | Purpose |
 | --- | --- |
 | [Developer guide](development.md) | Build environments, checks, release/USB workflow and validation boundaries |
+| [Alongside installation development](dual-boot-development.md) | Storage safety contract, EFI policy and disposable resize tests; integration in progress |
 | [Slint coding and visual review](slint-ui-review.md) | Practical design, interaction, rendering and implementation procedure |
 | [GUI development](../slint-ui/README.md) | Preview scenes, fixtures and executable review commands |
 | [Live binary updates](../gen_iso/LIVE_UPDATE.md) | Update the installer on Ventoy without rebuilding its base ISO |

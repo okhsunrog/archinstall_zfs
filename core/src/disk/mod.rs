@@ -1,3 +1,4 @@
+pub mod alongside;
 pub mod device;
 pub mod partition;
 
