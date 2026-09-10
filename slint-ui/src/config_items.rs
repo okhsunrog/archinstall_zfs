@@ -7,9 +7,11 @@ use archinstall_zfs_core::config::choices::Choice;
 use archinstall_zfs_core::config::edit::{ChoiceSetting, EditorSetting, TextSetting};
 use archinstall_zfs_core::config::types::{GlobalConfig, InstallationMode, ZfsEncryptionMode};
 
+use crate::format::gib;
 use crate::ui::{ConfigItem, ItemType};
 #[cfg(test)]
 use archinstall_zfs_core::config::edit::DeviceSetting;
+use archinstall_zfs_core::disk::alongside::GIB;
 
 pub const TOTAL_STEPS: usize = 7;
 
@@ -70,7 +72,7 @@ fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                     value: format!(
                         "{} — {:.0} GiB",
                         r.before.device.display(),
-                        r.allocation_bytes as f64 / 1073741824.0
+                        gib(r.allocation_bytes)
                     )
                     .into(),
                     description: {
@@ -92,7 +94,7 @@ fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                                     .into()
                             }
                         };
-                        format!("{source}. {efi}. {} GiB reserved for swap; the remainder is the new ZFS pool.", r.swap_bytes / 1073741824).into()
+                        format!("{source}. {efi}. {} GiB reserved for swap; the remainder is the new ZFS pool.", r.swap_bytes / GIB).into()
                     },
                     item_type: ItemType::Storage,
                     ..Default::default()
@@ -291,7 +293,7 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         let value = if let Some(r) = &c.alongside
             && r.swap_bytes > 0
         {
-            format!("{} — {} GiB", c.swap_mode, r.swap_bytes / 1073741824)
+            format!("{} — {} GiB", c.swap_mode, r.swap_bytes / GIB)
         } else {
             c.swap_mode.to_string()
         };

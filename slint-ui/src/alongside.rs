@@ -1,5 +1,8 @@
 //! Read-only discovery and editable preview of the shared alongside plan.
-use crate::ui::{AlongsideState, App, DiskSegment, WizardState};
+use crate::{
+    format::{gib, sectors_gib, sectors_mib},
+    ui::{AlongsideState, App, DiskSegment, WizardState},
+};
 use archinstall_zfs_core::{
     config::{
         choices::Choice,
@@ -77,7 +80,7 @@ fn survey(disk: &std::path::Path, previous: Option<&Survey>) -> Result<Survey, S
                 label: format!(
                     "{} — {:.0} MiB",
                     p.node.display(),
-                    (p.size * layout.sectorsize) as f64 / MIB as f64
+                    sectors_mib(p.size, layout.sectorsize)
                 ),
                 space: inspect_efi(&RealRunner, &layout, number, &filesystems)
                     .map_err(|e| format!("{e:#}")),
@@ -90,12 +93,7 @@ fn survey(disk: &std::path::Path, previous: Option<&Survey>) -> Result<Survey, S
             .and_then(|f| f.fstype.as_deref())
             .unwrap_or("unknown filesystem");
         let size = p.size * layout.sectorsize;
-        let label = format!(
-            "{} — {} — {:.1} GiB",
-            p.node.display(),
-            fs,
-            size as f64 / GIB as f64
-        );
+        let label = format!("{} — {} — {:.1} GiB", p.node.display(), fs, gib(size));
         if let Some(cached) = previous
             .filter(|prev| prev.layout == layout)
             .and_then(|prev| {
@@ -115,7 +113,7 @@ fn survey(disk: &std::path::Path, previous: Option<&Survey>) -> Result<Survey, S
             ),
             Err(e) => (0, format!("{e:#}")),
         };
-        sources.push(Source { source: SpaceSource::Shrink { partition: number }, label, capacity, detail: format!("Keep {} at its current start; reduce only its end. Up to {:.0} GiB can be allocated here.", p.node.display(), capacity as f64 / GIB as f64), error });
+        sources.push(Source { source: SpaceSource::Shrink { partition: number }, label, capacity, detail: format!("Keep {} at its current start; reduce only its end. Up to {:.0} GiB can be allocated here.", p.node.display(), gib(capacity)), error });
     }
     for (start, end) in layout.free_extents().map_err(|e| e.to_string())? {
         let alignment = MIB / layout.sectorsize;
@@ -123,7 +121,7 @@ fn survey(disk: &std::path::Path, previous: Option<&Survey>) -> Result<Survey, S
         if bytes >= MIN_LINUX_BYTES {
             sources.push(Source {
                 source: SpaceSource::Unallocated { start, end },
-                label: format!("Unallocated space — {:.1} GiB", bytes as f64 / GIB as f64),
+                label: format!("Unallocated space — {:.1} GiB", gib(bytes)),
                 capacity: bytes,
                 detail: "Create a ZFS partition here without shrinking an existing filesystem."
                     .into(),
@@ -277,7 +275,7 @@ fn load(app: &App, index: Option<usize>, keep: Option<Request>) {
                         state.set_efi_index(efi as i32);
                         state.set_additional_efi(matches!(r.efi, EfiChoice::CreateSeparate { .. }));
                         state.set_use_all(false);
-                        state.set_allocation(r.allocation_bytes as f32 / GIB as f32);
+                        state.set_allocation(gib(r.allocation_bytes) as f32);
                         if r.swap_bytes > 0 {
                             state.set_swap_size((r.swap_bytes / GIB) as f32);
                         }
@@ -395,14 +393,11 @@ fn segments(layout: &Layout, plan: Option<&Plan>) -> ModelRc<DiskSegment> {
                 offset: start as f32 / total as f32,
                 fraction: (end - start) as f32 / total as f32,
                 kind,
-                short_label: format!(
-                    "{:.0} GiB",
-                    (end - start) as f64 * layout.sectorsize as f64 / GIB as f64
-                )
-                .into(),
+                short_label: format!("{:.0} GiB", sectors_gib(end - start, layout.sectorsize))
+                    .into(),
                 label: format!(
                     "{name} · {:.0} GiB",
-                    (end - start) as f64 * layout.sectorsize as f64 / GIB as f64
+                    sectors_gib(end - start, layout.sectorsize)
                 )
                 .into(),
             })
@@ -443,13 +438,12 @@ fn rebuild(app: &App, config: &mut GlobalConfig) {
         let source = s.sources.get(state.get_source_index() as usize).ok_or("No suitable partitions or unallocated space")?;
         state.set_details(source.detail.clone().into());
         let swap_bytes = if let Some(k) = kept { k.swap_bytes } else if config.swap_mode.uses_partition() { state.get_swap_size().round().clamp(1.0, 1024.0) as u64 * GIB } else { 0 };
-        let min = (MIN_LINUX_BYTES + swap_bytes + if state.get_additional_efi() { ESP_BYTES } else { 0 }) as f32 / GIB as f32;
-        let max = source.capacity as f64 / GIB as f64;
-        let max = max as f32;
+        let min = gib(MIN_LINUX_BYTES + swap_bytes + if state.get_additional_efi() { ESP_BYTES } else { 0 }) as f32;
+        let max = gib(source.capacity) as f32;
         state.set_minimum(min); state.set_maximum(max);
         let all_bytes = source.capacity / MIB * MIB;
         let allocation_bytes = if let Some(k) = kept { k.allocation_bytes } else if state.get_use_all() { all_bytes } else { (state.get_allocation().round().max(min) as u64).saturating_mul(GIB).min(all_bytes) };
-        state.set_allocation((allocation_bytes as f64 / GIB as f64 * 10.0).round() as f32 / 10.0);
+        state.set_allocation((gib(allocation_bytes) * 10.0).round() as f32 / 10.0);
         let efi = s.efis.get(state.get_efi_index() as usize).ok_or("No existing EFI partition on this disk. Prepare an EFI partition before using this mode.")?;
         let space = efi.space.as_ref().map_err(Clone::clone)?;
         let budget = BootSpace::default();
@@ -464,9 +458,9 @@ fn rebuild(app: &App, config: &mut GlobalConfig) {
         let request = match kept { Some(k) => k.clone(), None => Request { before: s.layout.clone(), source: source.source.clone(), efi: efi_choice, allocation_bytes, swap_bytes } };
         let plan = request.plan().map_err(|e| e.to_string())?;
         state.set_after(segments(&s.layout, Some(&plan)));
-        state.set_allocation_summary(format!("New ZFS pool: {:.1} GiB · Swap: {} GiB{}", (plan.swap_start.unwrap_or(plan.end) - plan.zfs_start) as f64 * s.layout.sectorsize as f64 / GIB as f64, swap_bytes / GIB, if plan.efi_start.is_some() { " · New EFI: 512 MiB" } else { " · Existing EFI reused" }).into());
+        state.set_allocation_summary(format!("New ZFS pool: {:.1} GiB · Swap: {} GiB{}", sectors_gib(plan.swap_start.unwrap_or(plan.end) - plan.zfs_start, s.layout.sectorsize), swap_bytes / GIB, if plan.efi_start.is_some() { " · New EFI: 512 MiB" } else { " · Existing EFI reused" }).into());
         if let Some((old, size)) = &plan.shrink {
-            state.set_details(format!("{}: {:.0} → {:.0} GiB. Its start and existing data are preserved.", old.node.display(), old.size as f64 * s.layout.sectorsize as f64 / GIB as f64, *size as f64 * s.layout.sectorsize as f64 / GIB as f64).into());
+            state.set_details(format!("{}: {:.0} → {:.0} GiB. Its start and existing data are preserved.", old.node.display(), sectors_gib(old.size, s.layout.sectorsize), sectors_gib(*size, s.layout.sectorsize)).into());
         }
         Ok(request)
     });

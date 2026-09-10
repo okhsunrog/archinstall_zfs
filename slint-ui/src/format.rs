@@ -1,4 +1,7 @@
-//! Tiny formatting helpers used by the install progress display.
+//! Tiny formatting helpers used by the install progress display and the
+//! storage pages.
+
+use archinstall_zfs_core::disk::alongside::{GIB, MIB};
 
 pub fn format_speed(bps: u64) -> String {
     if bps >= 1_000_000 {
@@ -32,4 +35,19 @@ pub fn truncate_str(s: &str, max: usize) -> &str {
             None => s,
         }
     }
+}
+
+/// Bytes as fractional GiB for `{:.0}`/`{:.1}` display.
+pub fn gib(bytes: u64) -> f64 {
+    bytes as f64 / GIB as f64
+}
+
+/// A sector count as fractional GiB for display.
+pub fn sectors_gib(sectors: u64, sectorsize: u64) -> f64 {
+    sectors as f64 * sectorsize as f64 / GIB as f64
+}
+
+/// A sector count as fractional MiB for display.
+pub fn sectors_mib(sectors: u64, sectorsize: u64) -> f64 {
+    sectors as f64 * sectorsize as f64 / MIB as f64
 }

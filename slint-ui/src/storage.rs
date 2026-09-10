@@ -461,7 +461,7 @@ async fn pool_inventory() -> Result<(Vec<PoolRow>, Vec<String>), String> {
             .properties
             .get("free")
             .and_then(|p| p.value.parse::<u64>().ok())
-            .map(|bytes| format!("{:.1} GiB", bytes as f64 / 1073741824.0))
+            .map(|bytes| format!("{:.1} GiB", crate::format::gib(bytes)))
             .unwrap_or_else(|| "Unknown".into());
         rows.push((
             p.name.clone(),
