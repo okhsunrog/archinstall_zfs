@@ -687,77 +687,64 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
             rebuild(&app, &mut cfg.borrow_mut());
         }
     });
-    let weak = app.as_weak();
-    app.global::<AlongsideState>()
-        .on_select_source(move |index| {
-            Session::touch();
-            if let Some(app) = weak.upgrade() {
-                let s = app.global::<AlongsideState>();
-                s.set_source_index(index);
-                s.set_use_all(true);
-                s.invoke_rebuild();
-            }
-        });
-    let weak = app.as_weak();
-    app.global::<AlongsideState>().on_select_efi(move |index| {
-        Session::touch();
-        if let Some(app) = weak.upgrade() {
-            let s = app.global::<AlongsideState>();
-            s.set_efi_index(index);
-            s.set_additional_efi(false);
-            s.invoke_rebuild();
+    let state = app.global::<AlongsideState>();
+    state.on_select_source(edit(app, |s, index: i32| {
+        s.set_source_index(index);
+        s.set_use_all(true);
+        true
+    }));
+    state.on_select_efi(edit(app, |s, index: i32| {
+        s.set_efi_index(index);
+        s.set_additional_efi(false);
+        true
+    }));
+    state.on_allocate(edit(app, |s, value: f32| {
+        if !value.is_finite() {
+            return false;
         }
-    });
-    let weak = app.as_weak();
-    app.global::<AlongsideState>().on_allocate(move |value| {
-        Session::touch();
-        if let Some(app) = weak.upgrade()
-            && value.is_finite()
-        {
-            let s = app.global::<AlongsideState>();
-            s.set_use_all(false);
-            s.set_allocation(value);
-            s.invoke_rebuild();
-        }
-    });
-    let weak = app.as_weak();
-    app.global::<AlongsideState>().on_all_space(move |value| {
-        Session::touch();
-        if let Some(app) = weak.upgrade() {
-            let s = app.global::<AlongsideState>();
-            s.set_use_all(value);
-            s.invoke_rebuild();
-        }
-    });
-    let weak = app.as_weak();
+        s.set_use_all(false);
+        s.set_allocation(value);
+        true
+    }));
+    state.on_all_space(edit(app, |s, value: bool| {
+        s.set_use_all(value);
+        true
+    }));
     let cfg = config.clone();
-    app.global::<AlongsideState>().on_select_swap(move |index| {
-        Session::touch();
-        if let Some(app) = weak.upgrade()
-            && let Some(mode) = SwapMode::from_index(index as usize)
-        {
-            cfg.borrow_mut().swap_mode = mode;
-            app.global::<AlongsideState>().invoke_rebuild();
+    state.on_select_swap(edit(app, move |_, index: i32| {
+        let Some(mode) = SwapMode::from_index(index as usize) else {
+            return false;
+        };
+        cfg.borrow_mut().swap_mode = mode;
+        true
+    }));
+    state.on_size_swap(edit(app, |s, value: f32| {
+        if !value.is_finite() {
+            return false;
         }
-    });
+        s.set_swap_size(value.round().clamp(1.0, 1024.0));
+        true
+    }));
+    state.on_additional(edit(app, |s, value: bool| {
+        s.set_additional_efi(value);
+        true
+    }));
+}
+
+/// A handler for one edited control. The loaded plan no longer applies;
+/// `apply` changes the state and returns whether the plan must be rebuilt.
+fn edit<T: 'static>(
+    app: &App,
+    apply: impl Fn(&AlongsideState, T) -> bool + 'static,
+) -> impl Fn(T) + 'static {
     let weak = app.as_weak();
-    app.global::<AlongsideState>().on_size_swap(move |value| {
-        Session::touch();
-        if let Some(app) = weak.upgrade()
-            && value.is_finite()
-        {
-            let s = app.global::<AlongsideState>();
-            s.set_swap_size(value.round().clamp(1.0, 1024.0));
-            s.invoke_rebuild();
-        }
-    });
-    let weak = app.as_weak();
-    app.global::<AlongsideState>().on_additional(move |value| {
+    move |value| {
         Session::touch();
         if let Some(app) = weak.upgrade() {
-            let s = app.global::<AlongsideState>();
-            s.set_additional_efi(value);
-            s.invoke_rebuild();
+            let state = app.global::<AlongsideState>();
+            if apply(&state, value) {
+                state.invoke_rebuild();
+            }
         }
-    });
+    }
 }
