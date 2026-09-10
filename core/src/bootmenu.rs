@@ -2,7 +2,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use color_eyre::eyre::{Context, Result};
+use color_eyre::eyre::{Context, Result, bail};
 use serde::Serialize;
 
 use crate::boot_environment::BootEnvironment;
@@ -227,7 +227,7 @@ pub async fn install_and_generate_zbm(
         install_zbm_from_aur(runner.clone(), target, cancel, download_config.clone()).await?;
     }
     if cancel.is_cancelled() {
-        color_eyre::eyre::bail!("installation cancelled");
+        bail!("installation cancelled");
     }
 
     // 2-5. Sync operations: config, hooks, generate-zbm, copy EFI
@@ -275,17 +275,22 @@ fn resolve_efi_location(runner: &dyn CommandRunner, efi_partition: &Path) -> Res
         ],
     )?;
     check_exit(&output, "resolve EFI disk and partition")?;
-    let fields: Vec<_> = output.stdout.split_whitespace().collect();
-    if fields.len() != 3 {
-        color_eyre::eyre::bail!(
+    parse_efi_location(&output.stdout, efi_partition)
+}
+
+/// The `PKNAME PARTN PARTUUID` line lsblk prints for the ESP.
+fn parse_efi_location(stdout: &str, efi_partition: &Path) -> Result<EfiLocation> {
+    let fields: Vec<&str> = stdout.split_whitespace().collect();
+    let &[disk, partition, partuuid] = fields.as_slice() else {
+        bail!(
             "cannot resolve EFI disk, partition number and PARTUUID for {}",
             efi_partition.display()
         );
-    }
+    };
     Ok(EfiLocation {
-        disk: fields[0].into(),
-        partition: fields[1].parse().wrap_err("invalid EFI partition number")?,
-        partuuid: fields[2].to_ascii_lowercase(),
+        disk: disk.into(),
+        partition: partition.parse().wrap_err("invalid EFI partition number")?,
+        partuuid: partuuid.to_ascii_lowercase(),
     })
 }
 
@@ -295,7 +300,8 @@ fn boot_entry(line: &str) -> Option<(&str, &str, &str)> {
     if !number.chars().all(|c| c.is_ascii_hexdigit()) {
         return None;
     }
-    let rest = rest.get(4..)?.strip_prefix('*').unwrap_or(&rest[4..]);
+    let tail = rest.get(4..)?;
+    let rest = tail.strip_prefix('*').unwrap_or(tail);
     let device_start = rest.find("HD(")?;
     Some((number, rest[..device_start].trim(), &rest[device_start..]))
 }
@@ -546,6 +552,34 @@ mod tests {
         assert!(content.contains("Type = Package"));
         assert!(content.contains("Target = zfsbootmenu"));
         assert!(content.contains("Target = zfs-utils"));
+    }
+
+    #[test]
+    fn efi_location_needs_all_three_lsblk_fields() {
+        let efi = Path::new("/dev/sda1");
+        let location = parse_efi_location("/dev/sda 1 AABB-CCDD\n", efi).unwrap();
+        assert_eq!(location.disk, PathBuf::from("/dev/sda"));
+        assert_eq!(location.partition, 1);
+        assert_eq!(location.partuuid, "aabb-ccdd");
+
+        assert!(parse_efi_location("/dev/sda 1\n", efi).is_err());
+        assert!(parse_efi_location("/dev/sda x AABB-CCDD\n", efi).is_err());
+        assert!(parse_efi_location("", efi).is_err());
+    }
+
+    #[test]
+    fn boot_entries_are_parsed_with_or_without_the_active_marker() {
+        let device = "HD(1,GPT,AABB-CCDD,0x800,0x1000)/File(\\EFI\\zbm\\vmlinuz.EFI)";
+        assert_eq!(
+            boot_entry(&format!("Boot0001* ZFSBootMenu\t{device}")),
+            Some(("0001", "ZFSBootMenu", device))
+        );
+        assert_eq!(
+            boot_entry(&format!("Boot00AF  Windows Boot Manager\t{device}")),
+            Some(("00AF", "Windows Boot Manager", device))
+        );
+        assert_eq!(boot_entry("BootCurrent: 0001"), None);
+        assert_eq!(boot_entry("Boot0002* Other\tPciRoot(0x0)"), None);
     }
 
     #[test]
