@@ -60,10 +60,15 @@ jobs:
           target/release/azfs
           target/release/xtask
 
-  iso-linux:
+  iso:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (github.event.inputs.build_iso == 'true' || github.event.inputs.create_release == 'true'))
     runs-on: ubuntu-latest
+    strategy:
+      # The kernels build independently; one failing must not cancel the other.
+      fail-fast: false
+      matrix:
+        kernel: [linux, linux-lts]
     container:
       image: ghcr.io/${{ github.repository }}/ci:latest
       credentials:
@@ -83,76 +88,34 @@ jobs:
     - name: Fix binary permissions
       run: chmod +x target/release/azfs-tui target/release/azfs target/release/xtask
 
-    - name: Build ISO with linux kernel
+    - name: Build ISO with ${{ matrix.kernel }} kernel
+      env:
+        KERNEL: ${{ matrix.kernel }}
       run: |
         target/release/xtask render-profile \
           --profile-dir gen_iso/profile --out-dir gen_iso/profile_rendered \
-          --kernel linux --zfs precompiled
+          --kernel "$KERNEL" --zfs precompiled
         just _prepare-binary
         if ! sudo mkarchiso -v -w "gen_iso/workdir" -o gen_iso/out gen_iso/profile_rendered; then
           echo "Precompiled failed, retrying with DKMS..."
           rm -rf gen_iso/profile_rendered gen_iso/workdir
           target/release/xtask render-profile \
             --profile-dir gen_iso/profile --out-dir gen_iso/profile_rendered \
-            --kernel linux --zfs dkms
+            --kernel "$KERNEL" --zfs dkms
           just _prepare-binary
           sudo mkarchiso -v -w "gen_iso/workdir" -o gen_iso/out gen_iso/profile_rendered
         fi
 
+    # The release job downloads these by name: iso-linux and iso-linux-lts.
     - name: Upload ISO
       uses: actions/upload-artifact@v7
       with:
-        name: iso-linux
+        name: iso-${{ matrix.kernel }}
         path: gen_iso/out/*.iso
         if-no-files-found: error
 
-  iso-linux-lts:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (github.event.inputs.build_iso == 'true' || github.event.inputs.create_release == 'true'))
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/${{ github.repository }}/ci:latest
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-      options: --privileged
-
-    steps:
-    - uses: actions/checkout@v7
-
-    - name: Download binaries
-      uses: actions/download-artifact@v8
-      with:
-        name: binaries
-        path: target/release/
-
-    - name: Fix binary permissions
-      run: chmod +x target/release/azfs-tui target/release/azfs target/release/xtask
-
-    - name: Build ISO with linux-lts kernel
-      run: |
-        target/release/xtask render-profile \
-          --profile-dir gen_iso/profile --out-dir gen_iso/profile_rendered \
-          --kernel linux-lts --zfs precompiled
-        just _prepare-binary
-        if ! sudo mkarchiso -v -w "gen_iso/workdir" -o gen_iso/out gen_iso/profile_rendered; then
-          echo "Precompiled failed, retrying with DKMS..."
-          rm -rf gen_iso/profile_rendered gen_iso/workdir
-          target/release/xtask render-profile \
-            --profile-dir gen_iso/profile --out-dir gen_iso/profile_rendered \
-            --kernel linux-lts --zfs dkms
-          just _prepare-binary
-          sudo mkarchiso -v -w "gen_iso/workdir" -o gen_iso/out gen_iso/profile_rendered
-        fi
-
-    - name: Upload ISO
-      uses: actions/upload-artifact@v7
-      with:
-        name: iso-linux-lts
-        path: gen_iso/out/*.iso
-
   release:
-    needs: [build, iso-linux, iso-linux-lts]
+    needs: [build, iso]
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
     runs-on: ubuntu-latest
     permissions:
