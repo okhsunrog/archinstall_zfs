@@ -1,5 +1,6 @@
 //! Read-only storage discovery and identity-based selection for the graphical wizard.
 use crate::{
+    busy::{self, Guarded},
     refresh::refresh_items,
     ui::{App, StorageCandidate, StorageState},
 };
@@ -354,16 +355,25 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
         scan(app, false);
     }
 }
+impl Guarded for StorageState<'_> {
+    fn generation(app: &App) -> i32 {
+        app.global::<StorageState>().get_generation()
+    }
+    fn set_generation(app: &App, generation: i32) {
+        app.global::<StorageState>().set_generation(generation);
+    }
+    fn set_busy(app: &App, busy: bool) {
+        app.global::<StorageState>().set_busy(busy);
+    }
+    fn set_error(app: &App, error: slint::SharedString) {
+        app.global::<StorageState>().set_error(error);
+    }
+}
 fn scan(app: &App, pools: bool) {
-    let state = app.global::<StorageState>();
-    let generation = state.get_generation() + 1;
-    state.set_generation(generation);
-    state.set_busy(true);
-    state.set_error("".into());
-    let weak = app.as_weak();
-    tokio::spawn(async move {
-        // Only plain owned Rust data crosses the worker/event-loop boundary.
-        let result = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+    let generation = busy::begin::<StorageState>(app);
+    // Only plain owned Rust data crosses the worker/event-loop boundary.
+    let work = async move {
+        tokio::time::timeout(std::time::Duration::from_secs(20), async {
             if pools {
                 let (pools, datasets) = pool_inventory().await?;
                 Ok::<_, String>((Vec::new(), Vec::new(), pools, datasets))
@@ -386,43 +396,37 @@ fn scan(app: &App, pools: bool) {
             }
         })
         .await
-        .unwrap_or_else(|_| {
-            Err("Storage discovery timed out. Check the devices and retry.".into())
-        });
-        let _ = weak.upgrade_in_event_loop(move |app| {
-            let state = app.global::<StorageState>();
-            if state.get_generation() != generation {
-                return;
-            }
-            state.set_busy(false);
-            match result {
-                Ok((_, _, found, datasets)) if pools => Inventory::set_pools(
-                    found
-                        .into_iter()
-                        .map(|(name, status, details, blocked)| StorageCandidate {
-                            key: name.clone().into(),
-                            name: name.into(),
-                            group: "ZFS pools".into(),
-                            label: status.into(),
-                            details: details.into(),
-                            unavailable: blocked.into(),
-                            ..Default::default()
-                        })
-                        .collect(),
-                    datasets,
-                ),
-                Ok((disks, parts, _, _)) => Inventory::set_devices(disks, parts),
-                Err(e) => {
-                    state.set_error(e.into());
-                    if pools {
-                        Inventory::update(|i| i.pools.clear());
-                    } else {
-                        Inventory::set_devices(Vec::new(), Vec::new());
-                    }
+        .unwrap_or_else(|_| Err("Storage discovery timed out. Check the devices and retry.".into()))
+    };
+    busy::spawn::<StorageState, _>(app, generation, work, move |app, result| {
+        let state = app.global::<StorageState>();
+        match result {
+            Ok((_, _, found, datasets)) if pools => Inventory::set_pools(
+                found
+                    .into_iter()
+                    .map(|(name, status, details, blocked)| StorageCandidate {
+                        key: name.clone().into(),
+                        name: name.into(),
+                        group: "ZFS pools".into(),
+                        label: status.into(),
+                        details: details.into(),
+                        unavailable: blocked.into(),
+                        ..Default::default()
+                    })
+                    .collect(),
+                datasets,
+            ),
+            Ok((disks, parts, _, _)) => Inventory::set_devices(disks, parts),
+            Err(e) => {
+                state.set_error(e.into());
+                if pools {
+                    Inventory::update(|i| i.pools.clear());
+                } else {
+                    Inventory::set_devices(Vec::new(), Vec::new());
                 }
             }
-            state.invoke_inventory_changed();
-        });
+        }
+        state.invoke_inventory_changed();
     });
 }
 type PoolRow = (String, String, String, String);

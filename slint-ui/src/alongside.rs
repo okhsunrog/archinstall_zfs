@@ -1,5 +1,6 @@
 //! Read-only discovery and editable preview of the shared alongside plan.
 use crate::{
+    busy::{self, Guarded},
     format::{gib, sectors_gib, sectors_mib},
     ui::{AlongsideState, App, DiskSegment, WizardState},
 };
@@ -267,21 +268,31 @@ fn fixture() -> Survey {
     survey
 }
 
+impl Guarded for AlongsideState<'_> {
+    fn generation(app: &App) -> i32 {
+        app.global::<AlongsideState>().get_generation()
+    }
+    fn set_generation(app: &App, generation: i32) {
+        app.global::<AlongsideState>().set_generation(generation);
+    }
+    fn set_busy(app: &App, busy: bool) {
+        app.global::<AlongsideState>().set_busy(busy);
+    }
+    fn set_error(app: &App, error: slint::SharedString) {
+        app.global::<AlongsideState>().set_error(error);
+    }
+}
+
 fn load(app: &App, index: Option<usize>, keep: Option<Request>) {
-    let state = app.global::<AlongsideState>();
-    let generation = state.get_generation() + 1;
-    state.set_generation(generation);
-    state.set_busy(true);
-    state.set_error("".into());
+    let generation = busy::begin::<AlongsideState>(app);
     Session::touch();
-    state.invoke_rebuild();
+    app.global::<AlongsideState>().invoke_rebuild();
     let disk = index
         .and_then(Session::disk)
         .or_else(|| keep.as_ref().map(|r| r.before.device.clone()));
     let previous = Session::survey();
-    let weak = app.as_weak();
-    tokio::spawn(async move {
-        let result = tokio::task::spawn_blocking(move || -> Result<_, String> {
+    let work = async move {
+        tokio::task::spawn_blocking(move || -> Result<_, String> {
             if crate::preview::enabled() {
                 return Ok((
                     vec![PathBuf::from("/dev/nvme0n1")],
@@ -317,100 +328,97 @@ fn load(app: &App, index: Option<usize>, keep: Option<Request>) {
             Ok((paths, names, selected_index, inspected))
         })
         .await
-        .unwrap_or_else(|e| Err(e.to_string()));
-        let _ = weak.upgrade_in_event_loop(move |app| {
-            let state = app.global::<AlongsideState>();
-            if state.get_generation() != generation {
-                return;
-            }
-            state.set_busy(false);
-            let result = result.and_then(|(paths, names, selected_index, inspected)| {
-                state.set_disks(strings(names));
-                state.set_disk_index(selected_index as i32);
-                Session::set_disks(paths);
-                inspected
-            });
-            match result {
-                Ok(survey) => {
-                    state.set_sources(strings(
-                        survey.sources.iter().map(|s| s.label.clone()).collect(),
-                    ));
-                    state.set_efi_partitions(strings(
-                        survey.efis.iter().map(|s| s.label.clone()).collect(),
-                    ));
-                    // A plan from a configuration file, or the current plan on
-                    // a refresh, is shown and executed as written when it
-                    // still describes this disk.
-                    let kept = keep.as_ref().and_then(|r| {
-                        let source = survey.sources.iter().position(|s| s.source == r.source)?;
-                        let efi = survey
-                            .efis
-                            .iter()
-                            .position(|e| e.number == r.efi.existing_partition())?;
-                        (r.before == survey.layout).then_some((source, efi))
-                    });
-                    if let Some((source, efi)) = kept {
-                        let r = keep.clone().expect("kept implies keep");
-                        state.set_source_index(source as i32);
-                        state.set_efi_index(efi as i32);
-                        state.set_additional_efi(matches!(r.efi, EfiChoice::CreateSeparate { .. }));
-                        state.set_use_all(false);
-                        state.set_allocation(gib(r.allocation_bytes) as f32);
-                        if r.swap_bytes > 0 {
-                            state.set_swap_size((r.swap_bytes / GIB) as f32);
-                        }
-                        Session::keep(survey, r);
-                        state.invoke_rebuild();
-                        return;
-                    }
-                    if keep.is_some() {
-                        Session::set_notice(
-                            "The previous plan no longer matches this disk; this is a new plan built from the current layout.",
-                        );
-                    }
-                    state.set_source_index(
-                        survey
-                            .sources
-                            .iter()
-                            .position(|s| {
-                                matches!(s.source, SpaceSource::Unallocated { .. })
-                                    && s.error.is_empty()
-                                    && s.capacity >= MIN_LINUX_BYTES
-                            })
-                            .or_else(|| {
-                                survey.sources.iter().position(|s| {
-                                    s.error.is_empty() && s.capacity >= MIN_LINUX_BYTES
-                                })
-                            })
-                            .map(|i| i as i32)
-                            .unwrap_or(0),
-                    );
-                    state.set_efi_index(
-                        survey
-                            .efis
-                            .iter()
-                            .position(|e| {
-                                e.space.as_ref().is_ok_and(|s| {
-                                    s.sufficient(Default::default()).unwrap_or(false)
-                                })
-                            })
-                            .unwrap_or(0) as i32,
-                    );
-                    state.set_additional_efi(false);
-                    state.set_use_all(true);
-                    Session::set_survey(Some(survey));
-                    state.invoke_rebuild();
-                }
-                Err(error) => {
-                    Session::set_survey(None);
-                    state.set_before(Default::default());
-                    state.set_after(Default::default());
-                    state.set_sources(Default::default());
-                    state.set_efi_partitions(Default::default());
-                    state.set_error(error.into());
-                }
-            }
+        .unwrap_or_else(|e| Err(e.to_string()))
+    };
+    busy::spawn::<AlongsideState, _>(app, generation, work, move |app, result| {
+        let state = app.global::<AlongsideState>();
+        let result = result.and_then(|(paths, names, selected_index, inspected)| {
+            state.set_disks(strings(names));
+            state.set_disk_index(selected_index as i32);
+            Session::set_disks(paths);
+            inspected
         });
+        match result {
+            Ok(survey) => {
+                state.set_sources(strings(
+                    survey.sources.iter().map(|s| s.label.clone()).collect(),
+                ));
+                state.set_efi_partitions(strings(
+                    survey.efis.iter().map(|s| s.label.clone()).collect(),
+                ));
+                // A plan from a configuration file, or the current plan on
+                // a refresh, is shown and executed as written when it
+                // still describes this disk.
+                let kept = keep.as_ref().and_then(|r| {
+                    let source = survey.sources.iter().position(|s| s.source == r.source)?;
+                    let efi = survey
+                        .efis
+                        .iter()
+                        .position(|e| e.number == r.efi.existing_partition())?;
+                    (r.before == survey.layout).then_some((source, efi))
+                });
+                if let Some((source, efi)) = kept {
+                    let r = keep.clone().expect("kept implies keep");
+                    state.set_source_index(source as i32);
+                    state.set_efi_index(efi as i32);
+                    state.set_additional_efi(matches!(r.efi, EfiChoice::CreateSeparate { .. }));
+                    state.set_use_all(false);
+                    state.set_allocation(gib(r.allocation_bytes) as f32);
+                    if r.swap_bytes > 0 {
+                        state.set_swap_size((r.swap_bytes / GIB) as f32);
+                    }
+                    Session::keep(survey, r);
+                    state.invoke_rebuild();
+                    return;
+                }
+                if keep.is_some() {
+                    Session::set_notice(
+                        "The previous plan no longer matches this disk; this is a new plan built from the current layout.",
+                    );
+                }
+                state.set_source_index(
+                    survey
+                        .sources
+                        .iter()
+                        .position(|s| {
+                            matches!(s.source, SpaceSource::Unallocated { .. })
+                                && s.error.is_empty()
+                                && s.capacity >= MIN_LINUX_BYTES
+                        })
+                        .or_else(|| {
+                            survey
+                                .sources
+                                .iter()
+                                .position(|s| s.error.is_empty() && s.capacity >= MIN_LINUX_BYTES)
+                        })
+                        .map(|i| i as i32)
+                        .unwrap_or(0),
+                );
+                state.set_efi_index(
+                    survey
+                        .efis
+                        .iter()
+                        .position(|e| {
+                            e.space
+                                .as_ref()
+                                .is_ok_and(|s| s.sufficient(Default::default()).unwrap_or(false))
+                        })
+                        .unwrap_or(0) as i32,
+                );
+                state.set_additional_efi(false);
+                state.set_use_all(true);
+                Session::set_survey(Some(survey));
+                state.invoke_rebuild();
+            }
+            Err(error) => {
+                Session::set_survey(None);
+                state.set_before(Default::default());
+                state.set_after(Default::default());
+                state.set_sources(Default::default());
+                state.set_efi_partitions(Default::default());
+                state.set_error(error.into());
+            }
+        }
     });
 }
 
