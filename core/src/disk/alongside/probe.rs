@@ -1,4 +1,5 @@
 use super::*;
+use crate::system::cmd::CmdOutput;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Filesystem {
@@ -84,12 +85,33 @@ pub fn inspect(runner: &dyn CommandRunner, disk: &Path) -> Result<(Layout, Vec<F
     Ok((layout, d.children))
 }
 
-pub(super) fn run(runner: &dyn CommandRunner, program: &str, args: &[&str]) -> Result<String> {
-    let mut argv = vec!["LC_ALL=C", program];
+/// The argv for `env LC_ALL=C [env...] program args...`: every filesystem
+/// tool is run with a C locale so its output can be parsed.
+fn env_argv<'a>(env: &[&'a str], program: &'a str, args: &[&'a str]) -> Vec<&'a str> {
+    let mut argv = Vec::with_capacity(env.len() + args.len() + 2);
+    argv.push("LC_ALL=C");
+    argv.extend_from_slice(env);
+    argv.push(program);
     argv.extend_from_slice(args);
-    let out = runner.run("env", &argv)?;
+    argv
+}
+
+pub(super) fn run(runner: &dyn CommandRunner, program: &str, args: &[&str]) -> Result<String> {
+    let out = runner.run("env", &env_argv(&[], program, args))?;
     check_exit(&out, program)?;
     Ok(out.stdout)
+}
+
+/// Like [`run`], with extra `NAME=value` pairs and input on stdin. The exit
+/// status is left to the caller, whose context message names the operation.
+pub(super) fn run_with_stdin(
+    runner: &dyn CommandRunner,
+    env: &[&str],
+    program: &str,
+    args: &[&str],
+    stdin: &[u8],
+) -> Result<CmdOutput> {
+    runner.run_with_stdin("env", &env_argv(env, program, args), stdin)
 }
 
 fn number_after(text: &str, key: &str) -> Result<u64> {
@@ -157,6 +179,64 @@ pub fn minimum_size(runner: &dyn CommandRunner, part: &Partition, fs: &str) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::system::cmd::tests::{CannedResponse, RecordingRunner};
+
+    #[test]
+    fn tools_run_under_env_with_a_c_locale_and_extra_variables_after_it() {
+        let runner = RecordingRunner::new(vec![
+            CannedResponse {
+                stdout: "No problems found.\n".into(),
+                ..Default::default()
+            },
+            CannedResponse::default(),
+        ]);
+
+        let verified = run(&runner, "sgdisk", &["--verify", "/dev/sda"]).unwrap();
+        assert_eq!(verified, "No problems found.\n");
+        let out = run_with_stdin(
+            &runner,
+            &["LOCK_BLOCK_DEVICE=0"],
+            "sfdisk",
+            &["--wipe", "never", "-N", "3", "/dev/sda"],
+            b"size=2048\n",
+        )
+        .unwrap();
+        assert!(out.success());
+
+        let calls = runner.calls();
+        assert_eq!(calls[0].program, "env");
+        assert_eq!(
+            calls[0].args,
+            ["LC_ALL=C", "sgdisk", "--verify", "/dev/sda"]
+        );
+        assert_eq!(calls[1].program, "env");
+        assert_eq!(
+            calls[1].args,
+            [
+                "LC_ALL=C",
+                "LOCK_BLOCK_DEVICE=0",
+                "sfdisk",
+                "--wipe",
+                "never",
+                "-N",
+                "3",
+                "/dev/sda"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_failing_tool_is_reported_by_name() {
+        let runner = RecordingRunner::new(vec![CannedResponse {
+            exit_code: 1,
+            stderr: "bad superblock".into(),
+            ..Default::default()
+        }]);
+        let err = run(&runner, "e2fsck", &["-f", "-n", "/dev/sda2"]).unwrap_err();
+        assert!(err.to_string().contains("e2fsck"), "{err}");
+        assert!(err.to_string().contains("bad superblock"), "{err}");
+    }
+
     #[test]
     fn exact_bytes_are_required_and_localized_or_missing_output_fails() {
         assert_eq!(

@@ -212,11 +212,11 @@ fn apply(
         tracing::info!(partition = %node, new_bytes = bytes, "Shrinking filesystem before partition boundary");
         match fs {
             Some("ntfs") => {
-                let out = runner.run_with_stdin(
-                    "env",
+                let out = probe::run_with_stdin(
+                    runner,
+                    &[],
+                    "ntfsresize",
                     &[
-                        "LC_ALL=C",
-                        "ntfsresize",
                         "--no-progress-bar",
                         "--size",
                         &(bytes - MIB).to_string(),
@@ -264,12 +264,12 @@ fn apply(
             _ => bail!("Unsupported filesystem; partition table was not modified"),
         }
         let number = part.number(disk)?;
-        let out = runner.run_with_stdin(
-            "env",
+        // sfdisk must not take the whole-disk lock this process already holds.
+        let out = probe::run_with_stdin(
+            runner,
+            &["LOCK_BLOCK_DEVICE=0"],
+            "sfdisk",
             &[
-                "LC_ALL=C",
-                "LOCK_BLOCK_DEVICE=0",
-                "sfdisk",
                 "--wipe",
                 "never",
                 "--wipe-partitions",
