@@ -5,7 +5,9 @@ use slint::SharedString;
 
 use archinstall_zfs_core::config::choices::Choice;
 use archinstall_zfs_core::config::edit::{ChoiceSetting, EditorSetting, TextSetting};
-use archinstall_zfs_core::config::types::{GlobalConfig, InstallationMode, ZfsEncryptionMode};
+use archinstall_zfs_core::config::types::{
+    GlobalConfig, InstallationMode, ZFS_PASSPHRASE_MIN_LENGTH, ZfsEncryptionMode,
+};
 
 use crate::format::gib;
 use crate::ui::{ConfigItem, ItemType};
@@ -283,8 +285,10 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                 "Required"
             }
             .into(),
-            description:
-                "At least 8 characters. Keep a copy: a lost passphrase cannot be recovered.".into(),
+            description: format!(
+                "At least {ZFS_PASSPHRASE_MIN_LENGTH} characters. Keep a copy: a lost passphrase cannot be recovered."
+            )
+            .into(),
             item_type: ItemType::InlinePassword,
             ..Default::default()
         });
@@ -431,16 +435,7 @@ fn build_users_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                 ),
                 _ => None,
             };
-            // ci_opt's None → "Not set"; users semantically wants "None".
-            // Construct directly so we keep the established label.
-            ConfigItem {
-                key: "users".into(),
-                label: "User accounts".into(),
-                value: summary.clone().unwrap_or_else(|| "None".into()).into(),
-                item_type: ItemType::Text,
-                is_empty: summary.is_none(),
-                ..Default::default()
-            }
+            ci_opt_with("users", "User accounts", summary, "None", ItemType::Text)
         },
     ]
 }
@@ -452,17 +447,13 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     let profile_name = profile_def.as_ref().map(|p| p.display_name.to_string());
     let mut items = vec![
         section_header("Environment"),
-        ConfigItem {
-            key: "profile".into(),
-            label: "Profile".into(),
-            value: profile_name
-                .clone()
-                .unwrap_or_else(|| "Console only".into())
-                .into(),
-            item_type: ItemType::Select,
-            is_empty: profile_name.is_none(),
-            ..Default::default()
-        },
+        ci_opt_with(
+            "profile",
+            "Profile",
+            profile_name,
+            "Console only",
+            ItemType::Select,
+        ),
     ];
 
     // ── Profile configuration: only when a desktop profile is active ──
@@ -530,17 +521,13 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         .as_ref()
         .is_some_and(|p| p.supports_gfx_driver())
     {
-        items.push({
-            let driver = c.gfx_driver.map(|d| d.to_string());
-            ConfigItem {
-                key: "gpu_driver".into(),
-                label: "GPU driver".into(),
-                value: driver.clone().unwrap_or_else(|| "None".into()).into(),
-                item_type: ItemType::Select,
-                is_empty: driver.is_none(),
-                ..Default::default()
-            }
-        });
+        items.push(ci_opt_with(
+            "gpu_driver",
+            "GPU driver",
+            c.gfx_driver.map(|d| d.to_string()),
+            "None",
+            ItemType::Select,
+        ));
 
         // Inline warning when the proprietary NVIDIA driver is paired with
         // a Wayland-only compositor. The TUI shows a confirmation dialog;
@@ -573,14 +560,7 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         } else {
             Some(parts.join(", "))
         };
-        ConfigItem {
-            key: "packages".into(),
-            label: "Extra packages".into(),
-            value: joined.clone().unwrap_or_else(|| "None".into()).into(),
-            item_type: ItemType::Text,
-            is_empty: joined.is_none(),
-            ..Default::default()
-        }
+        ci_opt_with("packages", "Extra packages", joined, "None", ItemType::Text)
     });
     items.push({
         let joined = if c.extra_services.is_empty() {
@@ -588,14 +568,13 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         } else {
             Some(c.extra_services.join(", "))
         };
-        ConfigItem {
-            key: "extra_services".into(),
-            label: "Extra services".into(),
-            value: joined.clone().unwrap_or_else(|| "None".into()).into(),
-            item_type: ItemType::Text,
-            is_empty: joined.is_none(),
-            ..Default::default()
-        }
+        ci_opt_with(
+            "extra_services",
+            "Extra services",
+            joined,
+            "None",
+            ItemType::Text,
+        )
     });
     items.push(ci_toggle("zrepl", "zrepl (snapshots)", c.zrepl_enabled));
 
@@ -769,14 +748,23 @@ fn ci(key: &str, label: &str, value: &str, item_type: ItemType) -> ConfigItem {
 /// "Not set" with `is_empty: true` so the Slint side colors the value muted
 /// without string-matching the sentinel.
 fn ci_opt(key: &str, label: &str, value: Option<&str>, item_type: ItemType) -> ConfigItem {
-    let (display, is_empty) = match value {
-        Some(v) => (v, false),
-        None => ("Not set", true),
-    };
+    ci_opt_with(key, label, value.map(str::to_owned), "Not set", item_type)
+}
+
+/// [`ci_opt`] with the placeholder shown for `None` chosen by the caller;
+/// `is_empty` still marks the row as unset.
+fn ci_opt_with(
+    key: &str,
+    label: &str,
+    value: Option<String>,
+    placeholder: &str,
+    item_type: ItemType,
+) -> ConfigItem {
+    let is_empty = value.is_none();
     ConfigItem {
         key: key.into(),
         label: label.into(),
-        value: display.into(),
+        value: value.unwrap_or_else(|| placeholder.into()).into(),
         item_type,
         is_empty,
         ..Default::default()
