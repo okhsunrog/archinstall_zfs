@@ -432,6 +432,14 @@ impl GlobalConfig {
         self.zfs_encryption_mode != ZfsEncryptionMode::None
     }
 
+    /// The package download settings this configuration asks for.
+    pub fn download_config(&self) -> crate::system::async_download::DownloadConfig {
+        crate::system::async_download::DownloadConfig {
+            concurrency: self.parallel_downloads as usize,
+            ..Default::default()
+        }
+    }
+
     pub fn all_aur_packages(&self) -> Vec<&str> {
         let mut pkgs: Vec<&str> = self.aur_packages.iter().map(|s| s.as_str()).collect();
         if self.zrepl_enabled && !pkgs.contains(&"zrepl-bin") {

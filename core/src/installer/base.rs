@@ -5,7 +5,6 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::types::GlobalConfig;
 use crate::system::alpm_pacman::{AlpmContext, TargetMounts};
-use crate::system::async_download::DownloadConfig;
 use crate::system::cmd::CommandRunner;
 use crate::system::sysinfo;
 
@@ -45,14 +44,7 @@ pub fn install_base(
     let target_mounts = TargetMounts::setup(target)?;
 
     let pacman_conf = Path::new("/etc/pacman.conf");
-    let mut ctx = AlpmContext::for_target(
-        target,
-        pacman_conf,
-        DownloadConfig {
-            concurrency: config.parallel_downloads as usize,
-            ..Default::default()
-        },
-    )?;
+    let mut ctx = AlpmContext::for_target(target, pacman_conf, config.download_config())?;
     ctx.sync_databases(false)?;
     ctx.install_packages(&packages, cancel, progress_tx)?;
     ctx.finalize_target()?;

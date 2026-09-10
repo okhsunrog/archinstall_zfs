@@ -17,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::types::{GlobalConfig, InitSystem, SwapMode, ZfsEncryptionMode};
 use crate::system::alpm_pacman::{AlpmContext, TargetMounts};
-use crate::system::async_download::{DownloadConfig, DownloadProgress};
+use crate::system::async_download::DownloadProgress;
 use crate::system::cmd::CommandRunner;
 
 /// What an installation needs to know before it starts.
@@ -115,14 +115,7 @@ pub fn perform_installation(request: InstallRequest) -> Result<Vec<String>> {
     // The target now has pacman.conf, keyring and mirrorlist from
     // finalize_target(), so the handle for the remaining phases can be made.
     let target_conf = target.join("etc/pacman.conf");
-    let mut alpm = AlpmContext::for_target(
-        &target,
-        &target_conf,
-        DownloadConfig {
-            concurrency: config.parallel_downloads as usize,
-            ..Default::default()
-        },
-    )?;
+    let mut alpm = AlpmContext::for_target(&target, &target_conf, config.download_config())?;
     alpm.sync_databases(false)?;
 
     let mut installer = Installer {
@@ -628,10 +621,7 @@ impl Installer {
                 &self.target,
                 &aur_pkgs,
                 &self.cancel,
-                DownloadConfig {
-                    concurrency: self.config.parallel_downloads as usize,
-                    ..Default::default()
-                },
+                self.config.download_config(),
             ))?;
         }
 

@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 use crate::boot_environment::BootEnvironment;
 use crate::config::types::GlobalConfig;
 use crate::config::validation::ValidationError;
-use crate::system::async_download::{DownloadConfig, DownloadProgress};
+use crate::system::async_download::DownloadProgress;
 use crate::system::cmd::CommandRunner;
 
 /// Where the pool is mounted while the target system is assembled.
@@ -206,10 +206,7 @@ async fn install(
         .to_string();
     let be = BootEnvironment::new(&pool_name, config.dataset_prefix.as_str());
     let kernel = config.primary_kernel().to_string();
-    let download_config = DownloadConfig {
-        concurrency: config.parallel_downloads as usize,
-        ..Default::default()
-    };
+    let download_config = config.download_config();
     let config = Arc::new(config);
 
     ensure_not_cancelled(&cancel)?;

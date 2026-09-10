@@ -79,12 +79,6 @@ impl AlpmContext {
         pacman_conf_path: &Path,
         download_config: DownloadConfig,
     ) -> Result<Self> {
-        let conf =
-            pacmanconf::Config::from_file(pacman_conf_path.to_str().unwrap_or("/etc/pacman.conf"))
-                .wrap_err("failed to parse pacman.conf")?;
-
-        let target_str = target.to_string_lossy();
-        let db_path = format!("{}/var/lib/pacman", target_str);
         // A cache outside the target survives it, so a later installation can
         // reuse what this one downloaded.
         let cache_dir = match download_config.cache_dir.as_ref() {
@@ -94,15 +88,10 @@ impl AlpmContext {
                 })?;
                 format!("{}/", shared.display())
             }
-            None => format!("{}/var/cache/pacman/pkg/", target_str),
+            None => format!("{}/var/cache/pacman/pkg/", target.to_string_lossy()),
         };
 
-        let mut handle = Alpm::new(target_str.as_ref(), &db_path)
-            .map_err(|e| eyre!("failed to init alpm for target: {e}"))?;
-
-        // Configure from host config but with target paths
-        alpm_utils::configure_alpm(&mut handle, &conf)
-            .map_err(|e| eyre!("failed to configure alpm for target: {e}"))?;
+        let mut handle = open_target_alpm(target, pacman_conf_path)?;
 
         // Override cache dir to target
         handle
@@ -426,6 +415,25 @@ impl AlpmContext {
             }
         });
     }
+}
+
+/// Open a libalpm handle rooted at `target`, with the target's database and
+/// the repositories from `pacman_conf_path` (the medium's own file while the
+/// base system is being installed, the target's afterwards).
+pub(crate) fn open_target_alpm(target: &Path, pacman_conf_path: &Path) -> Result<Alpm> {
+    let conf =
+        pacmanconf::Config::from_file(pacman_conf_path.to_str().unwrap_or("/etc/pacman.conf"))
+            .wrap_err("failed to parse pacman.conf")?;
+
+    let target_str = target.to_string_lossy();
+    let db_path = format!("{}/var/lib/pacman", target_str);
+    let mut handle = Alpm::new(target_str.as_ref(), &db_path)
+        .map_err(|e| eyre!("failed to init alpm for target: {e}"))?;
+
+    // Configure from the given config but with target paths.
+    alpm_utils::configure_alpm(&mut handle, &conf)
+        .map_err(|e| eyre!("failed to configure alpm for target: {e}"))?;
+    Ok(handle)
 }
 
 /// Install packages from the target's own repositories, for the phases that
