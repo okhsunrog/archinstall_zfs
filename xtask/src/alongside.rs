@@ -5,7 +5,6 @@ use std::{fs, io::Write, os::unix::fs::OpenOptionsExt, path::Path};
 pub fn prepare(vm: &QemuVm, config: &Path) -> Result<(), String> {
     let output = vm.ssh_run(r#"set -euo pipefail
 [ "$(readlink -f /dev/disk/by-id/virtio-archzfs-test-disk)" = /dev/vda ]
-command -v mmd >/dev/null || pacman -Sy --noconfirm --needed mtools
 sgdisk --zap-all --new=1:2048:+500M --typecode=1:ef00 --new=2:0:+50G --typecode=2:8300 --new=3:0:+1G --typecode=3:8300 /dev/vda
 udevadm settle
 mkfs.fat -F32 /dev/vda1
@@ -14,9 +13,12 @@ mkdir -p /run/preserved
 mount /dev/vda2 /run/preserved
 printf 'preserved filesystem payload\n' > /run/preserved/KEEP.txt
 umount /run/preserved
-printf 'foreign EFI payload\n' > /run/KEEP.EFI
-mmd -i /dev/vda1 ::/EFI ::/EFI/FOREIGN
-mcopy -i /dev/vda1 /run/KEEP.EFI ::/EFI/FOREIGN/KEEP.EFI
+# Write through a normal mount: the live medium need not carry mtools or a
+# usable pacman keyring for the fixture.
+mount /dev/vda1 /run/preserved
+mkdir -p /run/preserved/EFI/FOREIGN
+printf 'foreign EFI payload\n' > /run/preserved/EFI/FOREIGN/KEEP.EFI
+umount /run/preserved
 "#).map_err(|e| e.to_string())?;
     if !output.status.success() {
         return Err(format!(
@@ -72,8 +74,11 @@ mount -o ro /dev/vda2 /run/preserved
 value=$(cat /run/preserved/KEEP.txt)
 umount /run/preserved
 [ "$value" = 'preserved filesystem payload' ]
-[ "$(mtype -i /dev/vda1 ::/EFI/FOREIGN/KEEP.EFI)" = 'foreign EFI payload' ]
-mtype -i /dev/vda1 ::/EFI/zbm/vmlinuz.EFI > /run/installed-zbm.EFI
+mount -o ro /dev/vda1 /run/preserved
+value=$(cat /run/preserved/EFI/FOREIGN/KEEP.EFI)
+cp /run/preserved/EFI/zbm/vmlinuz.EFI /run/installed-zbm.EFI
+umount /run/preserved
+[ "$value" = 'foreign EFI payload' ]
 [ "$(od -An -tx1 -N2 /run/installed-zbm.EFI | tr -d ' \n')" = 4d5a ]
 "#,
         )
