@@ -113,7 +113,17 @@ fn survey(disk: &std::path::Path, previous: Option<&Survey>) -> Result<Survey, S
             ),
             Err(e) => (0, format!("{e:#}")),
         };
-        sources.push(Source { source: SpaceSource::Shrink { partition: number }, label, capacity, detail: format!("Keep {} at its current start; reduce only its end. Up to {:.0} GiB can be allocated here.", p.node.display(), gib(capacity)), error });
+        sources.push(Source {
+            source: SpaceSource::Shrink { partition: number },
+            label,
+            capacity,
+            detail: format!(
+                "Keep {} at its current start; reduce only its end. Up to {:.0} GiB can be allocated here.",
+                p.node.display(),
+                gib(capacity)
+            ),
+            error,
+        });
     }
     for (start, end) in layout.free_extents().map_err(|e| e.to_string())? {
         let alignment = MIB / layout.sectorsize;
@@ -176,10 +186,36 @@ fn fixture() -> Survey {
         ],
     };
     let low = std::env::var("AZFS_PREVIEW_ESP").as_deref() == Ok("small");
-    let mut survey = Survey { layout: layout.clone(), sources: vec![
-        Source { source: SpaceSource::Shrink { partition: 2 }, label: "/dev/nvme0n1p2 — NTFS — 450 GiB".into(), capacity: 240 * GIB, detail: "Windows keeps at least 210 GiB, including working space. Only the end of this partition will move.".into(), error: String::new() },
-        Source { source: SpaceSource::Unallocated { start: 452 * GIB / 512, end: layout.lastlba + 1 }, label: "Unallocated space — 60 GiB".into(), capacity: ((layout.lastlba + 1) * 512 - 452 * GIB) / MIB * MIB, detail: "Use free space without resizing Windows.".into(), error: String::new() },
-    ], efis: vec![Efi { number: 1, label: "/dev/nvme0n1p1 — EFI — 500 MiB".into(), space: Ok(EfiSpace { partition: 1, free_bytes: if low { 40 * MIB } else { 350 * MIB } }) }] };
+    let mut survey = Survey {
+        layout: layout.clone(),
+        sources: vec![
+            Source {
+                source: SpaceSource::Shrink { partition: 2 },
+                label: "/dev/nvme0n1p2 — NTFS — 450 GiB".into(),
+                capacity: 240 * GIB,
+                detail: "Windows keeps at least 210 GiB, including working space. Only the end of this partition will move.".into(),
+                error: String::new(),
+            },
+            Source {
+                source: SpaceSource::Unallocated {
+                    start: 452 * GIB / 512,
+                    end: layout.lastlba + 1,
+                },
+                label: "Unallocated space — 60 GiB".into(),
+                capacity: ((layout.lastlba + 1) * 512 - 452 * GIB) / MIB * MIB,
+                detail: "Use free space without resizing Windows.".into(),
+                error: String::new(),
+            },
+        ],
+        efis: vec![Efi {
+            number: 1,
+            label: "/dev/nvme0n1p1 — EFI — 500 MiB".into(),
+            space: Ok(EfiSpace {
+                partition: 1,
+                free_bytes: if low { 40 * MIB } else { 350 * MIB },
+            }),
+        }],
+    };
     match std::env::var("AZFS_PREVIEW_ALONGSIDE").as_deref() {
         Ok("ext4") => {
             survey.layout.partitions[1].kind = LINUX_TYPE.into();
@@ -188,7 +224,9 @@ fn fixture() -> Survey {
         }
         Ok("missing-tools") => {
             survey.sources[0].capacity = 0;
-            survey.sources[0].error = "Resizing NTFS requires ntfsresize (package ntfs-3g). Install it in the live system and refresh, or use unallocated space.".into();
+            survey.sources[0].error =
+                "Resizing NTFS requires ntfsresize (package ntfs-3g). Install it in the live system and refresh, or use unallocated space."
+                    .into();
         }
         Ok("no-efi") => survey.efis.clear(),
         _ => {}
@@ -219,7 +257,14 @@ fn load(app: &App, index: Option<usize>, keep: Option<Request>) {
                     vec![PathBuf::from("/dev/nvme0n1")],
                     vec!["Samsung SSD — 512 GiB".into()],
                     0,
-                    if std::env::var("AZFS_PREVIEW_ALONGSIDE").as_deref() == Ok("mbr") { Err("This disk does not use GPT. Automatic MBR conversion is not supported; existing data has not been changed.".into()) } else { Ok(fixture()) },
+                    if std::env::var("AZFS_PREVIEW_ALONGSIDE").as_deref() == Ok("mbr") {
+                        Err(
+                            "This disk does not use GPT. Automatic MBR conversion is not supported; existing data has not been changed."
+                                .into(),
+                        )
+                    } else {
+                        Ok(fixture())
+                    },
                 ));
             }
             let disks = device::disk_choices().map_err(|e| e.to_string())?;
@@ -228,7 +273,9 @@ fn load(app: &App, index: Option<usize>, keep: Option<Request>) {
                 .iter()
                 .map(|d| format!("{} — {} — {}", d.label, d.model, d.size))
                 .collect::<Vec<_>>();
-            let same = |a: &PathBuf, b: &PathBuf| a == b || a.canonicalize().ok() == b.canonicalize().ok();
+            let same = |a: &PathBuf, b: &PathBuf| {
+                a == b || a.canonicalize().ok() == b.canonicalize().ok()
+            };
             let selected_index = disk
                 .as_ref()
                 .and_then(|d| paths.iter().position(|p| same(p, d)))
@@ -266,7 +313,10 @@ fn load(app: &App, index: Option<usize>, keep: Option<Request>) {
                     // still describes this disk.
                     let kept = keep.as_ref().and_then(|r| {
                         let source = survey.sources.iter().position(|s| s.source == r.source)?;
-                        let efi = survey.efis.iter().position(|e| e.number == r.efi.existing_partition())?;
+                        let efi = survey
+                            .efis
+                            .iter()
+                            .position(|e| e.number == r.efi.existing_partition())?;
                         (r.before == survey.layout).then_some((source, efi))
                     });
                     if let Some((source, efi)) = kept {
@@ -287,7 +337,9 @@ fn load(app: &App, index: Option<usize>, keep: Option<Request>) {
                         return;
                     }
                     if keep.is_some() {
-                        SESSION.with_borrow_mut(|s| s.notice = "The previous plan no longer matches this disk; this is a new plan built from the current layout.".into());
+                        SESSION.with_borrow_mut(|s| {
+                            s.notice = "The previous plan no longer matches this disk; this is a new plan built from the current layout.".into()
+                        });
                     }
                     state.set_source_index(
                         survey
@@ -405,6 +457,55 @@ fn segments(layout: &Layout, plan: Option<&Plan>) -> ModelRc<DiskSegment> {
     ))
 }
 
+/// Swap reserved inside the allocation: the kept plan's figure, or the
+/// configured size when a swap partition is wanted.
+fn planned_swap_bytes(
+    kept: Option<&Request>,
+    config: &GlobalConfig,
+    state: &AlongsideState,
+) -> u64 {
+    if let Some(k) = kept {
+        k.swap_bytes
+    } else if config.swap_mode.uses_partition() {
+        state.get_swap_size().round().clamp(1.0, 1024.0) as u64 * GIB
+    } else {
+        0
+    }
+}
+
+/// How much of the existing ESP the boot files need, and what reusing it means.
+fn efi_details(space: &EfiSpace, budget: BootSpace, insufficient: bool) -> Result<String, String> {
+    let required = budget
+        .required_bytes()
+        .map_err(|e| e.to_string())?
+        .div_ceil(MIB);
+    let consequence = if insufficient {
+        "It cannot be reused; select a separate EFI partition to continue."
+    } else if space.free_bytes < required + budget.image_bytes {
+        "Later ZFSBootMenu updates replace the image in place instead of writing a second copy first."
+    } else {
+        "Reusing it formats nothing and keeps the existing loaders."
+    };
+    Ok(format!(
+        "{} MiB free; {required} MiB is needed to reuse it. {consequence}",
+        space.free_bytes / MIB
+    ))
+}
+
+fn allocation_summary(plan: &Plan, layout: &Layout, swap_bytes: u64) -> String {
+    let zfs_sectors = plan.swap_start.unwrap_or(plan.end) - plan.zfs_start;
+    let efi = if plan.efi_start.is_some() {
+        " · New EFI: 512 MiB"
+    } else {
+        " · Existing EFI reused"
+    };
+    format!(
+        "New ZFS pool: {:.1} GiB · Swap: {} GiB{efi}",
+        sectors_gib(zfs_sectors, layout.sectorsize),
+        swap_bytes / GIB
+    )
+}
+
 fn rebuild(app: &App, config: &mut GlobalConfig) {
     if config.installation_mode != Some(InstallationMode::Alongside) {
         return;
@@ -434,33 +535,85 @@ fn rebuild(app: &App, config: &mut GlobalConfig) {
     let result = SESSION.with_borrow(|session| -> Result<Request, String> {
         let kept = session.kept.as_ref();
         let s = session.survey.as_ref().ok_or("Select a disk")?;
-        state.set_before(segments(&s.layout, None)); state.set_after(segments(&s.layout, None));
-        let source = s.sources.get(state.get_source_index() as usize).ok_or("No suitable partitions or unallocated space")?;
+        state.set_before(segments(&s.layout, None));
+        state.set_after(segments(&s.layout, None));
+        let source = s
+            .sources
+            .get(state.get_source_index() as usize)
+            .ok_or("No suitable partitions or unallocated space")?;
         state.set_details(source.detail.clone().into());
-        let swap_bytes = if let Some(k) = kept { k.swap_bytes } else if config.swap_mode.uses_partition() { state.get_swap_size().round().clamp(1.0, 1024.0) as u64 * GIB } else { 0 };
-        let min = gib(MIN_LINUX_BYTES + swap_bytes + if state.get_additional_efi() { ESP_BYTES } else { 0 }) as f32;
+        let swap_bytes = planned_swap_bytes(kept, config, &state);
+        let extra = if state.get_additional_efi() {
+            ESP_BYTES
+        } else {
+            0
+        };
+        let min = gib(MIN_LINUX_BYTES + swap_bytes + extra) as f32;
         let max = gib(source.capacity) as f32;
-        state.set_minimum(min); state.set_maximum(max);
+        state.set_minimum(min);
+        state.set_maximum(max);
         let all_bytes = source.capacity / MIB * MIB;
-        let allocation_bytes = if let Some(k) = kept { k.allocation_bytes } else if state.get_use_all() { all_bytes } else { (state.get_allocation().round().max(min) as u64).saturating_mul(GIB).min(all_bytes) };
+        let allocation_bytes = if let Some(k) = kept {
+            k.allocation_bytes
+        } else if state.get_use_all() {
+            all_bytes
+        } else {
+            (state.get_allocation().round().max(min) as u64)
+                .saturating_mul(GIB)
+                .min(all_bytes)
+        };
         state.set_allocation((gib(allocation_bytes) * 10.0).round() as f32 / 10.0);
-        let efi = s.efis.get(state.get_efi_index() as usize).ok_or("No existing EFI partition on this disk. Prepare an EFI partition before using this mode.")?;
+        let efi = s.efis.get(state.get_efi_index() as usize).ok_or(
+            "No existing EFI partition on this disk. Prepare an EFI partition before using this mode.",
+        )?;
         let space = efi.space.as_ref().map_err(Clone::clone)?;
         let budget = BootSpace::default();
         let insufficient = !space.sufficient(budget).map_err(|e| e.to_string())?;
         state.set_insufficient(insufficient);
-        let required = budget.required_bytes().map_err(|e| e.to_string())?.div_ceil(MIB);
-        state.set_efi_details(format!("{} MiB free; {required} MiB is needed to reuse it. {}", space.free_bytes / MIB, if insufficient { "It cannot be reused; select a separate EFI partition to continue." } else if space.free_bytes < required + budget.image_bytes { "Later ZFSBootMenu updates replace the image in place instead of writing a second copy first." } else { "Reusing it formats nothing and keeps the existing loaders." }).into());
-        if !source.error.is_empty() { return Err(source.error.clone()); }
-        if max < min { return Err(format!("At least {min:.0} GiB is needed for the ZFS pool, swap and EFI; only {max:.1} GiB is available. Reduce swap or choose another source.")); }
-        let efi_choice = if state.get_additional_efi() { EfiChoice::CreateSeparate { existing_partition: efi.number } } else { EfiChoice::Reuse { partition: efi.number } };
-        efi_choice.validate_space(space, budget).map_err(|e| e.to_string())?;
-        let request = match kept { Some(k) => k.clone(), None => Request { before: s.layout.clone(), source: source.source.clone(), efi: efi_choice, allocation_bytes, swap_bytes } };
+        state.set_efi_details(efi_details(space, budget, insufficient)?.into());
+        if !source.error.is_empty() {
+            return Err(source.error.clone());
+        }
+        if max < min {
+            return Err(format!(
+                "At least {min:.0} GiB is needed for the ZFS pool, swap and EFI; only {max:.1} GiB is available. Reduce swap or choose another source."
+            ));
+        }
+        let efi_choice = if state.get_additional_efi() {
+            EfiChoice::CreateSeparate {
+                existing_partition: efi.number,
+            }
+        } else {
+            EfiChoice::Reuse {
+                partition: efi.number,
+            }
+        };
+        efi_choice
+            .validate_space(space, budget)
+            .map_err(|e| e.to_string())?;
+        let request = match kept {
+            Some(k) => k.clone(),
+            None => Request {
+                before: s.layout.clone(),
+                source: source.source.clone(),
+                efi: efi_choice,
+                allocation_bytes,
+                swap_bytes,
+            },
+        };
         let plan = request.plan().map_err(|e| e.to_string())?;
         state.set_after(segments(&s.layout, Some(&plan)));
-        state.set_allocation_summary(format!("New ZFS pool: {:.1} GiB · Swap: {} GiB{}", sectors_gib(plan.swap_start.unwrap_or(plan.end) - plan.zfs_start, s.layout.sectorsize), swap_bytes / GIB, if plan.efi_start.is_some() { " · New EFI: 512 MiB" } else { " · Existing EFI reused" }).into());
+        state.set_allocation_summary(allocation_summary(&plan, &s.layout, swap_bytes).into());
         if let Some((old, size)) = &plan.shrink {
-            state.set_details(format!("{}: {:.0} → {:.0} GiB. Its start and existing data are preserved.", old.node.display(), sectors_gib(old.size, s.layout.sectorsize), sectors_gib(*size, s.layout.sectorsize)).into());
+            state.set_details(
+                format!(
+                    "{}: {:.0} → {:.0} GiB. Its start and existing data are preserved.",
+                    old.node.display(),
+                    sectors_gib(old.size, s.layout.sectorsize),
+                    sectors_gib(*size, s.layout.sectorsize)
+                )
+                .into(),
+            );
         }
         Ok(request)
     });
