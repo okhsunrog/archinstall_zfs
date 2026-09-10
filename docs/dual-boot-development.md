@@ -110,6 +110,10 @@ uv run slint-ui/scripts/alongside_review.py --output /tmp/alongside-review
 SLINT_BACKEND=headless target/debug/azfs --preview alongside
 ```
 
+Filesystem minimum-size probes are reused across refreshes and disk
+re-selection while the partition table and filesystem type are unchanged; the
+ESP capacity check always runs again, and execution re-probes before writing.
+
 `AZFS_PREVIEW_ESP=small` exercises explicit additional-ESP consent.
 `AZFS_PREVIEW_ALONGSIDE=ext4|missing-tools|no-efi|mbr` selects edge cases without
 probing or changing the host. Preview mode remains mandatory.

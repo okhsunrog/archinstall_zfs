@@ -11,6 +11,7 @@ use archinstall_zfs_core::{
 use slint::{ComponentHandle, ModelRc, VecModel};
 use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
+#[derive(Clone)]
 struct Source {
     source: SpaceSource,
     label: String,
@@ -18,11 +19,13 @@ struct Source {
     detail: String,
     error: String,
 }
+#[derive(Clone)]
 struct Efi {
     number: u32,
     label: String,
     space: Result<EfiSpace, String>,
 }
+#[derive(Clone)]
 struct Survey {
     layout: Layout,
     sources: Vec<Source>,
@@ -51,7 +54,12 @@ fn strings(values: Vec<String>) -> ModelRc<slint::SharedString> {
     ))
 }
 
-fn survey(disk: &std::path::Path) -> Result<Survey, String> {
+/// Filesystem minimum-size probes (e2fsck, resize2fs -P, ntfsresize) take
+/// seconds to minutes per partition. Their results from `previous` are reused
+/// while the partition table and filesystem type are unchanged; the ESP
+/// capacity check is cheap and always repeated. Execution probes again before
+/// touching anything.
+fn survey(disk: &std::path::Path, previous: Option<&Survey>) -> Result<Survey, String> {
     check_tools(&[
         ("sfdisk", "util-linux"),
         ("sgdisk", "gptfdisk"),
@@ -81,8 +89,25 @@ fn survey(disk: &std::path::Path) -> Result<Survey, String> {
             .find(|f| f.path == p.node)
             .and_then(|f| f.fstype.as_deref())
             .unwrap_or("unknown filesystem");
-        let minimum = minimum_size(&RealRunner, p, fs);
         let size = p.size * layout.sectorsize;
+        let label = format!(
+            "{} — {} — {:.1} GiB",
+            p.node.display(),
+            fs,
+            size as f64 / GIB as f64
+        );
+        if let Some(cached) = previous
+            .filter(|prev| prev.layout == layout)
+            .and_then(|prev| {
+                prev.sources.iter().find(|s| {
+                    s.source == SpaceSource::Shrink { partition: number } && s.label == label
+                })
+            })
+        {
+            sources.push(cached.clone());
+            continue;
+        }
+        let minimum = minimum_size(&RealRunner, p, fs);
         let (capacity, error) = match minimum {
             Ok(min) => (
                 size.saturating_sub(min.saturating_add(2 * MIB)),
@@ -90,7 +115,7 @@ fn survey(disk: &std::path::Path) -> Result<Survey, String> {
             ),
             Err(e) => (0, format!("{e:#}")),
         };
-        sources.push(Source { source: SpaceSource::Shrink { partition: number }, label: format!("{} — {} — {:.1} GiB", p.node.display(), fs, size as f64 / GIB as f64), capacity, detail: format!("Keep {} at its current start; reduce only its end. Up to {:.0} GiB can be allocated here.", p.node.display(), capacity as f64 / GIB as f64), error });
+        sources.push(Source { source: SpaceSource::Shrink { partition: number }, label, capacity, detail: format!("Keep {} at its current start; reduce only its end. Up to {:.0} GiB can be allocated here.", p.node.display(), capacity as f64 / GIB as f64), error });
     }
     for (start, end) in layout.free_extents().map_err(|e| e.to_string())? {
         let alignment = MIB / layout.sectorsize;
@@ -187,6 +212,7 @@ fn load(app: &App, index: Option<usize>, keep: Option<Request>) {
     let disk = index
         .and_then(|i| SESSION.with_borrow(|s| s.disks.get(i).cloned()))
         .or_else(|| keep.as_ref().map(|r| r.before.device.clone()));
+    let previous = SESSION.with_borrow(|s| s.survey.clone());
     let weak = app.as_weak();
     tokio::spawn(async move {
         let result = tokio::task::spawn_blocking(move || -> Result<_, String> {
@@ -212,7 +238,7 @@ fn load(app: &App, index: Option<usize>, keep: Option<Request>) {
             let inspected = paths
                 .get(selected_index)
                 .ok_or_else(|| "No disks found".to_string())
-                .and_then(|p| survey(p));
+                .and_then(|p| survey(p, previous.as_ref()));
             Ok((paths, names, selected_index, inspected))
         })
         .await
@@ -395,6 +421,21 @@ fn rebuild(app: &App, config: &mut GlobalConfig) {
         return;
     }
     state.set_swap_mode(config.swap_mode.index() as i32);
+    // A kept plan whose swap no longer matches the configured method (changed
+    // while another storage mode was selected) is rebuilt from the controls.
+    let wants_swap = matches!(
+        config.swap_mode,
+        SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
+    );
+    SESSION.with_borrow_mut(|s| {
+        if s.kept
+            .as_ref()
+            .is_some_and(|k| (k.swap_bytes > 0) != wants_swap)
+        {
+            s.kept = None;
+            s.notice.clear();
+        }
+    });
     state.set_allocation_summary("".into());
     state.set_insufficient(false);
     state.set_efi_details("".into());
