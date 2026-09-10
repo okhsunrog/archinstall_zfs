@@ -1,7 +1,18 @@
+use std::path::Path;
+
 use archinstall_zfs_core::config::edit::DeviceSetting;
 use archinstall_zfs_core::config::types::{GlobalConfig, InstallationMode};
 
-use super::{MenuItem, MenuKind};
+use super::MenuItem;
+
+fn device_row(setting: DeviceSetting, label: &'static str, path: Option<&Path>) -> MenuItem {
+    MenuItem::custom(
+        setting.as_str(),
+        label,
+        path.map(|p| p.display().to_string())
+            .unwrap_or("Not set".into()),
+    )
+}
 
 pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     let mode = config.installation_mode;
@@ -9,16 +20,11 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
 
     // Show disk picker for FullDisk mode
     if matches!(mode, Some(InstallationMode::FullDisk) | None) {
-        items.push(MenuItem {
-            key: DeviceSetting::Disk.as_str(),
-            label: "Disk",
-            value: config
-                .disk
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or("Not set".into()),
-            kind: MenuKind::Custom,
-        });
+        items.push(device_row(
+            DeviceSetting::Disk,
+            "Disk",
+            config.disk.as_deref(),
+        ));
     }
 
     // Show partition pickers for NewPool/ExistingPool
@@ -26,44 +32,33 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
         mode,
         Some(InstallationMode::NewPool) | Some(InstallationMode::ExistingPool)
     ) {
-        items.push(MenuItem {
-            key: DeviceSetting::EfiPartition.as_str(),
-            label: "EFI partition",
-            value: config
-                .efi_partition
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or("Not set".into()),
-            kind: MenuKind::Custom,
-        });
+        items.push(device_row(
+            DeviceSetting::EfiPartition,
+            "EFI partition",
+            config.efi_partition.as_deref(),
+        ));
     }
     if matches!(mode, Some(InstallationMode::NewPool)) {
-        items.push(MenuItem {
-            key: DeviceSetting::ZfsPartition.as_str(),
-            label: "ZFS partition",
-            value: config
-                .zfs_partition
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or("Not set".into()),
-            kind: MenuKind::Custom,
-        });
+        items.push(device_row(
+            DeviceSetting::ZfsPartition,
+            "ZFS partition",
+            config.zfs_partition.as_deref(),
+        ));
     }
 
     // The graphical installer owns alongside planning. A plan loaded from a
     // configuration file is shown so the page is not blank; it cannot be
     // edited here.
     if matches!(mode, Some(InstallationMode::Alongside)) {
-        items.push(MenuItem {
-            key: "",
-            label: "Alongside plan",
-            value: config
+        items.push(MenuItem::header(
+            "",
+            "Alongside plan",
+            config
                 .alongside
                 .as_ref()
                 .map(alongside_summary)
                 .unwrap_or_else(|| "Missing; create it with the graphical installer (azfs)".into()),
-            kind: MenuKind::SectionHeader,
-        });
+        ));
     }
 
     items

@@ -15,11 +15,10 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     // The graphical allocation editor owns alongside plan construction. Do not
     // expose an option that this frontend cannot configure.
     items.retain(|item| !matches!(item.kind, MenuKind::RadioOption { index, .. } if index == InstallationMode::Alongside.index()));
-    items.push(MenuItem {
-        key: "",
-        label: "For installation alongside another OS, use the graphical installer (azfs).",
-        value: String::new(),
-        kind: MenuKind::SectionHeader,
-    });
+    items.push(MenuItem::header(
+        "",
+        "For installation alongside another OS, use the graphical installer (azfs).",
+        String::new(),
+    ));
     items
 }

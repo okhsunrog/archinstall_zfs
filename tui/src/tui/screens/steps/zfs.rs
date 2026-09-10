@@ -8,22 +8,21 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     let has_swap_partition = config.swap_mode.uses_partition();
 
     let mut items = vec![
-        MenuItem {
-            key: TextSetting::PoolName.as_str(),
-            label: "Pool name",
-            value: config.pool_name.clone().unwrap_or("Not set".into()),
-            kind: if matches!(mode, Some(InstallationMode::ExistingPool)) {
+        MenuItem::new(
+            TextSetting::PoolName.as_str(),
+            "Pool name",
+            config.pool_name.clone().unwrap_or("Not set".into()),
+            if matches!(mode, Some(InstallationMode::ExistingPool)) {
                 MenuKind::Custom
             } else {
                 MenuKind::Text
             },
-        },
-        MenuItem {
-            key: TextSetting::DatasetPrefix.as_str(),
-            label: "Dataset prefix",
-            value: config.dataset_prefix.clone(),
-            kind: MenuKind::Text,
-        },
+        ),
+        MenuItem::text(
+            TextSetting::DatasetPrefix.as_str(),
+            "Dataset prefix",
+            config.dataset_prefix.clone(),
+        ),
     ];
 
     items.extend(choice_group(
@@ -39,16 +38,11 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     ));
 
     if config.zfs_encryption_mode != ZfsEncryptionMode::None {
-        items.push(MenuItem {
-            key: TextSetting::EncryptionPassword.as_str(),
-            label: "Encryption password",
-            value: if config.zfs_encryption_password.is_some() {
-                "Set".into()
-            } else {
-                "Not set".into()
-            },
-            kind: MenuKind::Password,
-        });
+        items.push(MenuItem::secret(
+            TextSetting::EncryptionPassword.as_str(),
+            "Encryption password",
+            config.zfs_encryption_password.is_some(),
+        ));
     }
 
     items.extend(choice_group(
@@ -58,27 +52,25 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     ));
 
     if matches!(mode, Some(InstallationMode::FullDisk)) && has_swap_partition {
-        items.push(MenuItem {
-            key: TextSetting::SwapPartitionSize.as_str(),
-            label: "Swap size",
-            value: config
+        items.push(MenuItem::text(
+            TextSetting::SwapPartitionSize.as_str(),
+            "Swap size",
+            config
                 .swap_partition_size
                 .clone()
                 .unwrap_or("Not set".into()),
-            kind: MenuKind::Text,
-        });
+        ));
     }
     if !matches!(mode, Some(InstallationMode::FullDisk) | None) && has_swap_partition {
-        items.push(MenuItem {
-            key: DeviceSetting::SwapPartition.as_str(),
-            label: "Swap partition",
-            value: config
+        items.push(MenuItem::custom(
+            DeviceSetting::SwapPartition.as_str(),
+            "Swap partition",
+            config
                 .swap_partition
                 .as_ref()
                 .map(|p| p.display().to_string())
                 .unwrap_or("Not set".into()),
-            kind: MenuKind::Custom,
-        });
+        ));
     }
 
     items.extend(choice_group(
