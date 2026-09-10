@@ -130,7 +130,8 @@ fixture, allocates 32 GiB by shrinking ext4, and checks retained payloads before
 booting the newly installed system. It does not represent a bootable Windows or
 second Linux installation. Do not claim existing-OS bootability from this test.
 
-The boot publisher has an independent real FAT test, using only its own image:
+The boot publisher has an independent real FAT test, using only its own image.
+CI runs it on the VM runner (`zbm-publisher` job in `check.yml`):
 
 ```sh
 sudo bash core/tests/zbm-update-fixture.sh
