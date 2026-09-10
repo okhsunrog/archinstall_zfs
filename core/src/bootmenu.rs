@@ -348,11 +348,7 @@ fn ensure_efi_entry(
     Ok(())
 }
 
-pub fn create_efi_entries(
-    runner: &dyn CommandRunner,
-    efi_partition: &Path,
-    target: &Path,
-) -> Result<()> {
+pub fn create_efi_entries(runner: &dyn CommandRunner, efi_partition: &Path) -> Result<()> {
     let location = resolve_efi_location(runner, efi_partition)?;
 
     let existing = runner.run("efibootmgr", &["-v"])?;
@@ -377,8 +373,6 @@ pub fn create_efi_entries(
             tracing::warn!(number, "failed to remove the obsolete backup EFI entry");
         }
     }
-    let _ = target;
-
     tracing::info!("created ZFSBootMenu EFI boot entry");
     Ok(())
 }
@@ -549,18 +543,9 @@ mod tests {
         assert!(content.contains("Target = zfs-utils"));
     }
 
-    fn target_with_zbm() -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap();
-        let zbm = dir.path().join("boot/efi/EFI/zbm");
-        fs::create_dir_all(&zbm).unwrap();
-        fs::write(zbm.join("vmlinuz.EFI"), b"main").unwrap();
-        dir
-    }
-
     #[test]
     fn test_create_efi_entries_uses_the_selected_disk_and_partition() {
         // With locally-built ZBM, cmdline is embedded - no -u needed
-        let target = target_with_zbm();
         let runner = RecordingRunner::new(vec![
             CannedResponse {
                 stdout: "/dev/nvme0n1 7 AABB-CCDD\n".into(),
@@ -573,12 +558,7 @@ mod tests {
             CannedResponse::default(), // efibootmgr -c (main)
         ]);
 
-        create_efi_entries(
-            &runner,
-            Path::new("/dev/disk/by-id/disk-part7"),
-            target.path(),
-        )
-        .unwrap();
+        create_efi_entries(&runner, Path::new("/dev/disk/by-id/disk-part7")).unwrap();
 
         let calls = runner.calls();
         let main_call = &calls[2];
@@ -595,7 +575,6 @@ mod tests {
 
     #[test]
     fn test_matching_entry_is_kept() {
-        let target = target_with_zbm();
         let runner = RecordingRunner::new(vec![
             CannedResponse {
                 stdout: "/dev/sda 1 aabb-ccdd\n".into(),
@@ -607,14 +586,13 @@ mod tests {
             },
         ]);
 
-        create_efi_entries(&runner, Path::new("/dev/sda1"), target.path()).unwrap();
+        create_efi_entries(&runner, Path::new("/dev/sda1")).unwrap();
 
         assert_eq!(runner.calls().len(), 2);
     }
 
     #[test]
     fn test_obsolete_backup_entry_is_removed_and_main_entry_created() {
-        let target = target_with_zbm();
         let runner = RecordingRunner::new(vec![
             CannedResponse {
                 stdout: "/dev/sda 1 aabb-ccdd\n".into(),
@@ -628,7 +606,7 @@ mod tests {
             CannedResponse::default(),
         ]);
 
-        create_efi_entries(&runner, Path::new("/dev/sda1"), target.path()).unwrap();
+        create_efi_entries(&runner, Path::new("/dev/sda1")).unwrap();
 
         let calls = runner.calls();
         assert_eq!(calls.len(), 4);
@@ -638,7 +616,6 @@ mod tests {
 
     #[test]
     fn test_stale_same_name_entry_is_replaced() {
-        let target = target_with_zbm();
         let runner = RecordingRunner::new(vec![
             CannedResponse {
                 stdout: "/dev/sda 3 aabb-ccdd\n".into(),
@@ -652,7 +629,7 @@ mod tests {
             CannedResponse::default(),
         ]);
 
-        create_efi_entries(&runner, Path::new("/dev/sda3"), target.path()).unwrap();
+        create_efi_entries(&runner, Path::new("/dev/sda3")).unwrap();
 
         let calls = runner.calls();
         assert_eq!(calls[2].args, ["-b", "00AF", "-B"]);

@@ -18,16 +18,6 @@ pub fn get_kernel_info(distro: &'static Distribution, name: &str) -> Option<&'st
     distro.kernels.iter().find(|k| k.name == name)
 }
 
-pub fn get_zfs_packages(
-    distro: &'static Distribution,
-    kernel: &str,
-    mode: ZfsModuleMode,
-) -> Vec<String> {
-    let mut packages = vec!["zfs-utils".to_string()];
-    packages.extend(zfs_module_packages(distro, kernel, mode));
-    packages
-}
-
 /// The packages that provide a ZFS module for `kernel`, without `zfs-utils`
 /// (which is shared by every kernel and installed once).
 ///
@@ -58,19 +48,6 @@ pub fn zfs_module_packages(
             vec!["zfs-dkms".to_string(), info.headers_package.to_string()]
         }
     }
-}
-
-pub fn supports_precompiled(distro: &'static Distribution, kernel: &str) -> bool {
-    get_kernel_info(distro, kernel)
-        .and_then(|k| k.precompiled_package)
-        .is_some()
-}
-
-/// Query a package version from the local pacman sync database using libalpm.
-/// Returns None if the package is not found in any configured repo.
-pub async fn query_package_version(package: &str) -> Result<Option<String>> {
-    let versions = query_packages(&[package]).await?;
-    Ok(versions.get(package).cloned())
 }
 
 /// Initialize an alpm handle from the system pacman.conf.
@@ -243,53 +220,31 @@ mod tests {
     }
 
     #[test]
-    fn test_get_zfs_packages_precompiled() {
-        let pkgs = get_zfs_packages(
+    fn precompiled_module_is_preferred_when_the_kernel_has_one() {
+        let pkgs = zfs_module_packages(
             crate::distro::default(),
             "linux-lts",
             ZfsModuleMode::Precompiled,
         );
-        assert!(pkgs.contains(&"zfs-utils".to_string()));
-        assert!(pkgs.contains(&"zfs-linux-lts".to_string()));
-        assert!(!pkgs.contains(&"zfs-dkms".to_string()));
+        assert_eq!(pkgs, ["zfs-linux-lts"]);
     }
 
     #[test]
-    fn test_get_zfs_packages_dkms() {
-        let pkgs = get_zfs_packages(crate::distro::default(), "linux", ZfsModuleMode::Dkms);
-        assert!(pkgs.contains(&"zfs-utils".to_string()));
+    fn dkms_brings_the_kernel_headers() {
+        let pkgs = zfs_module_packages(crate::distro::default(), "linux", ZfsModuleMode::Dkms);
         assert!(pkgs.contains(&"zfs-dkms".to_string()));
         assert!(pkgs.contains(&"linux-headers".to_string()));
     }
 
     #[test]
-    fn test_supports_precompiled() {
-        assert!(supports_precompiled(crate::distro::default(), "linux-lts"));
-        assert!(supports_precompiled(crate::distro::default(), "linux"));
-        assert!(!supports_precompiled(
-            crate::distro::default(),
-            "linux-custom"
-        ));
-    }
-
-    // Integration test: only runs on Arch with synced pacman DB
-    #[tokio::test]
-    async fn test_query_package_version_on_arch() {
-        if !std::path::Path::new("/var/lib/pacman/sync").exists() {
-            return; // Skip on non-Arch
-        }
-        let ver = query_package_version("linux-lts").await;
-        match ver {
-            Ok(Some(v)) => {
-                assert!(!v.is_empty());
-                tracing::info!(version = v, "linux-lts version from alpm");
-            }
-            Ok(None) => {
-                // DB might not be synced
-            }
-            Err(_) => {
-                // libalpm not available
-            }
-        }
+    fn an_unknown_kernel_has_no_module_packages() {
+        assert!(
+            zfs_module_packages(
+                crate::distro::default(),
+                "linux-custom",
+                ZfsModuleMode::Precompiled
+            )
+            .is_empty()
+        );
     }
 }

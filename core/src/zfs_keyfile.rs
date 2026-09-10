@@ -43,10 +43,6 @@ pub fn pool_encryption_properties(key_path: &Path) -> Vec<(&'static str, String)
     ]
 }
 
-pub fn dataset_encryption_properties(key_path: &Path) -> Vec<(&'static str, String)> {
-    pool_encryption_properties(key_path)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

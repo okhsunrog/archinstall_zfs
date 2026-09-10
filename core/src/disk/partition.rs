@@ -213,13 +213,6 @@ pub fn mount_efi(
     Ok(())
 }
 
-pub fn umount_efi(runner: &dyn CommandRunner, mountpoint: &Path) -> Result<()> {
-    let mount_path = mountpoint.join("boot/efi");
-    let mount_str = mount_path.to_string_lossy();
-    let _ = runner.run("umount", &[&*mount_str]);
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

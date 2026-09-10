@@ -223,7 +223,7 @@ fn base_dataset_props(
 ) -> Vec<(&'static str, String)> {
     match encryption {
         ZfsEncryptionMode::Dataset => {
-            let mut p = crate::zfs_keyfile::dataset_encryption_properties(key_path);
+            let mut p = crate::zfs_keyfile::pool_encryption_properties(key_path);
             p.push(("mountpoint", "none".to_string()));
             p.push(("compression", compression.to_string()));
             p.push(("overlay", "off".to_string()));

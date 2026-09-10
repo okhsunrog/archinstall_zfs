@@ -342,16 +342,6 @@ impl AlpmContext {
         Ok(())
     }
 
-    /// Get a reference to the underlying alpm handle.
-    pub fn handle(&self) -> &Alpm {
-        &self.handle
-    }
-
-    /// Get a mutable reference to the underlying alpm handle.
-    pub fn handle_mut(&mut self) -> &mut Alpm {
-        &mut self.handle
-    }
-
     fn find_package(&self, name: &str) -> Result<&alpm::Package> {
         for db in self.handle.syncdbs() {
             if let Ok(pkg) = db.pkg(name) {

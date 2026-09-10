@@ -3,7 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{CommandRunner, check_exit};
+use crate::system::cmd::CommandRunner;
 
 pub fn copy_iso_network(runner: &dyn CommandRunner, target: &Path) -> Result<()> {
     // Copy systemd-networkd configs
@@ -40,28 +40,6 @@ pub fn copy_iso_network(runner: &dyn CommandRunner, target: &Path) -> Result<()>
     }
 
     tracing::info!("copied ISO network configuration");
-    Ok(())
-}
-
-pub fn install_network_manager(
-    runner: &dyn CommandRunner,
-    target: &Path,
-    cancel: &tokio_util::sync::CancellationToken,
-    download_config: crate::system::async_download::DownloadConfig,
-) -> Result<()> {
-    let target_conf = target.join("etc/pacman.conf");
-    let mut ctx =
-        crate::system::alpm_pacman::AlpmContext::for_target(target, &target_conf, download_config)?;
-    ctx.sync_databases(false)?;
-    ctx.install_packages(&["networkmanager"], cancel, None)?;
-
-    let target_str = target.to_string_lossy();
-    let output = runner.run(
-        "systemctl",
-        &["--root", &target_str, "enable", "NetworkManager"],
-    )?;
-    check_exit(&output, "enable NetworkManager")?;
-
     Ok(())
 }
 
