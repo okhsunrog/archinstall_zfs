@@ -78,6 +78,16 @@ class Preview:
         inputs = [e for e in self.tree()['elements'] if e.get('accessibleRole') == 'TextInput']
         self.data('set_element_value', elementHandle=inputs[index]['handle'], value=value)
 
+    def fill_labeled(self, label, value):
+        self.data('set_element_value', elementHandle=self.wait('TextInput', label)['handle'], value=value)
+
+    def properties(self, role, label):
+        return self.data('get_element_properties', elementHandle=self.wait(role, label)['handle'])
+
+    def select(self, label, option):
+        self.click('Combobox', label)
+        self.click('ListItem', option)
+
     def key(self, text):
         self.data('dispatch_key_event', windowHandle=self.window, text=text)
 
@@ -92,6 +102,26 @@ class Preview:
 
     def click(self, role, label):
         self.data('click_element', elementHandle=self.wait(role, label)['handle'])
+
+    def reveal_by_tab(self, role, label):
+        """Navigate real focusable controls so an offscreen target scrolls into view."""
+        for _ in range(50):
+            e = self.element(role, label)
+            if e and 100 <= e['absolutePosition']['y'] and e['absolutePosition']['y'] + e['size']['height'] < self.size[1] / self.scale - 70:
+                return
+            self.key('\t')
+        raise AssertionError(f'Cannot reach {label} by Tab')
+
+    def wait_value(self, role, label, value):
+        """Reveal a focusable control and wait until Rust has set its value."""
+        self.reveal_by_tab(role, label)
+        end = time.monotonic() + 15
+        while time.monotonic() < end:
+            e = self.element(role, label)
+            if e and e.get('accessibleValue') == value:
+                return
+            time.sleep(.1)
+        raise AssertionError(f'{label} did not reach {value}')
 
     def close(self):
         self.process.terminate()

@@ -9,22 +9,9 @@ from pathlib import Path
 from review import Preview
 
 
-def properties(p, role, label):
-    return p.data("get_element_properties", elementHandle=p.wait(role, label)["handle"])
-
-
-def fill(p, label, value):
-    p.data("set_element_value", elementHandle=p.wait("TextInput", label)["handle"], value=value)
-
-
-def select(p, label, option):
-    p.click('Combobox', label)
-    p.click('ListItem', option)
-
-
 def assign(p, label, device):
     p.click('Button', label)
-    fill(p, 'Search storage', device)
+    p.fill_labeled('Search storage', device)
     p.click('ListItem', device)
     p.click('Button', 'Use this device')
 
@@ -33,15 +20,15 @@ def storage(p):
     p.click('Button', 'Change New ZFS pool')
     p.wait('ListItem', '/dev/nvme0n1p2')
     p.screenshot('partition-picker')
-    fill(p, 'Search storage', '/dev/sdb')
+    p.fill_labeled('Search storage', '/dev/sdb')
     p.wait('ListItem', '/dev/sdb1')
-    assert properties(p, 'ListItem', '/dev/sdb1').get('accessibleEnabled', False) is False
+    assert p.properties('ListItem', '/dev/sdb1').get('accessibleEnabled', False) is False
     p.screenshot('installer-media-unavailable')
-    fill(p, 'Search storage', '/dev/nvme0n1p1')
+    p.fill_labeled('Search storage', '/dev/nvme0n1p1')
     p.wait('ListItem', '/dev/nvme0n1p1')
-    assert properties(p, 'ListItem', '/dev/nvme0n1p1').get('accessibleEnabled', False) is False
+    assert p.properties('ListItem', '/dev/nvme0n1p1').get('accessibleEnabled', False) is False
     p.screenshot('efi-role-unavailable')
-    fill(p, 'Search storage', '/dev/sda4')
+    p.fill_labeled('Search storage', '/dev/sda4')
     p.click('ListItem', '/dev/sda4')
     p.click('Button', 'Details')
     p.screenshot('selected-partition-details')
@@ -49,9 +36,9 @@ def storage(p):
     p.wait('Text', '/dev/sda4')
     p.screenshot('new-pool-assigned')
     p.click('Button', 'Change EFI boot partition')
-    fill(p, 'Search storage', '/dev/sda4')
+    p.fill_labeled('Search storage', '/dev/sda4')
     p.wait('ListItem', '/dev/sda4')
-    assert properties(p, 'ListItem', '/dev/sda4').get('accessibleEnabled', False) is False
+    assert p.properties('ListItem', '/dev/sda4').get('accessibleEnabled', False) is False
     p.key('\u001b')
     p.wait('Button', 'Change EFI boot partition')
     p.screenshot('cancel-preserves-selection')
@@ -59,13 +46,13 @@ def storage(p):
     p.click('TextInput', 'New pool name')
     p.key('\t')
     p.key('reviewbe')
-    assert properties(p, 'TextInput', 'Boot environment')['accessibleValue'] == 'reviewbe'
+    assert p.properties('TextInput', 'Boot environment')['accessibleValue'] == 'reviewbe'
     p.wait('Text', '2 / 6')  # Tab moves through fields, not wizard steps.
-    select(p, 'Encryption', 'Encrypt base dataset only')
+    p.select('Encryption', 'Encrypt base dataset only')
     p.click('TextInput', 'Encryption passphrase')
-    fill(p, 'Encryption passphrase', 'a preview passphrase 123 qjk')
+    p.fill_labeled('Encryption passphrase', 'a preview passphrase 123 qjk')
     p.key('\t')
-    select(p, 'Swap method', 'Swap partition (encrypted)')
+    p.select('Swap method', 'Swap partition (encrypted)')
     p.key('\t')
     assign(p, 'Choose Swap partition', '/dev/sda2')
     p.screenshot('zfs-encryption-swap')
@@ -74,7 +61,7 @@ def storage(p):
     p.screenshot('zfs-additional-settings')
     p.click('Button', 'Review')
     p.wait('Text', 'Storage changes during installation')
-    assert properties(p, 'Button', 'Install').get('accessibleEnabled', False) is True
+    assert p.properties('Button', 'Install').get('accessibleEnabled', False) is True
     p.screenshot('new-pool-review')
     p.click('Button', 'Edit ZFS')
     p.wait('Text', '2 / 6')
@@ -91,23 +78,23 @@ def storage(p):
     p.click('Button', 'ZFS')
     p.click('TextInput', 'Boot environment')
     p.key('\t'); p.key('\t'); p.key('\t')
-    select(p, 'Swap method', 'None')
-    fill(p, 'Boot environment', 'previous')  # Existing mode has one inline name: the environment.
+    p.select('Swap method', 'None')
+    p.fill_labeled('Boot environment', 'previous')  # Existing mode has one inline name: the environment.
     p.click('Button', 'Review')
-    assert properties(p, 'Button', 'Install').get('accessibleEnabled', False) is False
+    assert p.properties('Button', 'Install').get('accessibleEnabled', False) is False
     p.screenshot('existing-environment-conflict')
     p.click('Button', 'Edit ZFS')
-    fill(p, 'Boot environment', 'freshbe')
+    p.fill_labeled('Boot environment', 'freshbe')
     p.click('Button', 'Review')
-    assert properties(p, 'Button', 'Install').get('accessibleEnabled', False) is True
+    assert p.properties('Button', 'Install').get('accessibleEnabled', False) is True
     p.screenshot('existing-pool-review')
     p.click('Button', 'Disk')
     p.click('RadioButton', 'Erase a disk')
     p.click('Button', 'Choose Disk to erase')
     p.wait('ListItem', '/dev/sdb')
-    assert not properties(p, 'ListItem', '/dev/sdb').get('accessibleEnabled', False)
+    assert not p.properties('ListItem', '/dev/sdb').get('accessibleEnabled', False)
     p.screenshot('disk-picker')
-    fill(p, 'Search storage', '/dev/sda')
+    p.fill_labeled('Search storage', '/dev/sda')
     p.click('ListItem', '/dev/sda')
     p.click('Button', 'Details')
     p.screenshot('disk-details')
@@ -115,27 +102,27 @@ def storage(p):
     p.wait('Text', '/dev/sda')
     p.screenshot('full-disk-assigned')
     p.click('Button', 'ZFS')
-    fill(p, 'New pool name', 'newroot')
+    p.fill_labeled('New pool name', 'newroot')
     p.click('Button', 'Review')
-    assert properties(p, 'Button', 'Install').get('accessibleEnabled', False) is True
+    assert p.properties('Button', 'Install').get('accessibleEnabled', False) is True
     p.screenshot('full-disk-review')
 
 
 def keyboard(p):
     p.click('Button', 'Change EFI boot partition')
-    fill(p, 'Search storage', '/dev/sda1')
+    p.fill_labeled('Search storage', '/dev/sda1')
     p.click('ListItem', '/dev/sda1')
     p.click('TextInput', 'Search storage')
     for _ in range(6):
         p.key('\t')
     p.key('no-match')
-    assert 'no-match' in properties(p, 'TextInput', 'Search storage')['accessibleValue']
+    assert 'no-match' in p.properties('TextInput', 'Search storage')['accessibleValue']
     p.wait('Text', 'No matches.')
     p.key('\u001b')
     p.key('\t')
     p.key('\n')  # Cancel returns to EFI; Tab reaches the ZFS assignment below it.
     p.wait('Text', 'Choose a ZFS partition')
-    fill(p, 'Search storage', '/dev/sda4')
+    p.fill_labeled('Search storage', '/dev/sda4')
     p.key('\t'); p.key('\t')  # Focus the list, then select by arrows.
     p.key('\uf701')
     p.wait('Text', 'Selected: /dev/sda4')
@@ -149,14 +136,14 @@ def edge(p, fixture):
     p.click('Button', 'Choose New ZFS pool' if fixture == 'empty' else 'Change New ZFS pool')
     if fixture == 'empty':
         p.wait('Text', 'No devices found.')
-        assert properties(p, 'Button', 'Use this device').get('accessibleEnabled', False) is False
+        assert p.properties('Button', 'Use this device').get('accessibleEnabled', False) is False
     elif fixture == 'many':
-        fill(p, 'Search storage', '/dev/sda20')
+        p.fill_labeled('Search storage', '/dev/sda20')
         p.click('ListItem', '/dev/sda20')
         p.click('Button', 'Use this device')
         p.wait('Text', '/dev/sda20')
     else:
-        fill(p, 'Search storage', '/dev/sda4')
+        p.fill_labeled('Search storage', '/dev/sda4')
         p.wait('ListItem', '/dev/sda4')
     p.screenshot('fixture-' + fixture)
 

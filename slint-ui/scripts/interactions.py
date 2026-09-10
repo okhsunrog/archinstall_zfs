@@ -7,16 +7,6 @@ import time
 from review import Preview
 
 
-def reveal_by_tab(p, role, label):
-    """Navigate real focusable controls so an offscreen target scrolls into view."""
-    for _ in range(50):
-        e = p.element(role, label)
-        if e and 100 <= e['absolutePosition']['y'] and e['absolutePosition']['y'] + e['size']['height'] < p.size[1] / p.scale - 70:
-            return
-        p.key('\t')
-    raise AssertionError(f'Cannot reach {label} by Tab')
-
-
 def system(p):
     p.click('Button', 'Hostname')
     p.fill(0, 'arch-workstation-long-name')
@@ -25,7 +15,7 @@ def system(p):
     p.click('Button', 'Kernel')
     p.screenshot('kernel')
     p.click('ListItem', 'linux — compatible')
-    reveal_by_tab(p, 'Button', 'Locale')
+    p.reveal_by_tab('Button', 'Locale')
     p.click('Button', 'Locale')
     p.fill(0, 'ru_RU')
     p.screenshot('locale-filter')
@@ -65,14 +55,14 @@ def desktop(p):
     p.click('Button', 'Optional packages')
     p.screenshot('optional-packages')
     p.click('Button', 'Done')
-    reveal_by_tab(p, 'Button', 'Extra packages')
+    p.reveal_by_tab('Button', 'Extra packages')
     p.screenshot('desktop-scrolled')
     p.click('Button', 'Extra packages')
     p.fill(0, 'fire')
     p.wait('Text', 'firefox')
     p.screenshot('packages')
     p.click('Button', 'Done')
-    reveal_by_tab(p, 'Button', 'Extra services')
+    p.reveal_by_tab('Button', 'Extra services')
     p.click('Button', 'Extra services')
     p.fill(0, 'cups')
     p.click('Button', 'Add')
@@ -213,7 +203,7 @@ def installation_layout(p):
 
 
 def invalid(p):
-    assert not p.data('get_element_properties', elementHandle=p.wait('Button', 'Install')['handle']).get('accessibleEnabled', False)
+    assert not p.properties('Button', 'Install').get('accessibleEnabled', False)
     p.wait('Text', 'Complete setup before installing')
     assert p.element('Button', 'Cancel installation') is None
     p.screenshot('validation-blocks-installation')

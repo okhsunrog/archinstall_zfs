@@ -7,11 +7,10 @@ import argparse
 from pathlib import Path
 
 from review import Preview
-from interactions import reveal_by_tab
 
 
 def click_setting(p, name):
-    reveal_by_tab(p, 'Button', name)
+    p.reveal_by_tab('Button', name)
     p.click('Button', name)
 
 
@@ -104,7 +103,7 @@ def desktop(p):
     click_setting(p, 'Profile')
     choice(p, 'Sway')
     p.screenshot('wayland-profile')
-    reveal_by_tab(p, 'Combobox', 'Seat access')
+    p.reveal_by_tab('Combobox', 'Seat access')
     p.click('Combobox', 'Seat access')
     p.screenshot('seat-access-choices')
     p.key('\u001b')
