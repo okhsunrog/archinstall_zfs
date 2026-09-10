@@ -1,16 +1,11 @@
 use archinstall_zfs_core::config::edit::{ChoiceSetting, DeviceSetting, TextSetting};
-use archinstall_zfs_core::config::types::{
-    GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode,
-};
+use archinstall_zfs_core::config::types::{GlobalConfig, InstallationMode, ZfsEncryptionMode};
 
 use super::{MenuItem, MenuKind, choice_group};
 
 pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     let mode = config.installation_mode;
-    let has_swap_partition = matches!(
-        config.swap_mode,
-        SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-    );
+    let has_swap_partition = config.swap_mode.uses_partition();
 
     let mut items = vec![
         MenuItem {

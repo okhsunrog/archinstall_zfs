@@ -24,7 +24,7 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use crate::boot_environment::BootEnvironment;
-use crate::config::types::{GlobalConfig, SwapMode};
+use crate::config::types::GlobalConfig;
 use crate::config::validation::ValidationError;
 use crate::system::async_download::{DownloadConfig, DownloadProgress};
 use crate::system::cmd::CommandRunner;
@@ -337,10 +337,7 @@ async fn install(
     tracing::info!(target: "metrics", event = "phase_start", num = 13u32, name = "Setting up ZFSBootMenu");
     ensure_not_cancelled(&cancel)?;
 
-    let zswap_on = matches!(
-        config.swap_mode,
-        SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-    );
+    let zswap_on = config.swap_mode.uses_partition();
     crate::bootmenu::set_zbm_properties(&be, config.init_system, zswap_on, config.set_bootfs)
         .await?;
 

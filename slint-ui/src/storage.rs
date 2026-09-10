@@ -6,7 +6,7 @@ use crate::{
 use archinstall_zfs_core::{
     config::{
         edit::{DeviceSetting, apply_device},
-        types::{GlobalConfig, InstallationMode, SwapMode},
+        types::{GlobalConfig, InstallationMode},
     },
     disk::device::{self, DeviceChoice},
 };
@@ -63,10 +63,7 @@ pub fn unavailable(choice: &DeviceChoice, role: &str, c: &GlobalConfig) -> Strin
         (
             "swap_partition",
             c.swap_partition.as_ref(),
-            matches!(
-                c.swap_mode,
-                SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-            ),
+            c.swap_mode.uses_partition(),
         ),
     ] {
         if active && role != other && selected.is_some_and(|p| same_device(p, &choice.path)) {
@@ -520,10 +517,7 @@ pub fn issues(c: &GlobalConfig) -> Vec<String> {
         if c.installation_mode == Some(InstallationMode::NewPool) {
             roles.push(("zfs_partition", c.zfs_partition.as_deref()));
         }
-        if matches!(
-            c.swap_mode,
-            SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-        ) {
+        if c.swap_mode.uses_partition() {
             roles.push(("swap_partition", c.swap_partition.as_deref()));
         }
         roles

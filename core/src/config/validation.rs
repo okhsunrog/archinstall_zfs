@@ -1,9 +1,7 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use super::types::{
-    GlobalConfig, InstallationMode, SwapMode, ZFS_PASSPHRASE_MIN_LENGTH, ZfsEncryptionMode,
-};
+use super::types::{GlobalConfig, InstallationMode, ZFS_PASSPHRASE_MIN_LENGTH, ZfsEncryptionMode};
 
 /// Something about the configuration that stops the installation.
 ///
@@ -159,10 +157,7 @@ impl GlobalConfig {
         errors.extend(self.validate_dataset_prefix());
         errors.extend(self.validate_device_paths());
 
-        let wants_swap_partition = matches!(
-            self.swap_mode,
-            SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-        );
+        let wants_swap_partition = self.swap_mode.uses_partition();
 
         match mode {
             InstallationMode::Alongside => {
@@ -729,6 +724,7 @@ mod tests {
 #[cfg(test)]
 mod partition_role_tests {
     use super::*;
+    use crate::config::types::SwapMode;
     #[test]
     fn duplicate_roles_are_rejected_but_inactive_roles_are_ignored() {
         let mut c = GlobalConfig {

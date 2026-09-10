@@ -5,9 +5,7 @@ use slint::SharedString;
 
 use archinstall_zfs_core::config::choices::Choice;
 use archinstall_zfs_core::config::edit::{ChoiceSetting, EditorSetting, TextSetting};
-use archinstall_zfs_core::config::types::{
-    GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode,
-};
+use archinstall_zfs_core::config::types::{GlobalConfig, InstallationMode, ZfsEncryptionMode};
 
 use crate::ui::{ConfigItem, ItemType};
 #[cfg(test)]
@@ -145,12 +143,7 @@ fn storage_item(
     let choices = crate::storage::choices(role);
     let choice = selected.and_then(|p| choices.iter().find(|d| d.path == p));
     let consequence = match role {
-        "disk"
-            if matches!(
-                c.swap_mode,
-                SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-            ) =>
-        {
+        "disk" if c.swap_mode.uses_partition() => {
             "Erase all partitions; create EFI, ZFS and swap partitions"
         }
         "disk" => "Erase all partitions; create EFI and ZFS partitions",
@@ -317,10 +310,7 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             c.swap_mode,
             "ZRAM uses compressed RAM. A swap partition uses disk space.",
         ));
-        if matches!(
-            c.swap_mode,
-            SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-        ) {
+        if c.swap_mode.uses_partition() {
             if c.installation_mode == Some(InstallationMode::FullDisk) {
                 items.push(inline_text(
                     TextSetting::SwapPartitionSize,
@@ -641,10 +631,8 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     if matches!(
         c.installation_mode,
         Some(InstallationMode::NewPool | InstallationMode::ExistingPool)
-    ) && matches!(
-        c.swap_mode,
-        SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-    ) {
+    ) && c.swap_mode.uses_partition()
+    {
         let mut item = storage_item(
             "swap_partition",
             "Swap partition",

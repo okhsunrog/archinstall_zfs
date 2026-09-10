@@ -423,10 +423,7 @@ fn rebuild(app: &App, config: &mut GlobalConfig) {
     state.set_swap_mode(config.swap_mode.index() as i32);
     // A kept plan whose swap no longer matches the configured method (changed
     // while another storage mode was selected) is rebuilt from the controls.
-    let wants_swap = matches!(
-        config.swap_mode,
-        SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-    );
+    let wants_swap = config.swap_mode.uses_partition();
     SESSION.with_borrow_mut(|s| {
         if s.kept
             .as_ref()
@@ -445,7 +442,7 @@ fn rebuild(app: &App, config: &mut GlobalConfig) {
         state.set_before(segments(&s.layout, None)); state.set_after(segments(&s.layout, None));
         let source = s.sources.get(state.get_source_index() as usize).ok_or("No suitable partitions or unallocated space")?;
         state.set_details(source.detail.clone().into());
-        let swap_bytes = if let Some(k) = kept { k.swap_bytes } else if matches!(config.swap_mode, SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted) { state.get_swap_size().round().clamp(1.0, 1024.0) as u64 * GIB } else { 0 };
+        let swap_bytes = if let Some(k) = kept { k.swap_bytes } else if config.swap_mode.uses_partition() { state.get_swap_size().round().clamp(1.0, 1024.0) as u64 * GIB } else { 0 };
         let min = (MIN_LINUX_BYTES + swap_bytes + if state.get_additional_efi() { ESP_BYTES } else { 0 }) as f32 / GIB as f32;
         let max = source.capacity as f64 / GIB as f64;
         let max = max as f32;

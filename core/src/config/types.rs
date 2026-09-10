@@ -136,6 +136,14 @@ pub enum SwapMode {
     ZswapPartitionEncrypted,
 }
 
+impl SwapMode {
+    /// Whether this method needs a swap partition on disk (plain or
+    /// encrypted), as opposed to none or zram.
+    pub fn uses_partition(self) -> bool {
+        matches!(self, Self::ZswapPartition | Self::ZswapPartitionEncrypted)
+    }
+}
+
 impl std::fmt::Display for SwapMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

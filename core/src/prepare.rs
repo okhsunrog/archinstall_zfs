@@ -11,7 +11,7 @@ use color_eyre::eyre::{Result, eyre};
 use zfskit::pool::{ExportOptions, ImportOptions, PoolCreateOptions, Vdev};
 
 use crate::boot_environment::BootEnvironment;
-use crate::config::types::{GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode};
+use crate::config::types::{GlobalConfig, InstallationMode, ZfsEncryptionMode};
 use crate::system::cmd::CommandRunner;
 
 /// Partitions selected or created for the installation.
@@ -53,12 +53,11 @@ pub fn prepare_disk(
                 .ok_or_else(|| eyre!("disk not selected for full disk mode"))?;
             crate::disk::partition::zap_disk(runner, disk)?;
 
-            let swap_size = match config.swap_mode {
-                SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted => {
-                    config.swap_partition_size.as_deref()
-                }
-                _ => None,
-            };
+            let swap_size = config
+                .swap_mode
+                .uses_partition()
+                .then_some(config.swap_partition_size.as_deref())
+                .flatten();
             let layout = crate::disk::partition::create_partitions(runner, disk, swap_size)?;
             let parts = crate::disk::partition::wait_for_partitions(disk, &layout)?;
             let efi = parts[0].clone();
