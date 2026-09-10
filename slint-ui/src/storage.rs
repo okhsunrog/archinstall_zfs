@@ -21,6 +21,38 @@ struct Inventory {
     datasets: Vec<String>,
 }
 thread_local! { static INVENTORY: RefCell<Inventory> = RefCell::default(); }
+impl Inventory {
+    fn with<R>(f: impl FnOnce(&Inventory) -> R) -> R {
+        INVENTORY.with_borrow(f)
+    }
+    fn update<R>(f: impl FnOnce(&mut Inventory) -> R) -> R {
+        INVENTORY.with_borrow_mut(f)
+    }
+    fn devices(role: &str) -> Vec<DeviceChoice> {
+        Self::with(|i| {
+            if role == "disk" {
+                i.disks.clone()
+            } else {
+                i.partitions.clone()
+            }
+        })
+    }
+    fn set_devices(disks: Vec<DeviceChoice>, partitions: Vec<DeviceChoice>) {
+        Self::update(|i| {
+            i.disks = disks;
+            i.partitions = partitions;
+        });
+    }
+    fn pools() -> Vec<StorageCandidate> {
+        Self::with(|i| i.pools.clone())
+    }
+    fn set_pools(pools: Vec<StorageCandidate>, datasets: Vec<String>) {
+        Self::update(|i| {
+            i.pools = pools;
+            i.datasets = datasets;
+        });
+    }
+}
 
 pub fn choices(role: &str) -> Vec<DeviceChoice> {
     if crate::preview::enabled() {
@@ -30,13 +62,7 @@ pub fn choices(role: &str) -> Vec<DeviceChoice> {
             crate::preview::partitions()
         };
     }
-    INVENTORY.with_borrow(|i| {
-        if role == "disk" {
-            i.disks.clone()
-        } else {
-            i.partitions.clone()
-        }
-    })
+    Inventory::devices(role)
 }
 fn same_device(a: &Path, b: &Path) -> bool {
     std::fs::canonicalize(a).unwrap_or_else(|_| a.into())
@@ -163,7 +189,7 @@ fn populate(app: &App, c: &GlobalConfig) {
     let role = state.get_role();
     let filter = state.get_filter().to_lowercase();
     let rows: Vec<_> = if role == "pool" {
-        INVENTORY.with_borrow(|i| i.pools.clone())
+        Inventory::pools()
     } else {
         choices(&role)
             .into_iter()
@@ -370,36 +396,29 @@ fn scan(app: &App, pools: bool) {
             }
             state.set_busy(false);
             match result {
-                Ok((disks, parts, found, datasets)) => INVENTORY.with_borrow_mut(|i| {
-                    if pools {
-                        i.datasets = datasets;
-                        i.pools = found
-                            .into_iter()
-                            .map(|(name, status, details, blocked)| StorageCandidate {
-                                key: name.clone().into(),
-                                name: name.into(),
-                                group: "ZFS pools".into(),
-                                label: status.into(),
-                                details: details.into(),
-                                unavailable: blocked.into(),
-                                ..Default::default()
-                            })
-                            .collect();
-                    } else {
-                        i.disks = disks;
-                        i.partitions = parts;
-                    }
-                }),
+                Ok((_, _, found, datasets)) if pools => Inventory::set_pools(
+                    found
+                        .into_iter()
+                        .map(|(name, status, details, blocked)| StorageCandidate {
+                            key: name.clone().into(),
+                            name: name.into(),
+                            group: "ZFS pools".into(),
+                            label: status.into(),
+                            details: details.into(),
+                            unavailable: blocked.into(),
+                            ..Default::default()
+                        })
+                        .collect(),
+                    datasets,
+                ),
+                Ok((disks, parts, _, _)) => Inventory::set_devices(disks, parts),
                 Err(e) => {
                     state.set_error(e.into());
-                    INVENTORY.with_borrow_mut(|i| {
-                        if pools {
-                            i.pools.clear()
-                        } else {
-                            i.disks.clear();
-                            i.partitions.clear();
-                        }
-                    });
+                    if pools {
+                        Inventory::update(|i| i.pools.clear());
+                    } else {
+                        Inventory::set_devices(Vec::new(), Vec::new());
+                    }
                 }
             }
             state.invoke_inventory_changed();
@@ -545,7 +564,7 @@ pub fn issues(c: &GlobalConfig) -> Vec<String> {
     if c.installation_mode == Some(InstallationMode::ExistingPool)
         && let Some(name) = &c.pool_name
     {
-        INVENTORY.with_borrow(|i| {
+        Inventory::with(|i| {
             match i.pools.iter().find(|p| p.name.as_str() == name) {
                 None => issues.push("Choose or refresh the existing pool before installing".into()),
                 Some(p) if !p.unavailable.is_empty() => issues.push(p.unavailable.to_string()),

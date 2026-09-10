@@ -43,14 +43,47 @@ struct Session {
     kept: Option<Request>,
     notice: String,
 }
-/// The user changed a control: the loaded plan no longer applies.
-fn touched() {
-    SESSION.with_borrow_mut(|s| {
-        s.kept = None;
-        s.notice.clear();
-    });
-}
 thread_local! { static SESSION: RefCell<Session> = RefCell::default(); }
+impl Session {
+    fn with<R>(f: impl FnOnce(&Session) -> R) -> R {
+        SESSION.with_borrow(f)
+    }
+    fn update<R>(f: impl FnOnce(&mut Session) -> R) -> R {
+        SESSION.with_borrow_mut(f)
+    }
+    /// The user changed a control: the loaded plan no longer applies.
+    fn touch() {
+        Self::update(|s| {
+            s.kept = None;
+            s.notice.clear();
+        });
+    }
+    fn disk(index: usize) -> Option<PathBuf> {
+        Self::with(|s| s.disks.get(index).cloned())
+    }
+    fn set_disks(disks: Vec<PathBuf>) {
+        Self::update(|s| s.disks = disks);
+    }
+    fn survey() -> Option<Survey> {
+        Self::with(|s| s.survey.clone())
+    }
+    fn set_survey(survey: Option<Survey>) {
+        Self::update(|s| s.survey = survey);
+    }
+    /// Shows and executes `request` as written for the surveyed layout.
+    fn keep(survey: Survey, request: Request) {
+        Self::update(|s| {
+            s.survey = Some(survey);
+            s.kept = Some(request);
+        });
+    }
+    fn notice() -> String {
+        Self::with(|s| s.notice.clone())
+    }
+    fn set_notice(notice: &str) {
+        Self::update(|s| s.notice = notice.into());
+    }
+}
 fn strings(values: Vec<String>) -> ModelRc<slint::SharedString> {
     ModelRc::new(VecModel::from(
         values.into_iter().map(Into::into).collect::<Vec<_>>(),
@@ -240,15 +273,12 @@ fn load(app: &App, index: Option<usize>, keep: Option<Request>) {
     state.set_generation(generation);
     state.set_busy(true);
     state.set_error("".into());
-    SESSION.with_borrow_mut(|s| {
-        s.kept = None;
-        s.notice.clear();
-    });
+    Session::touch();
     state.invoke_rebuild();
     let disk = index
-        .and_then(|i| SESSION.with_borrow(|s| s.disks.get(i).cloned()))
+        .and_then(Session::disk)
         .or_else(|| keep.as_ref().map(|r| r.before.device.clone()));
-    let previous = SESSION.with_borrow(|s| s.survey.clone());
+    let previous = Session::survey();
     let weak = app.as_weak();
     tokio::spawn(async move {
         let result = tokio::task::spawn_blocking(move || -> Result<_, String> {
@@ -297,7 +327,7 @@ fn load(app: &App, index: Option<usize>, keep: Option<Request>) {
             let result = result.and_then(|(paths, names, selected_index, inspected)| {
                 state.set_disks(strings(names));
                 state.set_disk_index(selected_index as i32);
-                SESSION.with_borrow_mut(|s| s.disks = paths);
+                Session::set_disks(paths);
                 inspected
             });
             match result {
@@ -329,17 +359,14 @@ fn load(app: &App, index: Option<usize>, keep: Option<Request>) {
                         if r.swap_bytes > 0 {
                             state.set_swap_size((r.swap_bytes / GIB) as f32);
                         }
-                        SESSION.with_borrow_mut(|s| {
-                            s.survey = Some(survey);
-                            s.kept = Some(r);
-                        });
+                        Session::keep(survey, r);
                         state.invoke_rebuild();
                         return;
                     }
                     if keep.is_some() {
-                        SESSION.with_borrow_mut(|s| {
-                            s.notice = "The previous plan no longer matches this disk; this is a new plan built from the current layout.".into()
-                        });
+                        Session::set_notice(
+                            "The previous plan no longer matches this disk; this is a new plan built from the current layout.",
+                        );
                     }
                     state.set_source_index(
                         survey
@@ -371,13 +398,11 @@ fn load(app: &App, index: Option<usize>, keep: Option<Request>) {
                     );
                     state.set_additional_efi(false);
                     state.set_use_all(true);
-                    SESSION.with_borrow_mut(|s| {
-                        s.survey = Some(survey);
-                    });
+                    Session::set_survey(Some(survey));
                     state.invoke_rebuild();
                 }
                 Err(error) => {
-                    SESSION.with_borrow_mut(|s| s.survey = None);
+                    Session::set_survey(None);
                     state.set_before(Default::default());
                     state.set_after(Default::default());
                     state.set_sources(Default::default());
@@ -520,19 +545,18 @@ fn rebuild(app: &App, config: &mut GlobalConfig) {
     // A kept plan whose swap no longer matches the configured method (changed
     // while another storage mode was selected) is rebuilt from the controls.
     let wants_swap = config.swap_mode.uses_partition();
-    SESSION.with_borrow_mut(|s| {
-        if s.kept
+    let stale = Session::with(|s| {
+        s.kept
             .as_ref()
             .is_some_and(|k| (k.swap_bytes > 0) != wants_swap)
-        {
-            s.kept = None;
-            s.notice.clear();
-        }
     });
+    if stale {
+        Session::touch();
+    }
     state.set_allocation_summary("".into());
     state.set_insufficient(false);
     state.set_efi_details("".into());
-    let result = SESSION.with_borrow(|session| -> Result<Request, String> {
+    let result = Session::with(|session| -> Result<Request, String> {
         let kept = session.kept.as_ref();
         let s = session.survey.as_ref().ok_or("Select a disk")?;
         state.set_before(segments(&s.layout, None));
@@ -621,7 +645,7 @@ fn rebuild(app: &App, config: &mut GlobalConfig) {
         Ok(request) => {
             config.alongside = Some(request);
             state.set_error("".into());
-            let notice = SESSION.with_borrow(|s| s.notice.clone());
+            let notice = Session::notice();
             if !notice.is_empty() {
                 state.set_details(format!("{notice} {}", state.get_details()).into());
             }
@@ -666,7 +690,7 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
     let weak = app.as_weak();
     app.global::<AlongsideState>()
         .on_select_source(move |index| {
-            touched();
+            Session::touch();
             if let Some(app) = weak.upgrade() {
                 let s = app.global::<AlongsideState>();
                 s.set_source_index(index);
@@ -676,7 +700,7 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
         });
     let weak = app.as_weak();
     app.global::<AlongsideState>().on_select_efi(move |index| {
-        touched();
+        Session::touch();
         if let Some(app) = weak.upgrade() {
             let s = app.global::<AlongsideState>();
             s.set_efi_index(index);
@@ -686,7 +710,7 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
     });
     let weak = app.as_weak();
     app.global::<AlongsideState>().on_allocate(move |value| {
-        touched();
+        Session::touch();
         if let Some(app) = weak.upgrade()
             && value.is_finite()
         {
@@ -698,7 +722,7 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
     });
     let weak = app.as_weak();
     app.global::<AlongsideState>().on_all_space(move |value| {
-        touched();
+        Session::touch();
         if let Some(app) = weak.upgrade() {
             let s = app.global::<AlongsideState>();
             s.set_use_all(value);
@@ -708,7 +732,7 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
     let weak = app.as_weak();
     let cfg = config.clone();
     app.global::<AlongsideState>().on_select_swap(move |index| {
-        touched();
+        Session::touch();
         if let Some(app) = weak.upgrade()
             && let Some(mode) = SwapMode::from_index(index as usize)
         {
@@ -718,7 +742,7 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
     });
     let weak = app.as_weak();
     app.global::<AlongsideState>().on_size_swap(move |value| {
-        touched();
+        Session::touch();
         if let Some(app) = weak.upgrade()
             && value.is_finite()
         {
@@ -729,7 +753,7 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
     });
     let weak = app.as_weak();
     app.global::<AlongsideState>().on_additional(move |value| {
-        touched();
+        Session::touch();
         if let Some(app) = weak.upgrade() {
             let s = app.global::<AlongsideState>();
             s.set_additional_efi(value);
