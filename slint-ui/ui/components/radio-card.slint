@@ -1,0 +1,78 @@
+import { Theme } from "../styling.slint";
+import { RadioDot } from "radio-dot.slint";
+import { FocusTouchArea } from "internal/state-layer.slint";
+
+// One option in a row of mutually exclusive cards: a title, a short
+// description and a selection dot. `activated` reports a click or keyboard
+// activation; `reveal` reports the card's position when it gains focus so a
+// scrolling parent can bring it into view.
+//
+// The body is one unconditional layout: a layout wrapped in `if` does not
+// contribute its size to the card, which would collapse the row.
+export component RadioCard inherits Rectangle {
+    in property <string> title;
+    in property <string> description;
+    in property <bool> selected;
+    // Whether the option can be chosen at all; an unavailable card is dimmed.
+    in property <bool> available: true;
+    // Whether input is accepted right now (cleared while a survey runs).
+    in property <bool> enabled: true;
+    // Screen-reader and review-script name; the title by default.
+    in property <string> label: root.title;
+    // Compact rows draw the dot as a glyph in front of a larger title instead
+    // of a RadioDot column beside the body.
+    in property <bool> text-dot: false;
+    callback activated();
+    callback reveal(length, length);
+
+    horizontal-stretch: 1;
+    background: root.selected ? Theme.c.blue.with-alpha(0.16) : Theme.c.surface0.with-alpha(0.55);
+    border-radius: 8px;
+    border-width: touch.has-focus ? 2px : 1px;
+    border-color: touch.has-focus || root.selected ? Theme.c.blue : Theme.c.surface1;
+    opacity: root.available ? 1 : 0.5;
+
+    HorizontalLayout {
+        padding: root.text-dot ? 12px : 10px;
+        spacing: root.text-dot ? 0px : 8px;
+        RadioDot {
+            width: root.text-dot ? 0px : 18px;
+            visible: !root.text-dot;
+            filled: root.selected;
+            dot-color: Theme.c.blue;
+        }
+
+        VerticalLayout {
+            spacing: root.text-dot ? 5px : 3px;
+            alignment: root.text-dot ? LayoutAlignment.center : LayoutAlignment.stretch;
+            horizontal-stretch: 1;
+            Text {
+                text: (root.text-dot ? (root.selected ? "●  " : "○  ") : "") + root.title;
+                color: Theme.c.text;
+                font-size: root.text-dot ? 15px : 14px;
+                font-weight: 600;
+                wrap: word-wrap;
+            }
+
+            Text {
+                text: root.description;
+                color: Theme.c.subtext1;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+        }
+    }
+
+    touch := FocusTouchArea {
+        width: 100%;
+        height: 100%;
+        enabled: root.available && root.enabled;
+        accessible-role: radio-button;
+        accessible-label: root.label;
+        accessible-checked: root.selected;
+        accessible-enabled: root.available && root.enabled;
+        accessible-action-default => { root.activated(); }
+        clicked => { root.activated(); }
+        changed has-focus => { if self.has-focus { root.reveal(self.absolute-position.y, self.height); } }
+    }
+}

@@ -3,8 +3,7 @@ import { AlongsideState, DiskSegment } from "../state/alongside-state.slint";
 import { Theme } from "../styling.slint";
 import { StyledButton } from "styled-button.slint";
 import { StyledTextInput } from "styled-text-input.slint";
-import { RadioDot } from "radio-dot.slint";
-import { FocusTouchArea } from "internal/state-layer.slint";
+import { RadioCard } from "radio-card.slint";
 
 component DiskMap inherits Rectangle {
     in property <[DiskSegment]> segments;
@@ -130,38 +129,15 @@ export component AlongsidePanel inherits Rectangle {
             Text { text: AlongsideState.efi-details; color: Theme.c.subtext1; wrap: word-wrap; }
             HorizontalLayout {
                 spacing: 12px;
-                for option[index] in ["Reuse the selected EFI partition", "Create a separate 512 MiB EFI partition"]: Rectangle {
-                    property <bool> selected: (index == 1) == AlongsideState.additional-efi;
-                    property <bool> available: index == 1 || !AlongsideState.insufficient;
-                    horizontal-stretch: 1;
-                    background: selected ? Theme.c.blue.with-alpha(0.16) : Theme.c.surface0.with-alpha(0.55);
-                    border-radius: 8px;
-                    border-width: touch.has-focus ? 2px : 1px;
-                    border-color: touch.has-focus || selected ? Theme.c.blue : Theme.c.surface1;
-                    opacity: available ? 1 : 0.5;
-                    HorizontalLayout {
-                        padding: 10px;
-                        spacing: 8px;
-                        RadioDot { filled: selected; dot-color: Theme.c.blue; }
-                        VerticalLayout {
-                            spacing: 3px;
-                            horizontal-stretch: 1;
-                            Text { text: option + (index == 0 ? " (recommended)" : ""); color: Theme.c.text; font-weight: 600; wrap: word-wrap; }
-                            Text { text: index == 0 ? "Boot files go next to the existing loaders; nothing is formatted." : "Takes 512 MiB from the allocation; firmware and the other system then see two EFI partitions."; color: Theme.c.subtext1; font-size: 12px; wrap: word-wrap; }
-                        }
-                    }
-                    touch := FocusTouchArea {
-                        width: 100%;
-                        height: 100%;
-                        enabled: available && !AlongsideState.busy;
-                        accessible-role: radio-button;
-                        accessible-label: option;
-                        accessible-checked: selected;
-                        accessible-enabled: available && !AlongsideState.busy;
-                        accessible-action-default => { AlongsideState.additional(index == 1); }
-                        clicked => { AlongsideState.additional(index == 1); }
-                        changed has-focus => { root.reveal-if(self.has-focus, self.absolute-position.y, self.height); }
-                    }
+                for option[index] in ["Reuse the selected EFI partition", "Create a separate 512 MiB EFI partition"]: RadioCard {
+                    title: option + (index == 0 ? " (recommended)" : "");
+                    label: option;
+                    description: index == 0 ? "Boot files go next to the existing loaders; nothing is formatted." : "Takes 512 MiB from the allocation; firmware and the other system then see two EFI partitions.";
+                    selected: (index == 1) == AlongsideState.additional-efi;
+                    available: index == 1 || !AlongsideState.insufficient;
+                    enabled: !AlongsideState.busy;
+                    activated => { AlongsideState.additional(index == 1); }
+                    reveal(y, h) => { root.reveal(y, h); }
                 }
             }
         }
