@@ -45,6 +45,10 @@ cleanup_working_dir() {
     fi
 }
 
+# xtask/src/qemu.rs (find_ovmf) and the justfile (qemu-setup-uefi) keep their
+# own OVMF lists: xtask also probes /usr/share/edk2/ovmf, and the justfile
+# searches the /usr/share/{edk2,edk2-ovmf,OVMF} roots recursively while
+# skipping secboot images. Update all three together.
 find_ovmf_file() {
     local file_to_find=$1
     local paths=(

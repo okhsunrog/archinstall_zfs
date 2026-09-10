@@ -270,6 +270,12 @@ impl Drop for QemuVm {
 
 /// Locate an OVMF firmware file by trying distro-specific layouts.
 /// Arch ships `<name>.4m.fd`; Fedora/Debian ship `<name>.fd` (no 4m).
+///
+/// The justfile (`qemu-setup-uefi`) and `gen_iso/run-qemu.sh`
+/// (`find_ovmf_file`) keep their own lists: the justfile searches the
+/// `/usr/share/{edk2,edk2-ovmf,OVMF}` roots recursively and skips secboot
+/// images, run-qemu.sh probes the x64 subdirectories without
+/// `/usr/share/edk2/ovmf`. Update all three together.
 fn find_ovmf(base: &str) -> PathBuf {
     let dirs = [
         "/usr/share/edk2/x64",

@@ -95,6 +95,17 @@ _prepare-binary:
         install -m 0755 {{BINARY_SLINT}} {{PROFILE_OUT}}/airootfs/usr/local/bin/azfs; \
     fi
 
+# Internal: native build, render, and mkarchiso into ISO_OUT.
+# FAST="--fast" selects the minimal testing profile.
+_iso MODE KERNEL FAST="":
+    just cargo-build
+    just _render-profile {{MODE}} {{KERNEL}} {{FAST}}
+    just _prepare-binary
+    @echo "Building ISO..."
+    sudo rm -rf gen_iso/workdir
+    sudo mkarchiso -v -w "gen_iso/workdir" -o {{ISO_OUT}} {{PROFILE_OUT}}
+    sudo chown -R "$(id -u):$(id -g)" {{ISO_OUT}} gen_iso/workdir
+
 # Fast, minimal packages, serial+SSH enabled. Skips wifi/bluetooth/firmware.
 # For QEMU iteration and CI.
 # Usage: just iso-test [--mode precompiled|dkms] [--kernel linux|linux-lts|linux-zen]
@@ -102,13 +113,7 @@ _prepare-binary:
 [arg("KERNEL", long="kernel")]
 iso-test MODE="precompiled" KERNEL="linux-lts":
     @echo "Building testing ISO (mode={{MODE}}, kernel={{KERNEL}})"
-    just cargo-build
-    just _render-profile {{MODE}} {{KERNEL}} "--fast"
-    just _prepare-binary
-    @echo "Building ISO..."
-    sudo rm -rf gen_iso/workdir
-    sudo mkarchiso -v -w "gen_iso/workdir" -o {{ISO_OUT}} {{PROFILE_OUT}}
-    sudo chown -R "$(id -u):$(id -g)" {{ISO_OUT}} gen_iso/workdir
+    just _iso {{MODE}} {{KERNEL}} "--fast"
     @echo "Testing ISO built in {{ISO_OUT}}"
 
 # Same package set as CI releases (iwd, wireless-regdb, linux-firmware, etc).
@@ -119,13 +124,7 @@ iso-test MODE="precompiled" KERNEL="linux-lts":
 [arg("KERNEL", long="kernel")]
 iso-full MODE="precompiled" KERNEL="linux-lts":
     @echo "Building full ISO (mode={{MODE}}, kernel={{KERNEL}})"
-    just cargo-build
-    just _render-profile {{MODE}} {{KERNEL}}
-    just _prepare-binary
-    @echo "Building ISO..."
-    sudo rm -rf gen_iso/workdir
-    sudo mkarchiso -v -w "gen_iso/workdir" -o {{ISO_OUT}} {{PROFILE_OUT}}
-    sudo chown -R "$(id -u):$(id -g)" {{ISO_OUT}} gen_iso/workdir
+    just _iso {{MODE}} {{KERNEL}}
     @echo "Full ISO built in {{ISO_OUT}}"
 
 # Build the full hardware profile into a dedicated mkarchiso workdir.
@@ -220,6 +219,14 @@ builder-clean:
     -sudo podman image rm {{CONTAINER_IMAGE}}
     -sudo podman volume rm {{PACMAN_CACHE_VOLUME}} {{CARGO_TARGET_VOLUME}} {{CARGO_REGISTRY_VOLUME}}
 
+# Internal: container build, render, and mkarchiso inside the CI image.
+# FAST="--fast" selects the minimal testing profile.
+_iso-podman MODE KERNEL FAST="":
+    just cargo-build-container
+    just _render-profile {{MODE}} {{KERNEL}} {{FAST}}
+    just _prepare-binary
+    just _mkarchiso-container
+
 # Testing ISO fully inside the CI container: cargo, xtask render, mkarchiso.
 # Produces Arch-glibc binaries that work both on the host and inside the ISO.
 # For non-Arch hosts (Fedora/Debian/…). Only requires podman + qemu on the host.
@@ -228,10 +235,7 @@ builder-clean:
 [arg("KERNEL", long="kernel")]
 iso-test-podman MODE="precompiled" KERNEL="linux-lts":
     @echo "Building testing ISO via podman (mode={{MODE}}, kernel={{KERNEL}})"
-    just cargo-build-container
-    just _render-profile {{MODE}} {{KERNEL}} "--fast"
-    just _prepare-binary
-    just _mkarchiso-container
+    just _iso-podman {{MODE}} {{KERNEL}} "--fast"
 
 # Full ISO via podman. Same build path as iso-test-podman, full package set.
 # Usage: just iso-full-podman [--mode precompiled|dkms] [--kernel linux|linux-lts|linux-zen]
@@ -239,10 +243,7 @@ iso-test-podman MODE="precompiled" KERNEL="linux-lts":
 [arg("KERNEL", long="kernel")]
 iso-full-podman MODE="precompiled" KERNEL="linux-lts":
     @echo "Building full ISO via podman (mode={{MODE}}, kernel={{KERNEL}})"
-    just cargo-build-container
-    just _render-profile {{MODE}} {{KERNEL}}
-    just _prepare-binary
-    just _mkarchiso-container
+    just _iso-podman {{MODE}} {{KERNEL}}
 
 # Internal: invoke mkarchiso inside the container with correct mounts + chown.
 _mkarchiso-container:
@@ -269,6 +270,9 @@ qemu-create-disk:
 
 # Arch ships OVMF_VARS.4m.fd; Fedora/Debian ship OVMF_VARS.fd (no 4m suffix).
 # Search for the 4m variant first, fall back to the bare name. Skip secboot.
+# xtask/src/qemu.rs (find_ovmf) and gen_iso/run-qemu.sh (find_ovmf_file) keep
+# their own lists: they probe fixed directories, mostly the x64 subdirectories,
+# while this recipe searches the roots recursively. Update all three together.
 # Copy OVMF UEFI variables template into the workspace.
 qemu-setup-uefi:
     #!/usr/bin/env bash
@@ -293,35 +297,37 @@ qemu-refresh:
 
 # ─── QEMU Execution ───────────────────────────────────
 
+# Internal: boot QEMU on the workspace disk. MODE=install boots the newest ISO,
+# creating the disk and UEFI vars when missing; MODE=run boots the installed
+# system. SERIAL="-S" attaches the serial console instead of the GUI.
+_qemu-boot MODE SERIAL="":
+    #!/usr/bin/env bash
+    if [[ "{{MODE}}" == install ]]; then
+        if [[ ! -f {{DISK_IMAGE}} ]]; then just qemu-create-disk; fi
+        if [[ ! -f {{UEFI_VARS}} ]]; then just qemu-setup-uefi; fi
+        ISO=$(ls -1t {{ISO_OUT}}/archzfs-*.iso 2>/dev/null | head -n1)
+        if [[ -z "$ISO" ]]; then echo "No ISO found. Run 'just iso-test' or 'just iso-full'."; exit 1; fi
+        bash {{QEMU_SCRIPT}} -i "$ISO" -D {{DISK_IMAGE}} -U {{UEFI_VARS}} {{SERIAL}}
+    else
+        if [[ ! -f {{DISK_IMAGE}} ]]; then echo "No disk. Run 'just qemu-install' first."; exit 1; fi
+        bash {{QEMU_SCRIPT}} -D {{DISK_IMAGE}} -U {{UEFI_VARS}} {{SERIAL}}
+    fi
+
 # Boot latest ISO in QEMU with GUI
 qemu-install:
-    #!/usr/bin/env bash
-    if [[ ! -f {{DISK_IMAGE}} ]]; then just qemu-create-disk; fi
-    if [[ ! -f {{UEFI_VARS}} ]]; then just qemu-setup-uefi; fi
-    ISO=$(ls -1t {{ISO_OUT}}/archzfs-*.iso 2>/dev/null | head -n1)
-    if [[ -z "$ISO" ]]; then echo "No ISO found. Run 'just iso-test' or 'just iso-full'."; exit 1; fi
-    bash {{QEMU_SCRIPT}} -i "$ISO" -D {{DISK_IMAGE}} -U {{UEFI_VARS}}
+    just _qemu-boot install
 
 # Boot latest ISO in QEMU with serial console
 qemu-install-serial:
-    #!/usr/bin/env bash
-    if [[ ! -f {{DISK_IMAGE}} ]]; then just qemu-create-disk; fi
-    if [[ ! -f {{UEFI_VARS}} ]]; then just qemu-setup-uefi; fi
-    ISO=$(ls -1t {{ISO_OUT}}/archzfs-*.iso 2>/dev/null | head -n1)
-    if [[ -z "$ISO" ]]; then echo "No ISO found. Run 'just iso-test' or 'just iso-full'."; exit 1; fi
-    bash {{QEMU_SCRIPT}} -i "$ISO" -D {{DISK_IMAGE}} -U {{UEFI_VARS}} -S
+    just _qemu-boot install -S
 
 # Boot existing installation in QEMU with GUI
 qemu-run:
-    #!/usr/bin/env bash
-    if [[ ! -f {{DISK_IMAGE}} ]]; then echo "No disk. Run 'just qemu-install' first."; exit 1; fi
-    bash {{QEMU_SCRIPT}} -D {{DISK_IMAGE}} -U {{UEFI_VARS}}
+    just _qemu-boot run
 
 # Boot existing installation in QEMU with serial console
 qemu-run-serial:
-    #!/usr/bin/env bash
-    if [[ ! -f {{DISK_IMAGE}} ]]; then echo "No disk. Run 'just qemu-install' first."; exit 1; fi
-    bash {{QEMU_SCRIPT}} -D {{DISK_IMAGE}} -U {{UEFI_VARS}} -S
+    just _qemu-boot run -S
 
 # SSH into running VM
 ssh:
