@@ -508,13 +508,13 @@ fn planned_swap_bytes(
 
 /// How much of the existing ESP the boot files need, and what reusing it means.
 fn efi_details(space: &EfiSpace, budget: BootSpace, insufficient: bool) -> Result<String, String> {
-    let required = budget
-        .required_bytes()
-        .map_err(|e| e.to_string())?
-        .div_ceil(MIB);
+    let required_bytes = budget.required_bytes().map_err(|e| e.to_string())?;
+    let required = required_bytes.div_ceil(MIB);
     let consequence = if insufficient {
         "It cannot be reused; select a separate EFI partition to continue."
-    } else if space.free_bytes < required + budget.image_bytes {
+    } else if space.free_bytes < required_bytes + budget.image_bytes {
+        // Updates stage a second copy only when a whole image fits next to
+        // the installed one.
         "Later ZFSBootMenu updates replace the image in place instead of writing a second copy first."
     } else {
         "Reusing it formats nothing and keeps the existing loaders."
