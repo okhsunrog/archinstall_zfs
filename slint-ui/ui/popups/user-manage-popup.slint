@@ -60,6 +60,8 @@ export component UserManagePopup inherits Rectangle {
                             if y + self.content-y < 0px { self.content-y = -y; }
                             else if y + h + self.content-y > self.height { self.content-y = self.height - y - h; }
                         }
+                        // Scroll a control into view when it gains keyboard focus.
+                        function reveal-if(focused: bool, y: length, h: length) { if focused { self.reveal(y, h); } }
                         preferred-height: body.preferred-height;
                         body := VerticalLayout {
                             spacing: 12px;
@@ -99,7 +101,7 @@ export component UserManagePopup inherits Rectangle {
                                         width: 156px;
                                         accessible-label: "Administrator " + user.username;
                                         checked: user.has-sudo;
-                                        changed has-focus => { if self.has-focus { form-scroll.reveal(user-row.y, user-row.height); } }
+                                        changed has-focus => { form-scroll.reveal-if(self.has-focus, user-row.y, user-row.height); }
                                         toggled => { root.user-sudo-toggled(index); }
                                     }
 
@@ -108,7 +110,7 @@ export component UserManagePopup inherits Rectangle {
                                         height: 40px;
                                         outlined: true;
                                         accessible-label: "Remove user " + user.username;
-                                        changed has-focus => { if self.has-focus { form-scroll.reveal(user-row.y, user-row.height); } }
+                                        changed has-focus => { form-scroll.reveal-if(self.has-focus, user-row.y, user-row.height); }
                                         clicked => { root.user-removed(index); }
                                     }
                                 }
@@ -136,7 +138,7 @@ export component UserManagePopup inherits Rectangle {
                                 placeholder: "e.g. alex";
                                 accessible-label: "Username";
                                 edited(_) => { EditingState.user-error = ""; }
-                                changed has-focus => { if self.has-focus { form-scroll.reveal(self.y, self.height); } }
+                                changed has-focus => { form-scroll.reveal-if(self.has-focus, self.y, self.height); }
                             }
 
                             Text {
@@ -150,7 +152,7 @@ export component UserManagePopup inherits Rectangle {
                                 placeholder: "Set a sign-in password";
                                 accessible-label: "Account password";
                                 is-password: true;
-                                changed has-focus => { if self.has-focus { form-scroll.reveal(self.y, self.height); } }
+                                changed has-focus => { form-scroll.reveal-if(self.has-focus, self.y, self.height); }
                                 edited(val) => { root.password-edited(val); }
                             }
 
@@ -186,7 +188,7 @@ export component UserManagePopup inherits Rectangle {
                                 label: "Administrator (sudo)";
                                 height: 40px;
                                 checked: true;
-                                changed has-focus => { if self.has-focus { form-scroll.reveal(self.y, self.height); } }
+                                changed has-focus => { form-scroll.reveal-if(self.has-focus, self.y, self.height); }
                             }
                         }
                     }
