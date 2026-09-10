@@ -1,0 +1,131 @@
+#!/usr/bin/env -S uv run
+"""Exercise alongside controls and review on safe preview fixtures only."""
+import argparse
+import os
+import time
+from pathlib import Path
+from review import Preview
+from interactions import reveal_by_tab
+
+
+def wait_value(p, role, label, value):
+    """Reveal a focusable control and wait until Rust has set its value."""
+    reveal_by_tab(p, role, label)
+    end = time.monotonic() + 15
+    while time.monotonic() < end:
+        e = p.element(role, label)
+        if e and e.get('accessibleValue') == value:
+            return
+        time.sleep(.1)
+    raise AssertionError(f'{label} did not reach {value}')
+
+
+def run(binary, output, size, scale, small):
+    os.environ['AZFS_PREVIEW_ESP'] = 'small' if small else 'normal'
+    p = Preview(binary, 'alongside', size, scale, output)
+    prefix = f'{size}-{scale}-{ "small-esp" if small else "reuse" }'
+    try:
+        p.ready()
+        reveal_by_tab(p, 'Combobox', 'Space source')
+        p.screenshot(prefix + '-initial')
+        p.click('Combobox', 'Space source')
+        p.click('ListItem', '/dev/nvme0n1p2')
+        reveal_by_tab(p, 'TextInput', 'Allocation in GiB')
+        p.click('TextInput', 'Allocation in GiB')
+        p.data('set_element_value', elementHandle=p.wait('TextInput', 'Allocation in GiB')['handle'], value='100')
+        p.key('\n')
+        if small:
+            reveal_by_tab(p, 'RadioButton', 'Create a separate')
+            reuse = p.data('get_element_properties', elementHandle=p.wait('RadioButton', 'Reuse the selected')['handle'])
+            assert not reuse.get('accessibleEnabled'), reuse
+            p.click('RadioButton', 'Create a separate')
+        # Widgets must follow state set by Rust after the user has touched
+        # them: "Use all" moves the slider and the input to the capacity.
+        reveal_by_tab(p, 'Checkbox', 'Use all available space')
+        p.click('Checkbox', 'Use all available space')
+        wait_value(p, 'Slider', 'Space for installation', '240')
+        wait_value(p, 'TextInput', 'Allocation in GiB', '240')
+        # A refresh keeps the current plan while the layout is unchanged.
+        reveal_by_tab(p, 'Button', 'Refresh disks')
+        p.click('Button', 'Refresh disks')
+        wait_value(p, 'Combobox', 'Space source', '/dev/nvme0n1p2 — NTFS — 450 GiB')
+        wait_value(p, 'TextInput', 'Allocation in GiB', '240')
+        assert p.wait('Combobox', 'Space source')['accessibleValue'].startswith('/dev/nvme0n1p2'), 'refresh discarded the selected source'
+        p.click('TextInput', 'Allocation in GiB')
+        p.data('set_element_value', elementHandle=p.wait('TextInput', 'Allocation in GiB')['handle'], value='100')
+        p.key('\n')
+        p.click('Button', 'Review')
+        p.click('Button', 'Disk')
+        reveal_by_tab(p, 'Combobox', 'Space source')
+        p.wait('Text', '/dev/nvme0n1p2: 450 →')
+        p.screenshot(prefix + '-100gib')
+        p.click('Combobox', 'Space source')
+        p.click('ListItem', 'Unallocated space')
+        p.screenshot(prefix + '-unallocated')
+        reveal_by_tab(p, 'Combobox', 'Swap method')
+        p.click('Combobox', 'Swap method')
+        p.click('ListItem', 'Swap partition')
+        reveal_by_tab(p, 'TextInput', 'Swap size in GiB')
+        p.screenshot(prefix + '-swap-controls')
+        p.click('Button', 'Review')
+        p.wait('Text', 'Storage changes during installation')
+        p.screenshot(prefix + '-review')
+        p.click('Button', 'Disk')
+        reveal_by_tab(p, 'Combobox', 'Space source')
+        p.screenshot(prefix + '-return')
+        p.screenshot(prefix + '-swap-map')
+        reveal_by_tab(p, 'RadioButton', 'Erase a disk')
+        p.click('RadioButton', 'Erase a disk')
+        reveal_by_tab(p, 'RadioButton', 'Install alongside')
+        p.click('RadioButton', 'Install alongside')
+        p.click('Button', 'Review')
+        install = p.data('get_element_properties', elementHandle=p.wait('Button', 'Install')['handle'])
+        assert install.get('accessibleEnabled'), install
+        p.screenshot(prefix + '-mode-return')
+    except Exception:
+        p.screenshot(prefix + "-failure")
+        raise
+    finally:
+        p.close()
+
+
+def errors(binary, output):
+    os.environ.pop('AZFS_PREVIEW_ESP', None)
+    for case in ('ext4', 'missing-tools', 'no-efi', 'mbr'):
+        os.environ['AZFS_PREVIEW_ALONGSIDE'] = case
+        p = Preview(binary, 'alongside', '1920x1080', '1', output)
+        try:
+            p.ready()
+            p.wait('Combobox', 'Installation disk')
+            if case == 'missing-tools':
+                p.click('Combobox', 'Space source')
+                p.click('ListItem', '/dev/nvme0n1p2')
+                p.wait('Text', 'Resizing NTFS requires')
+            elif case == 'mbr':
+                p.wait('Text', 'This disk does not use GPT')
+            elif case == 'no-efi':
+                p.wait('Text', 'No existing EFI partition')
+            else:
+                p.wait('Combobox', 'Space source')
+            p.screenshot(case)
+            if case != 'ext4':
+                p.click('Button', 'Review')
+                props = p.data('get_element_properties', elementHandle=p.wait('Button', 'Install')['handle'])
+                assert not props.get('accessibleEnabled'), (case, props)
+                p.screenshot(case + '-review')
+        finally:
+            p.close()
+    os.environ.pop('AZFS_PREVIEW_ALONGSIDE', None)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--binary', type=Path, default=Path('target/debug/azfs'))
+    parser.add_argument('--output', type=Path, required=True)
+    args = parser.parse_args()
+    args.output.mkdir(parents=True, exist_ok=True)
+    for size, scale in [('1920x1080','1'), ('1366x768','1'), ('1920x1080','1.5'), ('1920x1080','2')]:
+        for small in [False, True]:
+            run(args.binary.resolve(), args.output, size, scale, small)
+
+    errors(args.binary.resolve(), args.output)

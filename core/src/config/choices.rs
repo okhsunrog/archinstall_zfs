@@ -66,6 +66,7 @@ impl Choice for InstallationMode {
         (Self::FullDisk, "Full Disk"),
         (Self::NewPool, "New Pool"),
         (Self::ExistingPool, "Existing Pool"),
+        (Self::Alongside, "Alongside"),
     ];
 }
 
@@ -168,6 +169,7 @@ mod tests {
             InstallationMode::FullDisk,
             InstallationMode::NewPool,
             InstallationMode::ExistingPool,
+            InstallationMode::Alongside,
         ]);
         assert_listed(&[
             CompressionAlgo::Off,

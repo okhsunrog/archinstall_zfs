@@ -51,3 +51,19 @@ jobs:
 
     - name: Audit dependencies
       run: cargo audit
+
+  zbm-publisher:
+    # Real FAT publication test for the boot image scripts. It mounts a loop
+    # image, so it runs on the VM runner rather than in the builder container.
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Install tools
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dosfstools shellcheck
+
+    - name: Lint publisher scripts
+      run: shellcheck core/assets/azfs-install-zbm core/assets/azfs-update-zbm core/tests/zbm-update-fixture.sh
+
+    - name: Run publisher fixture
+      run: sudo bash core/tests/zbm-update-fixture.sh

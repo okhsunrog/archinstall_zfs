@@ -180,6 +180,7 @@ pub fn apply_choice(config: &mut GlobalConfig, setting: ChoiceSetting, index: us
                 {
                     config.pool_name = None;
                 }
+                config.alongside = None;
                 config.disk = None;
                 config.efi_partition = None;
                 config.zfs_partition = None;
@@ -241,7 +242,10 @@ pub fn apply_device(config: &mut GlobalConfig, setting: DeviceSetting, path: &Pa
     match setting {
         DeviceSetting::Disk => {
             // Choosing a disk is what puts the wizard in full-disk mode.
-            config.installation_mode = Some(InstallationMode::FullDisk);
+            if config.installation_mode != Some(InstallationMode::Alongside) {
+                config.installation_mode = Some(InstallationMode::FullDisk);
+            }
+            config.alongside = None;
             config.disk = Some(path);
         }
         DeviceSetting::EfiPartition => config.efi_partition = Some(path),

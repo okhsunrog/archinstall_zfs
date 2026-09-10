@@ -1,0 +1,15 @@
+#!/usr/bin/bash
+# Keep generation off the ESP and propagate publication failures to pacman.
+set -euo pipefail
+[[ $# == 0 ]] || { echo "Run azfs-update-zbm without arguments; configure /etc/zfsbootmenu/config.yaml" >&2; exit 1; }
+esp=/boot/efi
+mkdir -p /var/lib/zfsbootmenu
+exec 8>/var/lib/zfsbootmenu/.update.lock
+flock -n 8 || { echo 'Another ZFSBootMenu build is running' >&2; exit 1; }
+# generate-zbm mounts an unmounted ESP itself and unmounts it again when it
+# exits; publication needs it afterwards. Mount it here so it stays mounted.
+if ! mountpoint -q "$esp"; then
+    mount "$esp" || { echo "ZFSBootMenu update failed: cannot mount $esp" >&2; exit 1; }
+fi
+generate-zbm
+exec /usr/local/libexec/azfs-install-zbm

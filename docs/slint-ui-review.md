@@ -259,3 +259,10 @@ findings fixed, artifact paths, and what remains untested. Keep dated reports su
 as [Design review](../slint-ui/DESIGN_REVIEW.md) distinct from this living workflow.
 Do not recycle an old screenshot as evidence of a new build. Documentation-only
 edits do not constitute another visual review of the application.
+
+When revealing a focused control inside conditional/nested layouts, compare
+its `absolute-position.y` and height with the ScrollView's absolute position
+and visible height. Mixing a child's local `y` with an ancestor's local `y`
+can leave the field partially clipped, especially with preview banners or
+scaling. Test Tab navigation at 150% as well as 100%; a successful click on a
+partially visible control is not proof that keyboard reveal works correctly.

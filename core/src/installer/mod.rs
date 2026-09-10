@@ -197,13 +197,19 @@ impl Installer {
         self.install_additional_packages()?;
         self.ensure_not_cancelled()?;
 
-        // Phase 11: Swap configuration
+        // Phase 11: mount entries, then swap.
         tracing::info!("Phase 11: Configuring swap...");
         tracing::info!(target: "metrics", event = "phase_start", num = 11u32, name = "Configuring swap");
-        self.configure_swap()?;
+        write_fstab_and_swap(
+            &*self.runner,
+            &self.target,
+            &self.boot_environment(),
+            &self.config,
+            self.effective_swap_partition(),
+        )?;
         self.ensure_not_cancelled()?;
 
-        // Phase 12: ZFS services + genfstab + misc files
+        // Phase 12: ZFS services + misc files
         tracing::info!("Phase 12: Finalizing ZFS configuration...");
         tracing::info!(target: "metrics", event = "phase_start", num = 12u32, name = "Finalizing ZFS configuration");
         self.finalize_zfs()?;
@@ -655,28 +661,6 @@ impl Installer {
         Ok(())
     }
 
-    fn configure_swap(&self) -> Result<()> {
-        match self.config.swap_mode {
-            SwapMode::Zram => {
-                crate::swap::configure_zram(&self.target, self.config.zram_size_expr.as_deref())?;
-            }
-            SwapMode::ZswapPartition => {
-                let part = self.effective_swap_partition();
-                if let Some(part) = part {
-                    crate::swap::setup_swap_partition(&*self.runner, &self.target, part, false)?;
-                }
-            }
-            SwapMode::ZswapPartitionEncrypted => {
-                let part = self.effective_swap_partition();
-                if let Some(part) = part {
-                    crate::swap::setup_swap_partition(&*self.runner, &self.target, part, true)?;
-                }
-            }
-            SwapMode::None => {}
-        }
-        Ok(())
-    }
-
     /// Return the swap partition path: runtime override first, then config.
     fn effective_swap_partition(&self) -> Option<&Path> {
         self.swap_partition
@@ -699,9 +683,6 @@ impl Installer {
         // on Alpm and is async (zfskit set_property). See
         // crate::zfs_trim::configure_zfs_trim, called from run_install.
 
-        // genfstab
-        fstab::generate_fstab(&*self.runner, &self.target, &be)?;
-
         // Copy misc files (hostid, zfs cache). The mountpoint the datasets are
         // currently mounted under is the install target itself — it is what
         // gets stripped from the cached mountpoints so they are correct once
@@ -722,12 +703,84 @@ impl Installer {
     }
 }
 
+/// Generate fstab from the live mounts, then add swap. The order is fixed:
+/// generation rewrites the whole file, and a swap partition is never
+/// activated during installation, so genfstab would not list it.
+fn write_fstab_and_swap(
+    runner: &dyn CommandRunner,
+    target: &Path,
+    be: &crate::boot_environment::BootEnvironment,
+    config: &GlobalConfig,
+    swap_partition: Option<&Path>,
+) -> Result<()> {
+    fstab::generate_fstab(runner, target, be)?;
+    match config.swap_mode {
+        SwapMode::Zram => {
+            crate::swap::configure_zram(target, config.zram_size_expr.as_deref())?;
+        }
+        SwapMode::ZswapPartition => {
+            if let Some(part) = swap_partition {
+                crate::swap::setup_swap_partition(runner, target, part, false)?;
+            }
+        }
+        SwapMode::ZswapPartitionEncrypted => {
+            if let Some(part) = swap_partition {
+                crate::swap::setup_swap_partition(runner, target, part, true)?;
+            }
+        }
+        SwapMode::None => {}
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::types::ZfsEncryptionMode;
-    use crate::system::cmd::tests::RecordingRunner;
+    use crate::system::cmd::tests::{CannedResponse, RecordingRunner};
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn swap_entries_survive_fstab_generation() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(target.path().join("etc")).unwrap();
+        let runner = RecordingRunner::new(vec![
+            CannedResponse {
+                stdout: "UUID=1234\t/boot/efi\tvfat\trw,relatime\t0\t2\n".into(),
+                ..Default::default()
+            },
+            CannedResponse::default(), // mkswap
+        ]);
+        let config = GlobalConfig {
+            swap_mode: SwapMode::ZswapPartition,
+            ..Default::default()
+        };
+        let be = crate::boot_environment::BootEnvironment::new("zroot", "arch0");
+
+        write_fstab_and_swap(
+            &runner,
+            target.path(),
+            &be,
+            &config,
+            Some(Path::new("/dev/disk/by-id/disk-part3")),
+        )
+        .unwrap();
+
+        let fstab = std::fs::read_to_string(target.path().join("etc/fstab")).unwrap();
+        assert!(fstab.contains("zroot/arch0/root\t/\tzfs"), "{fstab}");
+        assert!(
+            fstab.contains("/boot/efi\tvfat\trw,nofail,relatime\t0\t0"),
+            "{fstab}"
+        );
+        // The swap line is appended after generation; the reverse order
+        // silently dropped it and the system booted without swap.
+        assert!(
+            fstab.contains("/dev/disk/by-id/disk-part3\tnone\tswap"),
+            "{fstab}"
+        );
+        assert_eq!(runner.calls()[0].program, "genfstab");
+        assert_eq!(runner.calls()[1].program, "mkswap");
+    }
 
     fn request(config: GlobalConfig, target: &Path, cancel: CancellationToken) -> InstallRequest {
         InstallRequest {

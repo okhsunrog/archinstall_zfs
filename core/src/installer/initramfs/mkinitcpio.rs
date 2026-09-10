@@ -139,23 +139,38 @@ fn patch_conf_array(content: &str, key: &str, f: impl FnOnce(&mut Vec<String>)) 
 }
 
 fn set_conf_value(content: &str, key: &str, value: &str) -> String {
+    set_conf_line(content, key, &format!("{key}=\"{value}\""))
+}
+
+/// Replace every active `KEY=` assignment with `line`. When the key is only
+/// present as a commented example (stock files list several), activate the
+/// first one and leave the other examples as they are. Append when absent.
+pub(crate) fn set_conf_line(content: &str, key: &str, line: &str) -> String {
     let prefix = format!("{key}=");
+    let commented = format!("#{prefix}");
+    let has_active = content.lines().any(|l| l.trim().starts_with(&prefix));
     let mut result = String::new();
     let mut found = false;
 
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with(&prefix) || trimmed.starts_with(&format!("#{prefix}")) {
-            found = true;
-            result.push_str(&format!("{key}=\"{value}\"\n"));
+    for l in content.lines() {
+        let trimmed = l.trim();
+        let replace = if has_active {
+            trimmed.starts_with(&prefix)
         } else {
+            !found && trimmed.starts_with(&commented)
+        };
+        if replace {
+            found = true;
             result.push_str(line);
-            result.push('\n');
+        } else {
+            result.push_str(l);
         }
+        result.push('\n');
     }
 
     if !found {
-        result.push_str(&format!("{key}=\"{value}\"\n"));
+        result.push_str(line);
+        result.push('\n');
     }
 
     result
@@ -300,5 +315,30 @@ mod tests {
         let result = set_conf_value(input, "COMPRESSION", "cat");
         assert!(result.contains("COMPRESSION=\"cat\""));
         assert!(!result.contains("#COMPRESSION"));
+    }
+
+    #[test]
+    fn test_set_conf_line_activates_one_example_and_replaces_active_values() {
+        let examples = "#COMPRESSION=\"zstd\"\n#COMPRESSION=\"xz\"\n#COMPRESSION_OPTIONS=()\n";
+        assert_eq!(
+            set_conf_line(examples, "COMPRESSION", "COMPRESSION=\"xz\""),
+            "COMPRESSION=\"xz\"\n#COMPRESSION=\"xz\"\n#COMPRESSION_OPTIONS=()\n"
+        );
+        assert_eq!(
+            set_conf_line(
+                "#COMPRESSION=\"zstd\"\nCOMPRESSION=\"lz4\"\n",
+                "COMPRESSION",
+                "COMPRESSION=\"xz\""
+            ),
+            "#COMPRESSION=\"zstd\"\nCOMPRESSION=\"xz\"\n"
+        );
+        assert_eq!(
+            set_conf_line(
+                "HOOKS=(base)\n",
+                "COMPRESSION_OPTIONS",
+                "COMPRESSION_OPTIONS=(-9)"
+            ),
+            "HOOKS=(base)\nCOMPRESSION_OPTIONS=(-9)\n"
+        );
     }
 }

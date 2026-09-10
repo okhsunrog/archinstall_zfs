@@ -137,3 +137,7 @@ The `shell` interaction flow checks the simulated completion/return states.
 The `logs` flow verifies that completion opens at the latest output, scrolling
 back preserves earlier lines, and **Latest output** resumes following. Both
 flows check that the action panel stays below the log and inside the window.
+
+The `--preview alongside` scene exercises graphical disk resizing. See
+[Alongside development and verification](../docs/dual-boot-development.md) for
+fixtures, runtime tool requirements and test boundaries.

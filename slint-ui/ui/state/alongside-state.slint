@@ -1,0 +1,35 @@
+export struct DiskSegment { offset: float, fraction: float, kind: int, label: string, short-label: string }
+export global AlongsideState {
+    in-out property <[string]> disks;
+    in-out property <[string]> sources;
+    in-out property <[string]> efi-partitions;
+    in-out property <int> disk-index: -1;
+    in-out property <int> source-index: -1;
+    in-out property <int> efi-index: -1;
+    in-out property <bool> busy;
+    in-out property <int> generation;
+    in-out property <bool> insufficient;
+    in-out property <bool> additional-efi;
+    in-out property <bool> use-all: true;
+    in-out property <int> swap-mode;
+    in-out property <float> swap-size: 8;
+    in-out property <float> allocation: 32;
+    in-out property <float> minimum: 32;
+    in-out property <float> maximum: 32;
+    in-out property <string> error;
+    in-out property <string> details;
+    in-out property <string> allocation-summary;
+    in-out property <string> efi-details;
+    in-out property <[DiskSegment]> before;
+    in-out property <[DiskSegment]> after;
+    callback reload();
+    callback select-disk(int);
+    callback select-source(int);
+    callback select-efi(int);
+    callback allocate(float);
+    callback additional(bool);
+    callback all-space(bool);
+    callback select-swap(int);
+    callback size-swap(float);
+    callback rebuild();
+}

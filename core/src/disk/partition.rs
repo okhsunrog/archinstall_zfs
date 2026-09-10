@@ -145,7 +145,7 @@ const PARTITION_POLL: std::time::Duration = std::time::Duration::from_millis(200
 /// Returning without the node present only defers the failure to whatever runs
 /// next — mkfs, or zpool create — where it surfaces as a confusing "no such
 /// file" against a path the user never typed.
-fn wait_for_path(path: &Path) -> Result<()> {
+pub fn wait_for_path(path: &Path) -> Result<()> {
     let deadline = std::time::Instant::now() + PARTITION_WAIT;
     loop {
         if path.exists() {

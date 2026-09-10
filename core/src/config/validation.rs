@@ -14,6 +14,7 @@ use super::types::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValidationError {
     InstallationModeNotSelected,
+    AlongsidePlan(String),
     PoolNameMissing,
     PoolNameInvalid(String),
     DatasetPrefixInvalid(String),
@@ -66,6 +67,7 @@ pub fn is_valid_username(name: &str) -> bool {
 impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::AlongsidePlan(reason) => write!(f, "Alongside installation: {reason}"),
             Self::InstallationModeNotSelected => write!(f, "Installation mode not selected"),
             Self::PoolNameMissing => write!(f, "Pool name is required"),
             Self::PoolNameInvalid(name) => write!(
@@ -163,6 +165,26 @@ impl GlobalConfig {
         );
 
         match mode {
+            InstallationMode::Alongside => {
+                match &self.alongside {
+                    Some(request) => {
+                        if let Err(e) = request.plan() {
+                            errors.push(ValidationError::AlongsidePlan(e.to_string()));
+                        }
+                    }
+                    None => errors.push(ValidationError::AlongsidePlan(
+                        "Choose a disk, space allocation and EFI partition".into(),
+                    )),
+                }
+                if let Some(request) = &self.alongside
+                    && wants_swap_partition != (request.swap_bytes > 0)
+                {
+                    errors.push(ValidationError::AlongsidePlan(
+                        "Swap method differs from the disk allocation; update the storage plan"
+                            .into(),
+                    ));
+                }
+            }
             InstallationMode::FullDisk => {
                 if self.disk.is_none() {
                     errors.push(ValidationError::DiskRequired);

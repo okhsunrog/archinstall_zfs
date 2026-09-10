@@ -80,10 +80,6 @@ async fn probe_with_client(client: &reqwest::Client, url: &str) -> Result<(), Pr
     Ok(())
 }
 
-pub fn is_uefi() -> bool {
-    std::path::Path::new("/sys/firmware/efi").exists()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
