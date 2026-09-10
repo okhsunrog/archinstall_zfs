@@ -171,13 +171,7 @@ pub async fn prepare_zfs(
                 .set_property("cachefile", "none")
                 .await?;
 
-            let base_refs = base_dataset_props(encryption, &key_path, &compression);
-            let base_refs_view: Vec<(&str, &str)> =
-                base_refs.iter().map(|(k, v)| (*k, v.as_str())).collect();
-            crate::dataset_layout::create_base_dataset(&zfs, &be, &base_refs_view).await?;
-
-            let datasets = crate::dataset_layout::default_datasets();
-            crate::dataset_layout::create_child_datasets(&zfs, &be, &datasets).await?;
+            create_boot_environment(&zfs, &be, encryption, &key_path, &compression).await?;
             tracing::info!("Created datasets");
 
             export_pool(&zfs, pool_name).await?;
@@ -196,13 +190,7 @@ pub async fn prepare_zfs(
                     .await?;
             }
 
-            let base_refs = base_dataset_props(encryption, &key_path, &compression);
-            let base_refs_view: Vec<(&str, &str)> =
-                base_refs.iter().map(|(k, v)| (*k, v.as_str())).collect();
-            crate::dataset_layout::create_base_dataset(&zfs, &be, &base_refs_view).await?;
-
-            let datasets = crate::dataset_layout::default_datasets();
-            crate::dataset_layout::create_child_datasets(&zfs, &be, &datasets).await?;
+            create_boot_environment(&zfs, &be, encryption, &key_path, &compression).await?;
             tracing::info!("Created new BE in existing pool");
         }
     }
@@ -213,6 +201,24 @@ pub async fn prepare_zfs(
     crate::dataset_layout::mount_datasets_ordered(&zfs, &be, &datasets).await?;
     tracing::info!("Datasets mounted");
 
+    Ok(())
+}
+
+/// Create the boot environment's base dataset and the children under it,
+/// whether the pool was just created or already existed.
+async fn create_boot_environment(
+    zfs: &zfskit::Zfs,
+    be: &BootEnvironment,
+    encryption: ZfsEncryptionMode,
+    key_path: &Path,
+    compression: &str,
+) -> Result<()> {
+    let base_props = base_dataset_props(encryption, key_path, compression);
+    let base_refs: Vec<(&str, &str)> = base_props.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    crate::dataset_layout::create_base_dataset(zfs, be, &base_refs).await?;
+
+    let datasets = crate::dataset_layout::default_datasets();
+    crate::dataset_layout::create_child_datasets(zfs, be, &datasets).await?;
     Ok(())
 }
 

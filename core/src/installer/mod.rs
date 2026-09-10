@@ -104,13 +104,8 @@ pub fn perform_installation(request: InstallRequest) -> Result<Vec<String>> {
 
     tracing::info!("Phase 4: Installing base system...");
     tracing::info!(target: "metrics", event = "phase_start", num = 4u32, name = "Installing base system");
-    let target_mounts = base::install_base(
-        &*runner,
-        &target,
-        &config,
-        &cancel,
-        download_progress_tx.clone(),
-    )?;
+    let target_mounts =
+        base::install_base(&target, &config, &cancel, download_progress_tx.clone())?;
 
     // The target now has pacman.conf, keyring and mirrorlist from
     // finalize_target(), so the handle for the remaining phases can be made.
@@ -235,7 +230,7 @@ impl Installer {
             locale::set_locale(&*self.runner, &self.target, locale)?;
         }
 
-        locale::set_keyboard(&*self.runner, &self.target, &self.config.keyboard_layout)?;
+        locale::set_keyboard(&self.target, &self.config.keyboard_layout)?;
         locale::set_x11_keyboard(&self.target, &self.config.keyboard_layout)?;
 
         if let Some(ref tz) = self.config.timezone {
@@ -343,7 +338,7 @@ impl Installer {
 
         match self.config.init_system {
             InitSystem::Dracut => {
-                initramfs::dracut::configure(&*self.runner, &self.target, encryption)?;
+                initramfs::dracut::configure(&self.target, encryption)?;
                 initramfs::dracut::generate(&*self.runner, &self.target, &kernels)?;
             }
             InitSystem::Mkinitcpio => {

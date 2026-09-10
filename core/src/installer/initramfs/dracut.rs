@@ -62,7 +62,7 @@ while read -r line; do
 done
 "#;
 
-pub fn configure(_runner: &dyn CommandRunner, target: &Path, encryption: bool) -> Result<()> {
+pub fn configure(target: &Path, encryption: bool) -> Result<()> {
     // Write dracut.conf.d/zfs.conf
     let conf_dir = target.join("etc/dracut.conf.d");
     fs::create_dir_all(&conf_dir)?;
@@ -215,8 +215,7 @@ mod tests {
     #[test]
     fn test_configure_dracut_creates_files() {
         let dir = tempfile::tempdir().unwrap();
-        let runner = RecordingRunner::new(vec![]);
-        configure(&runner, dir.path(), false).unwrap();
+        configure(dir.path(), false).unwrap();
 
         assert!(dir.path().join("etc/dracut.conf.d/zfs.conf").exists());
         assert!(
@@ -245,8 +244,7 @@ mod tests {
     #[test]
     fn test_configure_dracut_with_encryption() {
         let dir = tempfile::tempdir().unwrap();
-        let runner = RecordingRunner::new(vec![]);
-        configure(&runner, dir.path(), true).unwrap();
+        configure(dir.path(), true).unwrap();
 
         let conf = fs::read_to_string(dir.path().join("etc/dracut.conf.d/zfs.conf")).unwrap();
         assert!(conf.contains("zroot.key"));

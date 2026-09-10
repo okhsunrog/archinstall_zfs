@@ -26,17 +26,15 @@ pub fn copy_iso_network(runner: &dyn CommandRunner, target: &Path) -> Result<()>
     let _ = fs::remove_file(&resolv);
     std::os::unix::fs::symlink("/run/systemd/resolve/stub-resolv.conf", &resolv)?;
 
-    // Enable services
-    let services = ["systemd-networkd", "systemd-resolved"];
-    for service in &services {
-        let target_str = target.to_string_lossy();
-        let _ = runner.run("systemctl", &["--root", &target_str, "enable", service]);
+    // Enable services. The helper already treats a non-zero exit as a
+    // warning; a systemctl that cannot be run at all is ignored here as well.
+    for service in ["systemd-networkd", "systemd-resolved"] {
+        let _ = super::services::enable_service(runner, target, service);
     }
 
     // Enable iwd if configs were copied
     if dst_iwd.exists() {
-        let target_str = target.to_string_lossy();
-        let _ = runner.run("systemctl", &["--root", &target_str, "enable", "iwd"]);
+        let _ = super::services::enable_service(runner, target, "iwd");
     }
 
     tracing::info!("copied ISO network configuration");

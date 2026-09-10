@@ -5,14 +5,12 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::types::GlobalConfig;
 use crate::system::alpm_pacman::{AlpmContext, TargetMounts};
-use crate::system::cmd::CommandRunner;
 use crate::system::sysinfo;
 
 /// Install base system packages into target.
 /// Returns `TargetMounts` which must be kept alive for the duration of the
 /// installation — dropping it unmounts API filesystems (proc, sys, dev, etc.).
 pub fn install_base(
-    _runner: &dyn CommandRunner,
     target: &Path,
     config: &GlobalConfig,
     cancel: &CancellationToken,
