@@ -92,14 +92,15 @@ impl EfiSpace {
 }
 
 /// Inspect FAT without mounting or repairing it. A failed consistency or
-/// capacity check is not a low-space result.
+/// capacity check is not a low-space result. Free space comes from the same
+/// `fsck.fat -n -v` run: dosfstools is on every live medium, mtools is not.
 pub fn inspect_efi(
     runner: &dyn CommandRunner,
     layout: &Layout,
     number: u32,
     filesystems: &[Filesystem],
 ) -> Result<EfiSpace> {
-    check_tools(&[("fsck.fat", "dosfstools"), ("mdir", "mtools")])?;
+    check_tools(&[("fsck.fat", "dosfstools")])?;
     let p = layout
         .partitions
         .iter()
@@ -115,8 +116,7 @@ pub fn inspect_efi(
             .any(|f| f.path == p.node && f.fstype.as_deref() == Some("vfat")),
         "The existing ESP must contain a FAT filesystem"
     );
-    probe::run(runner, "fsck.fat", &["-n", &p.node.to_string_lossy()]).wrap_err("The existing EFI filesystem needs maintenance. No additional ESP is offered for a failed filesystem check")?;
-    let output = probe::run(runner, "mdir", &["-i", &p.node.to_string_lossy(), "::"])?;
+    let output = probe::run(runner, "fsck.fat", &["-n", "-v", &p.node.to_string_lossy()]).wrap_err("The existing EFI filesystem needs maintenance. No additional ESP is offered for a failed filesystem check")?;
     let free_bytes = parse_free_bytes(&output)?;
     ensure!(
         free_bytes <= p.size * layout.sectorsize,
@@ -128,17 +128,33 @@ pub fn inspect_efi(
     })
 }
 
+/// Free bytes from `fsck.fat -v` output: the boot-sector dump gives the
+/// cluster size and the summary line gives `used/total clusters`.
 fn parse_free_bytes(output: &str) -> Result<u64> {
-    let lines: Vec<_> = output
+    const UNREADABLE: &str =
+        "Cannot determine free space on the existing ESP; refresh after checking the filesystem";
+    let cluster_bytes: Vec<u64> = output
         .lines()
-        .filter_map(|l| l.trim().strip_suffix("bytes free"))
+        .filter_map(|l| l.trim().strip_suffix(" bytes per cluster"))
+        .filter_map(|n| n.trim().parse().ok())
         .collect();
-    ensure!(
-        lines.len() == 1,
-        "Cannot determine free space on the existing ESP; refresh after checking the filesystem"
-    );
-    let digits: String = lines[0].chars().filter(|c| !c.is_whitespace()).collect();
-    Ok(digits.parse()?)
+    let clusters: Vec<(u64, u64)> = output
+        .lines()
+        .filter_map(|l| l.trim().strip_suffix(" clusters"))
+        .filter_map(|l| l.rsplit(' ').next())
+        .filter_map(|pair| {
+            let (used, total) = pair.split_once('/')?;
+            Some((used.parse().ok()?, total.parse().ok()?))
+        })
+        .collect();
+    let (&[cluster], &[(used, total)]) = (cluster_bytes.as_slice(), clusters.as_slice()) else {
+        bail!(UNREADABLE);
+    };
+    ensure!(cluster > 0 && used <= total, UNREADABLE);
+    total
+        .checked_sub(used)
+        .and_then(|free| free.checked_mul(cluster))
+        .ok_or_else(|| eyre!(UNREADABLE))
 }
 
 #[cfg(test)]
@@ -229,11 +245,13 @@ mod tests {
     }
     #[test]
     fn unreadable_capacity_is_not_zero_space() {
-        assert_eq!(
-            parse_free_bytes("  123 456 789 bytes free\n").unwrap(),
-            123456789
-        );
+        let verbose = "fsck.fat 4.2 (2021-01-31)\nBoot sector contents:\n       512 bytes per logical sector\n      4096 bytes per cluster\n    201616 data clusters (825819136 bytes)\nChecking free cluster summary.\n/dev/sda1: 12 files, 8451/201616 clusters\n";
+        assert_eq!(parse_free_bytes(verbose).unwrap(), (201616 - 8451) * 4096);
         assert!(parse_free_bytes("Device unavailable").is_err());
-        assert!(parse_free_bytes("12 bytes free\n34 bytes free").is_err());
+        // The summary alone, without the cluster size, is not a measurement.
+        assert!(parse_free_bytes("/dev/sda1: 12 files, 8451/201616 clusters\n").is_err());
+        assert!(
+            parse_free_bytes("4096 bytes per cluster\n/dev/sda1: 1 files, 5/4 clusters\n").is_err()
+        );
     }
 }
