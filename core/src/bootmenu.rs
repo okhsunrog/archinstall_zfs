@@ -7,8 +7,8 @@ use serde::Serialize;
 
 use crate::boot_environment::BootEnvironment;
 use crate::config::types::InitSystem;
-use crate::installer::initramfs::mkinitcpio::set_conf_line;
 use crate::system::cmd::{CommandRunner, check_exit, chroot_checked};
+use crate::system::conf::set_conf_line;
 
 pub const HOSTID_VALUE: &str = "0x00bab10c";
 

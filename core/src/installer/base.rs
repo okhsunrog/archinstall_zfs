@@ -38,7 +38,7 @@ pub fn install_base(
     }
 
     // Set parallel downloads on host before installing
-    crate::system::pacman::set_parallel_downloads(None, config.parallel_downloads)?;
+    crate::system::conf::set_parallel_downloads(None, config.parallel_downloads)?;
 
     // Mount API filesystems — returned to caller to keep alive
     let target_mounts = TargetMounts::setup(target)?;
@@ -52,7 +52,7 @@ pub fn install_base(
     // target_mounts stays alive via the return value.
 
     // Set parallel downloads on target too
-    crate::system::pacman::set_parallel_downloads(Some(target), config.parallel_downloads)?;
+    crate::system::conf::set_parallel_downloads(Some(target), config.parallel_downloads)?;
 
     Ok(target_mounts)
 }

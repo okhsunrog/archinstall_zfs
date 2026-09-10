@@ -3,6 +3,7 @@ use std::path::Path;
 use color_eyre::eyre::{Result, bail};
 
 use super::cmd::CommandRunner;
+use super::conf::set_option;
 use crate::distro::{Distribution, Repository};
 use crate::system::sysinfo::IsaLevel;
 
@@ -139,72 +140,6 @@ fn replace_repo_block(content: &str, repo: &Repository) -> String {
     result
 }
 
-/// Set a key in pacman.conf's `[options]`, adding it when absent.
-///
-/// Both keys this is used for appear only in that section, so a line-based
-/// replacement is enough and does not need a full parser.
-fn set_option(content: &str, key: &str, value: &str) -> String {
-    let line = format!("{key} = {value}");
-    let mut replaced = false;
-    let mut result: Vec<String> = content
-        .lines()
-        .map(|existing| {
-            let trimmed = existing.trim_start().trim_start_matches('#');
-            if trimmed.starts_with(&format!("{key} ")) || trimmed.starts_with(&format!("{key}=")) {
-                replaced = true;
-                line.clone()
-            } else {
-                existing.to_string()
-            }
-        })
-        .collect();
-
-    if !replaced {
-        // Straight after [options], which every pacman.conf opens with.
-        let at = result
-            .iter()
-            .position(|l| l.trim() == "[options]")
-            .map(|i| i + 1)
-            .unwrap_or(0);
-        result.insert(at, line);
-    }
-
-    let mut out = result.join("\n");
-    out.push('\n');
-    out
-}
-
-pub fn set_parallel_downloads(target: Option<&Path>, count: u32) -> Result<()> {
-    let pacman_conf = match target {
-        Some(t) => t.join("etc/pacman.conf"),
-        None => std::path::PathBuf::from("/etc/pacman.conf"),
-    };
-
-    let content = std::fs::read_to_string(&pacman_conf)?;
-    let new_line = format!("ParallelDownloads = {count}");
-
-    let new_content = if content.contains("ParallelDownloads") {
-        content
-            .lines()
-            .map(|line| {
-                if line.trim_start().starts_with("ParallelDownloads")
-                    || line.trim_start().starts_with("#ParallelDownloads")
-                {
-                    new_line.as_str()
-                } else {
-                    line
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    } else {
-        format!("{content}\n{new_line}\n")
-    };
-
-    std::fs::write(&pacman_conf, new_content)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,41 +152,6 @@ mod tests {
         key_ids: &[],
         signatures: Signatures::Never,
     };
-
-    #[test]
-    fn an_option_is_replaced_in_place() {
-        let conf = "[options]\nArchitecture = x86_64\nParallelDownloads = 5\n\n[core]\n";
-
-        let result = set_option(conf, "Architecture", "auto");
-
-        assert!(result.contains("Architecture = auto"));
-        assert!(!result.contains("Architecture = x86_64"));
-        assert!(result.contains("ParallelDownloads = 5"), "others untouched");
-    }
-
-    #[test]
-    fn a_commented_option_is_taken_over() {
-        let conf = "[options]\n#Architecture = auto\n\n[core]\n";
-
-        let result = set_option(conf, "Architecture", "auto");
-
-        assert_eq!(result.matches("Architecture").count(), 1);
-        assert!(!result.contains('#'));
-    }
-
-    #[test]
-    fn a_missing_option_is_added_under_options() {
-        let conf = "[options]\nHoldPkg = pacman\n\n[core]\nSigLevel = Required\n";
-
-        let result = set_option(conf, "Architecture", "auto");
-
-        let lines: Vec<&str> = result.lines().collect();
-        assert_eq!(lines[0], "[options]");
-        assert_eq!(
-            lines[1], "Architecture = auto",
-            "must land inside [options]"
-        );
-    }
 
     #[test]
     fn a_repository_is_added_once() {
@@ -291,19 +191,5 @@ mod tests {
 
         assert!(result.contains("ParallelDownloads = 5"));
         assert!(result.contains("[extra]\nSigLevel = Required"));
-    }
-
-    #[test]
-    fn test_set_parallel_downloads() {
-        let dir = tempfile::tempdir().unwrap();
-        let conf_path = dir.path().join("etc/pacman.conf");
-        std::fs::create_dir_all(conf_path.parent().unwrap()).unwrap();
-        std::fs::write(&conf_path, "#ParallelDownloads = 5\n").unwrap();
-
-        set_parallel_downloads(Some(dir.path()), 10).unwrap();
-
-        let content = std::fs::read_to_string(&conf_path).unwrap();
-        assert!(content.contains("ParallelDownloads = 10"));
-        assert!(!content.contains("#ParallelDownloads"));
     }
 }

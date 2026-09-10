@@ -4,6 +4,7 @@ use std::path::Path;
 use color_eyre::eyre::{Context, Result, bail};
 
 use crate::system::cmd::{CommandRunner, chroot_checked};
+use crate::system::conf::{patch_conf_array, set_conf_value};
 
 pub fn configure(target: &Path, encryption: bool) -> Result<()> {
     let conf_path = target.join("etc/mkinitcpio.conf");
@@ -96,108 +97,9 @@ pub fn generate(runner: &dyn CommandRunner, target: &Path, with_zfs: &[&str]) ->
     Ok(())
 }
 
-/// Rewrite a `KEY=(a b c)` array assignment in an mkinitcpio.conf.
-///
-/// Errors when the assignment cannot be parsed rather than falling back to an
-/// empty array. Silently emptying `HOOKS` produces a `HOOKS=(zfs)` initramfs
-/// that cannot mount root, and the installation would report success — a
-/// failure here is recoverable, an unbootable system is not.
-///
-/// Where the same key is assigned more than once the last assignment is the
-/// one the shell would use, so that is the one patched.
-fn patch_conf_array(content: &str, key: &str, f: impl FnOnce(&mut Vec<String>)) -> Result<String> {
-    let prefix = format!("{key}=(");
-    let mut lines: Vec<String> = Vec::new();
-    let mut target_line: Option<usize> = None;
-    let mut values: Vec<String> = Vec::new();
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with(&prefix) {
-            let Some(inner) = trimmed
-                .strip_prefix(&prefix)
-                .and_then(|s| s.strip_suffix(')'))
-            else {
-                bail!(
-                    "cannot patch {key} in mkinitcpio.conf: the assignment on line {} does not \
-                     close on the same line. Rewriting it would drop the existing entries and \
-                     leave an unbootable initramfs; put {key}=(...) on one line and retry.",
-                    lines.len() + 1
-                );
-            };
-            target_line = Some(lines.len());
-            values = inner.split_whitespace().map(|s| s.to_string()).collect();
-        }
-        lines.push(line.to_string());
-    }
-
-    f(&mut values);
-    let new_line = format!("{key}=({})", values.join(" "));
-    match target_line {
-        Some(index) => lines[index] = new_line,
-        None => lines.push(new_line),
-    }
-
-    let mut result = lines.join("\n");
-    result.push('\n');
-    Ok(result)
-}
-
-fn set_conf_value(content: &str, key: &str, value: &str) -> String {
-    set_conf_line(content, key, &format!("{key}=\"{value}\""))
-}
-
-/// Replace every active `KEY=` assignment with `line`. When the key is only
-/// present as a commented example (stock files list several), activate the
-/// first one and leave the other examples as they are. Append when absent.
-pub(crate) fn set_conf_line(content: &str, key: &str, line: &str) -> String {
-    let prefix = format!("{key}=");
-    let commented = format!("#{prefix}");
-    let has_active = content.lines().any(|l| l.trim().starts_with(&prefix));
-    let mut result = String::new();
-    let mut found = false;
-
-    for l in content.lines() {
-        let trimmed = l.trim();
-        let replace = if has_active {
-            trimmed.starts_with(&prefix)
-        } else {
-            !found && trimmed.starts_with(&commented)
-        };
-        if replace {
-            found = true;
-            result.push_str(line);
-        } else {
-            result.push_str(l);
-        }
-        result.push('\n');
-    }
-
-    if !found {
-        result.push_str(line);
-        result.push('\n');
-    }
-
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_patch_conf_array_adds_zfs() {
-        let input = "MODULES=()\nHOOKS=(base udev autodetect modconf block filesystems fsck)\n";
-        let result = patch_conf_array(input, "HOOKS", |hooks| {
-            if !hooks.contains(&"zfs".to_string())
-                && let Some(pos) = hooks.iter().position(|h| h == "filesystems")
-            {
-                hooks.insert(pos, "zfs".to_string());
-            }
-        })
-        .unwrap();
-        assert!(result.contains("zfs filesystems"));
-    }
 
     #[test]
     fn each_kernel_with_a_module_gets_its_own_preset_run() {
@@ -231,21 +133,6 @@ mod tests {
     }
 
     #[test]
-    fn multi_line_array_is_rejected_instead_of_emptied() {
-        // A HOOKS array split across lines used to parse as empty, so the
-        // patched config kept only the hook being added — an initramfs with no
-        // base, udev or block hooks, i.e. a system that cannot boot.
-        let input = "MODULES=()\nHOOKS=(base udev autodetect\n       block filesystems fsck)\n";
-
-        let err = patch_conf_array(input, "HOOKS", |hooks| hooks.push("zfs".to_string()))
-            .expect_err("a multi-line array must not be silently rewritten");
-
-        let msg = err.to_string();
-        assert!(msg.contains("HOOKS"), "error should name the key: {msg}");
-        assert!(msg.contains("line 2"), "error should locate it: {msg}");
-    }
-
-    #[test]
     fn configure_refuses_a_conf_it_cannot_patch_safely() {
         let dir = tempfile::tempdir().unwrap();
         let conf_path = dir.path().join("etc/mkinitcpio.conf");
@@ -256,42 +143,6 @@ mod tests {
         assert!(configure(dir.path(), false).is_err());
         // The original config must be left intact for the user to fix.
         assert_eq!(fs::read_to_string(&conf_path).unwrap(), original);
-    }
-
-    #[test]
-    fn repeated_assignment_patches_the_one_the_shell_would_use() {
-        let input = "HOOKS=(base udev)\nHOOKS=(base udev block filesystems)\n";
-
-        let result = patch_conf_array(input, "HOOKS", |hooks| {
-            let pos = hooks.iter().position(|h| h == "filesystems").unwrap();
-            hooks.insert(pos, "zfs".to_string());
-        })
-        .unwrap();
-
-        assert_eq!(
-            result,
-            "HOOKS=(base udev)\nHOOKS=(base udev block zfs filesystems)\n"
-        );
-    }
-
-    #[test]
-    fn missing_array_is_appended() {
-        let result = patch_conf_array("COMPRESSION=\"cat\"\n", "FILES", |files| {
-            files.push("/etc/zfs/zroot.key".to_string())
-        })
-        .unwrap();
-
-        assert_eq!(result, "COMPRESSION=\"cat\"\nFILES=(/etc/zfs/zroot.key)\n");
-    }
-
-    #[test]
-    fn commented_out_assignment_is_left_alone() {
-        let result = patch_conf_array("#MODULES=(vfat)\n", "MODULES", |modules| {
-            modules.push("zfs".to_string())
-        })
-        .unwrap();
-
-        assert_eq!(result, "#MODULES=(vfat)\nMODULES=(zfs)\n");
     }
 
     #[test]
@@ -312,38 +163,5 @@ mod tests {
         assert!(content.contains("zfs filesystems"));
         assert!(content.contains("COMPRESSION=\"cat\""));
         assert!(content.contains("/etc/zfs/zroot.key"));
-    }
-
-    #[test]
-    fn test_set_conf_value() {
-        let input = "#COMPRESSION=\"zstd\"\n";
-        let result = set_conf_value(input, "COMPRESSION", "cat");
-        assert!(result.contains("COMPRESSION=\"cat\""));
-        assert!(!result.contains("#COMPRESSION"));
-    }
-
-    #[test]
-    fn test_set_conf_line_activates_one_example_and_replaces_active_values() {
-        let examples = "#COMPRESSION=\"zstd\"\n#COMPRESSION=\"xz\"\n#COMPRESSION_OPTIONS=()\n";
-        assert_eq!(
-            set_conf_line(examples, "COMPRESSION", "COMPRESSION=\"xz\""),
-            "COMPRESSION=\"xz\"\n#COMPRESSION=\"xz\"\n#COMPRESSION_OPTIONS=()\n"
-        );
-        assert_eq!(
-            set_conf_line(
-                "#COMPRESSION=\"zstd\"\nCOMPRESSION=\"lz4\"\n",
-                "COMPRESSION",
-                "COMPRESSION=\"xz\""
-            ),
-            "#COMPRESSION=\"zstd\"\nCOMPRESSION=\"xz\"\n"
-        );
-        assert_eq!(
-            set_conf_line(
-                "HOOKS=(base)\n",
-                "COMPRESSION_OPTIONS",
-                "COMPRESSION_OPTIONS=(-9)"
-            ),
-            "HOOKS=(base)\nCOMPRESSION_OPTIONS=(-9)\n"
-        );
     }
 }
