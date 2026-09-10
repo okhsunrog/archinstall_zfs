@@ -74,10 +74,13 @@ mount -o ro /dev/vda2 /run/preserved
 value=$(cat /run/preserved/KEEP.txt)
 umount /run/preserved
 [ "$value" = 'preserved filesystem payload' ]
-mount -o ro /dev/vda1 /run/preserved
-value=$(cat /run/preserved/EFI/FOREIGN/KEEP.EFI)
-cp /run/preserved/EFI/zbm/vmlinuz.EFI /run/installed-zbm.EFI
-umount /run/preserved
+# The installer leaves the ESP mounted under the target; FAT cannot be
+# mounted a second time, so read it where it is.
+esp=$(findmnt -n -o TARGET --source /dev/vda1 | head -n 1)
+if [ -z "$esp" ]; then mount -o ro /dev/vda1 /run/preserved; esp=/run/preserved; fi
+value=$(cat "$esp/EFI/FOREIGN/KEEP.EFI")
+cp "$esp/EFI/zbm/vmlinuz.EFI" /run/installed-zbm.EFI
+[ "$esp" != /run/preserved ] || umount /run/preserved
 [ "$value" = 'foreign EFI payload' ]
 [ "$(od -An -tx1 -N2 /run/installed-zbm.EFI | tr -d ' \n')" = 4d5a ]
 "#,
