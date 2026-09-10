@@ -500,25 +500,15 @@ impl Installer {
         seat: Option<crate::config::types::SeatAccess>,
     ) -> Result<()> {
         use crate::config::types::SeatAccess;
-        use crate::system::cmd::{check_exit, chroot_cmd};
 
         match seat {
             Some(SeatAccess::Seatd) => {
                 self.install_target_packages(&["seatd"])?;
                 services::enable_service(&*self.runner, &self.target, "seatd")?;
                 // Add all installer-created users to the `seat` group
-                if let Some(ref user_list) = self.config.users.clone() {
-                    // groupadd -f is idempotent
-                    let _ = chroot_cmd(&*self.runner, &self.target, "groupadd", &["-f", "seat"]);
-                    for user in user_list {
-                        let output = chroot_cmd(
-                            &*self.runner,
-                            &self.target,
-                            "usermod",
-                            &["-aG", "seat", &user.username],
-                        )?;
-                        check_exit(&output, &format!("add {} to seat group", user.username))?;
-                    }
+                if let Some(user_list) = &self.config.users {
+                    let users: Vec<&str> = user_list.iter().map(|u| u.username.as_str()).collect();
+                    users::add_to_group(&*self.runner, &self.target, "seat", &users)?;
                 }
                 tracing::info!("configured seatd for seat access");
             }
@@ -544,7 +534,6 @@ impl Installer {
     /// if the data directory already exists on a reinstall, and that is fine.
     fn run_post_install_steps(&self, steps: &[crate::profile::PostInstallStep]) -> Result<()> {
         use crate::profile::PostInstallStep;
-        use crate::system::cmd::{check_exit, chroot_cmd};
 
         for step in steps {
             match step {
@@ -583,20 +572,10 @@ impl Installer {
                 }
                 PostInstallStep::AddUsersToGroup { group } => {
                     tracing::info!(group, "adding installer users to group");
-                    if let Some(ref user_list) = self.config.users {
-                        let _ = chroot_cmd(&*self.runner, &self.target, "groupadd", &["-f", group]);
-                        for user in user_list {
-                            let output = chroot_cmd(
-                                &*self.runner,
-                                &self.target,
-                                "usermod",
-                                &["-aG", group, &user.username],
-                            )?;
-                            check_exit(
-                                &output,
-                                &format!("add {} to {} group", user.username, group),
-                            )?;
-                        }
+                    if let Some(user_list) = &self.config.users {
+                        let users: Vec<&str> =
+                            user_list.iter().map(|u| u.username.as_str()).collect();
+                        users::add_to_group(&*self.runner, &self.target, group, &users)?;
                     }
                 }
             }

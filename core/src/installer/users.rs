@@ -98,6 +98,25 @@ pub fn setup_ssh_keys(
     Ok(())
 }
 
+/// Add `users` to `group`, creating the group first.
+///
+/// `groupadd -f` succeeds whether or not the group exists, so its result is
+/// not inspected; a `usermod` that fails is an error, since the membership is
+/// what the caller needs.
+pub fn add_to_group(
+    runner: &dyn CommandRunner,
+    target: &Path,
+    group: &str,
+    users: &[&str],
+) -> Result<()> {
+    let _ = chroot_cmd(runner, target, "groupadd", &["-f", group]);
+    for user in users {
+        let output = chroot_cmd(runner, target, "usermod", &["-aG", group, user])?;
+        check_exit(&output, &format!("add {user} to {group} group"))?;
+    }
+    Ok(())
+}
+
 fn enable_sudo(target: &Path, username: &str) -> Result<()> {
     let sudoers_dir = target.join("etc/sudoers.d");
     fs::create_dir_all(&sudoers_dir)?;
@@ -146,6 +165,43 @@ mod tests {
         assert!(sudoers.exists());
         let content = fs::read_to_string(sudoers).unwrap();
         assert!(content.contains("testuser ALL=(ALL:ALL) ALL"));
+    }
+
+    #[test]
+    fn group_is_created_once_and_each_user_added() {
+        let runner = RecordingRunner::new(vec![]);
+
+        add_to_group(&runner, Path::new("/mnt"), "seat", &["alice", "bob"]).unwrap();
+
+        let calls = runner.calls();
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[0].args, ["/mnt", "groupadd", "-f", "seat"]);
+        assert_eq!(calls[1].args, ["/mnt", "usermod", "-aG", "seat", "alice"]);
+        assert_eq!(calls[2].args, ["/mnt", "usermod", "-aG", "seat", "bob"]);
+    }
+
+    #[test]
+    fn a_failed_group_creation_is_ignored_but_a_failed_usermod_is_not() {
+        let runner = RecordingRunner::new(vec![
+            CannedResponse {
+                exit_code: 9,
+                stderr: "group exists".into(),
+                ..Default::default()
+            },
+            CannedResponse {
+                exit_code: 6,
+                stderr: "user does not exist".into(),
+                ..Default::default()
+            },
+        ]);
+
+        let err = add_to_group(&runner, Path::new("/mnt"), "autologin", &["carol"]).unwrap_err();
+
+        assert!(
+            err.to_string().contains("add carol to autologin group"),
+            "{err}"
+        );
+        assert!(err.to_string().contains("user does not exist"), "{err}");
     }
 
     #[test]
