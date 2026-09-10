@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use color_eyre::eyre::{Context, Result, bail};
 
-use crate::system::cmd::{CommandRunner, check_exit, chroot, chroot_cmd, shell_quote};
+use crate::system::cmd::{
+    CommandRunner, check_exit, chroot, chroot_checked, chroot_cmd, shell_quote,
+};
 use crate::system::fs::write_file_with_mode;
 
 const TEMP_USER: &str = "aurinstall";
@@ -131,8 +133,13 @@ fn setup_aur_environment(
     )?;
 
     // Create temp user
-    let output = chroot_cmd(runner, target, "useradd", &["-m", TEMP_USER])?;
-    check_exit(&output, "create AUR temp user")?;
+    chroot_checked(
+        runner,
+        target,
+        "useradd",
+        &["-m", TEMP_USER],
+        "create AUR temp user",
+    )?;
 
     configure_source_cache(target)?;
 

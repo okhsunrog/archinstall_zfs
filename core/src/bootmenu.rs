@@ -8,7 +8,7 @@ use serde::Serialize;
 use crate::boot_environment::BootEnvironment;
 use crate::config::types::InitSystem;
 use crate::installer::initramfs::mkinitcpio::set_conf_line;
-use crate::system::cmd::{CommandRunner, check_exit, chroot_cmd};
+use crate::system::cmd::{CommandRunner, check_exit, chroot_checked};
 
 pub const HOSTID_VALUE: &str = "0x00bab10c";
 
@@ -238,8 +238,13 @@ pub async fn install_and_generate_zbm(
         install_zbm_pacman_hook(&t)?;
 
         tracing::info!("running generate-zbm to build EFI bundle");
-        let output = chroot_cmd(&*r, &t, "/usr/local/sbin/azfs-update-zbm", &[])?;
-        check_exit(&output, "generate and install ZFSBootMenu")?;
+        chroot_checked(
+            &*r,
+            &t,
+            "/usr/local/sbin/azfs-update-zbm",
+            &[],
+            "generate and install ZFSBootMenu",
+        )?;
 
         tracing::info!("ZFSBootMenu built and installed locally");
         Ok(())

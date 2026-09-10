@@ -3,7 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result, bail};
 
-use crate::system::cmd::{CommandRunner, check_exit, chroot_cmd};
+use crate::system::cmd::{CommandRunner, chroot_checked};
 
 const DRACUT_ZFS_CONF: &str = r#"hostonly="yes"
 hostonly_cmdline="no"
@@ -178,23 +178,20 @@ pub fn generate(runner: &dyn CommandRunner, target: &Path, with_zfs: &[&str]) ->
 
         let vmlinuz_src = format!("/usr/lib/modules/{kver}/vmlinuz");
         let vmlinuz_dst = format!("/boot/vmlinuz-{pkgbase}");
-        let output = chroot_cmd(
+        chroot_checked(
             runner,
             target,
             "install",
             &["-Dm0644", &vmlinuz_src, &vmlinuz_dst],
+            &format!("install vmlinuz for {pkgbase}"),
         )?;
-        check_exit(&output, &format!("install vmlinuz for {pkgbase}"))?;
 
         let image = format!("/boot/initramfs-{pkgbase}.img");
-        let output = chroot_cmd(
+        chroot_checked(
             runner,
             target,
             "dracut",
             &["--force", &image, "--kver", kver],
-        )?;
-        check_exit(
-            &output,
             &format!("dracut generate initramfs for {pkgbase} ({kver})"),
         )?;
     }

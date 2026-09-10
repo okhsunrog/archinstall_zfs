@@ -3,7 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{CommandRunner, check_exit, chroot_cmd};
+use crate::system::cmd::{CommandRunner, chroot_checked};
 
 pub fn set_hostname(target: &Path, hostname: &str) -> Result<()> {
     let path = target.join("etc/hostname");
@@ -25,8 +25,7 @@ pub fn set_locale(runner: &dyn CommandRunner, target: &Path, locale: &str) -> Re
     }
 
     // Run locale-gen
-    let output = chroot_cmd(runner, target, "locale-gen", &[])?;
-    check_exit(&output, "locale-gen")?;
+    chroot_checked(runner, target, "locale-gen", &[], "locale-gen")?;
 
     // Write locale.conf
     let locale_conf = target.join("etc/locale.conf");
