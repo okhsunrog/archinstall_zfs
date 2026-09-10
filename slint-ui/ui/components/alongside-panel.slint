@@ -3,6 +3,8 @@ import { AlongsideState, DiskSegment } from "../state/alongside-state.slint";
 import { Theme } from "../styling.slint";
 import { StyledButton } from "styled-button.slint";
 import { StyledTextInput } from "styled-text-input.slint";
+import { RadioDot } from "radio-dot.slint";
+import { FocusTouchArea } from "internal/state-layer.slint";
 
 component DiskMap inherits Rectangle {
     in property <[DiskSegment]> segments;
@@ -63,15 +65,20 @@ export component AlongsidePanel inherits Rectangle {
         if AlongsideState.sources.length > 0: VerticalLayout {
             spacing: 8px;
             Text { text: "Where to make space"; font-weight: 600; color: Theme.c.text; }
-            source-choice := ComboBox { changed has-focus => { if self.has-focus { root.reveal(self.absolute-position.y, self.height); } } accessible-label: "Space source"; model: AlongsideState.sources; current-index: AlongsideState.source-index; enabled: !AlongsideState.busy; selected(value) => { AlongsideState.select-source(self.current-index); } }
+            source-choice := ComboBox { changed has-focus => { if self.has-focus { root.reveal(self.absolute-position.y, self.height); } } accessible-label: "Space source"; model: AlongsideState.sources; current-index <=> AlongsideState.source-index; enabled: !AlongsideState.busy; selected(value) => { AlongsideState.select-source(self.current-index); } }
             Text { text: AlongsideState.details; color: Theme.c.subtext1; wrap: word-wrap; }
             CheckBox { text: "Use all available space"; checked: AlongsideState.use-all; enabled: !AlongsideState.busy; toggled => { AlongsideState.all-space(self.checked); } changed has-focus => { if self.has-focus { root.reveal(self.absolute-position.y, self.height); } } }
             HorizontalLayout {
                 spacing: 16px;
                 Text { text: "Allocate to this installation"; color: Theme.c.text; }
-                allocation-slider := Slider { changed has-focus => { if self.has-focus { root.reveal(self.absolute-position.y, self.height); } } accessible-label: "Space for installation"; minimum: AlongsideState.minimum; maximum: max(AlongsideState.minimum, AlongsideState.maximum); value: AlongsideState.allocation; enabled: !AlongsideState.busy && AlongsideState.maximum >= AlongsideState.minimum; changed(value) => { AlongsideState.allocate(round(value)); } }
+                allocation-slider := Slider { changed has-focus => { if self.has-focus { root.reveal(self.absolute-position.y, self.height); } } accessible-label: "Space for installation"; minimum: AlongsideState.minimum; maximum: max(AlongsideState.minimum, AlongsideState.maximum); value <=> AlongsideState.allocation; enabled: !AlongsideState.busy && AlongsideState.maximum >= AlongsideState.minimum; changed(value) => { AlongsideState.allocate(round(value)); } }
                 allocation-input := StyledTextInput {
                     property <bool> dirty: false;
+                    // Typing replaces the `text` binding; follow later state
+                    // changes (Use all, refresh, a loaded plan) explicitly
+                    // unless an edit is in progress.
+                    property <float> bound: AlongsideState.allocation;
+                    changed bound => { if !self.dirty { self.text = "\{self.bound}"; } }
                     changed has-focus => {
                         if self.has-focus { root.reveal(self.absolute-position.y, self.height); }
                         else if self.dirty { self.dirty = false; if self.text.is-float() { AlongsideState.allocate(self.text.to-float()); } self.text = "\{AlongsideState.allocation}"; }
@@ -87,7 +94,7 @@ export component AlongsidePanel inherits Rectangle {
             ComboBox {
                 accessible-label: "Swap method";
                 model: ["None", "ZRAM — compressed RAM", "Swap partition", "Encrypted swap partition"];
-                current-index: AlongsideState.swap-mode;
+                current-index <=> AlongsideState.swap-mode;
                 enabled: !AlongsideState.busy;
                 selected(value) => { AlongsideState.select-swap(self.current-index); }
                 changed has-focus => { if self.has-focus { root.reveal(self.absolute-position.y, self.height); } }
@@ -100,6 +107,8 @@ export component AlongsidePanel inherits Rectangle {
                     text: "\{AlongsideState.swap-size}";
                     width: 80px;
                     property <bool> dirty: false;
+                    property <float> bound: AlongsideState.swap-size;
+                    changed bound => { if !self.dirty { self.text = "\{self.bound}"; } }
                     edited(value) => { self.dirty = true; }
                     accepted(value) => { self.dirty = false; if value.is-float() { AlongsideState.size-swap(value.to-float()); } self.text = "\{AlongsideState.swap-size}"; }
                     changed has-focus => {
@@ -115,9 +124,44 @@ export component AlongsidePanel inherits Rectangle {
         if AlongsideState.efi-partitions.length > 0: VerticalLayout {
             spacing: 8px;
             Text { text: "EFI boot files"; font-weight: 600; color: Theme.c.text; }
-            efi-choice := ComboBox { changed has-focus => { if self.has-focus { root.reveal(self.absolute-position.y, self.height); } } accessible-label: "EFI partition"; model: AlongsideState.efi-partitions; current-index: AlongsideState.efi-index; enabled: !AlongsideState.busy; selected(value) => { AlongsideState.select-efi(self.current-index); } }
+            efi-choice := ComboBox { changed has-focus => { if self.has-focus { root.reveal(self.absolute-position.y, self.height); } } accessible-label: "EFI partition"; model: AlongsideState.efi-partitions; current-index <=> AlongsideState.efi-index; enabled: !AlongsideState.busy; selected(value) => { AlongsideState.select-efi(self.current-index); } }
             Text { text: AlongsideState.efi-details; color: Theme.c.subtext1; wrap: word-wrap; }
-            if AlongsideState.insufficient: CheckBox { changed has-focus => { if self.has-focus { root.reveal(self.absolute-position.y, self.height); } } text: "Create an additional 1 GiB EFI partition in the allocated space"; checked: AlongsideState.additional-efi; enabled: !AlongsideState.busy; toggled => { AlongsideState.additional(self.checked); } }
+            HorizontalLayout {
+                spacing: 12px;
+                for option[index] in ["Reuse the selected EFI partition", "Create a separate 512 MiB EFI partition"]: Rectangle {
+                    property <bool> selected: (index == 1) == AlongsideState.additional-efi;
+                    property <bool> available: index == 1 || !AlongsideState.insufficient;
+                    horizontal-stretch: 1;
+                    background: selected ? Theme.c.blue.with-alpha(0.16) : Theme.c.surface0.with-alpha(0.55);
+                    border-radius: 8px;
+                    border-width: touch.has-focus ? 2px : 1px;
+                    border-color: touch.has-focus || selected ? Theme.c.blue : Theme.c.surface1;
+                    opacity: available ? 1 : 0.5;
+                    HorizontalLayout {
+                        padding: 10px;
+                        spacing: 8px;
+                        RadioDot { filled: selected; dot-color: Theme.c.blue; }
+                        VerticalLayout {
+                            spacing: 3px;
+                            horizontal-stretch: 1;
+                            Text { text: option + (index == 0 ? " (recommended)" : ""); color: Theme.c.text; font-weight: 600; wrap: word-wrap; }
+                            Text { text: index == 0 ? "Boot files go next to the existing loaders; nothing is formatted." : "Takes 512 MiB from the allocation; firmware and the other system then see two EFI partitions."; color: Theme.c.subtext1; font-size: 12px; wrap: word-wrap; }
+                        }
+                    }
+                    touch := FocusTouchArea {
+                        width: 100%;
+                        height: 100%;
+                        enabled: available && !AlongsideState.busy;
+                        accessible-role: radio-button;
+                        accessible-label: option;
+                        accessible-checked: selected;
+                        accessible-enabled: available && !AlongsideState.busy;
+                        accessible-action-default => { AlongsideState.additional(index == 1); }
+                        clicked => { AlongsideState.additional(index == 1); }
+                        changed has-focus => { if self.has-focus { root.reveal(self.absolute-position.y, self.height); } }
+                    }
+                }
+            }
         }
         if AlongsideState.error != "": Text { text: AlongsideState.error; color: Theme.c.red; wrap: word-wrap; }
     }

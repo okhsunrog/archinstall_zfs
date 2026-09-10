@@ -1,8 +1,11 @@
 use super::*;
 
-/// Planning uses a 100 MiB image allowance, informed by published EFI assets.
-/// Actual installation verifies the generated file before replacing anything.
-/// Existing files are not credited as reclaimable: they may be other loaders.
+/// Planning uses a 48 MiB image allowance. The image is built for this machine
+/// with `xz -9` (see `bootmenu::ZBM_DRACUT_CONF`); a stock `linux-lts` target
+/// measured 33 MiB. With the 8 MiB overhead, a 100 MiB Windows ESP holding only
+/// Microsoft's loader qualifies for reuse. Actual installation verifies the
+/// generated file before replacing anything. Existing files are not credited
+/// as reclaimable: they may be other loaders.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BootSpace {
     pub image_bytes: u64,
@@ -13,7 +16,7 @@ pub struct BootSpace {
 impl Default for BootSpace {
     fn default() -> Self {
         Self {
-            image_bytes: 100 * MIB,
+            image_bytes: 48 * MIB,
             backup: false,
             fallback: false,
         }
@@ -35,19 +38,28 @@ impl BootSpace {
     }
 }
 
-/// A second ESP is never a default or an error fallback. It must refer to the
-/// existing ESP whose capacity was checked; execution repeats that check.
+/// Reuse is the default and the recommendation. A separate ESP is only ever an
+/// explicit selection, never an automatic fallback: it costs `ESP_BYTES` of the
+/// allocation and leaves two ESPs for firmware and the other system to choose
+/// between. Both variants name the existing ESP that was inspected, so a disk
+/// without a readable FAT ESP is rejected either way; execution repeats that
+/// inspection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EfiChoice {
-    Reuse { partition: u32 },
-    CreateAfterInsufficientSpace { existing_partition: u32 },
+    Reuse {
+        partition: u32,
+    },
+    #[serde(alias = "CreateAfterInsufficientSpace")]
+    CreateSeparate {
+        existing_partition: u32,
+    },
 }
 
 impl EfiChoice {
     pub fn existing_partition(&self) -> u32 {
         match *self {
             Self::Reuse { partition } => partition,
-            Self::CreateAfterInsufficientSpace { existing_partition } => existing_partition,
+            Self::CreateSeparate { existing_partition } => existing_partition,
         }
     }
 
@@ -56,21 +68,13 @@ impl EfiChoice {
             self.existing_partition() == space.partition,
             "EFI capacity check belongs to another partition"
         );
-        match self {
-            Self::Reuse { .. } => ensure!(
+        if let Self::Reuse { .. } = self {
+            ensure!(
                 space.sufficient(budget)?,
-                "The existing EFI partition has {} MiB free; {} MiB is reserved for boot files and updates. Choose explicitly whether to create an additional EFI partition, or free space and refresh.",
+                "The existing EFI partition has {} MiB free; {} MiB is needed for boot files and updates. Select a separate EFI partition, or free space and refresh.",
                 space.free_bytes / MIB,
                 budget.required_bytes()?.div_ceil(MIB)
-            ),
-            Self::CreateAfterInsufficientSpace { .. } => ensure!(
-                !space.sufficient(BootSpace {
-                    backup: false,
-                    fallback: false,
-                    ..budget
-                })?,
-                "The existing EFI partition fits the main image with headroom. Reuse it; disable optional copies if necessary. A second ESP is offered only when the minimum configuration does not fit."
-            ),
+            );
         }
         Ok(())
     }
@@ -176,7 +180,7 @@ mod tests {
         );
     }
     #[test]
-    fn second_esp_requires_insufficient_space_on_the_selected_esp() {
+    fn reuse_requires_space_and_a_separate_esp_is_an_explicit_choice() {
         let budget = BootSpace {
             image_bytes: 50 * MIB,
             backup: false,
@@ -192,31 +196,37 @@ mod tests {
             free_bytes: required - 1,
         };
         let reuse = EfiChoice::Reuse { partition: 1 };
-        let create = EfiChoice::CreateAfterInsufficientSpace {
+        let create = EfiChoice::CreateSeparate {
             existing_partition: 1,
         };
         assert!(reuse.validate_space(&enough, budget).is_ok());
         assert!(reuse.validate_space(&small, budget).is_err());
+        // The separate ESP is allowed whether or not the existing one fits.
         assert!(create.validate_space(&small, budget).is_ok());
-        assert!(create.validate_space(&enough, budget).is_err());
+        assert!(create.validate_space(&enough, budget).is_ok());
         let with_backup = BootSpace {
             backup: true,
             ..budget
         };
         assert!(reuse.validate_space(&enough, with_backup).is_err());
-        // An optional copy must not justify repartitioning the disk.
-        assert!(create.validate_space(&enough, with_backup).is_err());
-        assert!(
-            create
-                .validate_space(
-                    &EfiSpace {
-                        partition: 2,
-                        ..small
-                    },
-                    budget
-                )
-                .is_err()
-        );
+        // Either choice must refer to the ESP whose capacity was inspected.
+        for choice in [&reuse, &create] {
+            assert!(
+                choice
+                    .validate_space(
+                        &EfiSpace {
+                            partition: 2,
+                            ..enough
+                        },
+                        budget
+                    )
+                    .is_err()
+            );
+        }
+        let old_name: EfiChoice =
+            serde_json::from_str(r#"{"CreateAfterInsufficientSpace":{"existing_partition":1}}"#)
+                .unwrap();
+        assert_eq!(old_name, create);
     }
     #[test]
     fn unreadable_capacity_is_not_zero_space() {

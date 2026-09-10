@@ -739,6 +739,23 @@ Kernel:
   **This only works if the pool's `bootfs` property is set** — without it ZBM waits
   for input forever.
 
+`/mnt/etc/zfsbootmenu/dracut.conf.d/azfs.conf` keeps the image small enough to
+share a stock 100 MiB Windows ESP (about 33 MiB on `linux-lts` instead of 36 MiB
+with the packaged configuration alone, or 48–64 MiB for a generic image):
+
+```sh
+hostonly="yes"                            # this machine's drivers; dracut's default
+hostonly_cmdline="no"                     # mode still keeps all storage/USB/keyboard drivers
+omit_dracutmodules+=" fs-lib usrmount "   # ZBM never runs fsck or mounts /usr
+compress="xz -9 --check=crc32 -T0"        # slower build than zstd, smaller image
+```
+
+The `i18n` module stays: in host-only mode it adds only the keymap from
+`/etc/vconsole.conf` (about 50 KiB), which ZBM loads for menu and passphrase
+input. On mkinitcpio the packaged `/etc/zfsbootmenu/mkinitcpio.conf` already
+uses `autodetect`; the installer only sets `COMPRESSION="xz"` with
+`COMPRESSION_OPTIONS=(-9 -T0)`.
+
 The installer installs `azfs-update-zbm` and `azfs-install-zbm` from
 [`core/assets`](../core/assets). After installation, rebuild and publish with:
 
@@ -757,7 +774,12 @@ images and a permanent backup on the ESP are not required.
 
 An optional copy at `EFI/BOOT/BOOTX64.EFI` helps when firmware entries are lost.
 The publisher preserves any existing foreign fallback and skips this duplicate
-when space is insufficient. Normal boot uses the main firmware entry below.
+when space is insufficient. It records the digest of its own copy in
+`/var/lib/zfsbootmenu/fallback.sha256`, so a copy that could not be refreshed
+for a few updates is still recognised as ours later. `azfs-update-zbm` mounts
+`/boot/efi` itself when it is not mounted and leaves it mounted, because
+`generate-zbm` would otherwise unmount it again before publication. Normal boot
+uses the main firmware entry below.
 
 A pacman hook keeps it fresh — `/mnt/etc/pacman.d/hooks/95-zfsbootmenu.hook`:
 

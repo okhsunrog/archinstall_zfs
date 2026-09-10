@@ -55,4 +55,30 @@ cmp "$stage/vmlinuz.EFI" "$esp/EFI/zbm/vmlinuz.EFI"
 printf '\000\000' | dd of="$stage/vmlinuz.EFI" bs=1 seek=220 conv=notrunc status=none
 if bash "$helper" "$stage" "$esp"; then echo 'Non-EFI PE accepted' >&2; exit 1; fi
 [[ $(stat -c %s "$esp/EFI/zbm/vmlinuz.EFI") == 18874368 ]]
-printf 'PASS: FAT publication, single-image replacement, root recovery, foreign fallback preservation, owned fallback reclamation, invalid and oversized image rejection\n'
+# With room, a fresh fallback is written and its digest recorded on root.
+rm "$esp/filler"
+make_image "$stage/vmlinuz.EFI" 12M
+bash "$helper" "$stage" "$esp"
+cmp "$stage/vmlinuz.EFI" "$esp/EFI/BOOT/BOOTX64.EFI"
+[[ -f $stage/fallback.sha256 ]]
+# Two updates that fit only in place leave the fallback two versions behind:
+# it no longer equals the current or the previous main image.
+dd if=/dev/zero of="$esp/filler" bs=1M count=30 status=none
+make_image "$stage/vmlinuz.EFI" 14M
+bash "$helper" "$stage" "$esp" | grep -q 'Skipping optional EFI fallback'
+make_image "$stage/vmlinuz.EFI" 15M
+bash "$helper" "$stage" "$esp" | grep -q 'Skipping optional EFI fallback'
+[[ $(stat -c %s "$esp/EFI/BOOT/BOOTX64.EFI") == 12582912 ]]
+# The recorded digest still identifies it as ours, so it is refreshed.
+rm "$esp/filler"
+make_image "$stage/vmlinuz.EFI" 16M
+bash "$helper" "$stage" "$esp"
+cmp "$stage/vmlinuz.EFI" "$esp/EFI/BOOT/BOOTX64.EFI"
+# An owned fallback is not sacrificed when the image would not fit anyway.
+dd if=/dev/zero of="$esp/filler" bs=1M count=28 status=none
+cp "$stage/vmlinuz.EFI" "$work/current"
+make_image "$stage/vmlinuz.EFI" 40M
+if bash "$helper" "$stage" "$esp"; then echo 'Oversized image accepted after reclaim' >&2; exit 1; fi
+cmp "$work/current" "$esp/EFI/zbm/vmlinuz.EFI"
+cmp "$work/current" "$esp/EFI/BOOT/BOOTX64.EFI"
+printf 'PASS: FAT publication, single-image replacement, root recovery, foreign fallback preservation, owned fallback reclamation and retention, digest ownership, invalid and oversized image rejection\n'

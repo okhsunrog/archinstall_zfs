@@ -89,8 +89,8 @@ fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                             EfiChoice::Reuse { partition } => {
                                 format!("Reuse EFI partition {partition} without formatting")
                             }
-                            EfiChoice::CreateAfterInsufficientSpace { .. } => {
-                                "Create the explicitly selected additional 1 GiB EFI partition"
+                            EfiChoice::CreateSeparate { .. } => {
+                                "Create the explicitly selected separate 512 MiB EFI partition"
                                     .into()
                             }
                         };

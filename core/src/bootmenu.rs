@@ -7,6 +7,7 @@ use serde::Serialize;
 
 use crate::boot_environment::BootEnvironment;
 use crate::config::types::InitSystem;
+use crate::installer::initramfs::mkinitcpio::set_conf_line;
 use crate::system::cmd::{CommandRunner, check_exit, chroot_cmd};
 
 pub const HOSTID_VALUE: &str = "0x00bab10c";
@@ -54,7 +55,25 @@ struct ZbmKernel {
     command_line: String,
 }
 
-/// Write /etc/zfsbootmenu/config.yaml inside the target chroot.
+/// Image size settings for the dracut build. The image must fit next to an
+/// existing operating system on a stock 100 MiB Windows ESP, so it is built
+/// for this machine's hardware. dracut's default host-only mode keeps every
+/// storage, USB and keyboard driver; only unrelated device classes are left
+/// out. `xz -9` is slower to build than the default zstd level but produces
+/// a smaller image. Measured on a stock `linux-lts` target: 36 MiB without
+/// this file, 33 MiB with it. Omitting `i18n` saves 50 KiB, but it loads the
+/// configured console keymap, so it stays.
+const ZBM_DRACUT_CONF: &str = r#"# Written by archinstall_zfs; keep ZFSBootMenu small enough for a shared ESP.
+hostonly="yes"
+hostonly_cmdline="no"
+# ZFSBootMenu never runs filesystem checks or mounts /usr.
+omit_dracutmodules+=" fs-lib usrmount "
+compress="xz -9 --check=crc32 -T0"
+"#;
+
+/// Write /etc/zfsbootmenu/config.yaml and the image size settings inside the
+/// target chroot. Both initramfs generators are configured: config.yaml
+/// selects the one in use.
 fn write_zbm_config(target: &Path, init_system: InitSystem) -> Result<()> {
     let conf_dir = target.join("etc/zfsbootmenu");
     fs::create_dir_all(&conf_dir)?;
@@ -84,6 +103,30 @@ fn write_zbm_config(target: &Path, init_system: InitSystem) -> Result<()> {
     let yaml = serde_yaml_ng::to_string(&config).wrap_err("failed to serialize ZBM config")?;
     fs::write(conf_dir.join("config.yaml"), yaml).wrap_err("failed to write ZBM config.yaml")?;
     tracing::info!("wrote /etc/zfsbootmenu/config.yaml (init_system={init_system})");
+
+    let dracut_dir = conf_dir.join("dracut.conf.d");
+    fs::create_dir_all(&dracut_dir)?;
+    fs::write(dracut_dir.join("azfs.conf"), ZBM_DRACUT_CONF)
+        .wrap_err("failed to write ZBM dracut configuration")?;
+
+    // The `autodetect` hook in the packaged file already limits modules to
+    // this machine; only the compressor needs changing.
+    let mkinitcpio_conf = conf_dir.join("mkinitcpio.conf");
+    if mkinitcpio_conf.exists() {
+        let content = fs::read_to_string(&mkinitcpio_conf)?;
+        let content = set_conf_line(&content, "COMPRESSION", "COMPRESSION=\"xz\"");
+        // mkinitcpio adds --check=crc32 itself for xz.
+        let content = set_conf_line(
+            &content,
+            "COMPRESSION_OPTIONS",
+            "COMPRESSION_OPTIONS=(-9 -T0)",
+        );
+        fs::write(&mkinitcpio_conf, content).wrap_err("failed to write ZBM mkinitcpio.conf")?;
+    } else if matches!(init_system, InitSystem::Mkinitcpio) {
+        tracing::warn!(
+            "/etc/zfsbootmenu/mkinitcpio.conf is missing; the ZBM image will use the default compression"
+        );
+    }
     Ok(())
 }
 
@@ -322,18 +365,21 @@ pub fn create_efi_entries(
         "\\EFI\\zbm\\vmlinuz.EFI",
         true,
     )?;
-    if target.join("boot/efi/EFI/zbm/vmlinuz-backup.EFI").is_file() {
-        ensure_efi_entry(
-            runner,
-            &existing.stdout,
-            &location,
-            "ZFSBootMenu (Backup)",
-            "\\EFI\\zbm\\vmlinuz-backup.EFI",
-            false,
-        )?;
+    // Earlier releases kept a second image on the ESP and registered it as
+    // "ZFSBootMenu (Backup)". The publisher no longer writes that file, so
+    // such an entry would point at a stale image; remove it from firmware.
+    for (number, label, _) in existing.stdout.lines().filter_map(boot_entry) {
+        if label != "ZFSBootMenu (Backup)" {
+            continue;
+        }
+        let output = runner.run("efibootmgr", &["-b", number, "-B"])?;
+        if !output.success() {
+            tracing::warn!(number, "failed to remove the obsolete backup EFI entry");
+        }
     }
+    let _ = target;
 
-    tracing::info!("created ZFSBootMenu EFI boot entries");
+    tracing::info!("created ZFSBootMenu EFI boot entry");
     Ok(())
 }
 
@@ -423,6 +469,38 @@ mod tests {
         assert!(config.contains("ImageDir: /var/lib/zfsbootmenu"));
         assert!(config.contains("Enabled: true"));
         assert!(config.contains("Prefix: vmlinuz"));
+
+        let dracut =
+            fs::read_to_string(dir.path().join("etc/zfsbootmenu/dracut.conf.d/azfs.conf")).unwrap();
+        assert!(dracut.contains("hostonly=\"yes\""));
+        assert!(dracut.contains("hostonly_cmdline=\"no\""));
+        assert!(dracut.contains("omit_dracutmodules+=\" fs-lib usrmount \""));
+        assert!(dracut.contains("compress=\"xz -9 --check=crc32 -T0\""));
+        assert!(!dracut.contains("i18n"));
+        assert!(!dir.path().join("etc/zfsbootmenu/mkinitcpio.conf").exists());
+    }
+
+    #[test]
+    fn test_write_zbm_config_compresses_packaged_mkinitcpio_conf() {
+        let dir = tempfile::tempdir().unwrap();
+        let conf = dir.path().join("etc/zfsbootmenu/mkinitcpio.conf");
+        fs::create_dir_all(conf.parent().unwrap()).unwrap();
+        fs::write(
+            &conf,
+            "HOOKS=(base udev autodetect modconf block filesystems keyboard zfsbootmenu)\n#COMPRESSION=\"zstd\"\n#COMPRESSION=\"xz\"\n#COMPRESSION_OPTIONS=()\n",
+        )
+        .unwrap();
+        write_zbm_config(dir.path(), InitSystem::Mkinitcpio).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&conf).unwrap(),
+            "HOOKS=(base udev autodetect modconf block filesystems keyboard zfsbootmenu)\nCOMPRESSION=\"xz\"\n#COMPRESSION=\"xz\"\nCOMPRESSION_OPTIONS=(-9 -T0)\n"
+        );
+        assert!(
+            dir.path()
+                .join("etc/zfsbootmenu/dracut.conf.d/azfs.conf")
+                .is_file()
+        );
     }
 
     #[test]
@@ -471,21 +549,18 @@ mod tests {
         assert!(content.contains("Target = zfs-utils"));
     }
 
-    fn target_with_zbm(backup: bool) -> tempfile::TempDir {
+    fn target_with_zbm() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let zbm = dir.path().join("boot/efi/EFI/zbm");
         fs::create_dir_all(&zbm).unwrap();
         fs::write(zbm.join("vmlinuz.EFI"), b"main").unwrap();
-        if backup {
-            fs::write(zbm.join("vmlinuz-backup.EFI"), b"backup").unwrap();
-        }
         dir
     }
 
     #[test]
     fn test_create_efi_entries_uses_the_selected_disk_and_partition() {
         // With locally-built ZBM, cmdline is embedded - no -u needed
-        let target = target_with_zbm(true);
+        let target = target_with_zbm();
         let runner = RecordingRunner::new(vec![
             CannedResponse {
                 stdout: "/dev/nvme0n1 7 AABB-CCDD\n".into(),
@@ -496,7 +571,6 @@ mod tests {
                 ..Default::default()
             },
             CannedResponse::default(), // efibootmgr -c (main)
-            CannedResponse::default(), // efibootmgr -c (backup)
         ]);
 
         create_efi_entries(
@@ -520,19 +594,15 @@ mod tests {
     }
 
     #[test]
-    fn test_matching_entries_are_kept() {
-        let target = target_with_zbm(true);
+    fn test_matching_entry_is_kept() {
+        let target = target_with_zbm();
         let runner = RecordingRunner::new(vec![
             CannedResponse {
                 stdout: "/dev/sda 1 aabb-ccdd\n".into(),
                 ..Default::default()
             },
             CannedResponse {
-                stdout: concat!(
-                    "Boot0001* ZFSBootMenu\tHD(1,GPT,AABB-CCDD,0x800,0x1000)/File(\\EFI\\zbm\\vmlinuz.EFI)\n",
-                    "Boot0002* ZFSBootMenu (Backup)\tHD(1,GPT,AABB-CCDD,0x800,0x1000)/File(\\EFI\\zbm\\vmlinuz-backup.EFI)\n"
-                )
-                .into(),
+                stdout: "Boot0001* ZFSBootMenu\tHD(1,GPT,AABB-CCDD,0x800,0x1000)/File(\\EFI\\zbm\\vmlinuz.EFI)\n".into(),
                 ..Default::default()
             },
         ]);
@@ -543,8 +613,8 @@ mod tests {
     }
 
     #[test]
-    fn test_backup_entry_does_not_hide_a_missing_main_entry() {
-        let target = target_with_zbm(true);
+    fn test_obsolete_backup_entry_is_removed_and_main_entry_created() {
+        let target = target_with_zbm();
         let runner = RecordingRunner::new(vec![
             CannedResponse {
                 stdout: "/dev/sda 1 aabb-ccdd\n".into(),
@@ -555,18 +625,20 @@ mod tests {
                 ..Default::default()
             },
             CannedResponse::default(),
+            CannedResponse::default(),
         ]);
 
         create_efi_entries(&runner, Path::new("/dev/sda1"), target.path()).unwrap();
 
         let calls = runner.calls();
-        assert_eq!(calls.len(), 3);
+        assert_eq!(calls.len(), 4);
         assert!(calls[2].args.windows(2).any(|a| a == ["-L", "ZFSBootMenu"]));
+        assert_eq!(calls[3].args, ["-b", "0002", "-B"]);
     }
 
     #[test]
     fn test_stale_same_name_entry_is_replaced() {
-        let target = target_with_zbm(false);
+        let target = target_with_zbm();
         let runner = RecordingRunner::new(vec![
             CannedResponse {
                 stdout: "/dev/sda 3 aabb-ccdd\n".into(),

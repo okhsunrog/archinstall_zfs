@@ -24,15 +24,24 @@ does not claim verified bootability of an existing operating system.
 
 ## EFI policy
 
-Reuse an existing ESP on the selected disk by default. Only offer an additional
-ESP when a successful capacity check establishes insufficient space, and require
-an explicit selection. A corrupt or unreadable ESP is not evidence of low space.
-Repeat capacity validation before applying the plan.
+Reuse an existing ESP on the selected disk by default; it is the recommended
+option. A separate 512 MiB ESP is always an explicit selection and never an
+automatic fallback: it costs allocation and leaves two ESPs for firmware and the
+other operating system to choose between. When the capacity check shows the
+existing ESP cannot take the image, reuse is disabled with the reason and the
+separate ESP remains the only way forward. A corrupt or unreadable ESP blocks
+both choices; it is not evidence of low space. Repeat capacity validation before
+applying the plan.
 
-Space planning reserves **100 MiB for one locally built ZFSBootMenu image plus
-8 MiB overhead**. This is a growth allowance, not an exact prediction: the host
-image measured 48.33 MiB; published ordinary EFI bundles through v3.1.0 reached
-63.56 MiB. A backup or temporary second copy is not a prerequisite for reuse.
+Space planning reserves **48 MiB for one locally built ZFSBootMenu image plus
+8 MiB overhead**, so a stock 100 MiB Windows ESP with about 65 MiB free
+qualifies for reuse. The installer writes `/etc/zfsbootmenu/dracut.conf.d/azfs.conf`
+(host-only modules, `fs-lib` and `usrmount` omitted, `xz -9`) and sets the same
+compression in `/etc/zfsbootmenu/mkinitcpio.conf`. On a stock `linux-lts`
+6.18 target with ZFSBootMenu 3.1.0 the image measured 32.98 MiB (36.17 MiB
+with the packaged dracut configuration alone). The allowance covers kernel and
+ZFS growth, not a generic image: published EFI bundles reach 63.56 MiB and are
+not used. A backup or temporary second copy is not a prerequisite for reuse.
 
 The installed system still builds ZBM locally. `azfs-update-zbm` generates it in
 `/var/lib/zfsbootmenu` and then runs `azfs-install-zbm`. Publication checks the
@@ -66,8 +75,8 @@ The fixture accepts filesystem/mode names, never a target disk argument. It
 creates a sparse image, attaches its own loop device, and detaches it before
 removing the image. It checks retained file contents, existing ESP contents,
 recovery-partition metadata, new partition geometry and stale-plan rejection.
-The `new-esp` fixture fills the existing ESP before explicitly requesting a
-second one. It does not simulate a booted Windows installation or prove Windows
+The `new-esp` fixture fills the existing ESP and then explicitly requests a
+separate one. It does not simulate a booted Windows installation or prove Windows
 bootability.
 
 NTFS shrinking intentionally schedules a Windows consistency check. The test
@@ -80,9 +89,9 @@ and devtmpfs nodes directly; aliases can be populated after releasing the lock.
 
 Validated on 2026-09-10: all four fixture commands above passed, including file
 content comparisons and stale-plan rejection. Workspace tests, formatting and
-clippy with warnings denied also passed. No installation or guest-OS boot was
-performed by these fixtures; These original fixture runs did not cover guest boot; the GUI and VM checks
-below were added subsequently. Windows boot remains unverified.
+clippy with warnings denied also passed. These fixture runs do not install a
+system or boot a guest; the GUI and VM checks below were added separately.
+Windows boot remains unverified.
 
 ## Graphical editor and integration checks
 
@@ -128,7 +137,7 @@ shellcheck core/assets/azfs-install-zbm core/assets/azfs-update-zbm \
 ## Visual review coverage (2026-09-10)
 
 Real headless Slint captures and callbacks were exercised at 1920×1080 / 100%,
-1366×768 / 100%, and 1920×1080 / 150%. Individual captures were inspected,
+1366×768 / 100%, 1920×1080 / 150% and 1920×1080 / 200%. Individual captures were inspected,
 including maps, the compact layout and the review summary.
 
 | Case | Interaction checked |
@@ -136,7 +145,7 @@ including maps, the compact layout and the review summary.
 | Reuse ESP | Select source, enter allocation, switch to unallocated space |
 | Swap | Choose disk swap on Disk; map and Review subtract its size from the pool |
 | Whole extent | Default to all MiB-aligned space; preserve fractional-GiB capacity |
-| Insufficient ESP | Reach consent by keyboard, explicitly enable second ESP |
+| Insufficient ESP | Reuse option disabled with reason; select the separate ESP by keyboard |
 | Return navigation | Open Review, return to Disk, switch installation modes and return |
 | Missing NTFS tools | Select unavailable source; readable package hint; Install disabled |
 | Missing ESP / MBR | Readable reason; Install disabled; disk selector remains available |
@@ -169,4 +178,8 @@ The swap fixture reserves 8 GiB inside a 40 GiB allocation, leaving 32 GiB for
 ZFS. Both filesystem fixtures passed with retained payload comparisons. The
 first complete alongside VM install with ZRAM passed; the installed system
 booted and all 13 health checks passed after updating the check for the new
-ZBM wrapper. The additional disk-swap VM run is a separate verification.
+ZBM wrapper. The additional disk-swap VM run installed and booted successfully,
+but caught a missing swap entry: final fstab generation overwrote the earlier
+swap configuration. Mount entries are now generated before swap configuration;
+the complete disk-swap installation/boot test must pass before this check is
+considered complete.

@@ -20,7 +20,8 @@ pub use probe::{Filesystem, inspect, minimum_size};
 pub const MIB: u64 = 1024 * 1024;
 pub const GIB: u64 = 1024 * MIB;
 pub const MIN_LINUX_BYTES: u64 = 32 * GIB;
-pub const ESP_BYTES: u64 = GIB;
+/// Size of the optional separate ESP; matches the full-disk layout.
+pub const ESP_BYTES: u64 = 512 * MIB;
 pub const EFI_TYPE: &str = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B";
 pub const BASIC_TYPE: &str = "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7";
 pub const LINUX_TYPE: &str = "0FC63DAF-8483-4772-8E79-3D69D8477DE4";
@@ -171,7 +172,7 @@ pub struct Request {
     pub before: Layout,
     pub source: SpaceSource,
     pub efi: EfiChoice,
-    /// Includes a new ESP only when explicitly requested after a space check.
+    /// Includes the separate ESP when one was explicitly selected.
     pub allocation_bytes: u64,
     /// Optional new swap partition, included in allocation_bytes.
     #[serde(default)]
@@ -194,7 +195,7 @@ impl Request {
     pub fn plan(&self) -> Result<Plan> {
         let l = &self.before;
         l.validate()?;
-        let additional_efi = matches!(self.efi, EfiChoice::CreateAfterInsufficientSpace { .. });
+        let additional_efi = matches!(self.efi, EfiChoice::CreateSeparate { .. });
         let efi_bytes = if additional_efi { ESP_BYTES } else { 0 };
         let minimum = MIN_LINUX_BYTES
             .checked_add(efi_bytes)
@@ -206,7 +207,7 @@ impl Request {
         );
         ensure!(
             self.allocation_bytes >= minimum,
-            "Reserve at least 32 GiB for the ZFS pool, plus the selected swap and any additional EFI partition"
+            "Reserve at least 32 GiB for the ZFS pool, plus the selected swap and the separate EFI partition if selected"
         );
         let existing_efi = self.efi.existing_partition();
         ensure!(

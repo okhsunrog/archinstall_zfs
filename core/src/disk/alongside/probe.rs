@@ -9,8 +9,6 @@ pub struct Filesystem {
     pub ro: bool,
     #[serde(default)]
     pub fstype: Option<String>,
-    #[serde(default)]
-    pub label: Option<String>,
     pub mountpoints: Vec<Option<String>>,
     #[serde(default)]
     children: Vec<Filesystem>,
@@ -28,7 +26,7 @@ pub fn inspect(runner: &dyn CommandRunner, disk: &Path) -> Result<(Layout, Vec<F
             "--bytes",
             "--paths",
             "--output",
-            "PATH,TYPE,SIZE,RO,FSTYPE,LABEL,MOUNTPOINTS",
+            "PATH,TYPE,SIZE,RO,FSTYPE,MOUNTPOINTS",
             &layout.device.to_string_lossy(),
         ],
     )?;

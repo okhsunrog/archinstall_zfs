@@ -24,6 +24,7 @@ pub fn execute(
         ("sfdisk", "util-linux"),
         ("sgdisk", "gptfdisk"),
         ("lsblk", "util-linux"),
+        ("blockdev", "util-linux"),
     ])?;
     let disk = &request.before.device;
     let mut handle = OpenOptions::new().read(true).write(true).open(disk)?;
@@ -105,7 +106,78 @@ pub fn execute(
     backup.sync_all()?;
     File::open(recovery_dir)?.sync_all()?;
     tracing::info!(path = %recovery_dir.display(), "Saved partition table before resizing; this is not a filesystem backup");
-    apply(runner, request, &plan, filesystem.as_deref()).wrap_err_with(|| format!("Storage operation stopped. Some changes may already have completed. Do not retry or restore GPT blindly. Original partition table: {}", recovery_dir.join("partition-table.sfdisk").display()))
+    let prepared = apply(runner, request, &plan, filesystem.as_deref()).wrap_err_with(|| format!("Storage operation stopped. Some changes may already have completed. Do not retry or restore GPT blindly. Original partition table: {}", recovery_dir.join("partition-table.sfdisk").display()))?;
+    // Persistent aliases are created by udev, which may be waiting for the
+    // disk lock. Release it before waiting for them.
+    drop(handle);
+    for path in std::iter::once(&prepared.efi)
+        .chain(prepared.zfs.iter())
+        .chain(prepared.swap.iter())
+    {
+        crate::disk::partition::wait_for_path(path)?;
+    }
+    Ok(prepared)
+}
+
+/// Prefer a persistent `/dev/disk/by-id` alias for paths that are written
+/// into the installed system, as the full-disk layout does. The kernel node
+/// is only a fallback: it can change across boots.
+fn stable_disk_path(disk: &Path) -> PathBuf {
+    let Ok(canonical) = disk.canonicalize() else {
+        return disk.to_path_buf();
+    };
+    let Ok(entries) = std::fs::read_dir("/dev/disk/by-id") else {
+        return disk.to_path_buf();
+    };
+    let mut aliases: Vec<PathBuf> = entries
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.canonicalize().ok().as_deref() == Some(&canonical))
+        .collect();
+    aliases.sort();
+    // Model and serial names read better than WWN or EUI identifiers, but
+    // any persistent alias is preferable to the kernel node.
+    let generic = |p: &PathBuf| {
+        let name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        name.starts_with("wwn-") || name.starts_with("nvme-eui.")
+    };
+    aliases
+        .iter()
+        .find(|p| !generic(p))
+        .or_else(|| aliases.first())
+        .cloned()
+        .unwrap_or_else(|| {
+            tracing::warn!(disk = %disk.display(), "No persistent alias for the disk; using the kernel node");
+            disk.to_path_buf()
+        })
+}
+
+/// The partitioning tools exit successfully even when the kernel refuses to
+/// re-read the table (`EBUSY` while another process holds a partition node).
+/// The GPT on disk is complete at that point; ask for a rescan before giving
+/// up rather than reporting a consistent disk as damaged.
+fn sync_kernel_partitions(runner: &dyn CommandRunner, disk: &Path) -> Result<()> {
+    let mut last = None;
+    for attempt in 1..=5 {
+        match inspect(runner, disk) {
+            Ok(_) => return Ok(()),
+            Err(error) => last = Some(error),
+        }
+        tracing::warn!(
+            attempt,
+            "Kernel partition table is stale; requesting a rescan"
+        );
+        let out = runner.run("blockdev", &["--rereadpt", &disk.to_string_lossy()])?;
+        if !out.success() {
+            tracing::warn!(stderr = %out.stderr, "Partition table rescan was refused");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    Err(last.expect("at least one attempt")).wrap_err(
+        "The kernel still reports the previous partition table. The GPT on disk is complete; close programs using this disk (or reboot the live system) and retry the plan after refreshing",
+    )
 }
 
 fn validate_protective_mbr(mbr: &[u8; 512]) -> Result<()> {
@@ -253,18 +325,18 @@ fn apply(
     let after = Layout::read(runner, disk)?;
     verify_created(&expected, &after, plan)?;
     // Compare kernel-reported sizes before a node is handed to mkfs or ZFS.
-    inspect(runner, disk)?;
-    let efi = super::super::partition::partition_path(disk, plan.efi_number);
-    let zfs = super::super::partition::partition_path(disk, plan.zfs_number);
+    sync_kernel_partitions(runner, disk)?;
+    use super::super::partition::partition_path;
     if plan.efi_start.is_some() {
-        crate::disk::partition::format_efi(runner, &efi)?;
+        // The kernel node exists now; persistent aliases appear only after
+        // udev runs, which must not be awaited under the disk lock.
+        crate::disk::partition::format_efi(runner, &partition_path(disk, plan.efi_number))?;
     }
+    let stable = stable_disk_path(disk);
     Ok(crate::prepare::PreparedPartitions {
-        efi,
-        zfs: Some(zfs),
-        swap: plan
-            .swap_number
-            .map(|n| super::super::partition::partition_path(disk, n)),
+        efi: partition_path(&stable, plan.efi_number),
+        zfs: Some(partition_path(&stable, plan.zfs_number)),
+        swap: plan.swap_number.map(|n| partition_path(&stable, n)),
     })
 }
 

@@ -110,7 +110,7 @@ fn main() -> Result<()> {
             SpaceSource::Shrink { partition: 2 }
         },
         efi: if mode == "new-esp" {
-            EfiChoice::CreateAfterInsufficientSpace {
+            EfiChoice::CreateSeparate {
                 existing_partition: 1,
             }
         } else {
