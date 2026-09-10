@@ -45,8 +45,14 @@ fn search_repo_sync(query: &str, limit: usize) -> Result<Vec<PackageInfo>> {
         }
     }
 
-    // Sort by fuzzy match score against package name
-    let mut scored: Vec<_> = results
+    Ok(best_matches(query, results, limit))
+}
+
+/// Order packages by how well their names fuzzy-match `query`, best first,
+/// keeping `limit` of them. The sort is stable, so packages with equal
+/// scores keep the order the search returned them in.
+fn best_matches(query: &str, packages: Vec<PackageInfo>, limit: usize) -> Vec<PackageInfo> {
+    let mut scored: Vec<_> = packages
         .into_iter()
         .map(|pkg| {
             let score = sublime_fuzzy::best_match(query, &pkg.name)
@@ -56,8 +62,7 @@ fn search_repo_sync(query: &str, limit: usize) -> Result<Vec<PackageInfo>> {
         })
         .collect();
     scored.sort_by_key(|s| std::cmp::Reverse(s.0));
-
-    Ok(scored.into_iter().map(|(_, pkg)| pkg).take(limit).collect())
+    scored.into_iter().map(|(_, pkg)| pkg).take(limit).collect()
 }
 
 /// Search AUR packages via raur. Returns up to `limit` results sorted by popularity.
@@ -80,16 +85,30 @@ pub async fn search_aur(query: &str, limit: usize) -> Result<Vec<PackageInfo>> {
         })
         .collect();
 
-    let mut scored: Vec<_> = packages
-        .into_iter()
-        .map(|pkg| {
-            let score = sublime_fuzzy::best_match(query, &pkg.name)
-                .map(|m| m.score())
-                .unwrap_or(0);
-            (score, pkg)
-        })
-        .collect();
-    scored.sort_by_key(|s| std::cmp::Reverse(s.0));
+    Ok(best_matches(query, packages, limit))
+}
 
-    Ok(scored.into_iter().map(|(_, pkg)| pkg).take(limit).collect())
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pkg(name: &str) -> PackageInfo {
+        PackageInfo {
+            name: name.into(),
+            version: "1".into(),
+            description: String::new(),
+            repo: "extra".into(),
+        }
+    }
+
+    #[test]
+    fn closer_names_come_first_and_the_limit_is_applied() {
+        let ranked = best_matches(
+            "zfs",
+            vec![pkg("libzfs-tools"), pkg("zfs-utils"), pkg("unrelated")],
+            2,
+        );
+        let names: Vec<&str> = ranked.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["zfs-utils", "libzfs-tools"]);
+    }
 }
