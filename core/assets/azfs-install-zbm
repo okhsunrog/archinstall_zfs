@@ -35,6 +35,20 @@ free_bytes() {
     printf '%s\n' "$((blocks * unit))"
 }
 
+# Copy the generated image next to $1 under a temporary name, verify the copy
+# and rename it into place; $2 is the failure message when it does not verify.
+# $temporary stays global so the EXIT trap removes an interrupted copy.
+publish_to() {
+    local dest=$1 message=$2
+    temporary=$(mktemp "${dest%/*}/.zbm-update.XXXXXXXX")
+    cp -- "$source_file" "$temporary"
+    cmp -s -- "$source_file" "$temporary" || fail "$message"
+    sync -f "$temporary"
+    mv -f -- "$temporary" "$dest"
+    temporary=
+    sync -f "$esp"
+}
+
 old_size=0
 if [[ -f $destination ]]; then
     old_size=$(stat -c %s "$destination")
@@ -73,13 +87,7 @@ if (( available < needed )); then
     rm -- "$destination"
     sync -f "$esp"
 fi
-temporary=$(mktemp "${destination%/*}/.zbm-update.XXXXXXXX")
-cp -- "$source_file" "$temporary"
-cmp -s -- "$source_file" "$temporary" || fail "Written image verification failed; recovery copy: $recovery"
-sync -f "$temporary"
-mv -f -- "$temporary" "$destination"
-temporary=
-sync -f "$esp"
+publish_to "$destination" "Written image verification failed; recovery copy: $recovery"
 
 # A fallback is useful but optional. Never overwrite another loader or fail a
 # successful main-image update merely because a duplicate does not fit.
@@ -95,13 +103,7 @@ if (( $(free_bytes) < needed )); then
     exit 0
 fi
 mkdir -p -- "${fallback%/*}"
-temporary=$(mktemp "${fallback%/*}/.zbm-update.XXXXXXXX")
-cp -- "$source_file" "$temporary"
-cmp -s -- "$source_file" "$temporary" || fail "Fallback verification failed; main loader is installed"
-sync -f "$temporary"
-mv -f -- "$temporary" "$fallback"
-temporary=
-sync -f "$esp"
+publish_to "$fallback" "Fallback verification failed; main loader is installed"
 sha256sum < "$fallback" > "$fallback_digest.tmp"
 mv -f -- "$fallback_digest.tmp" "$fallback_digest"
 sync -f "$stage"
