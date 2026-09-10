@@ -2,7 +2,7 @@ use super::*;
 
 /// Planning uses a 48 MiB image allowance. The image is built for this machine
 /// with `xz -9` (see `bootmenu::ZBM_DRACUT_CONF`); a stock `linux-lts` target
-/// measured 33 MiB. With the 8 MiB overhead, a 100 MiB Windows ESP holding only
+/// measured 33 MiB. With [`ESP_SLACK_BYTES`] added, a 100 MiB Windows ESP holding only
 /// Microsoft's loader qualifies for reuse. Actual installation verifies the
 /// generated file before replacing anything. Existing files are not credited
 /// as reclaimable: they may be other loaders.
@@ -30,10 +30,9 @@ impl BootSpace {
             "ZFSBootMenu image allowance must be nonzero"
         );
         // One image, and only explicitly enabled persistent copies.
-        // Reserve a modest allowance for cluster rounding and directory entries.
         self.image_bytes
             .checked_mul(1 + u64::from(self.backup) + u64::from(self.fallback))
-            .and_then(|size| size.checked_add(8 * MIB))
+            .and_then(|size| size.checked_add(ESP_SLACK_BYTES))
             .ok_or_else(|| eyre!("EFI space calculation overflow"))
     }
 }

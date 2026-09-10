@@ -2,19 +2,21 @@ use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::{Context, Result};
 
+use crate::disk::{GPT_MARGIN_SECTORS, SGDISK_EFI, SGDISK_SWAP, SGDISK_ZFS};
 use crate::system::cmd::{CommandRunner, check_exit};
 
 pub fn zap_disk(runner: &dyn CommandRunner, disk: &Path) -> Result<()> {
     let disk_str = disk.to_string_lossy();
 
-    // Clear first and last 34 sectors (GPT/MBR signatures)
+    // Clear the GPT/MBR signatures at both ends of the disk.
+    let count = format!("count={GPT_MARGIN_SECTORS}");
     let output = runner.run(
         "dd",
         &[
             "if=/dev/zero",
             &format!("of={disk_str}"),
             "bs=512",
-            "count=34",
+            &count,
             "conv=notrunc",
         ],
     )?;
@@ -28,15 +30,15 @@ pub fn zap_disk(runner: &dyn CommandRunner, disk: &Path) -> Result<()> {
         .trim()
         .parse()
         .wrap_err("failed to parse disk sector count from blockdev --getsz")?;
-    if sectors > 34 {
-        let seek = sectors - 34;
+    if sectors > GPT_MARGIN_SECTORS {
+        let seek = sectors - GPT_MARGIN_SECTORS;
         let _ = runner.run(
             "dd",
             &[
                 "if=/dev/zero",
                 &format!("of={disk_str}"),
                 "bs=512",
-                "count=34",
+                &count,
                 &format!("seek={seek}"),
                 "conv=notrunc",
             ],
@@ -68,12 +70,14 @@ pub fn create_partitions(
     check_exit(&output, "sgdisk create GPT")?;
 
     // Partition 1: EFI (500M)
+    let efi_type = format!("1:{SGDISK_EFI}");
     let output = runner.run(
         "sgdisk",
-        &["-n", "1:0:+500M", "-t", "1:ef00", "-c", "1:EFI", &disk_str],
+        &["-n", "1:0:+500M", "-t", &efi_type, "-c", "1:EFI", &disk_str],
     )?;
     check_exit(&output, "sgdisk create EFI partition")?;
 
+    let zfs_type = format!("2:{SGDISK_ZFS}");
     let layout = if let Some(swap_sz) = swap_size {
         // Partition 3: Swap (at end of disk)
         let swap_spec = format!("-{swap_sz}:0");
@@ -83,7 +87,7 @@ pub fn create_partitions(
                 "-n",
                 &format!("3:{swap_spec}"),
                 "-t",
-                "3:8200",
+                &format!("3:{SGDISK_SWAP}"),
                 "-c",
                 "3:swap",
                 &disk_str,
@@ -94,7 +98,7 @@ pub fn create_partitions(
         // Partition 2: ZFS (remaining space)
         let output = runner.run(
             "sgdisk",
-            &["-n", "2:0:0", "-t", "2:bf00", "-c", "2:ZFS", &disk_str],
+            &["-n", "2:0:0", "-t", &zfs_type, "-c", "2:ZFS", &disk_str],
         )?;
         check_exit(&output, "sgdisk create ZFS partition")?;
 
@@ -107,7 +111,7 @@ pub fn create_partitions(
         // Partition 2: ZFS (rest of disk)
         let output = runner.run(
             "sgdisk",
-            &["-n", "2:0:0", "-t", "2:bf00", "-c", "2:ZFS", &disk_str],
+            &["-n", "2:0:0", "-t", &zfs_type, "-c", "2:ZFS", &disk_str],
         )?;
         check_exit(&output, "sgdisk create ZFS partition")?;
 

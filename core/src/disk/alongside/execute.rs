@@ -1,4 +1,5 @@
 use super::*;
+use crate::disk::{SGDISK_EFI, SGDISK_SWAP, SGDISK_ZFS};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
@@ -54,7 +55,7 @@ pub fn execute(
     if plan.efi_start.is_some() {
         check_tools(&[("mkfs.fat", "dosfstools")])?;
         ensure!(
-            budget.required_bytes()? < ESP_BYTES - 8 * MIB,
+            budget.required_bytes()? < ESP_BYTES - ESP_SLACK_BYTES,
             "The boot image and selected copies do not fit the proposed additional ESP"
         );
     }
@@ -295,7 +296,7 @@ fn apply(
     if let Some(start) = plan.efi_start {
         args.extend([
             format!("--new={}:{}:{}", plan.efi_number, start, plan.zfs_start - 1),
-            format!("--typecode={}:ef00", plan.efi_number),
+            format!("--typecode={}:{SGDISK_EFI}", plan.efi_number),
         ]);
     }
     args.extend([
@@ -305,12 +306,12 @@ fn apply(
             plan.zfs_start,
             plan.swap_start.unwrap_or(plan.end) - 1
         ),
-        format!("--typecode={}:bf00", plan.zfs_number),
+        format!("--typecode={}:{SGDISK_ZFS}", plan.zfs_number),
     ]);
     if let (Some(number), Some(start)) = (plan.swap_number, plan.swap_start) {
         args.extend([
             format!("--new={number}:{start}:{}", plan.end - 1),
-            format!("--typecode={number}:8200"),
+            format!("--typecode={number}:{SGDISK_SWAP}"),
         ]);
     }
     args.push(dev.to_string());
@@ -350,9 +351,7 @@ fn verify_created(before: &Layout, after: &Layout, plan: &Plan) -> Result<()> {
     ensure!(
         zfs.start == plan.zfs_start
             && zfs.end()? == plan.swap_start.unwrap_or(plan.end)
-            && zfs
-                .kind
-                .eq_ignore_ascii_case("6A85CF4D-1DD2-11B2-99A6-080020736631"),
+            && zfs.kind.eq_ignore_ascii_case(ZFS_TYPE),
         "New ZFS partition differs from plan"
     );
     if let Some(start) = plan.efi_start {
@@ -377,9 +376,7 @@ fn verify_created(before: &Layout, after: &Layout, plan: &Plan) -> Result<()> {
         ensure!(
             swap.start == start
                 && swap.end()? == plan.end
-                && swap
-                    .kind
-                    .eq_ignore_ascii_case("0657FD6D-A4AB-43C4-84E5-0933C84B4F4F"),
+                && swap.kind.eq_ignore_ascii_case(SWAP_TYPE),
             "New swap partition differs from plan"
         );
     }
