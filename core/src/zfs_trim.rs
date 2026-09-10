@@ -29,6 +29,9 @@ pub async fn configure_zfs_trim(
     // mode leaves the pool's autotrim property and any timer untouched.
     let disk_path = match config.installation_mode {
         Some(InstallationMode::FullDisk) => config.disk.as_deref(),
+        Some(InstallationMode::Alongside) => {
+            config.alongside.as_ref().map(|r| r.before.device.as_path())
+        }
         Some(InstallationMode::NewPool) => config.zfs_partition.as_deref(),
         _ => None,
     };

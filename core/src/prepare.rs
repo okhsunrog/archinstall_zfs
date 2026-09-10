@@ -35,6 +35,17 @@ pub fn prepare_disk(
         .ok_or_else(|| eyre!("installation mode not set"))?;
 
     match mode {
+        InstallationMode::Alongside => {
+            let request = config
+                .alongside
+                .as_ref()
+                .ok_or_else(|| eyre!("Alongside plan is missing"))?;
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos();
+            let recovery = PathBuf::from(format!("/run/archinstall-zfs-storage-{stamp}"));
+            crate::disk::alongside::execute(runner, request, Default::default(), &recovery)
+        }
         InstallationMode::FullDisk => {
             let disk = config
                 .disk
@@ -133,7 +144,7 @@ pub async fn prepare_zfs(
     let key_path = crate::zfs_keyfile::key_file_path(Path::new("/"));
 
     match mode {
-        InstallationMode::FullDisk | InstallationMode::NewPool => {
+        InstallationMode::FullDisk | InstallationMode::NewPool | InstallationMode::Alongside => {
             let zfs_partition =
                 zfs_partition.ok_or_else(|| eyre!("zfs partition required for new pool modes"))?;
 

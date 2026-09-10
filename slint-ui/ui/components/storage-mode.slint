@@ -8,7 +8,7 @@ export component StorageMode inherits Rectangle {
         spacing: 12px;
         padding-top: 8px;
         padding-bottom: 14px;
-        for label[index] in ["Erase a disk", "Use existing partitions", "Use an existing pool"]: Rectangle {
+        for label[index] in ["Erase a disk", "Use existing partitions", "Use an existing pool", "Install alongside"]: Rectangle {
             horizontal-stretch: 1;
             background: WizardState.storage-mode == index ? Theme.c.blue.with-alpha(0.16) : Theme.c.surface0.with-alpha(0.55);
             border-radius: 8px;
@@ -27,7 +27,7 @@ export component StorageMode inherits Rectangle {
                 }
 
                 Text {
-                    text: index == 0 ? "Create a new partition layout" : index == 1 ? "Create a new ZFS pool" : "Create a new boot environment";
+                    text: index == 0 ? "Create a new partition layout" : index == 1 ? "Create a new ZFS pool" : index == 2 ? "Create a new boot environment" : "Keep another operating system";
                     color: Theme.c.subtext1;
                     font-size: 12px;
                     wrap: word-wrap;

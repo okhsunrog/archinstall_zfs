@@ -173,6 +173,9 @@ pub struct Request {
     pub efi: EfiChoice,
     /// Includes a new ESP only when explicitly requested after a space check.
     pub allocation_bytes: u64,
+    /// Optional new swap partition, included in allocation_bytes.
+    #[serde(default)]
+    pub swap_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -183,6 +186,8 @@ pub struct Plan {
     pub efi_start: Option<u64>,
     pub zfs_start: u64,
     pub end: u64,
+    pub swap_number: Option<u32>,
+    pub swap_start: Option<u64>,
 }
 
 impl Request {
@@ -191,9 +196,17 @@ impl Request {
         l.validate()?;
         let additional_efi = matches!(self.efi, EfiChoice::CreateAfterInsufficientSpace { .. });
         let efi_bytes = if additional_efi { ESP_BYTES } else { 0 };
+        let minimum = MIN_LINUX_BYTES
+            .checked_add(efi_bytes)
+            .and_then(|n| n.checked_add(self.swap_bytes))
+            .ok_or_else(|| eyre!("Allocation overflow"))?;
         ensure!(
-            self.allocation_bytes >= MIN_LINUX_BYTES + efi_bytes,
-            "Reserve at least 32 GiB for Linux, plus 1 GiB if creating an additional EFI partition"
+            self.swap_bytes.is_multiple_of(MIB),
+            "Swap size must be aligned to MiB"
+        );
+        ensure!(
+            self.allocation_bytes >= minimum,
+            "Reserve at least 32 GiB for the ZFS pool, plus the selected swap and any additional EFI partition"
         );
         let existing_efi = self.efi.existing_partition();
         ensure!(
@@ -246,7 +259,7 @@ impl Request {
                 (aligned, new_end, None)
             }
         };
-        let needed = if additional_efi { 2 } else { 1 };
+        let needed = 1 + usize::from(additional_efi) + usize::from(self.swap_bytes > 0);
         let unused: Vec<_> = (1..=128)
             .filter(|n| {
                 !l.partitions
@@ -270,6 +283,8 @@ impl Request {
             efi_start: additional_efi.then_some(start),
             zfs_start: start + efi_bytes / l.sectorsize,
             end,
+            swap_number: (self.swap_bytes > 0).then(|| unused[usize::from(additional_efi)]),
+            swap_start: (self.swap_bytes > 0).then_some(end - self.swap_bytes / l.sectorsize),
         })
     }
 }
@@ -358,11 +373,12 @@ mod tests {
                 name: "EFI".into(),
                 attrs: "".into(),
             });
-            let r = Request {
+            let mut r = Request {
                 before: l.clone(),
                 source: SpaceSource::Shrink { partition: 3 },
                 efi: EfiChoice::Reuse { partition: 1 },
                 allocation_bytes: 32 * GIB,
+                swap_bytes: 0,
             };
             let p = r.plan().unwrap();
             let (old, size) = p.shrink.unwrap();
@@ -370,6 +386,19 @@ mod tests {
             assert_eq!((old.start + size) * sectorsize, 69 * GIB);
             assert_eq!((p.end - p.zfs_start) * sectorsize, 32 * GIB);
             assert_eq!((p.efi_number, p.zfs_number), (1, 2));
+            r.swap_bytes = 8 * GIB;
+            assert!(
+                r.plan().is_err(),
+                "swap cannot consume the minimum ZFS capacity"
+            );
+            r.allocation_bytes = 40 * GIB;
+            let p = r.plan().unwrap();
+            assert_eq!((p.swap_start.unwrap() - p.zfs_start) * sectorsize, 32 * GIB);
+            assert_eq!((p.end - p.swap_start.unwrap()) * sectorsize, 8 * GIB);
+            assert_ne!(p.swap_number, Some(p.zfs_number));
+            assert_ne!(p.swap_number, Some(p.efi_number));
+            r.swap_bytes = u64::MAX;
+            assert!(r.plan().is_err());
         }
     }
 
@@ -400,6 +429,7 @@ mod tests {
             },
             efi: EfiChoice::Reuse { partition: 1 },
             allocation_bytes: 33 * GIB,
+            swap_bytes: 0,
         };
         assert!(r.plan().is_err());
     }

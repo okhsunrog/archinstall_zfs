@@ -24,6 +24,7 @@ pub const STEP_LABELS: [&str; TOTAL_STEPS] = [
 pub fn build_step_items(step: usize, c: &GlobalConfig) -> Vec<ConfigItem> {
     let mut items = match step {
         0 => build_welcome_items(c),
+        1 if c.installation_mode == Some(InstallationMode::Alongside) => vec![],
         1 => build_disk_items(c),
         2 => build_zfs_items(c),
         3 => build_system_items(c),
@@ -64,6 +65,42 @@ fn build_welcome_items(_c: &GlobalConfig) -> Vec<ConfigItem> {
 fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     let mut items = vec![section_header("Storage assignments")];
     match c.installation_mode {
+        Some(InstallationMode::Alongside) => {
+            if let Some(r) = &c.alongside {
+                items.push(ConfigItem {
+                    label: "Planned allocation".into(),
+                    value: format!(
+                        "{} — {:.0} GiB",
+                        r.before.device.display(),
+                        r.allocation_bytes as f64 / 1073741824.0
+                    )
+                    .into(),
+                    description: {
+                        use archinstall_zfs_core::disk::alongside::{EfiChoice, SpaceSource};
+                        let source = match r.source {
+                            SpaceSource::Shrink { partition } => format!(
+                                "Shrink partition {partition} from its end; preserve its data"
+                            ),
+                            SpaceSource::Unallocated { .. } => {
+                                "Use unallocated space; preserve existing partitions".into()
+                            }
+                        };
+                        let efi = match r.efi {
+                            EfiChoice::Reuse { partition } => {
+                                format!("Reuse EFI partition {partition} without formatting")
+                            }
+                            EfiChoice::CreateAfterInsufficientSpace { .. } => {
+                                "Create the explicitly selected additional 1 GiB EFI partition"
+                                    .into()
+                            }
+                        };
+                        format!("{source}. {efi}. {} GiB reserved for swap; the remainder is the new ZFS pool.", r.swap_bytes / 1073741824).into()
+                    },
+                    item_type: ItemType::Storage,
+                    ..Default::default()
+                });
+            }
+        }
         Some(InstallationMode::FullDisk) => {
             items.push(storage_item("disk", "Disk to erase", c.disk.as_deref(), c))
         }
@@ -257,31 +294,48 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             ..Default::default()
         });
     }
-    items.push(section_header("Swap"));
-    items.push(compact_choice(
-        ChoiceSetting::SwapMode,
-        "Swap method",
-        c.swap_mode,
-        "ZRAM uses compressed RAM. A swap partition uses disk space.",
-    ));
-    if matches!(
-        c.swap_mode,
-        SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-    ) {
-        if c.installation_mode == Some(InstallationMode::FullDisk) {
-            items.push(inline_text(
-                TextSetting::SwapPartitionSize,
-                "Swap size",
-                c.swap_partition_size.as_deref().unwrap_or(""),
-                "Created on the selected disk, for example 8G",
-            ));
+    if c.installation_mode == Some(InstallationMode::Alongside) {
+        let value = if let Some(r) = &c.alongside
+            && r.swap_bytes > 0
+        {
+            format!("{} — {} GiB", c.swap_mode, r.swap_bytes / 1073741824)
         } else {
-            items.push(storage_item(
-                "swap_partition",
-                "Swap partition",
-                c.swap_partition.as_deref(),
-                c,
-            ));
+            c.swap_mode.to_string()
+        };
+        items.push(ConfigItem {
+            label: "Swap method".into(),
+            value: value.into(),
+            description: "Configured with the space allocation on the Disk page".into(),
+            item_type: ItemType::Readonly,
+            ..Default::default()
+        });
+    } else {
+        items.push(section_header("Swap"));
+        items.push(compact_choice(
+            ChoiceSetting::SwapMode,
+            "Swap method",
+            c.swap_mode,
+            "ZRAM uses compressed RAM. A swap partition uses disk space.",
+        ));
+        if matches!(
+            c.swap_mode,
+            SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
+        ) {
+            if c.installation_mode == Some(InstallationMode::FullDisk) {
+                items.push(inline_text(
+                    TextSetting::SwapPartitionSize,
+                    "Swap size",
+                    c.swap_partition_size.as_deref().unwrap_or(""),
+                    "Created on the selected disk, for example 8G",
+                ));
+            } else {
+                items.push(storage_item(
+                    "swap_partition",
+                    "Swap partition",
+                    c.swap_partition.as_deref(),
+                    c,
+                ));
+            }
         }
     }
     let mut compression = compact_choice(
@@ -584,12 +638,13 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         item.key = "".into();
         items.push(item);
     }
-    if c.installation_mode != Some(InstallationMode::FullDisk)
-        && matches!(
-            c.swap_mode,
-            SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-        )
-    {
+    if matches!(
+        c.installation_mode,
+        Some(InstallationMode::NewPool | InstallationMode::ExistingPool)
+    ) && matches!(
+        c.swap_mode,
+        SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
+    ) {
         let mut item = storage_item(
             "swap_partition",
             "Swap partition",

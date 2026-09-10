@@ -510,6 +510,9 @@ async fn pool_inventory() -> Result<(Vec<PoolRow>, Vec<String>), String> {
 
 /// Review uses the same eligibility rules as the picker, including loaded configs.
 pub fn issues(c: &GlobalConfig) -> Vec<String> {
+    if c.installation_mode == Some(InstallationMode::Alongside) {
+        return Vec::new();
+    }
     let roles = if c.installation_mode == Some(InstallationMode::FullDisk) {
         vec![("disk", c.disk.as_deref())]
     } else {

@@ -1,3 +1,4 @@
+mod alongside;
 mod iso;
 mod qemu;
 
@@ -113,6 +114,9 @@ enum Commands {
 
 #[derive(Parser, Clone)]
 struct TestOpts {
+    /// Install by shrinking an ext4 fixture in the disposable VM; verify retained files.
+    #[arg(long)]
+    alongside: bool,
     /// Testing ISO to boot. By default, use the newest *-testing-*.iso.
     /// Custom images must allow passwordless root SSH on the ISO VM.
     #[arg(long)]
@@ -432,6 +436,17 @@ fn cmd_test_install(opts: TestOpts) -> Result<(), String> {
     // Fresh environment
     eprintln!("[1/4] Creating fresh disk and UEFI vars");
     qemu::create_fresh_disk(&opts.disk);
+    if opts.alongside {
+        let status = Command::new("qemu-img")
+            .args(["resize"])
+            .arg(&opts.disk)
+            .arg("80G")
+            .status()
+            .map_err(|e| e.to_string())?;
+        if !status.success() {
+            return Err("Cannot enlarge alongside fixture disk".into());
+        }
+    }
     qemu::reset_uefi_vars(&opts.vars);
 
     // Boot ISO
@@ -452,6 +467,9 @@ fn cmd_test_install(opts: TestOpts) -> Result<(), String> {
     eprintln!("[3/4] Running installer");
     vm.scp_to(&opts.binary, "/root/archinstall-zfs-rs");
     vm.scp_to(&opts.config, "/root/config.json");
+    if opts.alongside {
+        alongside::prepare(&vm, &opts.config)?;
+    }
     vm.ssh_run("chmod +x /root/archinstall-zfs-rs")
         .map_err(|e| format!("chmod failed: {e}"))?;
 
@@ -473,6 +491,10 @@ fn cmd_test_install(opts: TestOpts) -> Result<(), String> {
     let output = vm
         .ssh_run(&installer_command)
         .map_err(|e| format!("installer failed to execute: {e}"))?;
+
+    if opts.alongside && output.status.success() {
+        alongside::verify(&vm)?;
+    }
 
     // Pull installer logs from VM before shutdown (regardless of success/failure)
     let log_dest = PathBuf::from("test-install.log");
@@ -539,8 +561,7 @@ fn cmd_test_boot(opts: TestOpts) -> Result<(), String> {
 
     // Verify
     eprintln!("[3/3] Verifying system health");
-    let init_system = detect_init_system(&opts.config);
-    verify_system(&vm, &init_system)?;
+    verify_system(&vm, &opts.config)?;
 
     eprintln!("=== test-boot: PASSED ===\n");
     Ok(())
@@ -548,7 +569,8 @@ fn cmd_test_boot(opts: TestOpts) -> Result<(), String> {
 
 // ── Verification ───────────────────────────────────────
 
-fn verify_system(vm: &QemuVm, init_system: &str) -> Result<(), String> {
+fn verify_system(vm: &QemuVm, config_path: &Path) -> Result<(), String> {
+    let init_system = detect_init_system(config_path);
     let mut passed = 0;
     let mut checks = Vec::new();
 
@@ -607,13 +629,22 @@ fn verify_system(vm: &QemuVm, init_system: &str) -> Result<(), String> {
         }
     }
 
-    // zram
-    let zram = vm.ssh_stdout("cat /etc/systemd/zram-generator.conf 2>/dev/null || echo missing");
-    if zram.contains("zram0") {
-        checks.push("  zram: configured".to_string());
+    // Verify the configured swap path, including activation after boot.
+    let config: Value = serde_json::from_slice(&fs::read(config_path).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    let swap = vm.ssh_stdout("swapon --show=NAME --noheadings");
+    let swap_ok = match config["swap_mode"].as_str().unwrap_or("none") {
+        "none" => swap.trim().is_empty(),
+        "zram" => swap.contains("/dev/zram"),
+        "zswap_partition" => !swap.trim().is_empty() && !swap.contains("zram"),
+        "zswap_partition_encrypted" => swap.contains("cryptswap") || swap.contains("/dev/dm-"),
+        _ => false,
+    };
+    if swap_ok {
+        checks.push("  swap: configured and active as requested".into());
         passed += 1;
     } else {
-        checks.push(format!("  zram: FAIL ({zram})"));
+        checks.push(format!("  swap: FAIL ({swap})"));
     }
 
     // ZFS mounts
@@ -699,7 +730,8 @@ fn verify_system(vm: &QemuVm, init_system: &str) -> Result<(), String> {
     // ZBM pacman hook
     let zbm_hook =
         vm.ssh_stdout("cat /etc/pacman.d/hooks/95-zfsbootmenu.hook 2>/dev/null || echo missing");
-    if zbm_hook.contains("generate-zbm") {
+    if zbm_hook.contains("Exec = /usr/local/sbin/azfs-update-zbm")
+        && vm.ssh_stdout("test -x /usr/local/sbin/azfs-update-zbm && test -x /usr/local/libexec/azfs-install-zbm && echo ready").trim() == "ready" {
         checks.push("  ZBM pacman hook: installed".to_string());
         passed += 1;
     } else {

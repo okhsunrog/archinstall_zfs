@@ -1,8 +1,8 @@
 # Alongside installation development
 
-The core planner and execution helper are under development in
-`core/src/disk/alongside/`. They are not yet connected to the installation flow
-or graphical wizard. This document does not claim end-to-end dual-boot support.
+The planner in `core/src/disk/alongside/` is connected to the graphical wizard
+and installation pipeline. Integration validation is in progress; this document
+does not claim verified bootability of an existing operating system.
 
 ## Storage contract
 
@@ -29,16 +29,20 @@ ESP when a successful capacity check establishes insufficient space, and require
 an explicit selection. A corrupt or unreadable ESP is not evidence of low space.
 Repeat capacity validation before applying the plan.
 
-Space calculation takes the actual EFI bundle size, reserves one replacement
-image and 8 MiB for allocation overhead, and adds persistent backup/fallback
-copies only when enabled. A permanent previous-version backup is optional.
-The inspected host bundle was 50,681,856 bytes; this measurement is a reference,
-not a constant to assume for other builds.
+Space planning reserves **100 MiB for one locally built ZFSBootMenu image plus
+8 MiB overhead**. This is a growth allowance, not an exact prediction: the host
+image measured 48.33 MiB; published ordinary EFI bundles through v3.1.0 reached
+63.56 MiB. A backup or temporary second copy is not a prerequisite for reuse.
 
-The source of the pre-installation bundle remains to be integrated: the current
-installer builds ZBM in the target after installation, too late for exact
-pre-resize capacity checks. The live-image packaging or a preliminary build
-must supply the actual artifact before the new workflow can be enabled.
+The installed system still builds ZBM locally. `azfs-update-zbm` generates it in
+`/var/lib/zfsbootmenu` and then runs `azfs-install-zbm`. Publication checks the
+actual file and available FAT space. With room for two images it stages and
+renames; otherwise it saves the current loader on the root filesystem, removes
+that loader from the ESP and writes its replacement. The latter has a short
+power-loss window requiring recovery from live media. It is an accepted tradeoff,
+not a reason to create a second ESP by default. No persistent backup is created
+on the ESP. A foreign removable-media fallback is preserved; an optional ZBM
+fallback must not block updating the main image.
 
 ## Disposable execution tests
 
@@ -77,5 +81,92 @@ and devtmpfs nodes directly; aliases can be populated after releasing the lock.
 Validated on 2026-09-10: all four fixture commands above passed, including file
 content comparisons and stale-plan rejection. Workspace tests, formatting and
 clippy with warnings denied also passed. No installation or guest-OS boot was
-performed by these fixtures; Windows boot, full installer integration and GUI
-review remain outstanding.
+performed by these fixtures; These original fixture runs did not cover guest boot; the GUI and VM checks
+below were added subsequently. Windows boot remains unverified.
+
+## Graphical editor and integration checks
+
+The GUI's **Install alongside** mode shows proportional current/planned maps,
+separate filesystem/free-space choices, and an allocation slider plus exact GiB
+input. Disk discovery and filesystem checks run off the UI thread. Errors on
+one disk leave the disk selector available. The TUI currently directs interactive
+resizing users to `azfs`; its config-driven installer uses the same core plan.
+
+Safe visual fixtures:
+
+```sh
+SLINT_EMIT_DEBUG_INFO=1 cargo build -p archinstall-zfs-slint \
+  --no-default-features --features desktop-mock,slint/mcp --locked
+uv run slint-ui/scripts/alongside_review.py --output /tmp/alongside-review
+SLINT_BACKEND=headless target/debug/azfs --preview alongside
+```
+
+`AZFS_PREVIEW_ESP=small` exercises explicit additional-ESP consent.
+`AZFS_PREVIEW_ALONGSIDE=ext4|missing-tools|no-efi|mbr` selects edge cases without
+probing or changing the host. Preview mode remains mandatory.
+
+After a production build, run the disposable installation and boot test:
+
+```sh
+just cargo-build
+just test-vm --alongside --zfs-mode dkms --tmpfs --timeout 1800
+```
+
+This option creates an 80 GiB QEMU disk with a preserved ext4 filesystem and EFI
+fixture, allocates 32 GiB by shrinking ext4, and checks retained payloads before
+booting the newly installed system. It does not represent a bootable Windows or
+second Linux installation. Do not claim existing-OS bootability from this test.
+
+The boot publisher has an independent real FAT test, using only its own image:
+
+```sh
+sudo bash core/tests/zbm-update-fixture.sh
+shellcheck core/assets/azfs-install-zbm core/assets/azfs-update-zbm \
+  core/tests/zbm-update-fixture.sh
+```
+
+## Visual review coverage (2026-09-10)
+
+Real headless Slint captures and callbacks were exercised at 1920×1080 / 100%,
+1366×768 / 100%, and 1920×1080 / 150%. Individual captures were inspected,
+including maps, the compact layout and the review summary.
+
+| Case | Interaction checked |
+| --- | --- |
+| Reuse ESP | Select source, enter allocation, switch to unallocated space |
+| Swap | Choose disk swap on Disk; map and Review subtract its size from the pool |
+| Whole extent | Default to all MiB-aligned space; preserve fractional-GiB capacity |
+| Insufficient ESP | Reach consent by keyboard, explicitly enable second ESP |
+| Return navigation | Open Review, return to Disk, switch installation modes and return |
+| Missing NTFS tools | Select unavailable source; readable package hint; Install disabled |
+| Missing ESP / MBR | Readable reason; Install disabled; disk selector remains available |
+| ext4 | Alternate filesystem fixture |
+
+Large and small partition widths represent disk proportions; small EFI/recovery
+regions cannot carry a full label inside the bar. Their role is identified by
+color and the EFI selector. A free extent is preferred over shrinking when one
+can satisfy the minimum allocation. These preview results do not establish real
+filesystem safety or existing-OS bootability; use the execution tests separately.
+
+
+Allocation defaults to the entire selected free extent (or the maximum safe
+shrink allocation), aligned down to MiB without discarding a fractional GiB.
+The Disk page owns swap selection for alongside installs. None/ZRAM consume no
+disk space; plain/encrypted swap reserves the chosen GiB inside the allocation.
+A minimum of 32 GiB remains for ZFS after subtracting swap and an optional new
+ESP. The later ZFS page shows the same setting read-only. Encrypted swap uses a
+random key per boot and is not a hibernation target.
+
+Additional tests:
+
+```sh
+sudo target/debug/examples/alongside_fixture ext4 swap
+sudo target/debug/examples/alongside_fixture ntfs swap
+just test-vm --alongside --config xtask/configs/alongside-swap.json --tmpfs --timeout 1800
+```
+
+The swap fixture reserves 8 GiB inside a 40 GiB allocation, leaving 32 GiB for
+ZFS. Both filesystem fixtures passed with retained payload comparisons. The
+first complete alongside VM install with ZRAM passed; the installed system
+booted and all 13 health checks passed after updating the check for the new
+ZBM wrapper. The additional disk-swap VM run is a separate verification.

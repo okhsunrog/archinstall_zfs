@@ -16,6 +16,7 @@ pub enum InstallationMode {
     FullDisk,
     NewPool,
     ExistingPool,
+    Alongside,
 }
 
 impl std::fmt::Display for InstallationMode {
@@ -24,6 +25,7 @@ impl std::fmt::Display for InstallationMode {
             Self::FullDisk => write!(f, "Full Disk"),
             Self::NewPool => write!(f, "New Pool"),
             Self::ExistingPool => write!(f, "Existing Pool"),
+            Self::Alongside => write!(f, "Alongside"),
         }
     }
 }
@@ -154,6 +156,8 @@ pub struct GlobalConfig {
 
     // Flow control
     pub installation_mode: Option<InstallationMode>,
+    #[serde(default)]
+    pub alongside: Option<crate::disk::alongside::Request>,
     #[serde(default, alias = "disk_by_id")]
     pub disk: Option<PathBuf>,
     #[serde(default, alias = "efi_partition_by_id")]
@@ -359,6 +363,7 @@ impl Default for GlobalConfig {
         Self {
             distribution: default_distribution(),
             installation_mode: None,
+            alongside: None,
             disk: None,
             efi_partition: None,
             zfs_partition: None,

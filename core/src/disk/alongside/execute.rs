@@ -231,11 +231,17 @@ fn apply(
             "--new={}:{}:{}",
             plan.zfs_number,
             plan.zfs_start,
-            plan.end - 1
+            plan.swap_start.unwrap_or(plan.end) - 1
         ),
         format!("--typecode={}:bf00", plan.zfs_number),
-        dev.to_string(),
     ]);
+    if let (Some(number), Some(start)) = (plan.swap_number, plan.swap_start) {
+        args.extend([
+            format!("--new={number}:{start}:{}", plan.end - 1),
+            format!("--typecode={number}:8200"),
+        ]);
+    }
+    args.push(dev.to_string());
     probe::run(
         runner,
         "sgdisk",
@@ -256,7 +262,9 @@ fn apply(
     Ok(crate::prepare::PreparedPartitions {
         efi,
         zfs: Some(zfs),
-        swap: None,
+        swap: plan
+            .swap_number
+            .map(|n| super::super::partition::partition_path(disk, n)),
     })
 }
 
@@ -269,7 +277,7 @@ fn verify_created(before: &Layout, after: &Layout, plan: &Plan) -> Result<()> {
         .ok_or_else(|| eyre!("New ZFS partition is missing"))?;
     ensure!(
         zfs.start == plan.zfs_start
-            && zfs.end()? == plan.end
+            && zfs.end()? == plan.swap_start.unwrap_or(plan.end)
             && zfs
                 .kind
                 .eq_ignore_ascii_case("6A85CF4D-1DD2-11B2-99A6-080020736631"),
@@ -288,8 +296,24 @@ fn verify_created(before: &Layout, after: &Layout, plan: &Plan) -> Result<()> {
             "New EFI partition differs from plan"
         );
     }
+    if let (Some(number), Some(start)) = (plan.swap_number, plan.swap_start) {
+        let swap = retained
+            .partitions
+            .iter()
+            .find(|p| p.number(&before.device).ok() == Some(number))
+            .ok_or_else(|| eyre!("New swap partition is missing"))?;
+        ensure!(
+            swap.start == start
+                && swap.end()? == plan.end
+                && swap
+                    .kind
+                    .eq_ignore_ascii_case("0657FD6D-A4AB-43C4-84E5-0933C84B4F4F"),
+            "New swap partition differs from plan"
+        );
+    }
     retained.partitions.retain(|p| {
         p.number(&before.device).ok() != Some(plan.zfs_number)
+            && !(plan.swap_number.is_some() && p.number(&before.device).ok() == plan.swap_number)
             && !(plan.efi_start.is_some() && p.number(&before.device).ok() == Some(plan.efi_number))
     });
     ensure!(

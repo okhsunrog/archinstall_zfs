@@ -1,3 +1,4 @@
+import { AlongsidePanel } from "../components/alongside-panel.slint";
 import { StorageState } from "../state/storage-state.slint";
 import { SetupRow } from "../components/setup-row.slint";
 import { StorageMode } from "../components/storage-mode.slint";
@@ -187,6 +188,12 @@ export component WizardView inherits Rectangle {
                                 }
                                 if WizardState.current-step == 1: StorageMode {
                                     activated(key) => { root.item-activated(key); }
+                                }
+                                if WizardState.current-step == 1 && WizardState.storage-mode == 3: alongside := AlongsidePanel {
+                                    reveal(y, h) => {
+                                        if y < items-scroll.absolute-position.y { items-scroll.content-y += items-scroll.absolute-position.y - y; }
+                                        else if y + h > items-scroll.absolute-position.y + items-scroll.height - 8px { items-scroll.content-y -= y + h - items-scroll.absolute-position.y - items-scroll.height + 8px; }
+                                    }
                                 }
                                 for item[index] in WizardState.config-items: Rectangle {
                                     vertical-stretch: 0;

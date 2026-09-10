@@ -16,7 +16,7 @@ import time
 import urllib.error
 import urllib.request
 
-SCENES = 'welcome offline no-uefi zfs-preparing zfs-failed wifi-empty wifi-unavailable wifi-no-internet wifi-verifying cancelling disk new-pool existing-pool zfs system users desktop review install done failed cancelled inspect invalid'.split()
+SCENES = 'welcome offline no-uefi zfs-preparing zfs-failed wifi-empty wifi-unavailable wifi-no-internet wifi-verifying cancelling disk new-pool alongside existing-pool zfs system users desktop review install done failed cancelled inspect invalid'.split()
 
 class Preview:
     def __init__(self, binary, scene, size, scale, output):

@@ -43,6 +43,7 @@ pub enum Scene {
     Cancelling,
     Disk,
     NewPool,
+    Alongside,
     ExistingPool,
     Zfs,
     System,
@@ -231,6 +232,7 @@ pub fn config(scene: Scene) -> GlobalConfig {
     GlobalConfig {
         installation_mode: Some(match scene {
             Scene::NewPool => InstallationMode::NewPool,
+            Scene::Alongside => InstallationMode::Alongside,
             Scene::ExistingPool => InstallationMode::ExistingPool,
             _ => InstallationMode::FullDisk,
         }),
@@ -425,7 +427,7 @@ pub fn show(app: &App, scene: Scene, size: Size) {
         | Scene::WifiUnavailable
         | Scene::WifiNoInternet
         | Scene::WifiVerifying => 0,
-        Scene::Disk | Scene::NewPool | Scene::ExistingPool => 1,
+        Scene::Disk | Scene::NewPool | Scene::ExistingPool | Scene::Alongside => 1,
         Scene::Zfs => 2,
         Scene::System => 3,
         Scene::Users => 4,

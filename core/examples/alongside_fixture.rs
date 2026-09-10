@@ -23,7 +23,7 @@ fn main() -> Result<()> {
     let fs = std::env::args().nth(1).unwrap_or_else(|| "ext4".into());
     let mode = std::env::args().nth(2).unwrap_or_else(|| "shrink".into());
     ensure!(
-        matches!(mode.as_str(), "shrink" | "free" | "new-esp"),
+        matches!(mode.as_str(), "shrink" | "free" | "new-esp" | "swap"),
         "Mode must be shrink, free or new-esp"
     );
     ensure!(
@@ -116,8 +116,11 @@ fn main() -> Result<()> {
         } else {
             EfiChoice::Reuse { partition: 1 }
         },
+        swap_bytes: if mode == "swap" { 8 * GIB } else { 0 },
         allocation_bytes: if mode == "new-esp" {
             33 * GIB
+        } else if mode == "swap" {
+            40 * GIB
         } else {
             32 * GIB
         },
@@ -149,9 +152,25 @@ fn main() -> Result<()> {
     );
     let after = Layout::read(&RealRunner, &PathBuf::from(&device.0))?;
     ensure!(
-        after.partitions.len() == before.partitions.len() + if mode == "new-esp" { 2 } else { 1 },
+        after.partitions.len()
+            == before.partitions.len()
+                + if matches!(mode.as_str(), "new-esp" | "swap") {
+                    2
+                } else {
+                    1
+                },
         "Unexpected partition count"
     );
+    if mode == "swap" {
+        let swap = prepared.swap.as_ref().expect("planned swap node");
+        ensure!(
+            after
+                .partitions
+                .iter()
+                .any(|p| &p.node == swap && p.size * after.sectorsize == 8 * GIB),
+            "Swap size differs from plan"
+        );
+    }
     if mode == "free" {
         ensure!(
             before.partitions[1] == after.partitions[1],

@@ -1,0 +1,124 @@
+import { ComboBox, Slider, CheckBox } from "std-widgets.slint";
+import { AlongsideState, DiskSegment } from "../state/alongside-state.slint";
+import { Theme } from "../styling.slint";
+import { StyledButton } from "styled-button.slint";
+import { StyledTextInput } from "styled-text-input.slint";
+
+component DiskMap inherits Rectangle {
+    in property <[DiskSegment]> segments;
+    height: 44px;
+    background: Theme.c.surface1;
+    clip: true;
+    // Custom drawing: exact sector ratios, not layout stretch weights.
+    for segment in root.segments: Rectangle {
+        x: parent.width * segment.offset;
+        width: max(2px, parent.width * segment.fraction);
+        height: parent.height;
+        background: segment.kind == 1 ? Theme.c.green : segment.kind == 2 ? Theme.c.yellow : segment.kind == 3 ? Theme.c.blue : segment.kind == 5 ? Theme.c.mauve : segment.kind == 4 ? Theme.c.surface0 : Theme.c.overlay0;
+        if self.width > 90px: Text {
+            x: 10px;
+            width: parent.width - 20px;
+            height: parent.height;
+            text: parent.width < 160px ? segment.short-label : segment.label;
+            overflow: elide;
+            vertical-alignment: center;
+            color: segment.kind == 4 ? Theme.c.subtext1 : Theme.c.base;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        border-width: segment.fraction < 0.004 ? 0px : 1px;
+        border-color: Theme.c.base;
+    }
+}
+
+export component AlongsidePanel inherits Rectangle {
+    callback reveal(length, length);
+    background: transparent;
+    vertical-stretch: 0;
+    init => { if AlongsideState.disks.length == 0 { AlongsideState.reload(); } else { AlongsideState.rebuild(); } }
+    VerticalLayout {
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 12px;
+            disk-choice := ComboBox {
+                changed has-focus => { if self.has-focus { root.reveal(self.absolute-position.y, self.height); } }
+                accessible-label: "Installation disk";
+                model: AlongsideState.disks;
+                current-index: AlongsideState.disk-index;
+                enabled: !AlongsideState.busy;
+                selected(value) => { AlongsideState.select-disk(self.current-index); }
+            }
+            StyledButton { label: "Refresh disks"; outlined: true; enabled: !AlongsideState.busy; clicked => { AlongsideState.reload(); } }
+        }
+        if AlongsideState.busy: Text { text: "Checking disk layout and filesystem resize limits…"; color: Theme.c.subtext1; wrap: word-wrap; }
+        if AlongsideState.before.length > 0: VerticalLayout {
+            spacing: 8px;
+            Text { text: "CURRENT LAYOUT"; font-size: 12px; color: Theme.c.subtext0; }
+            DiskMap { segments: AlongsideState.before; }
+            Text { text: "AFTER INSTALLATION"; font-size: 12px; color: Theme.c.subtext0; }
+            DiskMap { segments: AlongsideState.after; }
+            Text { text: "Gray: preserved   ·   Blue: resized   ·   Green: new ZFS   ·   Yellow: EFI   ·   Purple: swap"; color: Theme.c.subtext1; font-size: 12px; wrap: word-wrap; }
+        }
+        if AlongsideState.allocation-summary != "": Text { text: AlongsideState.allocation-summary; color: Theme.c.text; wrap: word-wrap; }
+        if AlongsideState.sources.length > 0: VerticalLayout {
+            spacing: 8px;
+            Text { text: "Where to make space"; font-weight: 600; color: Theme.c.text; }
+            source-choice := ComboBox { changed has-focus => { if self.has-focus { root.reveal(self.absolute-position.y, self.height); } } accessible-label: "Space source"; model: AlongsideState.sources; current-index: AlongsideState.source-index; enabled: !AlongsideState.busy; selected(value) => { AlongsideState.select-source(self.current-index); } }
+            Text { text: AlongsideState.details; color: Theme.c.subtext1; wrap: word-wrap; }
+            CheckBox { text: "Use all available space"; checked: AlongsideState.use-all; enabled: !AlongsideState.busy; toggled => { AlongsideState.all-space(self.checked); } changed has-focus => { if self.has-focus { root.reveal(self.absolute-position.y, self.height); } } }
+            HorizontalLayout {
+                spacing: 16px;
+                Text { text: "Allocate to this installation"; color: Theme.c.text; }
+                allocation-slider := Slider { changed has-focus => { if self.has-focus { root.reveal(self.absolute-position.y, self.height); } } accessible-label: "Space for installation"; minimum: AlongsideState.minimum; maximum: max(AlongsideState.minimum, AlongsideState.maximum); value: AlongsideState.allocation; enabled: !AlongsideState.busy && AlongsideState.maximum >= AlongsideState.minimum; changed(value) => { AlongsideState.allocate(round(value)); } }
+                allocation-input := StyledTextInput {
+                    property <bool> dirty: false;
+                    changed has-focus => {
+                        if self.has-focus { root.reveal(self.absolute-position.y, self.height); }
+                        else if self.dirty { self.dirty = false; if self.text.is-float() { AlongsideState.allocate(self.text.to-float()); } self.text = "\{AlongsideState.allocation}"; }
+                    }
+                    edited(value) => { self.dirty = true; } accessible-label: "Allocation in GiB"; width: 80px; text: "\{AlongsideState.allocation}"; enabled: !AlongsideState.busy; accepted(value) => { self.dirty = false; if value.is-float() { AlongsideState.allocate(value.to-float()); } self.text = "\{AlongsideState.allocation}"; } }
+                Text { text: "GiB"; color: Theme.c.subtext1; }
+            }
+            Text { text: "Existing partition starts stay fixed. Make a backup before resizing an operating system."; color: Theme.c.subtext1; font-size: 12px; wrap: word-wrap; }
+        }
+        if AlongsideState.sources.length > 0: VerticalLayout {
+            spacing: 8px;
+            Text { text: "Swap"; font-weight: 600; color: Theme.c.text; }
+            ComboBox {
+                accessible-label: "Swap method";
+                model: ["None", "ZRAM — compressed RAM", "Swap partition", "Encrypted swap partition"];
+                current-index: AlongsideState.swap-mode;
+                enabled: !AlongsideState.busy;
+                selected(value) => { AlongsideState.select-swap(self.current-index); }
+                changed has-focus => { if self.has-focus { root.reveal(self.absolute-position.y, self.height); } }
+            }
+            if AlongsideState.swap-mode >= 2: HorizontalLayout {
+                spacing: 12px;
+                Text { text: "Swap size (GiB)"; color: Theme.c.text; horizontal-stretch: 0; }
+                StyledTextInput {
+                    accessible-label: "Swap size in GiB";
+                    text: "\{AlongsideState.swap-size}";
+                    width: 80px;
+                    property <bool> dirty: false;
+                    edited(value) => { self.dirty = true; }
+                    accepted(value) => { self.dirty = false; if value.is-float() { AlongsideState.size-swap(value.to-float()); } self.text = "\{AlongsideState.swap-size}"; }
+                    changed has-focus => {
+                        if self.has-focus { root.reveal(self.absolute-position.y, self.height); }
+                        else if self.dirty { self.dirty = false; if self.text.is-float() { AlongsideState.size-swap(self.text.to-float()); } self.text = "\{AlongsideState.swap-size}"; }
+                    }
+                }
+                Text { text: "Taken from the allocation above; the remainder goes to ZFS."; horizontal-stretch: 1; color: Theme.c.subtext1; wrap: word-wrap; }
+            }
+            if AlongsideState.swap-mode == 3: Text { text: "Uses a new random encryption key at each boot; cannot be used for hibernation."; color: Theme.c.subtext1; wrap: word-wrap; }
+            if AlongsideState.swap-mode < 2: Text { text: AlongsideState.swap-mode == 1 ? "ZRAM uses no disk space. The allocation remains available to ZFS." : "No space is reserved for swap."; color: Theme.c.subtext1; wrap: word-wrap; }
+        }
+        if AlongsideState.efi-partitions.length > 0: VerticalLayout {
+            spacing: 8px;
+            Text { text: "EFI boot files"; font-weight: 600; color: Theme.c.text; }
+            efi-choice := ComboBox { changed has-focus => { if self.has-focus { root.reveal(self.absolute-position.y, self.height); } } accessible-label: "EFI partition"; model: AlongsideState.efi-partitions; current-index: AlongsideState.efi-index; enabled: !AlongsideState.busy; selected(value) => { AlongsideState.select-efi(self.current-index); } }
+            Text { text: AlongsideState.efi-details; color: Theme.c.subtext1; wrap: word-wrap; }
+            if AlongsideState.insufficient: CheckBox { changed has-focus => { if self.has-focus { root.reveal(self.absolute-position.y, self.height); } } text: "Create an additional 1 GiB EFI partition in the allocated space"; checked: AlongsideState.additional-efi; enabled: !AlongsideState.busy; toggled => { AlongsideState.additional(self.checked); } }
+        }
+        if AlongsideState.error != "": Text { text: AlongsideState.error; color: Theme.c.red; wrap: word-wrap; }
+    }
+}

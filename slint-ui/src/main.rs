@@ -1,3 +1,4 @@
+mod alongside;
 mod completion;
 mod config_items;
 #[cfg(feature = "linuxkms")]
@@ -231,6 +232,7 @@ fn run_gui(
     controllers::lists::setup(&app, &config, &models);
     controllers::wizard::setup(&app, &config, &kernel_scan);
     storage::setup(&app, &config);
+    alongside::setup(&app, &config);
     controllers::install::setup(&app, &config, demo, log_rx, &completion);
     controllers::wifi::setup(&app);
 
