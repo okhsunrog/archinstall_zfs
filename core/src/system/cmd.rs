@@ -112,6 +112,19 @@ pub fn chroot_cmd(
     runner.run("arch-chroot", &full_args)
 }
 
+/// Run a program inside the chroot and fail, naming `context`, when it exits
+/// non-zero. For the common case where nothing but the exit status matters.
+pub fn chroot_checked(
+    runner: &dyn CommandRunner,
+    target: &Path,
+    program: &str,
+    args: &[&str],
+    context: &str,
+) -> Result<()> {
+    let output = chroot_cmd(runner, target, program, args)?;
+    check_exit(&output, context)
+}
+
 /// Shell-quote a string for safe interpolation into bash commands.
 /// Returns the string wrapped in single quotes with internal single quotes escaped.
 pub fn shell_quote(s: &str) -> String {
@@ -241,6 +254,35 @@ pub mod tests {
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].program, "echo");
         assert_eq!(calls[0].args, vec!["hello"]);
+    }
+
+    #[test]
+    fn chroot_checked_passes_the_argv_through_and_reports_failures_by_context() {
+        let runner = RecordingRunner::new(vec![
+            CannedResponse::default(),
+            CannedResponse {
+                exit_code: 1,
+                stderr: "no such preset".into(),
+                ..Default::default()
+            },
+        ]);
+
+        chroot_checked(&runner, Path::new("/mnt"), "locale-gen", &[], "locale-gen").unwrap();
+        let err = chroot_checked(
+            &runner,
+            Path::new("/mnt"),
+            "mkinitcpio",
+            &["-p", "linux"],
+            "mkinitcpio -p linux",
+        )
+        .unwrap_err();
+
+        let calls = runner.calls();
+        assert_eq!(calls[0].program, "arch-chroot");
+        assert_eq!(calls[0].args, ["/mnt", "locale-gen"]);
+        assert_eq!(calls[1].args, ["/mnt", "mkinitcpio", "-p", "linux"]);
+        assert!(err.to_string().contains("mkinitcpio -p linux"), "{err}");
+        assert!(err.to_string().contains("no such preset"), "{err}");
     }
 
     #[test]

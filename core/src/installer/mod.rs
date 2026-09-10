@@ -17,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::types::{GlobalConfig, InitSystem, SwapMode, ZfsEncryptionMode};
 use crate::system::alpm_pacman::{AlpmContext, TargetMounts};
-use crate::system::async_download::{DownloadConfig, DownloadProgress};
+use crate::system::async_download::DownloadProgress;
 use crate::system::cmd::CommandRunner;
 
 /// What an installation needs to know before it starts.
@@ -104,25 +104,13 @@ pub fn perform_installation(request: InstallRequest) -> Result<Vec<String>> {
 
     tracing::info!("Phase 4: Installing base system...");
     tracing::info!(target: "metrics", event = "phase_start", num = 4u32, name = "Installing base system");
-    let target_mounts = base::install_base(
-        &*runner,
-        &target,
-        &config,
-        &cancel,
-        download_progress_tx.clone(),
-    )?;
+    let target_mounts =
+        base::install_base(&target, &config, &cancel, download_progress_tx.clone())?;
 
     // The target now has pacman.conf, keyring and mirrorlist from
     // finalize_target(), so the handle for the remaining phases can be made.
     let target_conf = target.join("etc/pacman.conf");
-    let mut alpm = AlpmContext::for_target(
-        &target,
-        &target_conf,
-        DownloadConfig {
-            concurrency: config.parallel_downloads as usize,
-            ..Default::default()
-        },
-    )?;
+    let mut alpm = AlpmContext::for_target(&target, &target_conf, config.download_config())?;
     alpm.sync_databases(false)?;
 
     let mut installer = Installer {
@@ -242,7 +230,7 @@ impl Installer {
             locale::set_locale(&*self.runner, &self.target, locale)?;
         }
 
-        locale::set_keyboard(&*self.runner, &self.target, &self.config.keyboard_layout)?;
+        locale::set_keyboard(&self.target, &self.config.keyboard_layout)?;
         locale::set_x11_keyboard(&self.target, &self.config.keyboard_layout)?;
 
         if let Some(ref tz) = self.config.timezone {
@@ -350,7 +338,7 @@ impl Installer {
 
         match self.config.init_system {
             InitSystem::Dracut => {
-                initramfs::dracut::configure(&*self.runner, &self.target, encryption)?;
+                initramfs::dracut::configure(&self.target, encryption)?;
                 initramfs::dracut::generate(&*self.runner, &self.target, &kernels)?;
             }
             InitSystem::Mkinitcpio => {
@@ -507,25 +495,15 @@ impl Installer {
         seat: Option<crate::config::types::SeatAccess>,
     ) -> Result<()> {
         use crate::config::types::SeatAccess;
-        use crate::system::cmd::{check_exit, chroot_cmd};
 
         match seat {
             Some(SeatAccess::Seatd) => {
                 self.install_target_packages(&["seatd"])?;
                 services::enable_service(&*self.runner, &self.target, "seatd")?;
                 // Add all installer-created users to the `seat` group
-                if let Some(ref user_list) = self.config.users.clone() {
-                    // groupadd -f is idempotent
-                    let _ = chroot_cmd(&*self.runner, &self.target, "groupadd", &["-f", "seat"]);
-                    for user in user_list {
-                        let output = chroot_cmd(
-                            &*self.runner,
-                            &self.target,
-                            "usermod",
-                            &["-aG", "seat", &user.username],
-                        )?;
-                        check_exit(&output, &format!("add {} to seat group", user.username))?;
-                    }
+                if let Some(user_list) = &self.config.users {
+                    let users: Vec<&str> = user_list.iter().map(|u| u.username.as_str()).collect();
+                    users::add_to_group(&*self.runner, &self.target, "seat", &users)?;
                 }
                 tracing::info!("configured seatd for seat access");
             }
@@ -551,7 +529,6 @@ impl Installer {
     /// if the data directory already exists on a reinstall, and that is fine.
     fn run_post_install_steps(&self, steps: &[crate::profile::PostInstallStep]) -> Result<()> {
         use crate::profile::PostInstallStep;
-        use crate::system::cmd::{check_exit, chroot_cmd};
 
         for step in steps {
             match step {
@@ -590,20 +567,10 @@ impl Installer {
                 }
                 PostInstallStep::AddUsersToGroup { group } => {
                     tracing::info!(group, "adding installer users to group");
-                    if let Some(ref user_list) = self.config.users {
-                        let _ = chroot_cmd(&*self.runner, &self.target, "groupadd", &["-f", group]);
-                        for user in user_list {
-                            let output = chroot_cmd(
-                                &*self.runner,
-                                &self.target,
-                                "usermod",
-                                &["-aG", group, &user.username],
-                            )?;
-                            check_exit(
-                                &output,
-                                &format!("add {} to {} group", user.username, group),
-                            )?;
-                        }
+                    if let Some(user_list) = &self.config.users {
+                        let users: Vec<&str> =
+                            user_list.iter().map(|u| u.username.as_str()).collect();
+                        users::add_to_group(&*self.runner, &self.target, group, &users)?;
                     }
                 }
             }
@@ -628,10 +595,7 @@ impl Installer {
                 &self.target,
                 &aur_pkgs,
                 &self.cancel,
-                DownloadConfig {
-                    concurrency: self.config.parallel_downloads as usize,
-                    ..Default::default()
-                },
+                self.config.download_config(),
             ))?;
         }
 

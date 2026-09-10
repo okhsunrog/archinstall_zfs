@@ -24,9 +24,9 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use crate::boot_environment::BootEnvironment;
-use crate::config::types::{GlobalConfig, SwapMode};
+use crate::config::types::GlobalConfig;
 use crate::config::validation::ValidationError;
-use crate::system::async_download::{DownloadConfig, DownloadProgress};
+use crate::system::async_download::DownloadProgress;
 use crate::system::cmd::CommandRunner;
 
 /// Where the pool is mounted while the target system is assembled.
@@ -206,10 +206,7 @@ async fn install(
         .to_string();
     let be = BootEnvironment::new(&pool_name, config.dataset_prefix.as_str());
     let kernel = config.primary_kernel().to_string();
-    let download_config = DownloadConfig {
-        concurrency: config.parallel_downloads as usize,
-        ..Default::default()
-    };
+    let download_config = config.download_config();
     let config = Arc::new(config);
 
     ensure_not_cancelled(&cancel)?;
@@ -337,10 +334,7 @@ async fn install(
     tracing::info!(target: "metrics", event = "phase_start", num = 13u32, name = "Setting up ZFSBootMenu");
     ensure_not_cancelled(&cancel)?;
 
-    let zswap_on = matches!(
-        config.swap_mode,
-        SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-    );
+    let zswap_on = config.swap_mode.uses_partition();
     crate::bootmenu::set_zbm_properties(&be, config.init_system, zswap_on, config.set_bootfs)
         .await?;
 
@@ -358,11 +352,8 @@ async fn install(
     {
         let runner = runner.clone();
         let efi = efi_partition.clone();
-        let target = mountpoint.clone();
-        tokio::task::spawn_blocking(move || {
-            crate::bootmenu::create_efi_entries(&*runner, &efi, &target)
-        })
-        .await??;
+        tokio::task::spawn_blocking(move || crate::bootmenu::create_efi_entries(&*runner, &efi))
+            .await??;
     }
 
     // Last, so they are the final thing in the log the user is looking at

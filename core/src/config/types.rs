@@ -136,6 +136,14 @@ pub enum SwapMode {
     ZswapPartitionEncrypted,
 }
 
+impl SwapMode {
+    /// Whether this method needs a swap partition on disk (plain or
+    /// encrypted), as opposed to none or zram.
+    pub fn uses_partition(self) -> bool {
+        matches!(self, Self::ZswapPartition | Self::ZswapPartitionEncrypted)
+    }
+}
+
 impl std::fmt::Display for SwapMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -422,6 +430,14 @@ impl GlobalConfig {
 
     pub fn encryption_enabled(&self) -> bool {
         self.zfs_encryption_mode != ZfsEncryptionMode::None
+    }
+
+    /// The package download settings this configuration asks for.
+    pub fn download_config(&self) -> crate::system::async_download::DownloadConfig {
+        crate::system::async_download::DownloadConfig {
+            concurrency: self.parallel_downloads as usize,
+            ..Default::default()
+        }
     }
 
     pub fn all_aur_packages(&self) -> Vec<&str> {

@@ -6,12 +6,14 @@ use slint::SharedString;
 use archinstall_zfs_core::config::choices::Choice;
 use archinstall_zfs_core::config::edit::{ChoiceSetting, EditorSetting, TextSetting};
 use archinstall_zfs_core::config::types::{
-    GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode,
+    GlobalConfig, InstallationMode, ZFS_PASSPHRASE_MIN_LENGTH, ZfsEncryptionMode,
 };
 
+use crate::format::gib;
 use crate::ui::{ConfigItem, ItemType};
 #[cfg(test)]
 use archinstall_zfs_core::config::edit::DeviceSetting;
+use archinstall_zfs_core::disk::alongside::GIB;
 
 pub const TOTAL_STEPS: usize = 7;
 
@@ -72,7 +74,7 @@ fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                     value: format!(
                         "{} — {:.0} GiB",
                         r.before.device.display(),
-                        r.allocation_bytes as f64 / 1073741824.0
+                        gib(r.allocation_bytes)
                     )
                     .into(),
                     description: {
@@ -94,7 +96,7 @@ fn build_disk_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                                     .into()
                             }
                         };
-                        format!("{source}. {efi}. {} GiB reserved for swap; the remainder is the new ZFS pool.", r.swap_bytes / 1073741824).into()
+                        format!("{source}. {efi}. {} GiB reserved for swap; the remainder is the new ZFS pool.", r.swap_bytes / GIB).into()
                     },
                     item_type: ItemType::Storage,
                     ..Default::default()
@@ -145,12 +147,7 @@ fn storage_item(
     let choices = crate::storage::choices(role);
     let choice = selected.and_then(|p| choices.iter().find(|d| d.path == p));
     let consequence = match role {
-        "disk"
-            if matches!(
-                c.swap_mode,
-                SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-            ) =>
-        {
+        "disk" if c.swap_mode.uses_partition() => {
             "Erase all partitions; create EFI, ZFS and swap partitions"
         }
         "disk" => "Erase all partitions; create EFI and ZFS partitions",
@@ -288,8 +285,10 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                 "Required"
             }
             .into(),
-            description:
-                "At least 8 characters. Keep a copy: a lost passphrase cannot be recovered.".into(),
+            description: format!(
+                "At least {ZFS_PASSPHRASE_MIN_LENGTH} characters. Keep a copy: a lost passphrase cannot be recovered."
+            )
+            .into(),
             item_type: ItemType::InlinePassword,
             ..Default::default()
         });
@@ -298,7 +297,7 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         let value = if let Some(r) = &c.alongside
             && r.swap_bytes > 0
         {
-            format!("{} — {} GiB", c.swap_mode, r.swap_bytes / 1073741824)
+            format!("{} — {} GiB", c.swap_mode, r.swap_bytes / GIB)
         } else {
             c.swap_mode.to_string()
         };
@@ -317,10 +316,7 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             c.swap_mode,
             "ZRAM uses compressed RAM. A swap partition uses disk space.",
         ));
-        if matches!(
-            c.swap_mode,
-            SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-        ) {
+        if c.swap_mode.uses_partition() {
             if c.installation_mode == Some(InstallationMode::FullDisk) {
                 items.push(inline_text(
                     TextSetting::SwapPartitionSize,
@@ -439,16 +435,7 @@ fn build_users_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                 ),
                 _ => None,
             };
-            // ci_opt's None → "Not set"; users semantically wants "None".
-            // Construct directly so we keep the established label.
-            ConfigItem {
-                key: "users".into(),
-                label: "User accounts".into(),
-                value: summary.clone().unwrap_or_else(|| "None".into()).into(),
-                item_type: ItemType::Text,
-                is_empty: summary.is_none(),
-                ..Default::default()
-            }
+            ci_opt_with("users", "User accounts", summary, "None", ItemType::Text)
         },
     ]
 }
@@ -460,17 +447,13 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     let profile_name = profile_def.as_ref().map(|p| p.display_name.to_string());
     let mut items = vec![
         section_header("Environment"),
-        ConfigItem {
-            key: "profile".into(),
-            label: "Profile".into(),
-            value: profile_name
-                .clone()
-                .unwrap_or_else(|| "Console only".into())
-                .into(),
-            item_type: ItemType::Select,
-            is_empty: profile_name.is_none(),
-            ..Default::default()
-        },
+        ci_opt_with(
+            "profile",
+            "Profile",
+            profile_name,
+            "Console only",
+            ItemType::Select,
+        ),
     ];
 
     // ── Profile configuration: only when a desktop profile is active ──
@@ -538,17 +521,13 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         .as_ref()
         .is_some_and(|p| p.supports_gfx_driver())
     {
-        items.push({
-            let driver = c.gfx_driver.map(|d| d.to_string());
-            ConfigItem {
-                key: "gpu_driver".into(),
-                label: "GPU driver".into(),
-                value: driver.clone().unwrap_or_else(|| "None".into()).into(),
-                item_type: ItemType::Select,
-                is_empty: driver.is_none(),
-                ..Default::default()
-            }
-        });
+        items.push(ci_opt_with(
+            "gpu_driver",
+            "GPU driver",
+            c.gfx_driver.map(|d| d.to_string()),
+            "None",
+            ItemType::Select,
+        ));
 
         // Inline warning when the proprietary NVIDIA driver is paired with
         // a Wayland-only compositor. The TUI shows a confirmation dialog;
@@ -581,14 +560,7 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         } else {
             Some(parts.join(", "))
         };
-        ConfigItem {
-            key: "packages".into(),
-            label: "Extra packages".into(),
-            value: joined.clone().unwrap_or_else(|| "None".into()).into(),
-            item_type: ItemType::Text,
-            is_empty: joined.is_none(),
-            ..Default::default()
-        }
+        ci_opt_with("packages", "Extra packages", joined, "None", ItemType::Text)
     });
     items.push({
         let joined = if c.extra_services.is_empty() {
@@ -596,14 +568,13 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
         } else {
             Some(c.extra_services.join(", "))
         };
-        ConfigItem {
-            key: "extra_services".into(),
-            label: "Extra services".into(),
-            value: joined.clone().unwrap_or_else(|| "None".into()).into(),
-            item_type: ItemType::Text,
-            is_empty: joined.is_none(),
-            ..Default::default()
-        }
+        ci_opt_with(
+            "extra_services",
+            "Extra services",
+            joined,
+            "None",
+            ItemType::Text,
+        )
     });
     items.push(ci_toggle("zrepl", "zrepl (snapshots)", c.zrepl_enabled));
 
@@ -641,10 +612,8 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     if matches!(
         c.installation_mode,
         Some(InstallationMode::NewPool | InstallationMode::ExistingPool)
-    ) && matches!(
-        c.swap_mode,
-        SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-    ) {
+    ) && c.swap_mode.uses_partition()
+    {
         let mut item = storage_item(
             "swap_partition",
             "Swap partition",
@@ -779,14 +748,23 @@ fn ci(key: &str, label: &str, value: &str, item_type: ItemType) -> ConfigItem {
 /// "Not set" with `is_empty: true` so the Slint side colors the value muted
 /// without string-matching the sentinel.
 fn ci_opt(key: &str, label: &str, value: Option<&str>, item_type: ItemType) -> ConfigItem {
-    let (display, is_empty) = match value {
-        Some(v) => (v, false),
-        None => ("Not set", true),
-    };
+    ci_opt_with(key, label, value.map(str::to_owned), "Not set", item_type)
+}
+
+/// [`ci_opt`] with the placeholder shown for `None` chosen by the caller;
+/// `is_empty` still marks the row as unset.
+fn ci_opt_with(
+    key: &str,
+    label: &str,
+    value: Option<String>,
+    placeholder: &str,
+    item_type: ItemType,
+) -> ConfigItem {
+    let is_empty = value.is_none();
     ConfigItem {
         key: key.into(),
         label: label.into(),
-        value: display.into(),
+        value: value.unwrap_or_else(|| placeholder.into()).into(),
         item_type,
         is_empty,
         ..Default::default()

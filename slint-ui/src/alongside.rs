@@ -1,5 +1,9 @@
 //! Read-only discovery and editable preview of the shared alongside plan.
-use crate::ui::{AlongsideState, App, DiskSegment, WizardState};
+use crate::{
+    busy::{self, Guarded},
+    format::{gib, sectors_gib, sectors_mib},
+    ui::{AlongsideState, App, DiskSegment, WizardState},
+};
 use archinstall_zfs_core::{
     config::{
         choices::Choice,
@@ -40,14 +44,47 @@ struct Session {
     kept: Option<Request>,
     notice: String,
 }
-/// The user changed a control: the loaded plan no longer applies.
-fn touched() {
-    SESSION.with_borrow_mut(|s| {
-        s.kept = None;
-        s.notice.clear();
-    });
-}
 thread_local! { static SESSION: RefCell<Session> = RefCell::default(); }
+impl Session {
+    fn with<R>(f: impl FnOnce(&Session) -> R) -> R {
+        SESSION.with_borrow(f)
+    }
+    fn update<R>(f: impl FnOnce(&mut Session) -> R) -> R {
+        SESSION.with_borrow_mut(f)
+    }
+    /// The user changed a control: the loaded plan no longer applies.
+    fn touch() {
+        Self::update(|s| {
+            s.kept = None;
+            s.notice.clear();
+        });
+    }
+    fn disk(index: usize) -> Option<PathBuf> {
+        Self::with(|s| s.disks.get(index).cloned())
+    }
+    fn set_disks(disks: Vec<PathBuf>) {
+        Self::update(|s| s.disks = disks);
+    }
+    fn survey() -> Option<Survey> {
+        Self::with(|s| s.survey.clone())
+    }
+    fn set_survey(survey: Option<Survey>) {
+        Self::update(|s| s.survey = survey);
+    }
+    /// Shows and executes `request` as written for the surveyed layout.
+    fn keep(survey: Survey, request: Request) {
+        Self::update(|s| {
+            s.survey = Some(survey);
+            s.kept = Some(request);
+        });
+    }
+    fn notice() -> String {
+        Self::with(|s| s.notice.clone())
+    }
+    fn set_notice(notice: &str) {
+        Self::update(|s| s.notice = notice.into());
+    }
+}
 fn strings(values: Vec<String>) -> ModelRc<slint::SharedString> {
     ModelRc::new(VecModel::from(
         values.into_iter().map(Into::into).collect::<Vec<_>>(),
@@ -77,7 +114,7 @@ fn survey(disk: &std::path::Path, previous: Option<&Survey>) -> Result<Survey, S
                 label: format!(
                     "{} — {:.0} MiB",
                     p.node.display(),
-                    (p.size * layout.sectorsize) as f64 / MIB as f64
+                    sectors_mib(p.size, layout.sectorsize)
                 ),
                 space: inspect_efi(&RealRunner, &layout, number, &filesystems)
                     .map_err(|e| format!("{e:#}")),
@@ -90,12 +127,7 @@ fn survey(disk: &std::path::Path, previous: Option<&Survey>) -> Result<Survey, S
             .and_then(|f| f.fstype.as_deref())
             .unwrap_or("unknown filesystem");
         let size = p.size * layout.sectorsize;
-        let label = format!(
-            "{} — {} — {:.1} GiB",
-            p.node.display(),
-            fs,
-            size as f64 / GIB as f64
-        );
+        let label = format!("{} — {} — {:.1} GiB", p.node.display(), fs, gib(size));
         if let Some(cached) = previous
             .filter(|prev| prev.layout == layout)
             .and_then(|prev| {
@@ -115,7 +147,17 @@ fn survey(disk: &std::path::Path, previous: Option<&Survey>) -> Result<Survey, S
             ),
             Err(e) => (0, format!("{e:#}")),
         };
-        sources.push(Source { source: SpaceSource::Shrink { partition: number }, label, capacity, detail: format!("Keep {} at its current start; reduce only its end. Up to {:.0} GiB can be allocated here.", p.node.display(), capacity as f64 / GIB as f64), error });
+        sources.push(Source {
+            source: SpaceSource::Shrink { partition: number },
+            label,
+            capacity,
+            detail: format!(
+                "Keep {} at its current start; reduce only its end. Up to {:.0} GiB can be allocated here.",
+                p.node.display(),
+                gib(capacity)
+            ),
+            error,
+        });
     }
     for (start, end) in layout.free_extents().map_err(|e| e.to_string())? {
         let alignment = MIB / layout.sectorsize;
@@ -123,7 +165,7 @@ fn survey(disk: &std::path::Path, previous: Option<&Survey>) -> Result<Survey, S
         if bytes >= MIN_LINUX_BYTES {
             sources.push(Source {
                 source: SpaceSource::Unallocated { start, end },
-                label: format!("Unallocated space — {:.1} GiB", bytes as f64 / GIB as f64),
+                label: format!("Unallocated space — {:.1} GiB", gib(bytes)),
                 capacity: bytes,
                 detail: "Create a ZFS partition here without shrinking an existing filesystem."
                     .into(),
@@ -178,10 +220,36 @@ fn fixture() -> Survey {
         ],
     };
     let low = std::env::var("AZFS_PREVIEW_ESP").as_deref() == Ok("small");
-    let mut survey = Survey { layout: layout.clone(), sources: vec![
-        Source { source: SpaceSource::Shrink { partition: 2 }, label: "/dev/nvme0n1p2 — NTFS — 450 GiB".into(), capacity: 240 * GIB, detail: "Windows keeps at least 210 GiB, including working space. Only the end of this partition will move.".into(), error: String::new() },
-        Source { source: SpaceSource::Unallocated { start: 452 * GIB / 512, end: layout.lastlba + 1 }, label: "Unallocated space — 60 GiB".into(), capacity: ((layout.lastlba + 1) * 512 - 452 * GIB) / MIB * MIB, detail: "Use free space without resizing Windows.".into(), error: String::new() },
-    ], efis: vec![Efi { number: 1, label: "/dev/nvme0n1p1 — EFI — 500 MiB".into(), space: Ok(EfiSpace { partition: 1, free_bytes: if low { 40 * MIB } else { 350 * MIB } }) }] };
+    let mut survey = Survey {
+        layout: layout.clone(),
+        sources: vec![
+            Source {
+                source: SpaceSource::Shrink { partition: 2 },
+                label: "/dev/nvme0n1p2 — NTFS — 450 GiB".into(),
+                capacity: 240 * GIB,
+                detail: "Windows keeps at least 210 GiB, including working space. Only the end of this partition will move.".into(),
+                error: String::new(),
+            },
+            Source {
+                source: SpaceSource::Unallocated {
+                    start: 452 * GIB / 512,
+                    end: layout.lastlba + 1,
+                },
+                label: "Unallocated space — 60 GiB".into(),
+                capacity: ((layout.lastlba + 1) * 512 - 452 * GIB) / MIB * MIB,
+                detail: "Use free space without resizing Windows.".into(),
+                error: String::new(),
+            },
+        ],
+        efis: vec![Efi {
+            number: 1,
+            label: "/dev/nvme0n1p1 — EFI — 500 MiB".into(),
+            space: Ok(EfiSpace {
+                partition: 1,
+                free_bytes: if low { 40 * MIB } else { 350 * MIB },
+            }),
+        }],
+    };
     match std::env::var("AZFS_PREVIEW_ALONGSIDE").as_deref() {
         Ok("ext4") => {
             survey.layout.partitions[1].kind = LINUX_TYPE.into();
@@ -190,7 +258,9 @@ fn fixture() -> Survey {
         }
         Ok("missing-tools") => {
             survey.sources[0].capacity = 0;
-            survey.sources[0].error = "Resizing NTFS requires ntfsresize (package ntfs-3g). Install it in the live system and refresh, or use unallocated space.".into();
+            survey.sources[0].error =
+                "Resizing NTFS requires ntfsresize (package ntfs-3g). Install it in the live system and refresh, or use unallocated space."
+                    .into();
         }
         Ok("no-efi") => survey.efis.clear(),
         _ => {}
@@ -198,30 +268,44 @@ fn fixture() -> Survey {
     survey
 }
 
+impl Guarded for AlongsideState<'_> {
+    fn generation(app: &App) -> i32 {
+        app.global::<AlongsideState>().get_generation()
+    }
+    fn set_generation(app: &App, generation: i32) {
+        app.global::<AlongsideState>().set_generation(generation);
+    }
+    fn set_busy(app: &App, busy: bool) {
+        app.global::<AlongsideState>().set_busy(busy);
+    }
+    fn set_error(app: &App, error: slint::SharedString) {
+        app.global::<AlongsideState>().set_error(error);
+    }
+}
+
 fn load(app: &App, index: Option<usize>, keep: Option<Request>) {
-    let state = app.global::<AlongsideState>();
-    let generation = state.get_generation() + 1;
-    state.set_generation(generation);
-    state.set_busy(true);
-    state.set_error("".into());
-    SESSION.with_borrow_mut(|s| {
-        s.kept = None;
-        s.notice.clear();
-    });
-    state.invoke_rebuild();
+    let generation = busy::begin::<AlongsideState>(app);
+    Session::touch();
+    app.global::<AlongsideState>().invoke_rebuild();
     let disk = index
-        .and_then(|i| SESSION.with_borrow(|s| s.disks.get(i).cloned()))
+        .and_then(Session::disk)
         .or_else(|| keep.as_ref().map(|r| r.before.device.clone()));
-    let previous = SESSION.with_borrow(|s| s.survey.clone());
-    let weak = app.as_weak();
-    tokio::spawn(async move {
-        let result = tokio::task::spawn_blocking(move || -> Result<_, String> {
+    let previous = Session::survey();
+    let work = async move {
+        tokio::task::spawn_blocking(move || -> Result<_, String> {
             if crate::preview::enabled() {
                 return Ok((
                     vec![PathBuf::from("/dev/nvme0n1")],
                     vec!["Samsung SSD — 512 GiB".into()],
                     0,
-                    if std::env::var("AZFS_PREVIEW_ALONGSIDE").as_deref() == Ok("mbr") { Err("This disk does not use GPT. Automatic MBR conversion is not supported; existing data has not been changed.".into()) } else { Ok(fixture()) },
+                    if std::env::var("AZFS_PREVIEW_ALONGSIDE").as_deref() == Ok("mbr") {
+                        Err(
+                            "This disk does not use GPT. Automatic MBR conversion is not supported; existing data has not been changed."
+                                .into(),
+                        )
+                    } else {
+                        Ok(fixture())
+                    },
                 ));
             }
             let disks = device::disk_choices().map_err(|e| e.to_string())?;
@@ -230,7 +314,9 @@ fn load(app: &App, index: Option<usize>, keep: Option<Request>) {
                 .iter()
                 .map(|d| format!("{} — {} — {}", d.label, d.model, d.size))
                 .collect::<Vec<_>>();
-            let same = |a: &PathBuf, b: &PathBuf| a == b || a.canonicalize().ok() == b.canonicalize().ok();
+            let same = |a: &PathBuf, b: &PathBuf| {
+                a == b || a.canonicalize().ok() == b.canonicalize().ok()
+            };
             let selected_index = disk
                 .as_ref()
                 .and_then(|d| paths.iter().position(|p| same(p, d)))
@@ -242,100 +328,97 @@ fn load(app: &App, index: Option<usize>, keep: Option<Request>) {
             Ok((paths, names, selected_index, inspected))
         })
         .await
-        .unwrap_or_else(|e| Err(e.to_string()));
-        let _ = weak.upgrade_in_event_loop(move |app| {
-            let state = app.global::<AlongsideState>();
-            if state.get_generation() != generation {
-                return;
-            }
-            state.set_busy(false);
-            let result = result.and_then(|(paths, names, selected_index, inspected)| {
-                state.set_disks(strings(names));
-                state.set_disk_index(selected_index as i32);
-                SESSION.with_borrow_mut(|s| s.disks = paths);
-                inspected
-            });
-            match result {
-                Ok(survey) => {
-                    state.set_sources(strings(
-                        survey.sources.iter().map(|s| s.label.clone()).collect(),
-                    ));
-                    state.set_efi_partitions(strings(
-                        survey.efis.iter().map(|s| s.label.clone()).collect(),
-                    ));
-                    // A plan from a configuration file, or the current plan on
-                    // a refresh, is shown and executed as written when it
-                    // still describes this disk.
-                    let kept = keep.as_ref().and_then(|r| {
-                        let source = survey.sources.iter().position(|s| s.source == r.source)?;
-                        let efi = survey.efis.iter().position(|e| e.number == r.efi.existing_partition())?;
-                        (r.before == survey.layout).then_some((source, efi))
-                    });
-                    if let Some((source, efi)) = kept {
-                        let r = keep.clone().expect("kept implies keep");
-                        state.set_source_index(source as i32);
-                        state.set_efi_index(efi as i32);
-                        state.set_additional_efi(matches!(r.efi, EfiChoice::CreateSeparate { .. }));
-                        state.set_use_all(false);
-                        state.set_allocation(r.allocation_bytes as f32 / GIB as f32);
-                        if r.swap_bytes > 0 {
-                            state.set_swap_size((r.swap_bytes / GIB) as f32);
-                        }
-                        SESSION.with_borrow_mut(|s| {
-                            s.survey = Some(survey);
-                            s.kept = Some(r);
-                        });
-                        state.invoke_rebuild();
-                        return;
-                    }
-                    if keep.is_some() {
-                        SESSION.with_borrow_mut(|s| s.notice = "The previous plan no longer matches this disk; this is a new plan built from the current layout.".into());
-                    }
-                    state.set_source_index(
-                        survey
-                            .sources
-                            .iter()
-                            .position(|s| {
-                                matches!(s.source, SpaceSource::Unallocated { .. })
-                                    && s.error.is_empty()
-                                    && s.capacity >= MIN_LINUX_BYTES
-                            })
-                            .or_else(|| {
-                                survey.sources.iter().position(|s| {
-                                    s.error.is_empty() && s.capacity >= MIN_LINUX_BYTES
-                                })
-                            })
-                            .map(|i| i as i32)
-                            .unwrap_or(0),
-                    );
-                    state.set_efi_index(
-                        survey
-                            .efis
-                            .iter()
-                            .position(|e| {
-                                e.space.as_ref().is_ok_and(|s| {
-                                    s.sufficient(Default::default()).unwrap_or(false)
-                                })
-                            })
-                            .unwrap_or(0) as i32,
-                    );
-                    state.set_additional_efi(false);
-                    state.set_use_all(true);
-                    SESSION.with_borrow_mut(|s| {
-                        s.survey = Some(survey);
-                    });
-                    state.invoke_rebuild();
-                }
-                Err(error) => {
-                    SESSION.with_borrow_mut(|s| s.survey = None);
-                    state.set_before(Default::default());
-                    state.set_after(Default::default());
-                    state.set_sources(Default::default());
-                    state.set_efi_partitions(Default::default());
-                    state.set_error(error.into());
-                }
-            }
+        .unwrap_or_else(|e| Err(e.to_string()))
+    };
+    busy::spawn::<AlongsideState, _>(app, generation, work, move |app, result| {
+        let state = app.global::<AlongsideState>();
+        let result = result.and_then(|(paths, names, selected_index, inspected)| {
+            state.set_disks(strings(names));
+            state.set_disk_index(selected_index as i32);
+            Session::set_disks(paths);
+            inspected
         });
+        match result {
+            Ok(survey) => {
+                state.set_sources(strings(
+                    survey.sources.iter().map(|s| s.label.clone()).collect(),
+                ));
+                state.set_efi_partitions(strings(
+                    survey.efis.iter().map(|s| s.label.clone()).collect(),
+                ));
+                // A plan from a configuration file, or the current plan on
+                // a refresh, is shown and executed as written when it
+                // still describes this disk.
+                let kept = keep.as_ref().and_then(|r| {
+                    let source = survey.sources.iter().position(|s| s.source == r.source)?;
+                    let efi = survey
+                        .efis
+                        .iter()
+                        .position(|e| e.number == r.efi.existing_partition())?;
+                    (r.before == survey.layout).then_some((source, efi))
+                });
+                if let Some((source, efi)) = kept {
+                    let r = keep.clone().expect("kept implies keep");
+                    state.set_source_index(source as i32);
+                    state.set_efi_index(efi as i32);
+                    state.set_additional_efi(matches!(r.efi, EfiChoice::CreateSeparate { .. }));
+                    state.set_use_all(false);
+                    state.set_allocation(gib(r.allocation_bytes) as f32);
+                    if r.swap_bytes > 0 {
+                        state.set_swap_size((r.swap_bytes / GIB) as f32);
+                    }
+                    Session::keep(survey, r);
+                    state.invoke_rebuild();
+                    return;
+                }
+                if keep.is_some() {
+                    Session::set_notice(
+                        "The previous plan no longer matches this disk; this is a new plan built from the current layout.",
+                    );
+                }
+                state.set_source_index(
+                    survey
+                        .sources
+                        .iter()
+                        .position(|s| {
+                            matches!(s.source, SpaceSource::Unallocated { .. })
+                                && s.error.is_empty()
+                                && s.capacity >= MIN_LINUX_BYTES
+                        })
+                        .or_else(|| {
+                            survey
+                                .sources
+                                .iter()
+                                .position(|s| s.error.is_empty() && s.capacity >= MIN_LINUX_BYTES)
+                        })
+                        .map(|i| i as i32)
+                        .unwrap_or(0),
+                );
+                state.set_efi_index(
+                    survey
+                        .efis
+                        .iter()
+                        .position(|e| {
+                            e.space
+                                .as_ref()
+                                .is_ok_and(|s| s.sufficient(Default::default()).unwrap_or(false))
+                        })
+                        .unwrap_or(0) as i32,
+                );
+                state.set_additional_efi(false);
+                state.set_use_all(true);
+                Session::set_survey(Some(survey));
+                state.invoke_rebuild();
+            }
+            Err(error) => {
+                Session::set_survey(None);
+                state.set_before(Default::default());
+                state.set_after(Default::default());
+                state.set_sources(Default::default());
+                state.set_efi_partitions(Default::default());
+                state.set_error(error.into());
+            }
+        }
     });
 }
 
@@ -395,19 +478,65 @@ fn segments(layout: &Layout, plan: Option<&Plan>) -> ModelRc<DiskSegment> {
                 offset: start as f32 / total as f32,
                 fraction: (end - start) as f32 / total as f32,
                 kind,
-                short_label: format!(
-                    "{:.0} GiB",
-                    (end - start) as f64 * layout.sectorsize as f64 / GIB as f64
-                )
-                .into(),
+                short_label: format!("{:.0} GiB", sectors_gib(end - start, layout.sectorsize))
+                    .into(),
                 label: format!(
                     "{name} · {:.0} GiB",
-                    (end - start) as f64 * layout.sectorsize as f64 / GIB as f64
+                    sectors_gib(end - start, layout.sectorsize)
                 )
                 .into(),
             })
             .collect::<Vec<_>>(),
     ))
+}
+
+/// Swap reserved inside the allocation: the kept plan's figure, or the
+/// configured size when a swap partition is wanted.
+fn planned_swap_bytes(
+    kept: Option<&Request>,
+    config: &GlobalConfig,
+    state: &AlongsideState,
+) -> u64 {
+    if let Some(k) = kept {
+        k.swap_bytes
+    } else if config.swap_mode.uses_partition() {
+        state.get_swap_size().round().clamp(1.0, 1024.0) as u64 * GIB
+    } else {
+        0
+    }
+}
+
+/// How much of the existing ESP the boot files need, and what reusing it means.
+fn efi_details(space: &EfiSpace, budget: BootSpace, insufficient: bool) -> Result<String, String> {
+    let required_bytes = budget.required_bytes().map_err(|e| e.to_string())?;
+    let required = required_bytes.div_ceil(MIB);
+    let consequence = if insufficient {
+        "It cannot be reused; select a separate EFI partition to continue."
+    } else if space.free_bytes < required_bytes + budget.image_bytes {
+        // Updates stage a second copy only when a whole image fits next to
+        // the installed one.
+        "Later ZFSBootMenu updates replace the image in place instead of writing a second copy first."
+    } else {
+        "Reusing it formats nothing and keeps the existing loaders."
+    };
+    Ok(format!(
+        "{} MiB free; {required} MiB is needed to reuse it. {consequence}",
+        space.free_bytes / MIB
+    ))
+}
+
+fn allocation_summary(plan: &Plan, layout: &Layout, swap_bytes: u64) -> String {
+    let zfs_sectors = plan.swap_start.unwrap_or(plan.end) - plan.zfs_start;
+    let efi = if plan.efi_start.is_some() {
+        " · New EFI: 512 MiB"
+    } else {
+        " · Existing EFI reused"
+    };
+    format!(
+        "New ZFS pool: {:.1} GiB · Swap: {} GiB{efi}",
+        sectors_gib(zfs_sectors, layout.sectorsize),
+        swap_bytes / GIB
+    )
 }
 
 fn rebuild(app: &App, config: &mut GlobalConfig) {
@@ -423,53 +552,100 @@ fn rebuild(app: &App, config: &mut GlobalConfig) {
     state.set_swap_mode(config.swap_mode.index() as i32);
     // A kept plan whose swap no longer matches the configured method (changed
     // while another storage mode was selected) is rebuilt from the controls.
-    let wants_swap = matches!(
-        config.swap_mode,
-        SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-    );
-    SESSION.with_borrow_mut(|s| {
-        if s.kept
+    let wants_swap = config.swap_mode.uses_partition();
+    let stale = Session::with(|s| {
+        s.kept
             .as_ref()
             .is_some_and(|k| (k.swap_bytes > 0) != wants_swap)
-        {
-            s.kept = None;
-            s.notice.clear();
-        }
     });
+    if stale {
+        Session::touch();
+    }
     state.set_allocation_summary("".into());
     state.set_insufficient(false);
     state.set_efi_details("".into());
-    let result = SESSION.with_borrow(|session| -> Result<Request, String> {
+    let result = Session::with(|session| -> Result<Request, String> {
         let kept = session.kept.as_ref();
         let s = session.survey.as_ref().ok_or("Select a disk")?;
-        state.set_before(segments(&s.layout, None)); state.set_after(segments(&s.layout, None));
-        let source = s.sources.get(state.get_source_index() as usize).ok_or("No suitable partitions or unallocated space")?;
+        state.set_before(segments(&s.layout, None));
+        state.set_after(segments(&s.layout, None));
+        let source = s
+            .sources
+            .get(state.get_source_index() as usize)
+            .ok_or("No suitable partitions or unallocated space")?;
         state.set_details(source.detail.clone().into());
-        let swap_bytes = if let Some(k) = kept { k.swap_bytes } else if matches!(config.swap_mode, SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted) { state.get_swap_size().round().clamp(1.0, 1024.0) as u64 * GIB } else { 0 };
-        let min = (MIN_LINUX_BYTES + swap_bytes + if state.get_additional_efi() { ESP_BYTES } else { 0 }) as f32 / GIB as f32;
-        let max = source.capacity as f64 / GIB as f64;
-        let max = max as f32;
-        state.set_minimum(min); state.set_maximum(max);
+        let swap_bytes = planned_swap_bytes(kept, config, &state);
+        let extra = if state.get_additional_efi() {
+            ESP_BYTES
+        } else {
+            0
+        };
+        let min = gib(MIN_LINUX_BYTES + swap_bytes + extra) as f32;
+        let max = gib(source.capacity) as f32;
+        state.set_minimum(min);
+        state.set_maximum(max);
         let all_bytes = source.capacity / MIB * MIB;
-        let allocation_bytes = if let Some(k) = kept { k.allocation_bytes } else if state.get_use_all() { all_bytes } else { (state.get_allocation().round().max(min) as u64).saturating_mul(GIB).min(all_bytes) };
-        state.set_allocation((allocation_bytes as f64 / GIB as f64 * 10.0).round() as f32 / 10.0);
-        let efi = s.efis.get(state.get_efi_index() as usize).ok_or("No existing EFI partition on this disk. Prepare an EFI partition before using this mode.")?;
+        let allocation_bytes = if let Some(k) = kept {
+            k.allocation_bytes
+        } else if state.get_use_all() {
+            all_bytes
+        } else {
+            (state.get_allocation().round().max(min) as u64)
+                .saturating_mul(GIB)
+                .min(all_bytes)
+        };
+        state.set_allocation((gib(allocation_bytes) * 10.0).round() as f32 / 10.0);
+        let efi = s.efis.get(state.get_efi_index() as usize).ok_or(
+            "No existing EFI partition on this disk. Prepare an EFI partition before using this mode.",
+        )?;
         let space = efi.space.as_ref().map_err(Clone::clone)?;
         let budget = BootSpace::default();
         let insufficient = !space.sufficient(budget).map_err(|e| e.to_string())?;
         state.set_insufficient(insufficient);
-        let required = budget.required_bytes().map_err(|e| e.to_string())?.div_ceil(MIB);
-        state.set_efi_details(format!("{} MiB free; {required} MiB is needed to reuse it. {}", space.free_bytes / MIB, if insufficient { "It cannot be reused; select a separate EFI partition to continue." } else if space.free_bytes < required + budget.image_bytes { "Later ZFSBootMenu updates replace the image in place instead of writing a second copy first." } else { "Reusing it formats nothing and keeps the existing loaders." }).into());
-        if !source.error.is_empty() { return Err(source.error.clone()); }
-        if max < min { return Err(format!("At least {min:.0} GiB is needed for the ZFS pool, swap and EFI; only {max:.1} GiB is available. Reduce swap or choose another source.")); }
-        let efi_choice = if state.get_additional_efi() { EfiChoice::CreateSeparate { existing_partition: efi.number } } else { EfiChoice::Reuse { partition: efi.number } };
-        efi_choice.validate_space(space, budget).map_err(|e| e.to_string())?;
-        let request = match kept { Some(k) => k.clone(), None => Request { before: s.layout.clone(), source: source.source.clone(), efi: efi_choice, allocation_bytes, swap_bytes } };
+        state.set_efi_details(efi_details(space, budget, insufficient)?.into());
+        if !source.error.is_empty() {
+            return Err(source.error.clone());
+        }
+        if max < min {
+            return Err(format!(
+                "At least {min:.0} GiB is needed for the ZFS pool, swap and EFI; only {max:.1} GiB is available. Reduce swap or choose another source."
+            ));
+        }
+        let efi_choice = if state.get_additional_efi() {
+            EfiChoice::CreateSeparate {
+                existing_partition: efi.number,
+            }
+        } else {
+            EfiChoice::Reuse {
+                partition: efi.number,
+            }
+        };
+        efi_choice
+            .validate_space(space, budget)
+            .map_err(|e| e.to_string())?;
+        let request = match kept {
+            Some(k) => k.clone(),
+            None => Request {
+                before: s.layout.clone(),
+                source: source.source.clone(),
+                efi: efi_choice,
+                allocation_bytes,
+                swap_bytes,
+            },
+        };
         let plan = request.plan().map_err(|e| e.to_string())?;
         state.set_after(segments(&s.layout, Some(&plan)));
-        state.set_allocation_summary(format!("New ZFS pool: {:.1} GiB · Swap: {} GiB{}", (plan.swap_start.unwrap_or(plan.end) - plan.zfs_start) as f64 * s.layout.sectorsize as f64 / GIB as f64, swap_bytes / GIB, if plan.efi_start.is_some() { " · New EFI: 512 MiB" } else { " · Existing EFI reused" }).into());
+        state.set_allocation_summary(allocation_summary(&plan, &s.layout, swap_bytes).into());
         if let Some((old, size)) = &plan.shrink {
-            state.set_details(format!("{}: {:.0} → {:.0} GiB. Its start and existing data are preserved.", old.node.display(), old.size as f64 * s.layout.sectorsize as f64 / GIB as f64, *size as f64 * s.layout.sectorsize as f64 / GIB as f64).into());
+            state.set_details(
+                format!(
+                    "{}: {:.0} → {:.0} GiB. Its start and existing data are preserved.",
+                    old.node.display(),
+                    sectors_gib(old.size, s.layout.sectorsize),
+                    sectors_gib(*size, s.layout.sectorsize)
+                )
+                .into(),
+            );
         }
         Ok(request)
     });
@@ -477,7 +653,7 @@ fn rebuild(app: &App, config: &mut GlobalConfig) {
         Ok(request) => {
             config.alongside = Some(request);
             state.set_error("".into());
-            let notice = SESSION.with_borrow(|s| s.notice.clone());
+            let notice = Session::notice();
             if !notice.is_empty() {
                 state.set_details(format!("{notice} {}", state.get_details()).into());
             }
@@ -519,77 +695,64 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
             rebuild(&app, &mut cfg.borrow_mut());
         }
     });
-    let weak = app.as_weak();
-    app.global::<AlongsideState>()
-        .on_select_source(move |index| {
-            touched();
-            if let Some(app) = weak.upgrade() {
-                let s = app.global::<AlongsideState>();
-                s.set_source_index(index);
-                s.set_use_all(true);
-                s.invoke_rebuild();
-            }
-        });
-    let weak = app.as_weak();
-    app.global::<AlongsideState>().on_select_efi(move |index| {
-        touched();
-        if let Some(app) = weak.upgrade() {
-            let s = app.global::<AlongsideState>();
-            s.set_efi_index(index);
-            s.set_additional_efi(false);
-            s.invoke_rebuild();
+    let state = app.global::<AlongsideState>();
+    state.on_select_source(edit(app, |s, index: i32| {
+        s.set_source_index(index);
+        s.set_use_all(true);
+        true
+    }));
+    state.on_select_efi(edit(app, |s, index: i32| {
+        s.set_efi_index(index);
+        s.set_additional_efi(false);
+        true
+    }));
+    state.on_allocate(edit(app, |s, value: f32| {
+        if !value.is_finite() {
+            return false;
         }
-    });
-    let weak = app.as_weak();
-    app.global::<AlongsideState>().on_allocate(move |value| {
-        touched();
-        if let Some(app) = weak.upgrade()
-            && value.is_finite()
-        {
-            let s = app.global::<AlongsideState>();
-            s.set_use_all(false);
-            s.set_allocation(value);
-            s.invoke_rebuild();
-        }
-    });
-    let weak = app.as_weak();
-    app.global::<AlongsideState>().on_all_space(move |value| {
-        touched();
-        if let Some(app) = weak.upgrade() {
-            let s = app.global::<AlongsideState>();
-            s.set_use_all(value);
-            s.invoke_rebuild();
-        }
-    });
-    let weak = app.as_weak();
+        s.set_use_all(false);
+        s.set_allocation(value);
+        true
+    }));
+    state.on_all_space(edit(app, |s, value: bool| {
+        s.set_use_all(value);
+        true
+    }));
     let cfg = config.clone();
-    app.global::<AlongsideState>().on_select_swap(move |index| {
-        touched();
-        if let Some(app) = weak.upgrade()
-            && let Some(mode) = SwapMode::from_index(index as usize)
-        {
-            cfg.borrow_mut().swap_mode = mode;
-            app.global::<AlongsideState>().invoke_rebuild();
+    state.on_select_swap(edit(app, move |_, index: i32| {
+        let Some(mode) = SwapMode::from_index(index as usize) else {
+            return false;
+        };
+        cfg.borrow_mut().swap_mode = mode;
+        true
+    }));
+    state.on_size_swap(edit(app, |s, value: f32| {
+        if !value.is_finite() {
+            return false;
         }
-    });
+        s.set_swap_size(value.round().clamp(1.0, 1024.0));
+        true
+    }));
+    state.on_additional(edit(app, |s, value: bool| {
+        s.set_additional_efi(value);
+        true
+    }));
+}
+
+/// A handler for one edited control. The loaded plan no longer applies;
+/// `apply` changes the state and returns whether the plan must be rebuilt.
+fn edit<T: 'static>(
+    app: &App,
+    apply: impl Fn(&AlongsideState, T) -> bool + 'static,
+) -> impl Fn(T) + 'static {
     let weak = app.as_weak();
-    app.global::<AlongsideState>().on_size_swap(move |value| {
-        touched();
-        if let Some(app) = weak.upgrade()
-            && value.is_finite()
-        {
-            let s = app.global::<AlongsideState>();
-            s.set_swap_size(value.round().clamp(1.0, 1024.0));
-            s.invoke_rebuild();
-        }
-    });
-    let weak = app.as_weak();
-    app.global::<AlongsideState>().on_additional(move |value| {
-        touched();
+    move |value| {
+        Session::touch();
         if let Some(app) = weak.upgrade() {
-            let s = app.global::<AlongsideState>();
-            s.set_additional_efi(value);
-            s.invoke_rebuild();
+            let state = app.global::<AlongsideState>();
+            if apply(&state, value) {
+                state.invoke_rebuild();
+            }
         }
-    });
+    }
 }

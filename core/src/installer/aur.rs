@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use color_eyre::eyre::{Context, Result, bail};
 
-use crate::system::cmd::{CommandRunner, check_exit, chroot, chroot_cmd, shell_quote};
+use crate::system::cmd::{
+    CommandRunner, check_exit, chroot, chroot_checked, chroot_cmd, shell_quote,
+};
 use crate::system::fs::write_file_with_mode;
 
 const TEMP_USER: &str = "aurinstall";
@@ -88,17 +90,7 @@ pub async fn install_aur_packages(
 /// a reference to it, so we must `block_on` from the same thread.
 fn resolve_aur_deps(target: &Path, packages: &[&str]) -> Result<Vec<String>> {
     let target_conf = target.join("etc/pacman.conf");
-    let conf = pacmanconf::Config::from_file(target_conf.to_str().unwrap_or("/etc/pacman.conf"))
-        .map_err(|e| color_eyre::eyre::eyre!("failed to parse pacman.conf: {e}"))?;
-
-    let target_str = target.to_string_lossy();
-    let db_path = format!("{}/var/lib/pacman", target_str);
-
-    let mut alpm = alpm::Alpm::new(target_str.as_ref(), &db_path)
-        .map_err(|e| color_eyre::eyre::eyre!("failed to init alpm: {e}"))?;
-
-    alpm_utils::configure_alpm(&mut alpm, &conf)
-        .map_err(|e| color_eyre::eyre::eyre!("failed to configure alpm: {e}"))?;
+    let alpm = crate::system::alpm_pacman::open_target_alpm(target, &target_conf)?;
 
     let raur_handle = raur::Handle::new();
     let mut cache = raur::Cache::new();
@@ -133,15 +125,21 @@ fn setup_aur_environment(
     download_config: crate::system::async_download::DownloadConfig,
 ) -> Result<()> {
     // Install git and sudo via libalpm (base-devel already in base install)
-    let target_conf = target.join("etc/pacman.conf");
-    let mut ctx =
-        crate::system::alpm_pacman::AlpmContext::for_target(target, &target_conf, download_config)?;
-    ctx.sync_databases(false)?;
-    ctx.install_packages(&["git", "sudo"], cancel, None)?;
+    crate::system::alpm_pacman::install_into_target(
+        target,
+        &["git", "sudo"],
+        cancel,
+        download_config,
+    )?;
 
     // Create temp user
-    let output = chroot_cmd(runner, target, "useradd", &["-m", TEMP_USER])?;
-    check_exit(&output, "create AUR temp user")?;
+    chroot_checked(
+        runner,
+        target,
+        "useradd",
+        &["-m", TEMP_USER],
+        "create AUR temp user",
+    )?;
 
     configure_source_cache(target)?;
 

@@ -2,6 +2,16 @@ pub mod alongside;
 pub mod device;
 pub mod partition;
 
+/// sgdisk type codes for the partitions this installer creates. The GPT type
+/// GUIDs they stand for are next to [`alongside::EFI_TYPE`].
+pub const SGDISK_EFI: &str = "ef00";
+pub const SGDISK_ZFS: &str = "bf00";
+pub const SGDISK_SWAP: &str = "8200";
+
+/// Sectors taken by the protective MBR plus a GPT header and its 128 entries,
+/// at each end of a 512-byte-sector disk.
+pub const GPT_MARGIN_SECTORS: u64 = 34;
+
 /// Strip the partition suffix from a block device name, yielding the whole
 /// disk it belongs to.
 ///

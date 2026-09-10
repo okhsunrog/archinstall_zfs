@@ -41,24 +41,8 @@ property is never changed.
 EOF
 }
 
-die() {
-    printf '[%s] ERROR: %s\n' "${app_name}" "$*" >&2
-    exit 1
-}
-
-info() {
-    printf '[%s] %s\n' "${app_name}" "$*"
-}
-
-require_command() {
-    command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
-}
-
-cleanup() {
-    if (( mounted )) && mountpoint -q -- "${mount_dir}"; then
-        umount -- "${mount_dir}" || true
-    fi
-}
+# shellcheck source=gen_iso/zfs-be-common.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/zfs-be-common.sh"
 
 on_error() {
     local line="$1"
@@ -70,43 +54,42 @@ on_error() {
     fi
 }
 
-trap cleanup EXIT
 trap 'on_error "$LINENO"' ERR
 
 while (( $# )); do
     case "$1" in
         --dataset)
-            (( $# >= 2 )) || die "--dataset requires a value"
+            need_value "$1" "$#"
             dataset="$2"
             shift 2
             ;;
         --source-root)
-            (( $# >= 2 )) || die "--source-root requires a value"
+            need_value "$1" "$#"
             source_root="$2"
             shift 2
             ;;
         --boot-source)
-            (( $# >= 2 )) || die "--boot-source requires a value"
+            need_value "$1" "$#"
             boot_source="$2"
             shift 2
             ;;
         --kernel)
-            (( $# >= 2 )) || die "--kernel requires a value"
+            need_value "$1" "$#"
             kernel="$2"
             shift 2
             ;;
         --mount-dir)
-            (( $# >= 2 )) || die "--mount-dir requires a value"
+            need_value "$1" "$#"
             mount_dir="$2"
             shift 2
             ;;
         --snapshot)
-            (( $# >= 2 )) || die "--snapshot requires a value"
+            need_value "$1" "$#"
             snapshot="$2"
             shift 2
             ;;
         --key-file)
-            (( $# >= 2 )) || die "--key-file requires a value"
+            need_value "$1" "$#"
             key_file="$2"
             shift 2
             ;;
@@ -309,8 +292,7 @@ if [[ -n "${keysource}" ]]; then
 fi
 zfs create "${create_options[@]}" -- "${dataset}"
 
-mount -t zfs -o zfsutil -- "${dataset}" "${mount_dir}"
-mounted=1
+mount_be "${dataset}"
 
 info "copying mkarchiso rootfs into the dataset"
 rsync -aHAX --numeric-ids --delete -- "${source_root}/" "${mount_dir}/"
@@ -419,8 +401,7 @@ fi
 
 zfs snapshot -- "${dataset}@${snapshot}"
 sync -f -- "${mount_dir}"
-umount -- "${mount_dir}"
-mounted=0
+umount_be
 
 [[ "$(zfs get -H -o value mounted -- "${dataset}")" == "no" ]] \
     || die "target dataset remained mounted"

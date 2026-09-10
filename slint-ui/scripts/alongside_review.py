@@ -2,22 +2,8 @@
 """Exercise alongside controls and review on safe preview fixtures only."""
 import argparse
 import os
-import time
 from pathlib import Path
 from review import Preview
-from interactions import reveal_by_tab
-
-
-def wait_value(p, role, label, value):
-    """Reveal a focusable control and wait until Rust has set its value."""
-    reveal_by_tab(p, role, label)
-    end = time.monotonic() + 15
-    while time.monotonic() < end:
-        e = p.element(role, label)
-        if e and e.get('accessibleValue') == value:
-            return
-        time.sleep(.1)
-    raise AssertionError(f'{label} did not reach {value}')
 
 
 def run(binary, output, size, scale, small):
@@ -26,60 +12,60 @@ def run(binary, output, size, scale, small):
     prefix = f'{size}-{scale}-{ "small-esp" if small else "reuse" }'
     try:
         p.ready()
-        reveal_by_tab(p, 'Combobox', 'Space source')
+        p.reveal_by_tab('Combobox', 'Space source')
         p.screenshot(prefix + '-initial')
         p.click('Combobox', 'Space source')
         p.click('ListItem', '/dev/nvme0n1p2')
-        reveal_by_tab(p, 'TextInput', 'Allocation in GiB')
+        p.reveal_by_tab('TextInput', 'Allocation in GiB')
         p.click('TextInput', 'Allocation in GiB')
-        p.data('set_element_value', elementHandle=p.wait('TextInput', 'Allocation in GiB')['handle'], value='100')
+        p.fill_labeled('Allocation in GiB', '100')
         p.key('\n')
         if small:
-            reveal_by_tab(p, 'RadioButton', 'Create a separate')
-            reuse = p.data('get_element_properties', elementHandle=p.wait('RadioButton', 'Reuse the selected')['handle'])
+            p.reveal_by_tab('RadioButton', 'Create a separate')
+            reuse = p.properties('RadioButton', 'Reuse the selected')
             assert not reuse.get('accessibleEnabled'), reuse
             p.click('RadioButton', 'Create a separate')
         # Widgets must follow state set by Rust after the user has touched
         # them: "Use all" moves the slider and the input to the capacity.
-        reveal_by_tab(p, 'Checkbox', 'Use all available space')
+        p.reveal_by_tab('Checkbox', 'Use all available space')
         p.click('Checkbox', 'Use all available space')
-        wait_value(p, 'Slider', 'Space for installation', '240')
-        wait_value(p, 'TextInput', 'Allocation in GiB', '240')
+        p.wait_value('Slider', 'Space for installation', '240')
+        p.wait_value('TextInput', 'Allocation in GiB', '240')
         # A refresh keeps the current plan while the layout is unchanged.
-        reveal_by_tab(p, 'Button', 'Refresh disks')
+        p.reveal_by_tab('Button', 'Refresh disks')
         p.click('Button', 'Refresh disks')
-        wait_value(p, 'Combobox', 'Space source', '/dev/nvme0n1p2 — NTFS — 450 GiB')
-        wait_value(p, 'TextInput', 'Allocation in GiB', '240')
+        p.wait_value('Combobox', 'Space source', '/dev/nvme0n1p2 — NTFS — 450 GiB')
+        p.wait_value('TextInput', 'Allocation in GiB', '240')
         assert p.wait('Combobox', 'Space source')['accessibleValue'].startswith('/dev/nvme0n1p2'), 'refresh discarded the selected source'
         p.click('TextInput', 'Allocation in GiB')
-        p.data('set_element_value', elementHandle=p.wait('TextInput', 'Allocation in GiB')['handle'], value='100')
+        p.fill_labeled('Allocation in GiB', '100')
         p.key('\n')
         p.click('Button', 'Review')
         p.click('Button', 'Disk')
-        reveal_by_tab(p, 'Combobox', 'Space source')
+        p.reveal_by_tab('Combobox', 'Space source')
         p.wait('Text', '/dev/nvme0n1p2: 450 →')
         p.screenshot(prefix + '-100gib')
         p.click('Combobox', 'Space source')
         p.click('ListItem', 'Unallocated space')
         p.screenshot(prefix + '-unallocated')
-        reveal_by_tab(p, 'Combobox', 'Swap method')
+        p.reveal_by_tab('Combobox', 'Swap method')
         p.click('Combobox', 'Swap method')
         p.click('ListItem', 'Swap partition')
-        reveal_by_tab(p, 'TextInput', 'Swap size in GiB')
+        p.reveal_by_tab('TextInput', 'Swap size in GiB')
         p.screenshot(prefix + '-swap-controls')
         p.click('Button', 'Review')
         p.wait('Text', 'Storage changes during installation')
         p.screenshot(prefix + '-review')
         p.click('Button', 'Disk')
-        reveal_by_tab(p, 'Combobox', 'Space source')
+        p.reveal_by_tab('Combobox', 'Space source')
         p.screenshot(prefix + '-return')
         p.screenshot(prefix + '-swap-map')
-        reveal_by_tab(p, 'RadioButton', 'Erase a disk')
+        p.reveal_by_tab('RadioButton', 'Erase a disk')
         p.click('RadioButton', 'Erase a disk')
-        reveal_by_tab(p, 'RadioButton', 'Install alongside')
+        p.reveal_by_tab('RadioButton', 'Install alongside')
         p.click('RadioButton', 'Install alongside')
         p.click('Button', 'Review')
-        install = p.data('get_element_properties', elementHandle=p.wait('Button', 'Install')['handle'])
+        install = p.properties('Button', 'Install')
         assert install.get('accessibleEnabled'), install
         p.screenshot(prefix + '-mode-return')
     except Exception:
@@ -110,7 +96,7 @@ def errors(binary, output):
             p.screenshot(case)
             if case != 'ext4':
                 p.click('Button', 'Review')
-                props = p.data('get_element_properties', elementHandle=p.wait('Button', 'Install')['handle'])
+                props = p.properties('Button', 'Install')
                 assert not props.get('accessibleEnabled'), (case, props)
                 p.screenshot(case + '-review')
         finally:

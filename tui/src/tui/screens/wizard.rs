@@ -50,15 +50,7 @@ impl Wizard {
     }
 
     fn items(&self) -> Vec<MenuItem> {
-        match self.current_step {
-            StepId::Welcome => super::steps::welcome::items(&self.config),
-            StepId::Disk => super::steps::disk::items(&self.config),
-            StepId::Zfs => super::steps::zfs::items(&self.config),
-            StepId::System => super::steps::system::items(&self.config),
-            StepId::Users => super::steps::users::items(&self.config),
-            StepId::Desktop => super::steps::desktop::items(&self.config),
-            StepId::Review => super::steps::review::items(&self.config),
-        }
+        super::steps::items_for(self.current_step, &self.config)
     }
 
     fn selectable_indices(&self) -> Vec<usize> {

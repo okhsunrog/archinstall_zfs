@@ -46,41 +46,28 @@ somewhere already.
 EOF
 }
 
-die() {
-    printf '[%s] ERROR: %s\n' "${app_name}" "$*" >&2
-    exit 1
-}
-
-info() {
-    printf '[%s] %s\n' "${app_name}" "$*"
-}
-
-cleanup() {
-    if (( mounted )) && mountpoint -q -- "${mount_dir}"; then
-        umount -- "${mount_dir}" || true
-    fi
-}
-trap cleanup EXIT
+# shellcheck source=gen_iso/zfs-be-common.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/zfs-be-common.sh"
 
 while (( $# )); do
     case "$1" in
         --dataset)
-            (( $# >= 2 )) || die "--dataset requires a value"
+            need_value "$1" "$#"
             dataset="$2"
             shift 2
             ;;
         --binary-dir)
-            (( $# >= 2 )) || die "--binary-dir requires a value"
+            need_value "$1" "$#"
             binary_dir="$2"
             shift 2
             ;;
         --mount-dir)
-            (( $# >= 2 )) || die "--mount-dir requires a value"
+            need_value "$1" "$#"
             mount_dir="$2"
             shift 2
             ;;
         --snapshot)
-            (( $# >= 2 )) || die "--snapshot requires a value"
+            need_value "$1" "$#"
             snapshot="$2"
             shift 2
             ;;
@@ -107,7 +94,7 @@ done
     die "invalid snapshot name: ${snapshot}"
 
 for command in findmnt install mount mountpoint sync umount zfs; do
-    command -v "${command}" >/dev/null 2>&1 || die "required command not found: ${command}"
+    require_command "${command}"
 done
 
 (( EUID == 0 )) || die "must run as root (mounting a dataset needs it)"
@@ -152,8 +139,7 @@ if mountpoint -q -- "${mount_dir}"; then
 fi
 mkdir -p -- "${mount_dir}"
 
-mount -t zfs -o zfsutil -- "${dataset}" "${mount_dir}"
-mounted=1
+mount_be "${dataset}"
 
 marker="${mount_dir}/etc/archinstall-zfs/demo-be"
 if [[ ! -f "${marker}" ]]; then
@@ -175,8 +161,7 @@ for path in "${sources[@]}"; do
 done
 
 sync
-umount -- "${mount_dir}"
-mounted=0
+umount_be
 
 info "updated ${#sources[@]} binaries in ${dataset}"
 info "reboot into the environment to run them"

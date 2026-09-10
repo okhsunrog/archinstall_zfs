@@ -27,6 +27,11 @@ pub async fn configure_zfs_trim(
 ) -> Result<()> {
     // Only configure TRIM when we created (or know) the disk. ExistingPool
     // mode leaves the pool's autotrim property and any timer untouched.
+    //
+    // This mapping stays separate from prepare::prepare_disk: that one
+    // partitions the disk and returns the resulting partitions, whereas this
+    // only needs something whose storage type can be read from sysfs, which
+    // for NewPool is the configured ZFS partition itself.
     let disk_path = match config.installation_mode {
         Some(InstallationMode::FullDisk) => config.disk.as_deref(),
         Some(InstallationMode::Alongside) => {

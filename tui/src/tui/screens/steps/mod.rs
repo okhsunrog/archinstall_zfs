@@ -8,6 +8,7 @@ pub mod zfs;
 
 use archinstall_zfs_core::config::choices::Choice;
 use archinstall_zfs_core::config::edit::ChoiceSetting;
+use archinstall_zfs_core::config::types::GlobalConfig;
 
 // ── Shared types for all wizard steps ──────────────────
 
@@ -105,8 +106,67 @@ pub struct MenuItem {
 }
 
 impl MenuItem {
+    pub fn new(
+        key: &'static str,
+        label: &'static str,
+        value: impl Into<String>,
+        kind: MenuKind,
+    ) -> Self {
+        Self {
+            key,
+            label,
+            value: value.into(),
+            kind,
+        }
+    }
+
+    /// Row edited through a custom handler; shows `value`.
+    pub fn custom(key: &'static str, label: &'static str, value: impl Into<String>) -> Self {
+        Self::new(key, label, value, MenuKind::Custom)
+    }
+
+    /// Free-form text input row.
+    pub fn text(key: &'static str, label: &'static str, value: impl Into<String>) -> Self {
+        Self::new(key, label, value, MenuKind::Text)
+    }
+
+    /// Boolean toggle row, rendered as `Enabled` / `Disabled`.
+    pub fn toggle(key: &'static str, label: &'static str, enabled: bool) -> Self {
+        let value = if enabled { "Enabled" } else { "Disabled" };
+        Self::new(key, label, value, MenuKind::Toggle)
+    }
+
+    /// Masked input row that only reveals whether a value is present.
+    pub fn secret(key: &'static str, label: &'static str, is_set: bool) -> Self {
+        let value = if is_set { "Set" } else { "Not set" };
+        Self::new(key, label, value, MenuKind::Password)
+    }
+
+    /// Non-selectable header, separator or read-only summary line.
+    pub fn header(key: &'static str, label: &'static str, value: impl Into<String>) -> Self {
+        Self::new(key, label, value, MenuKind::SectionHeader)
+    }
+
+    /// Action button without a value.
+    pub fn action(key: &'static str, label: &'static str) -> Self {
+        Self::new(key, label, String::new(), MenuKind::Action)
+    }
+
     pub fn is_selectable(&self) -> bool {
         !matches!(self.kind, MenuKind::SectionHeader | MenuKind::RadioHeader)
+    }
+}
+
+/// Menu rows for one wizard step.
+pub fn items_for(step: StepId, config: &GlobalConfig) -> Vec<MenuItem> {
+    match step {
+        StepId::Welcome => welcome::items(config),
+        StepId::Disk => disk::items(config),
+        StepId::Zfs => zfs::items(config),
+        StepId::System => system::items(config),
+        StepId::Users => users::items(config),
+        StepId::Desktop => desktop::items(config),
+        StepId::Review => review::items(config),
     }
 }
 
@@ -128,23 +188,23 @@ pub fn radio_group(
     options: &[&'static str],
     current: usize,
 ) -> Vec<MenuItem> {
-    let mut items = vec![MenuItem {
+    let mut items = vec![MenuItem::new(
         key,
         label,
-        value: String::new(),
-        kind: MenuKind::RadioHeader,
-    }];
+        String::new(),
+        MenuKind::RadioHeader,
+    )];
     for (i, &opt) in options.iter().enumerate() {
-        items.push(MenuItem {
+        items.push(MenuItem::new(
             key,
-            label: opt,
-            value: String::new(),
-            kind: MenuKind::RadioOption {
+            opt,
+            String::new(),
+            MenuKind::RadioOption {
                 group_key: key,
                 index: i,
                 selected: i == current,
             },
-        });
+        ));
     }
     items
 }

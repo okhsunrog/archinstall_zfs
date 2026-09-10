@@ -12,19 +12,7 @@ use crate::system::cmd::CommandRunner;
 /// can be enabled manually post-install. The install progress screen displays
 /// WARN entries in yellow so the user will see the failure.
 pub fn enable_service(runner: &dyn CommandRunner, target: &Path, service: &str) -> Result<()> {
-    let target_str = target.to_string_lossy();
-    let output = runner.run("systemctl", &["--root", &target_str, "enable", service])?;
-    if output.success() {
-        tracing::info!(service, "enabled service");
-    } else {
-        tracing::warn!(
-            service,
-            exit_code = output.exit_code,
-            stderr = %output.stderr,
-            "failed to enable service — continuing (can be enabled manually)"
-        );
-    }
-    Ok(())
+    enable(runner, target, service, false)
 }
 
 /// Enable a user-level systemd unit globally for all users in the target.
@@ -33,19 +21,39 @@ pub fn enable_service(runner: &dyn CommandRunner, target: &Path, service: &str) 
 /// `<target>/etc/systemd/user/`. Non-zero exit is treated as a warning for the
 /// same reasons as `enable_service`.
 pub fn enable_user_service(runner: &dyn CommandRunner, target: &Path, service: &str) -> Result<()> {
+    enable(runner, target, service, true)
+}
+
+/// `systemctl --root <target> [--global] enable <service>`; a non-zero exit
+/// is a warning, not an error.
+fn enable(runner: &dyn CommandRunner, target: &Path, service: &str, global: bool) -> Result<()> {
     let target_str = target.to_string_lossy();
-    let output = runner.run(
-        "systemctl",
-        &["--root", &target_str, "--global", "enable", service],
-    )?;
+    let mut args = vec!["--root", &*target_str];
+    if global {
+        args.push("--global");
+    }
+    args.extend(["enable", service]);
+    let output = runner.run("systemctl", &args)?;
+
+    let (enabled, failed) = if global {
+        (
+            "enabled user service globally",
+            "failed to enable user service — continuing (can be enabled manually)",
+        )
+    } else {
+        (
+            "enabled service",
+            "failed to enable service — continuing (can be enabled manually)",
+        )
+    };
     if output.success() {
-        tracing::info!(service, "enabled user service globally");
+        tracing::info!(service, "{enabled}");
     } else {
         tracing::warn!(
             service,
             exit_code = output.exit_code,
             stderr = %output.stderr,
-            "failed to enable user service — continuing (can be enabled manually)"
+            "{failed}"
         );
     }
     Ok(())
@@ -72,6 +80,19 @@ mod tests {
         assert!(calls[0].args.contains(&"enable".to_string()));
         assert!(calls[0].args.contains(&"sshd".to_string()));
         assert!(calls[0].args.contains(&"/mnt".to_string()));
+    }
+
+    #[test]
+    fn a_user_service_is_enabled_globally() {
+        let runner = RecordingRunner::new(vec![CannedResponse::default()]);
+        enable_user_service(&runner, Path::new("/mnt"), "pipewire").unwrap();
+
+        let calls = runner.calls();
+        assert_eq!(calls[0].program, "systemctl");
+        assert_eq!(
+            calls[0].args,
+            ["--root", "/mnt", "--global", "enable", "pipewire"]
+        );
     }
 
     #[test]

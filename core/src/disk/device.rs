@@ -239,11 +239,11 @@ impl BlockPartition {
             .unwrap_or_default()
     }
 
-    pub fn selection_group_model(&self) -> String {
+    pub(crate) fn selection_group_model(&self) -> String {
         self.selection_model()
     }
 
-    pub fn selection_group_serial(&self) -> String {
+    pub(crate) fn selection_group_serial(&self) -> String {
         self.selection_serial()
     }
 
@@ -251,11 +251,11 @@ impl BlockPartition {
         self.parent_size_bytes.map(format_size).unwrap_or_default()
     }
 
-    pub fn selection_group_transport(&self) -> String {
+    pub(crate) fn selection_group_transport(&self) -> String {
         self.selection_transport()
     }
 
-    pub fn selection_group_media(&self) -> String {
+    pub(crate) fn selection_group_media(&self) -> String {
         self.selection_media()
     }
 

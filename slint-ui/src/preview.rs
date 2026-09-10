@@ -8,6 +8,7 @@ use std::time::Duration;
 use archinstall_zfs_core::config::types::{
     GlobalConfig, InstallationMode, ProfileSelection, UserConfig,
 };
+use archinstall_zfs_core::disk::alongside::GIB;
 use archinstall_zfs_core::disk::device::{
     BlockDevice, BlockPartition, DeviceChoice, DevicePath, DevicePathKind,
 };
@@ -115,7 +116,7 @@ fn devices() -> Vec<BlockDevice> {
         }],
         model: Some(model.into()),
         serial: Some(serial.into()),
-        size_bytes: Some(size * 1024 * 1024 * 1024),
+        size_bytes: Some(size * GIB),
         transport: Some(bus.into()),
         rotational: Some(false),
         removable,
@@ -172,9 +173,9 @@ pub fn partitions() -> Vec<DeviceChoice> {
                     model: disk.model.clone(),
                     serial: disk.serial.clone(),
                     size_bytes: Some(if number == 1 {
-                        1024 * 1024 * 1024
+                        GIB
                     } else {
-                        (disk.size_bytes.unwrap() - 1024 * 1024 * 1024) / (count - 1)
+                        (disk.size_bytes.unwrap() - GIB) / (count - 1)
                     }),
                     parent_size_bytes: disk.size_bytes,
                     transport: disk.transport.clone(),

@@ -11,7 +11,7 @@ use color_eyre::eyre::{Result, eyre};
 use zfskit::pool::{ExportOptions, ImportOptions, PoolCreateOptions, Vdev};
 
 use crate::boot_environment::BootEnvironment;
-use crate::config::types::{GlobalConfig, InstallationMode, SwapMode, ZfsEncryptionMode};
+use crate::config::types::{GlobalConfig, InstallationMode, ZfsEncryptionMode};
 use crate::system::cmd::CommandRunner;
 
 /// Partitions selected or created for the installation.
@@ -53,12 +53,11 @@ pub fn prepare_disk(
                 .ok_or_else(|| eyre!("disk not selected for full disk mode"))?;
             crate::disk::partition::zap_disk(runner, disk)?;
 
-            let swap_size = match config.swap_mode {
-                SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted => {
-                    config.swap_partition_size.as_deref()
-                }
-                _ => None,
-            };
+            let swap_size = config
+                .swap_mode
+                .uses_partition()
+                .then_some(config.swap_partition_size.as_deref())
+                .flatten();
             let layout = crate::disk::partition::create_partitions(runner, disk, swap_size)?;
             let parts = crate::disk::partition::wait_for_partitions(disk, &layout)?;
             let efi = parts[0].clone();
@@ -172,13 +171,7 @@ pub async fn prepare_zfs(
                 .set_property("cachefile", "none")
                 .await?;
 
-            let base_refs = base_dataset_props(encryption, &key_path, &compression);
-            let base_refs_view: Vec<(&str, &str)> =
-                base_refs.iter().map(|(k, v)| (*k, v.as_str())).collect();
-            crate::dataset_layout::create_base_dataset(&zfs, &be, &base_refs_view).await?;
-
-            let datasets = crate::dataset_layout::default_datasets();
-            crate::dataset_layout::create_child_datasets(&zfs, &be, &datasets).await?;
+            create_boot_environment(&zfs, &be, encryption, &key_path, &compression).await?;
             tracing::info!("Created datasets");
 
             export_pool(&zfs, pool_name).await?;
@@ -197,13 +190,7 @@ pub async fn prepare_zfs(
                     .await?;
             }
 
-            let base_refs = base_dataset_props(encryption, &key_path, &compression);
-            let base_refs_view: Vec<(&str, &str)> =
-                base_refs.iter().map(|(k, v)| (*k, v.as_str())).collect();
-            crate::dataset_layout::create_base_dataset(&zfs, &be, &base_refs_view).await?;
-
-            let datasets = crate::dataset_layout::default_datasets();
-            crate::dataset_layout::create_child_datasets(&zfs, &be, &datasets).await?;
+            create_boot_environment(&zfs, &be, encryption, &key_path, &compression).await?;
             tracing::info!("Created new BE in existing pool");
         }
     }
@@ -217,6 +204,24 @@ pub async fn prepare_zfs(
     Ok(())
 }
 
+/// Create the boot environment's base dataset and the children under it,
+/// whether the pool was just created or already existed.
+async fn create_boot_environment(
+    zfs: &zfskit::Zfs,
+    be: &BootEnvironment,
+    encryption: ZfsEncryptionMode,
+    key_path: &Path,
+    compression: &str,
+) -> Result<()> {
+    let base_props = base_dataset_props(encryption, key_path, compression);
+    let base_refs: Vec<(&str, &str)> = base_props.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    crate::dataset_layout::create_base_dataset(zfs, be, &base_refs).await?;
+
+    let datasets = crate::dataset_layout::default_datasets();
+    crate::dataset_layout::create_child_datasets(zfs, be, &datasets).await?;
+    Ok(())
+}
+
 fn base_dataset_props(
     encryption: ZfsEncryptionMode,
     key_path: &Path,
@@ -224,7 +229,7 @@ fn base_dataset_props(
 ) -> Vec<(&'static str, String)> {
     match encryption {
         ZfsEncryptionMode::Dataset => {
-            let mut p = crate::zfs_keyfile::dataset_encryption_properties(key_path);
+            let mut p = crate::zfs_keyfile::pool_encryption_properties(key_path);
             p.push(("mountpoint", "none".to_string()));
             p.push(("compression", compression.to_string()));
             p.push(("overlay", "off".to_string()));

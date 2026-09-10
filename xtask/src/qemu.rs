@@ -18,6 +18,13 @@ pub struct QemuVm {
     password: Option<String>,
 }
 
+/// OpenSSH client the VM is reached with; `scp` spells the port flag `-P`.
+#[derive(Clone, Copy)]
+enum RemoteTool {
+    Ssh,
+    Scp,
+}
+
 impl QemuVm {
     /// Boot the installation medium, with `cache` shared into the guest when
     /// one is given.
@@ -167,48 +174,42 @@ impl QemuVm {
         false
     }
 
-    pub fn ssh_run(&self, cmd: &str) -> std::io::Result<Output> {
-        let port_str = self.port.to_string();
-        let timeout_str = format!("ConnectTimeout={SSH_TIMEOUT_SECS}");
+    /// Build an `ssh`/`scp` command for the guest.
+    ///
+    /// Wraps the tool in `sshpass` when a password is set, disables host key
+    /// checks and appends the port; `opts` go between the shared options and
+    /// the port, so the caller adds only its own `-o` flags and operands.
+    fn remote_cmd(&self, tool: RemoteTool, opts: &[&str]) -> Command {
+        let (name, port_flag) = match tool {
+            RemoteTool::Ssh => ("ssh", "-p"),
+            RemoteTool::Scp => ("scp", "-P"),
+        };
+        let mut cmd = match &self.password {
+            Some(pw) => {
+                let mut cmd = Command::new("sshpass");
+                cmd.args(["-p", pw, name]);
+                cmd
+            }
+            None => Command::new(name),
+        };
+        cmd.args([
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+        ])
+        .args(opts)
+        .args([port_flag, &self.port.to_string()]);
+        cmd
+    }
 
-        if let Some(ref pw) = self.password {
-            Command::new("sshpass")
-                .args([
-                    "-p",
-                    pw,
-                    "ssh",
-                    "-o",
-                    "StrictHostKeyChecking=no",
-                    "-o",
-                    "UserKnownHostsFile=/dev/null",
-                    "-o",
-                    &timeout_str,
-                    "-p",
-                    &port_str,
-                    "root@localhost",
-                    cmd,
-                ])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .output()
-        } else {
-            Command::new("ssh")
-                .args([
-                    "-o",
-                    "StrictHostKeyChecking=no",
-                    "-o",
-                    "UserKnownHostsFile=/dev/null",
-                    "-o",
-                    &timeout_str,
-                    "-p",
-                    &port_str,
-                    "root@localhost",
-                    cmd,
-                ])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .output()
-        }
+    pub fn ssh_run(&self, cmd: &str) -> std::io::Result<Output> {
+        let timeout_str = format!("ConnectTimeout={SSH_TIMEOUT_SECS}");
+        self.remote_cmd(RemoteTool::Ssh, &["-o", &timeout_str])
+            .args(["root@localhost", cmd])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
     }
 
     pub fn ssh_stdout(&self, cmd: &str) -> String {
@@ -217,72 +218,28 @@ impl QemuVm {
     }
 
     pub fn scp_to(&self, local: &Path, remote: &str) {
-        let port_str = self.port.to_string();
-        let mut args = vec![
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "UserKnownHostsFile=/dev/null",
-            "-P",
-            &port_str,
-        ];
         let local_str = local.to_str().unwrap();
         let remote_dest = format!("root@localhost:{remote}");
-
-        if let Some(ref pw) = self.password {
-            let status = Command::new("sshpass")
-                .args(["-p", pw, "scp"])
-                .args(&args)
-                .args([local_str, remote_dest.as_str()])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .expect("scp failed to execute");
-            assert!(status.success(), "scp to {remote} failed");
-        } else {
-            args.push(local_str);
-            args.push(remote_dest.as_str());
-            let status = Command::new("scp")
-                .args(&args)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .expect("scp failed to execute");
-            assert!(status.success(), "scp to {remote} failed");
-        }
+        let status = self
+            .remote_cmd(RemoteTool::Scp, &[])
+            .args([local_str, remote_dest.as_str()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("scp failed to execute");
+        assert!(status.success(), "scp to {remote} failed");
     }
 
     /// Copy a file from the VM to a local path. Returns true on success.
     pub fn scp_from(&self, remote: &str, local: &Path) -> bool {
-        let port_str = self.port.to_string();
         let remote_src = format!("root@localhost:{remote}");
         let local_str = local.to_str().unwrap();
-        let base_args = [
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "UserKnownHostsFile=/dev/null",
-            "-P",
-            &port_str,
-        ];
-
-        let status = if let Some(pw) = &self.password {
-            Command::new("sshpass")
-                .args(["-p", pw, "scp"])
-                .args(base_args)
-                .args([remote_src.as_str(), local_str])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-        } else {
-            Command::new("scp")
-                .args(base_args)
-                .args([remote_src.as_str(), local_str])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-        };
-
+        let status = self
+            .remote_cmd(RemoteTool::Scp, &[])
+            .args([remote_src.as_str(), local_str])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
         status.is_ok_and(|s| s.success())
     }
 
@@ -313,6 +270,12 @@ impl Drop for QemuVm {
 
 /// Locate an OVMF firmware file by trying distro-specific layouts.
 /// Arch ships `<name>.4m.fd`; Fedora/Debian ship `<name>.fd` (no 4m).
+///
+/// The justfile (`qemu-setup-uefi`) and `gen_iso/run-qemu.sh`
+/// (`find_ovmf_file`) keep their own lists: the justfile searches the
+/// `/usr/share/{edk2,edk2-ovmf,OVMF}` roots recursively and skips secboot
+/// images, run-qemu.sh probes the x64 subdirectories without
+/// `/usr/share/edk2/ovmf`. Update all three together.
 fn find_ovmf(base: &str) -> PathBuf {
     let dirs = [
         "/usr/share/edk2/x64",
@@ -390,8 +353,68 @@ pub fn reset_uefi_vars(path: &Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::is_testing_iso;
+    use super::{QemuVm, RemoteTool, is_testing_iso};
     use std::path::Path;
+    use std::process::Command;
+
+    fn argv(cmd: &Command) -> Vec<String> {
+        std::iter::once(cmd.get_program())
+            .chain(cmd.get_args())
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn remote_commands_keep_their_argv() {
+        let vm = QemuVm {
+            pid: None,
+            port: 2222,
+            password: None,
+        };
+        assert_eq!(
+            argv(&vm.remote_cmd(RemoteTool::Ssh, &["-o", "ConnectTimeout=10"])),
+            [
+                "ssh",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "UserKnownHostsFile=/dev/null",
+                "-o",
+                "ConnectTimeout=10",
+                "-p",
+                "2222",
+            ]
+        );
+        assert_eq!(
+            argv(&vm.remote_cmd(RemoteTool::Scp, &[])),
+            [
+                "scp",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "UserKnownHostsFile=/dev/null",
+                "-P",
+                "2222",
+            ]
+        );
+
+        let vm = vm.with_password("test");
+        assert_eq!(
+            argv(&vm.remote_cmd(RemoteTool::Scp, &[])),
+            [
+                "sshpass",
+                "-p",
+                "test",
+                "scp",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "UserKnownHostsFile=/dev/null",
+                "-P",
+                "2222",
+            ]
+        );
+    }
 
     #[test]
     fn integration_harness_accepts_only_testing_isos() {

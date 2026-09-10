@@ -20,11 +20,19 @@ pub use probe::{Filesystem, inspect, minimum_size};
 pub const MIB: u64 = 1024 * 1024;
 pub const GIB: u64 = 1024 * MIB;
 pub const MIN_LINUX_BYTES: u64 = 32 * GIB;
-/// Size of the optional separate ESP; matches the full-disk layout.
+/// Size of the optional separate ESP; close to the 500 MiB the full-disk
+/// layout creates.
 pub const ESP_BYTES: u64 = 512 * MIB;
+/// Allowance for FAT metadata, cluster rounding and directory entries. It is
+/// added to the boot image budget, and reserved again when checking that the
+/// budget fits a newly created ESP.
+pub const ESP_SLACK_BYTES: u64 = 8 * MIB;
 pub const EFI_TYPE: &str = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B";
 pub const BASIC_TYPE: &str = "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7";
 pub const LINUX_TYPE: &str = "0FC63DAF-8483-4772-8E79-3D69D8477DE4";
+/// Solaris/illumos root, which is what sgdisk's `bf00` and ZFS itself use.
+pub const ZFS_TYPE: &str = "6A85CF4D-1DD2-11B2-99A6-080020736631";
+pub const SWAP_TYPE: &str = "0657FD6D-A4AB-43C4-84E5-0933C84B4F4F";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Partition {

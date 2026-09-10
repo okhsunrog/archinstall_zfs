@@ -3,7 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result, bail};
 
-use crate::system::cmd::{CommandRunner, check_exit, chroot_cmd};
+use crate::system::cmd::{CommandRunner, chroot_checked};
 
 const DRACUT_ZFS_CONF: &str = r#"hostonly="yes"
 hostonly_cmdline="no"
@@ -62,7 +62,7 @@ while read -r line; do
 done
 "#;
 
-pub fn configure(_runner: &dyn CommandRunner, target: &Path, encryption: bool) -> Result<()> {
+pub fn configure(target: &Path, encryption: bool) -> Result<()> {
     // Write dracut.conf.d/zfs.conf
     let conf_dir = target.join("etc/dracut.conf.d");
     fs::create_dir_all(&conf_dir)?;
@@ -178,23 +178,20 @@ pub fn generate(runner: &dyn CommandRunner, target: &Path, with_zfs: &[&str]) ->
 
         let vmlinuz_src = format!("/usr/lib/modules/{kver}/vmlinuz");
         let vmlinuz_dst = format!("/boot/vmlinuz-{pkgbase}");
-        let output = chroot_cmd(
+        chroot_checked(
             runner,
             target,
             "install",
             &["-Dm0644", &vmlinuz_src, &vmlinuz_dst],
+            &format!("install vmlinuz for {pkgbase}"),
         )?;
-        check_exit(&output, &format!("install vmlinuz for {pkgbase}"))?;
 
         let image = format!("/boot/initramfs-{pkgbase}.img");
-        let output = chroot_cmd(
+        chroot_checked(
             runner,
             target,
             "dracut",
             &["--force", &image, "--kver", kver],
-        )?;
-        check_exit(
-            &output,
             &format!("dracut generate initramfs for {pkgbase} ({kver})"),
         )?;
     }
@@ -218,8 +215,7 @@ mod tests {
     #[test]
     fn test_configure_dracut_creates_files() {
         let dir = tempfile::tempdir().unwrap();
-        let runner = RecordingRunner::new(vec![]);
-        configure(&runner, dir.path(), false).unwrap();
+        configure(dir.path(), false).unwrap();
 
         assert!(dir.path().join("etc/dracut.conf.d/zfs.conf").exists());
         assert!(
@@ -248,8 +244,7 @@ mod tests {
     #[test]
     fn test_configure_dracut_with_encryption() {
         let dir = tempfile::tempdir().unwrap();
-        let runner = RecordingRunner::new(vec![]);
-        configure(&runner, dir.path(), true).unwrap();
+        configure(dir.path(), true).unwrap();
 
         let conf = fs::read_to_string(dir.path().join("etc/dracut.conf.d/zfs.conf")).unwrap();
         assert!(conf.contains("zroot.key"));

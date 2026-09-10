@@ -3,7 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
-use crate::system::cmd::{CommandRunner, check_exit, chroot_cmd};
+use crate::system::cmd::CommandRunner;
 
 /// Configure automatic login for the given user on the detected display manager.
 ///
@@ -97,9 +97,7 @@ fn configure_lightdm(runner: &dyn CommandRunner, target: &Path, username: &str) 
         .wrap_err("failed to write lightdm autologin conf")?;
 
     // Create the autologin group and add the user — LightDM requires it.
-    let _ = chroot_cmd(runner, target, "groupadd", &["-f", "autologin"]);
-    let output = chroot_cmd(runner, target, "usermod", &["-aG", "autologin", username])?;
-    check_exit(&output, &format!("add {username} to autologin group"))?;
+    super::users::add_to_group(runner, target, "autologin", &[username])?;
 
     tracing::info!(username, "configured LightDM autologin");
     Ok(())

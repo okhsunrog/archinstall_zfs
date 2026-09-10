@@ -1,31 +1,28 @@
 use archinstall_zfs_core::config::edit::{ChoiceSetting, TextSetting};
 use archinstall_zfs_core::config::types::GlobalConfig;
 
-use super::{MenuItem, MenuKind, choice_group};
+use super::{MenuItem, choice_group};
 
 pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     let sel = config.profile_selection.as_ref();
     let profile_def = sel.and_then(|s| s.profile_def());
 
     let mut items = vec![
-        MenuItem {
-            key: "profile",
-            label: "Profile",
-            value: profile_def
+        MenuItem::custom(
+            "profile",
+            "Profile",
+            profile_def
                 .as_ref()
                 .map(|p| p.display_name.to_string())
                 .unwrap_or_else(|| "Not set".into()),
-            kind: MenuKind::Custom,
-        },
-        MenuItem {
-            key: "display_manager",
-            label: "Display manager",
-            value: sel
-                .and_then(|s| s.effective_display_manager())
+        ),
+        MenuItem::custom(
+            "display_manager",
+            "Display manager",
+            sel.and_then(|s| s.effective_display_manager())
                 .map(|d| d.display_name().to_string())
                 .unwrap_or_else(|| "Profile default".into()),
-            kind: MenuKind::Custom,
-        },
+        ),
     ];
 
     items.extend(choice_group(
@@ -40,71 +37,44 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
         .as_ref()
         .is_some_and(|p| p.supports_gfx_driver())
     {
-        items.push(MenuItem {
-            key: "gpu_driver",
-            label: "GPU driver",
-            value: config
+        items.push(MenuItem::custom(
+            "gpu_driver",
+            "GPU driver",
+            config
                 .gfx_driver
                 .map(|d| d.to_string())
                 .unwrap_or("None".into()),
-            kind: MenuKind::Custom,
-        });
+        ));
     }
 
     items.extend(choice_group(ChoiceSetting::Audio, "Audio", config.audio));
 
     items.extend([
-        MenuItem {
-            key: "bluetooth",
-            label: "Bluetooth",
-            value: if config.bluetooth {
-                "Enabled"
+        MenuItem::toggle("bluetooth", "Bluetooth", config.bluetooth),
+        MenuItem::custom("packages", "Extra packages", {
+            let total = config.additional_packages.len() + config.aur_packages.len();
+            if total == 0 {
+                "None".into()
             } else {
-                "Disabled"
+                let mut parts: Vec<&str> = config
+                    .additional_packages
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect();
+                parts.extend(config.aur_packages.iter().map(|s| s.as_str()));
+                parts.join(", ")
             }
-            .into(),
-            kind: MenuKind::Toggle,
-        },
-        MenuItem {
-            key: "packages",
-            label: "Extra packages",
-            value: {
-                let total = config.additional_packages.len() + config.aur_packages.len();
-                if total == 0 {
-                    "None".into()
-                } else {
-                    let mut parts: Vec<&str> = config
-                        .additional_packages
-                        .iter()
-                        .map(|s| s.as_str())
-                        .collect();
-                    parts.extend(config.aur_packages.iter().map(|s| s.as_str()));
-                    parts.join(", ")
-                }
-            },
-            kind: MenuKind::Custom,
-        },
-        MenuItem {
-            key: TextSetting::ExtraServices.as_str(),
-            label: "Extra services",
-            value: if config.extra_services.is_empty() {
+        }),
+        MenuItem::text(
+            TextSetting::ExtraServices.as_str(),
+            "Extra services",
+            if config.extra_services.is_empty() {
                 "None".into()
             } else {
                 config.extra_services.join(", ")
             },
-            kind: MenuKind::Text,
-        },
-        MenuItem {
-            key: "zrepl",
-            label: "zrepl (snapshots)",
-            value: if config.zrepl_enabled {
-                "Enabled"
-            } else {
-                "Disabled"
-            }
-            .into(),
-            kind: MenuKind::Toggle,
-        },
+        ),
+        MenuItem::toggle("zrepl", "zrepl (snapshots)", config.zrepl_enabled),
     ]);
 
     items

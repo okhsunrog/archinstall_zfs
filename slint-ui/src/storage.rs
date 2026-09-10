@@ -1,12 +1,13 @@
 //! Read-only storage discovery and identity-based selection for the graphical wizard.
 use crate::{
+    busy::{self, Guarded},
     refresh::refresh_items,
     ui::{App, StorageCandidate, StorageState},
 };
 use archinstall_zfs_core::{
     config::{
         edit::{DeviceSetting, apply_device},
-        types::{GlobalConfig, InstallationMode, SwapMode},
+        types::{GlobalConfig, InstallationMode},
     },
     disk::device::{self, DeviceChoice},
 };
@@ -21,6 +22,38 @@ struct Inventory {
     datasets: Vec<String>,
 }
 thread_local! { static INVENTORY: RefCell<Inventory> = RefCell::default(); }
+impl Inventory {
+    fn with<R>(f: impl FnOnce(&Inventory) -> R) -> R {
+        INVENTORY.with_borrow(f)
+    }
+    fn update<R>(f: impl FnOnce(&mut Inventory) -> R) -> R {
+        INVENTORY.with_borrow_mut(f)
+    }
+    fn devices(role: &str) -> Vec<DeviceChoice> {
+        Self::with(|i| {
+            if role == "disk" {
+                i.disks.clone()
+            } else {
+                i.partitions.clone()
+            }
+        })
+    }
+    fn set_devices(disks: Vec<DeviceChoice>, partitions: Vec<DeviceChoice>) {
+        Self::update(|i| {
+            i.disks = disks;
+            i.partitions = partitions;
+        });
+    }
+    fn pools() -> Vec<StorageCandidate> {
+        Self::with(|i| i.pools.clone())
+    }
+    fn set_pools(pools: Vec<StorageCandidate>, datasets: Vec<String>) {
+        Self::update(|i| {
+            i.pools = pools;
+            i.datasets = datasets;
+        });
+    }
+}
 
 pub fn choices(role: &str) -> Vec<DeviceChoice> {
     if crate::preview::enabled() {
@@ -30,13 +63,7 @@ pub fn choices(role: &str) -> Vec<DeviceChoice> {
             crate::preview::partitions()
         };
     }
-    INVENTORY.with_borrow(|i| {
-        if role == "disk" {
-            i.disks.clone()
-        } else {
-            i.partitions.clone()
-        }
-    })
+    Inventory::devices(role)
 }
 fn same_device(a: &Path, b: &Path) -> bool {
     std::fs::canonicalize(a).unwrap_or_else(|_| a.into())
@@ -63,10 +90,7 @@ pub fn unavailable(choice: &DeviceChoice, role: &str, c: &GlobalConfig) -> Strin
         (
             "swap_partition",
             c.swap_partition.as_ref(),
-            matches!(
-                c.swap_mode,
-                SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-            ),
+            c.swap_mode.uses_partition(),
         ),
     ] {
         if active && role != other && selected.is_some_and(|p| same_device(p, &choice.path)) {
@@ -166,7 +190,7 @@ fn populate(app: &App, c: &GlobalConfig) {
     let role = state.get_role();
     let filter = state.get_filter().to_lowercase();
     let rows: Vec<_> = if role == "pool" {
-        INVENTORY.with_borrow(|i| i.pools.clone())
+        Inventory::pools()
     } else {
         choices(&role)
             .into_iter()
@@ -331,16 +355,25 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
         scan(app, false);
     }
 }
+impl Guarded for StorageState<'_> {
+    fn generation(app: &App) -> i32 {
+        app.global::<StorageState>().get_generation()
+    }
+    fn set_generation(app: &App, generation: i32) {
+        app.global::<StorageState>().set_generation(generation);
+    }
+    fn set_busy(app: &App, busy: bool) {
+        app.global::<StorageState>().set_busy(busy);
+    }
+    fn set_error(app: &App, error: slint::SharedString) {
+        app.global::<StorageState>().set_error(error);
+    }
+}
 fn scan(app: &App, pools: bool) {
-    let state = app.global::<StorageState>();
-    let generation = state.get_generation() + 1;
-    state.set_generation(generation);
-    state.set_busy(true);
-    state.set_error("".into());
-    let weak = app.as_weak();
-    tokio::spawn(async move {
-        // Only plain owned Rust data crosses the worker/event-loop boundary.
-        let result = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+    let generation = busy::begin::<StorageState>(app);
+    // Only plain owned Rust data crosses the worker/event-loop boundary.
+    let work = async move {
+        tokio::time::timeout(std::time::Duration::from_secs(20), async {
             if pools {
                 let (pools, datasets) = pool_inventory().await?;
                 Ok::<_, String>((Vec::new(), Vec::new(), pools, datasets))
@@ -363,50 +396,37 @@ fn scan(app: &App, pools: bool) {
             }
         })
         .await
-        .unwrap_or_else(|_| {
-            Err("Storage discovery timed out. Check the devices and retry.".into())
-        });
-        let _ = weak.upgrade_in_event_loop(move |app| {
-            let state = app.global::<StorageState>();
-            if state.get_generation() != generation {
-                return;
-            }
-            state.set_busy(false);
-            match result {
-                Ok((disks, parts, found, datasets)) => INVENTORY.with_borrow_mut(|i| {
-                    if pools {
-                        i.datasets = datasets;
-                        i.pools = found
-                            .into_iter()
-                            .map(|(name, status, details, blocked)| StorageCandidate {
-                                key: name.clone().into(),
-                                name: name.into(),
-                                group: "ZFS pools".into(),
-                                label: status.into(),
-                                details: details.into(),
-                                unavailable: blocked.into(),
-                                ..Default::default()
-                            })
-                            .collect();
-                    } else {
-                        i.disks = disks;
-                        i.partitions = parts;
-                    }
-                }),
-                Err(e) => {
-                    state.set_error(e.into());
-                    INVENTORY.with_borrow_mut(|i| {
-                        if pools {
-                            i.pools.clear()
-                        } else {
-                            i.disks.clear();
-                            i.partitions.clear();
-                        }
-                    });
+        .unwrap_or_else(|_| Err("Storage discovery timed out. Check the devices and retry.".into()))
+    };
+    busy::spawn::<StorageState, _>(app, generation, work, move |app, result| {
+        let state = app.global::<StorageState>();
+        match result {
+            Ok((_, _, found, datasets)) if pools => Inventory::set_pools(
+                found
+                    .into_iter()
+                    .map(|(name, status, details, blocked)| StorageCandidate {
+                        key: name.clone().into(),
+                        name: name.into(),
+                        group: "ZFS pools".into(),
+                        label: status.into(),
+                        details: details.into(),
+                        unavailable: blocked.into(),
+                        ..Default::default()
+                    })
+                    .collect(),
+                datasets,
+            ),
+            Ok((disks, parts, _, _)) => Inventory::set_devices(disks, parts),
+            Err(e) => {
+                state.set_error(e.into());
+                if pools {
+                    Inventory::update(|i| i.pools.clear());
+                } else {
+                    Inventory::set_devices(Vec::new(), Vec::new());
                 }
             }
-            state.invoke_inventory_changed();
-        });
+        }
+        state.invoke_inventory_changed();
     });
 }
 type PoolRow = (String, String, String, String);
@@ -464,7 +484,7 @@ async fn pool_inventory() -> Result<(Vec<PoolRow>, Vec<String>), String> {
             .properties
             .get("free")
             .and_then(|p| p.value.parse::<u64>().ok())
-            .map(|bytes| format!("{:.1} GiB", bytes as f64 / 1073741824.0))
+            .map(|bytes| format!("{:.1} GiB", crate::format::gib(bytes)))
             .unwrap_or_else(|| "Unknown".into());
         rows.push((
             p.name.clone(),
@@ -520,10 +540,7 @@ pub fn issues(c: &GlobalConfig) -> Vec<String> {
         if c.installation_mode == Some(InstallationMode::NewPool) {
             roles.push(("zfs_partition", c.zfs_partition.as_deref()));
         }
-        if matches!(
-            c.swap_mode,
-            SwapMode::ZswapPartition | SwapMode::ZswapPartitionEncrypted
-        ) {
+        if c.swap_mode.uses_partition() {
             roles.push(("swap_partition", c.swap_partition.as_deref()));
         }
         roles
@@ -551,7 +568,7 @@ pub fn issues(c: &GlobalConfig) -> Vec<String> {
     if c.installation_mode == Some(InstallationMode::ExistingPool)
         && let Some(name) = &c.pool_name
     {
-        INVENTORY.with_borrow(|i| {
+        Inventory::with(|i| {
             match i.pools.iter().find(|p| p.name.as_str() == name) {
                 None => issues.push("Choose or refresh the existing pool before installing".into()),
                 Some(p) if !p.unavailable.is_empty() => issues.push(p.unavailable.to_string()),

@@ -5,15 +5,12 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::types::GlobalConfig;
 use crate::system::alpm_pacman::{AlpmContext, TargetMounts};
-use crate::system::async_download::DownloadConfig;
-use crate::system::cmd::CommandRunner;
 use crate::system::sysinfo;
 
 /// Install base system packages into target.
 /// Returns `TargetMounts` which must be kept alive for the duration of the
 /// installation — dropping it unmounts API filesystems (proc, sys, dev, etc.).
 pub fn install_base(
-    _runner: &dyn CommandRunner,
     target: &Path,
     config: &GlobalConfig,
     cancel: &CancellationToken,
@@ -39,20 +36,13 @@ pub fn install_base(
     }
 
     // Set parallel downloads on host before installing
-    crate::system::pacman::set_parallel_downloads(None, config.parallel_downloads)?;
+    crate::system::conf::set_parallel_downloads(None, config.parallel_downloads)?;
 
     // Mount API filesystems — returned to caller to keep alive
     let target_mounts = TargetMounts::setup(target)?;
 
     let pacman_conf = Path::new("/etc/pacman.conf");
-    let mut ctx = AlpmContext::for_target(
-        target,
-        pacman_conf,
-        DownloadConfig {
-            concurrency: config.parallel_downloads as usize,
-            ..Default::default()
-        },
-    )?;
+    let mut ctx = AlpmContext::for_target(target, pacman_conf, config.download_config())?;
     ctx.sync_databases(false)?;
     ctx.install_packages(&packages, cancel, progress_tx)?;
     ctx.finalize_target()?;
@@ -60,7 +50,7 @@ pub fn install_base(
     // target_mounts stays alive via the return value.
 
     // Set parallel downloads on target too
-    crate::system::pacman::set_parallel_downloads(Some(target), config.parallel_downloads)?;
+    crate::system::conf::set_parallel_downloads(Some(target), config.parallel_downloads)?;
 
     Ok(target_mounts)
 }

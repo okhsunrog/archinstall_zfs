@@ -3,7 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::Result;
 
-use crate::system::cmd::{CommandRunner, check_exit, chroot_cmd};
+use crate::system::cmd::{CommandRunner, check_exit, chroot_checked, chroot_cmd};
 use crate::system::fs::write_file_with_mode;
 
 pub fn set_root_password(runner: &dyn CommandRunner, target: &Path, password: &str) -> Result<()> {
@@ -26,12 +26,18 @@ pub fn create_user(
     groups: Option<&[String]>,
 ) -> Result<()> {
     // Create user — args passed directly, no shell interpretation
-    let output = if let Some(sh) = shell {
-        chroot_cmd(runner, target, "useradd", &["-m", "-s", sh, username])?
-    } else {
-        chroot_cmd(runner, target, "useradd", &["-m", username])?
-    };
-    check_exit(&output, &format!("useradd {username}"))?;
+    let mut args = vec!["-m"];
+    if let Some(sh) = shell {
+        args.extend(["-s", sh]);
+    }
+    args.push(username);
+    chroot_checked(
+        runner,
+        target,
+        "useradd",
+        &args,
+        &format!("useradd {username}"),
+    )?;
 
     // Set password via stdin (not visible in process args)
     if let Some(pw) = password {
@@ -45,8 +51,13 @@ pub fn create_user(
     // Add to groups — args passed directly, no shell interpretation
     if let Some(grps) = groups {
         for group in grps {
-            let output = chroot_cmd(runner, target, "usermod", &["-aG", group, username])?;
-            check_exit(&output, &format!("add {username} to {group}"))?;
+            chroot_checked(
+                runner,
+                target,
+                "usermod",
+                &["-aG", group, username],
+                &format!("add {username} to {group}"),
+            )?;
         }
     }
 
@@ -75,8 +86,13 @@ pub fn setup_ssh_keys(
     let ssh_dir = format!("/home/{username}/.ssh");
 
     // Create .ssh directory with correct permissions inside the chroot
-    let output = chroot_cmd(runner, target, "install", &["-d", "-m", "700", &ssh_dir])?;
-    check_exit(&output, &format!("create .ssh dir for {username}"))?;
+    chroot_checked(
+        runner,
+        target,
+        "install",
+        &["-d", "-m", "700", &ssh_dir],
+        &format!("create .ssh dir for {username}"),
+    )?;
 
     // Write authorized_keys on the host side (simpler than heredoc in chroot),
     // created 0600 directly so the keys are never briefly world-readable.
@@ -91,10 +107,34 @@ pub fn setup_ssh_keys(
 
     // Ownership still needs the chroot: the uid/gid live in the target's passwd.
     let owner = format!("{username}:{username}");
-    let output = chroot_cmd(runner, target, "chown", &["-R", &owner, &ssh_dir])?;
-    check_exit(&output, &format!("chown .ssh for {username}"))?;
+    chroot_checked(
+        runner,
+        target,
+        "chown",
+        &["-R", &owner, &ssh_dir],
+        &format!("chown .ssh for {username}"),
+    )?;
 
     tracing::info!(username, "set up SSH authorized_keys");
+    Ok(())
+}
+
+/// Add `users` to `group`, creating the group first.
+///
+/// `groupadd -f` succeeds whether or not the group exists, so its result is
+/// not inspected; a `usermod` that fails is an error, since the membership is
+/// what the caller needs.
+pub fn add_to_group(
+    runner: &dyn CommandRunner,
+    target: &Path,
+    group: &str,
+    users: &[&str],
+) -> Result<()> {
+    let _ = chroot_cmd(runner, target, "groupadd", &["-f", group]);
+    for user in users {
+        let output = chroot_cmd(runner, target, "usermod", &["-aG", group, user])?;
+        check_exit(&output, &format!("add {user} to {group} group"))?;
+    }
     Ok(())
 }
 
@@ -146,6 +186,43 @@ mod tests {
         assert!(sudoers.exists());
         let content = fs::read_to_string(sudoers).unwrap();
         assert!(content.contains("testuser ALL=(ALL:ALL) ALL"));
+    }
+
+    #[test]
+    fn group_is_created_once_and_each_user_added() {
+        let runner = RecordingRunner::new(vec![]);
+
+        add_to_group(&runner, Path::new("/mnt"), "seat", &["alice", "bob"]).unwrap();
+
+        let calls = runner.calls();
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[0].args, ["/mnt", "groupadd", "-f", "seat"]);
+        assert_eq!(calls[1].args, ["/mnt", "usermod", "-aG", "seat", "alice"]);
+        assert_eq!(calls[2].args, ["/mnt", "usermod", "-aG", "seat", "bob"]);
+    }
+
+    #[test]
+    fn a_failed_group_creation_is_ignored_but_a_failed_usermod_is_not() {
+        let runner = RecordingRunner::new(vec![
+            CannedResponse {
+                exit_code: 9,
+                stderr: "group exists".into(),
+                ..Default::default()
+            },
+            CannedResponse {
+                exit_code: 6,
+                stderr: "user does not exist".into(),
+                ..Default::default()
+            },
+        ]);
+
+        let err = add_to_group(&runner, Path::new("/mnt"), "autologin", &["carol"]).unwrap_err();
+
+        assert!(
+            err.to_string().contains("add carol to autologin group"),
+            "{err}"
+        );
+        assert!(err.to_string().contains("user does not exist"), "{err}");
     }
 
     #[test]
