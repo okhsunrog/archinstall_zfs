@@ -30,19 +30,21 @@ impl<S: Subscriber> Layer<S> for UiLogLayer {
         let mut visitor = MessageVisitor::default();
         event.record(&mut visitor);
 
-        let prefix = match level {
-            4 => "ERROR",
-            3 => "WARN ",
-            1 => "DEBUG",
-            0 => "TRACE",
-            _ => "INFO ",
+        // Pad after the bracket so messages line up without a stray space
+        // inside "[INFO ]".
+        let (name, pad) = match level {
+            4 => ("ERROR", ""),
+            3 => ("WARN", " "),
+            1 => ("DEBUG", ""),
+            0 => ("TRACE", ""),
+            _ => ("INFO", " "),
         };
 
         let msg = visitor.message.unwrap_or_default();
         let line = if visitor.fields.is_empty() {
-            format!("[{prefix}] {msg}")
+            format!("[{name}]{pad} {msg}")
         } else {
-            format!("[{prefix}] {msg} {}", visitor.fields.join(" "))
+            format!("[{name}]{pad} {msg} {}", visitor.fields.join(" "))
         };
 
         let _ = self.tx.try_send((line, level));
