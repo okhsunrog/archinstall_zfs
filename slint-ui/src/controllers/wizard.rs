@@ -430,8 +430,12 @@ fn setup_password_strength(app: &App) {
         }
         let current = generation.get().wrapping_add(1);
         generation.set(current);
-        app.global::<PopupState>().set_password_strength_score(-1);
+        // Keep the previous rating on screen until the new one arrives: a
+        // rating that vanishes and reappears on every keystroke is noise.
         if value.is_empty() {
+            let popup = app.global::<PopupState>();
+            popup.set_password_strength_score(-1);
+            popup.set_password_strength_hint(SharedString::default());
             return;
         }
 

@@ -156,32 +156,36 @@ export component UserManagePopup inherits Rectangle {
                                 edited(val) => { root.password-edited(val); }
                             }
 
-                            if password-input.text == "": Text {
-                                text: "Without a password, password login is unavailable. Configure another sign-in method before using this account.";
-                                color: Theme.c.subtext1;
-                                font-size: 13px;
-                                wrap: word-wrap;
-                            }
-                            if password-input.text != "" && PopupState.password-strength-score >= 0: VerticalLayout {
+                            // One fixed-size area for the rating or the no-password
+                            // note, so the form does not resize on every keystroke.
+                            rating := VerticalLayout {
                                 spacing: 6px;
+                                property <bool> rated: password-input.text != "" && PopupState.password-strength-score >= 0;
                                 ProgressBar {
-                                    value: PopupState.password-strength-score + 1;
+                                    value: rating.rated ? PopupState.password-strength-score + 1 : 0;
                                     max: 5;
-                                    fill-color: PopupState.password-strength-color;
+                                    fill-color: rating.rated ? PopupState.password-strength-color : Theme.c.overlay0;
                                 }
 
                                 Text {
-                                    text: PopupState.password-strength-label;
-                                    color: PopupState.password-strength-color;
+                                    text: rating.rated ? PopupState.password-strength-label : (password-input.text == "" ? "No password" : "Strength");
+                                    color: rating.rated ? PopupState.password-strength-color : Theme.c.overlay0;
                                     font-size: 13px;
                                     font-weight: 600;
+                                    height: 18px;
+                                    vertical-alignment: center;
                                 }
 
-                                if PopupState.password-strength-hint != "": Text {
-                                    text: PopupState.password-strength-hint;
+                                Text {
+                                    text: password-input.text == ""
+                                        ? "Without a password, password login is unavailable. Configure another sign-in method before using this account."
+                                        : (rating.rated ? PopupState.password-strength-hint : "The rating appears as you type.");
                                     color: Theme.c.subtext1;
                                     font-size: 13px;
                                     wrap: word-wrap;
+                                    overflow: elide;
+                                    height: 38px;
+                                    vertical-alignment: top;
                                 }
                             }
                             sudo-check := CheckBox {

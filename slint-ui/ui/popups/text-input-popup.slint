@@ -68,32 +68,35 @@ export component TextInputPopup inherits Rectangle {
 
                     init => { input.focus-input(); root.text-edited(root.input-text); }
 
-                // Password strength bar
-                if root.is-password && root.strength-score >= 0: VerticalLayout {
+                    // Password strength. The block keeps one size whatever the
+                    // rating, so the popup neither resizes nor moves while typing.
+                    if root.is-password: VerticalLayout {
                         spacing: Theme.spacing-xs;
 
                         ProgressBar {
-                            value: root.strength-score + 1;
+                            value: max(root.strength-score + 1, 0);
                             max: 5;
-                            fill-color: root.strength-color;
+                            fill-color: root.strength-score >= 0 ? root.strength-color : Theme.c.overlay0;
                         }
 
-                        VerticalLayout {
-                            spacing: Theme.spacing-md;
+                        Text {
+                            text: root.strength-score >= 0 ? root.strength-label : "Strength";
+                            color: root.strength-score >= 0 ? root.strength-color : Theme.c.overlay0;
+                            font-size: Theme.font-sm;
+                            font-weight: FontWeight.semi-bold;
+                            height: 18px;
+                            vertical-alignment: center;
+                        }
 
-                            Text {
-                                text: root.strength-label;
-                                color: root.strength-color;
-                                font-size: Theme.font-sm;
-                                font-weight: FontWeight.semi-bold;
-                            }
-
-                            if root.strength-hint != "": Text {
-                                text: root.strength-hint;
-                                color: Theme.c.subtext1;
-                                font-size: 13px;
-                                wrap: word-wrap;
-                            }
+                        // Room for two lines of advice; longer hints are elided.
+                        Text {
+                            text: root.strength-score >= 0 ? root.strength-hint : "The rating appears as you type.";
+                            color: Theme.c.subtext1;
+                            font-size: 13px;
+                            wrap: word-wrap;
+                            overflow: elide;
+                            height: 38px;
+                            vertical-alignment: top;
                         }
                     }
 
