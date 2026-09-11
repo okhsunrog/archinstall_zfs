@@ -68,7 +68,7 @@ export component AlongsidePanel inherits Rectangle {
             Text { text: "Where to make space"; font-weight: 600; color: Theme.c.text; }
             source-choice := ComboBox { changed has-focus => { root.reveal-if(self.has-focus, self.absolute-position.y, self.height); } accessible-label: "Space source"; model: AlongsideState.sources; current-index <=> AlongsideState.source-index; enabled: !AlongsideState.busy; selected(value) => { AlongsideState.select-source(self.current-index); } }
             Text { text: AlongsideState.details; color: Theme.c.subtext1; wrap: word-wrap; }
-            CheckBox { text: "Use all available space"; checked: AlongsideState.use-all; enabled: !AlongsideState.busy; toggled => { AlongsideState.all-space(self.checked); } changed has-focus => { root.reveal-if(self.has-focus, self.absolute-position.y, self.height); } }
+            CheckBox { text: AlongsideState.use-all-label; checked: AlongsideState.use-all; enabled: !AlongsideState.busy; toggled => { AlongsideState.all-space(self.checked); } changed has-focus => { root.reveal-if(self.has-focus, self.absolute-position.y, self.height); } }
             HorizontalLayout {
                 spacing: 16px;
                 Text { text: "Allocate to this installation"; color: Theme.c.text; }

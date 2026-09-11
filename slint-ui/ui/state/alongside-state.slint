@@ -11,6 +11,10 @@ export global AlongsideState {
     in-out property <bool> insufficient;
     in-out property <bool> additional-efi;
     in-out property <bool> use-all: true;
+    // Set when the user typed or dragged an allocation; cleared when the
+    // source changes so the proposal applies again.
+    in-out property <bool> custom-allocation;
+    in-out property <string> use-all-label: "Use the whole free extent";
     in-out property <int> swap-mode;
     in-out property <float> swap-size: 8;
     in-out property <float> allocation: 32;

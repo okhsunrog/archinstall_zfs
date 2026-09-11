@@ -16,7 +16,9 @@ def run(binary, output, size, scale, small):
         p.screenshot(prefix + '-initial')
         p.click('Combobox', 'Space source')
         p.click('ListItem', '/dev/nvme0n1p2')
-        p.reveal_by_tab('TextInput', 'Allocation in GiB')
+        # Shrinking proposes half of the free space (280 GiB free -> 140),
+        # never everything the resizer would allow.
+        p.wait_value('TextInput', 'Allocation in GiB', '140')
         p.click('TextInput', 'Allocation in GiB')
         p.fill_labeled('Allocation in GiB', '100')
         p.key('\n')
@@ -26,16 +28,17 @@ def run(binary, output, size, scale, small):
             assert not reuse.get('accessibleEnabled'), reuse
             p.click('RadioButton', 'Create a separate')
         # Widgets must follow state set by Rust after the user has touched
-        # them: "Use all" moves the slider and the input to the capacity.
-        p.reveal_by_tab('Checkbox', 'Use all available space')
-        p.click('Checkbox', 'Use all available space')
-        p.wait_value('Slider', 'Space for installation', '240')
-        p.wait_value('TextInput', 'Allocation in GiB', '240')
+        # them: taking everything moves the slider and the input to the
+        # resizer's limit (450 GiB minus the 187 GiB minimum).
+        p.reveal_by_tab('Checkbox', 'Leave the existing system')
+        p.click('Checkbox', 'Leave the existing system')
+        p.wait_value('Slider', 'Space for installation', '263')
+        p.wait_value('TextInput', 'Allocation in GiB', '263')
         # A refresh keeps the current plan while the layout is unchanged.
         p.reveal_by_tab('Button', 'Refresh disks')
         p.click('Button', 'Refresh disks')
         p.wait_value('Combobox', 'Space source', '/dev/nvme0n1p2 — NTFS — 450 GiB')
-        p.wait_value('TextInput', 'Allocation in GiB', '240')
+        p.wait_value('TextInput', 'Allocation in GiB', '263')
         assert p.wait('Combobox', 'Space source')['accessibleValue'].startswith('/dev/nvme0n1p2'), 'refresh discarded the selected source'
         p.click('TextInput', 'Allocation in GiB')
         p.fill_labeled('Allocation in GiB', '100')
