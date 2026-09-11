@@ -38,6 +38,8 @@ def users(p):
     p.click('Button', 'Cancel')
     p.click('Button', 'User accounts')
     p.screenshot('users-dialog')
+    # With an account present the dialog shows cards; the form is on request.
+    p.click('Button', 'Add another user')
     p.fill(0, 'previewuser')
     p.fill(1, 'a long preview passphrase for testing')
     time.sleep(.5)
