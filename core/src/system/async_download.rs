@@ -30,8 +30,14 @@ pub struct DownloadConfig {
     pub backoff_base: Duration,
     /// Connection timeout (default: 10s).
     pub connect_timeout: Duration,
-    /// Idle timeout — abort if no data received for this long (default: 30s).
+    /// Idle timeout — give up on a mirror when no data arrives for this
+    /// long (default: 10 s, pacman's low-speed rule).
     pub idle_timeout: Duration,
+    /// A transfer slower than this, averaged over `slow_window`, is
+    /// abandoned for the next mirror (default: 4 KiB/s over 15 s). The
+    /// partial file is kept, so a slow mirror never loses progress.
+    pub min_speed_bps: u64,
+    pub slow_window: Duration,
     /// Where downloaded packages are kept.
     ///
     /// `None` puts them in the target's own package cache, which is where a
@@ -68,7 +74,9 @@ impl Default for DownloadConfig {
             retries_per_mirror: 3,
             backoff_base: Duration::from_secs(1),
             connect_timeout: Duration::from_secs(10),
-            idle_timeout: Duration::from_secs(30),
+            idle_timeout: Duration::from_secs(10),
+            min_speed_bps: 4 * 1024,
+            slow_window: Duration::from_secs(15),
             cache_dir: cache_dir_from_environment(),
         }
     }
@@ -85,6 +93,10 @@ pub enum PackageState {
         speed_bps: u64,
         mirror: String,
         attempt: u32,
+        /// When the last chunk arrived (or the attempt began). A row that
+        /// has not moved for [`STALE_AFTER`] is waiting on its mirror, and
+        /// its last speed no longer describes anything.
+        updated: Instant,
     },
     Verifying {
         filename: String,
@@ -100,7 +112,21 @@ pub enum PackageState {
     },
 }
 
+/// A download without progress for this long counts as stalled in the
+/// aggregates and the interface.
+pub const STALE_AFTER: Duration = Duration::from_secs(3);
+
 impl PackageState {
+    /// Current transfer rate, zero once the transfer has stalled.
+    pub fn live_speed_bps(&self) -> u64 {
+        match self {
+            Self::Downloading {
+                speed_bps, updated, ..
+            } if updated.elapsed() < STALE_AFTER => *speed_bps,
+            _ => 0,
+        }
+    }
+
     /// Bytes of this package that are on disk.
     ///
     /// Taken from the package's own state rather than accumulated as chunks
@@ -128,6 +154,9 @@ pub enum PackageProgress {
         active_downloads: usize,
         completed: usize,
         failed: usize,
+        /// What the downloader is doing about a mirror that stopped
+        /// delivering, for the status line; empty while transfers flow.
+        note: String,
     },
     /// Installing/upgrading packages locally.
     Installing {
@@ -149,6 +178,7 @@ impl Default for PackageProgress {
             active_downloads: 0,
             completed: 0,
             failed: 0,
+            note: String::new(),
         }
     }
 }
@@ -157,13 +187,9 @@ impl PackageProgress {
     /// Overall download speed in bytes/sec (only meaningful in Downloading phase).
     pub fn total_speed_bps(&self) -> u64 {
         match self {
-            Self::Downloading { packages, .. } => packages
-                .iter()
-                .filter_map(|p| match p {
-                    PackageState::Downloading { speed_bps, .. } => Some(*speed_bps),
-                    _ => None,
-                })
-                .sum(),
+            Self::Downloading { packages, .. } => {
+                packages.iter().map(PackageState::live_speed_bps).sum()
+            }
             _ => 0,
         }
     }
@@ -221,6 +247,7 @@ pub fn start_downloads(
         active_downloads: 0,
         completed: 0,
         failed: 0,
+        note: String::new(),
     };
 
     let (tx, rx) = if let Some(ref tx) = progress_tx {
@@ -275,9 +302,72 @@ pub async fn download_packages(
 /// Shared state for coordinating progress updates.
 struct SharedProgress {
     tx: Arc<watch::Sender<DownloadProgress>>,
+    /// Mirrors that stalled or refused, shared by every download so one
+    /// bad mirror is tried once, not once per file. Counts failures.
+    mirrors: std::sync::Mutex<std::collections::HashMap<String, u32>>,
+}
+
+/// `servers` in their configured order, with mirrors that have failed
+/// moved behind those that have not; more failures sort later.
+fn order_by_health(
+    servers: &[String],
+    failures: &std::collections::HashMap<String, u32>,
+) -> Vec<String> {
+    let mut ordered: Vec<(u32, usize, &String)> = servers
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (failures.get(s).copied().unwrap_or(0), i, s))
+        .collect();
+    ordered.sort();
+    ordered.into_iter().map(|(_, _, s)| s.clone()).collect()
+}
+
+fn mirror_host(server: &str) -> &str {
+    server
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split('/')
+        .next()
+        .unwrap_or(server)
 }
 
 impl SharedProgress {
+    fn new(tx: Arc<watch::Sender<DownloadProgress>>) -> Self {
+        Self {
+            tx,
+            mirrors: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    fn ordered_servers(&self, servers: &[String]) -> Vec<String> {
+        let failures = self.mirrors.lock().expect("mirror health lock");
+        order_by_health(servers, &failures)
+    }
+
+    /// Record a failed transfer from `server` and tell the status line.
+    fn penalize(&self, server: &str, reason: &str, more_mirrors: bool) {
+        *self
+            .mirrors
+            .lock()
+            .expect("mirror health lock")
+            .entry(server.to_string())
+            .or_default() += 1;
+        let note = if more_mirrors {
+            format!("{}: {reason}; trying the next mirror", mirror_host(server))
+        } else {
+            format!("{}: {reason}; retrying", mirror_host(server))
+        };
+        self.set_note(note);
+    }
+
+    fn set_note(&self, note: String) {
+        self.tx.send_modify(|progress| {
+            if let PackageProgress::Downloading { note: current, .. } = progress {
+                *current = note;
+            }
+        });
+    }
+
     /// Record `state` for package `index` and recompute the aggregates.
     ///
     /// The counters are derived from the package vector instead of being
@@ -335,7 +425,19 @@ async fn run_downloads(
         "downloading {total_count} packages"
     );
 
-    let shared = Arc::new(SharedProgress { tx });
+    let shared = Arc::new(SharedProgress::new(tx));
+    // Nothing updates a stalled package, so wake the interface periodically
+    // to re-evaluate which rows are still moving.
+    let ticker = {
+        let tx = shared.tx.clone();
+        tokio::spawn(async move {
+            let mut every = tokio::time::interval(Duration::from_secs(1));
+            loop {
+                every.tick().await;
+                tx.send_modify(|_| {});
+            }
+        })
+    };
 
     // No overall request timeout on purpose: a kernel or firmware package is
     // hundreds of megabytes and may legitimately take many minutes on a slow
@@ -365,6 +467,8 @@ async fn run_downloads(
         .buffer_unordered(config.concurrency)
         .collect()
         .await;
+
+    ticker.abort();
 
     let mut errors = Vec::new();
     for result in results {
@@ -419,11 +523,12 @@ async fn download_single(
 
     let download_started = std::time::Instant::now();
 
-    // Try each mirror
+    // Each round walks the mirrors, healthiest first, and moves on at the
+    // first stall; only a round that fails everywhere waits before the next.
     let mut last_error = None;
-    for server in &task.servers {
-        // Retry on same mirror with exponential backoff
-        for attempt in 1..=config.retries_per_mirror {
+    for attempt in 1..=config.retries_per_mirror {
+        let servers = shared.ordered_servers(&task.servers);
+        for (position, server) in servers.iter().enumerate() {
             let url = format!("{}/{}", server, task.filename);
 
             shared.update_package(
@@ -435,6 +540,7 @@ async fn download_single(
                     speed_bps: 0,
                     mirror: server.clone(),
                     attempt,
+                    updated: Instant::now(),
                 },
             );
 
@@ -474,6 +580,7 @@ async fn download_single(
                         speed_bps = speed_bps,
                     );
                     tracing::info!(file = %task.filename, "download complete");
+                    shared.set_note(String::new());
                     return Ok(());
                 }
                 Err(e) => {
@@ -488,21 +595,21 @@ async fn download_single(
                         bail!("download cancelled");
                     }
 
-                    tracing::debug!(
+                    tracing::warn!(
                         file = %task.filename,
                         server,
                         attempt,
-                        "attempt failed: {e}"
+                        "mirror failed: {e}"
                     );
+                    shared.penalize(server, &e.to_string(), position + 1 < servers.len());
                     last_error = Some(e);
-
-                    // Exponential backoff before retry (on same mirror)
-                    if attempt < config.retries_per_mirror {
-                        let delay = config.backoff_base * 2u32.pow(attempt - 1);
-                        tokio::time::sleep(delay).await;
-                    }
                 }
             }
+        }
+        // Every mirror failed this round: wait before walking them again.
+        if attempt < config.retries_per_mirror {
+            let delay = config.backoff_base * 2u32.pow(attempt - 1);
+            tokio::time::sleep(delay).await;
         }
     }
 
@@ -553,10 +660,18 @@ async fn download_file_with_progress(
         tracing::debug!(file = filename, existing_size, "attempting resume");
     }
 
-    let resp = request
-        .send()
-        .await
-        .wrap_err_with(|| format!("HTTP request failed: {url}"))?;
+    // connect_timeout covers the TCP handshake only. A mirror that accepts
+    // the connection and never answers would park this await for good, and
+    // cancellation could not reach it: bound the wait for the response
+    // headers and watch the token here as well.
+    let resp = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => bail!("download cancelled"),
+        sent = tokio::time::timeout(config.idle_timeout, request.send()) => match sent {
+            Ok(sent) => sent.wrap_err_with(|| format!("HTTP request failed: {url}"))?,
+            Err(_) => bail!("no response from {mirror} within {:?}", config.idle_timeout),
+        },
+    };
 
     let status = resp.status();
     if !status.is_success() && status != reqwest::StatusCode::PARTIAL_CONTENT {
@@ -597,6 +712,7 @@ async fn download_file_with_progress(
 
     // Speed tracking: sliding window
     let mut speed_tracker = SpeedTracker::new();
+    let transfer_started = Instant::now();
 
     loop {
         tokio::select! {
@@ -634,6 +750,19 @@ async fn download_file_with_progress(
 
                         bytes_downloaded += len;
                         speed_tracker.record(len);
+                        // A trickle keeps the idle timeout from firing but is
+                        // no better than a stall: leave it for another mirror
+                        // and resume from here.
+                        if transfer_started.elapsed() >= config.slow_window
+                            && speed_tracker.speed_bps() < config.min_speed_bps
+                        {
+                            drop(file);
+                            bail!(
+                                "too slow ({} KiB/s over {:?}, {bytes_downloaded} of {total_size} bytes)",
+                                speed_tracker.speed_bps() / 1024,
+                                config.slow_window
+                            );
+                        }
 
                         // Update progress state
                         shared.update_package(index, PackageState::Downloading {
@@ -643,6 +772,7 @@ async fn download_file_with_progress(
                             speed_bps: speed_tracker.speed_bps(),
                             mirror: mirror.to_string(),
                             attempt,
+                            updated: Instant::now(),
                         });
                     }
                     Some(Err(e)) => {
@@ -882,12 +1012,14 @@ mod tests {
                 speed_bps: 10,
                 mirror: "mirror".into(),
                 attempt: 1,
+                updated: Instant::now(),
             }],
             total_bytes: 100,
             downloaded_bytes: 50,
             active_downloads: 1,
             completed: 0,
             failed: 0,
+            note: String::new(),
         };
 
         assert_eq!(progress.total_speed_bps(), 10);
@@ -903,6 +1035,7 @@ mod tests {
             active_downloads: 0,
             completed: 0,
             failed: 0,
+            note: String::new(),
         };
 
         assert!(progress.eta().is_none());
@@ -920,8 +1053,9 @@ mod tests {
             active_downloads: 0,
             completed: 0,
             failed: 0,
+            note: String::new(),
         });
-        (SharedProgress { tx: Arc::new(tx) }, rx)
+        (SharedProgress::new(Arc::new(tx)), rx)
     }
 
     fn counters(progress: &PackageProgress) -> (usize, usize, usize, u64) {
@@ -967,6 +1101,7 @@ mod tests {
             speed_bps: 0,
             mirror: "https://mirror.example".into(),
             attempt: 1,
+            updated: Instant::now(),
         };
 
         shared.update_package(0, downloading(100));
@@ -1006,6 +1141,7 @@ mod tests {
             speed_bps: 0,
             mirror: "https://mirror.example".into(),
             attempt,
+            updated: Instant::now(),
         };
 
         // First mirror stalls after 80 bytes, second starts over.
@@ -1029,11 +1165,32 @@ mod tests {
     }
 
     #[test]
+    fn failed_mirrors_sort_behind_healthy_ones_in_configured_order() {
+        let servers: Vec<String> = ["https://a/x", "https://b/x", "https://c/x"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let mut failures = std::collections::HashMap::new();
+        assert_eq!(order_by_health(&servers, &failures), servers);
+        failures.insert("https://a/x".to_string(), 2);
+        failures.insert("https://b/x".to_string(), 1);
+        assert_eq!(
+            order_by_health(&servers, &failures),
+            ["https://c/x", "https://b/x", "https://a/x"]
+        );
+        assert_eq!(
+            mirror_host("https://frankfurt.mirror.pkgbuild.com/core/os/x86_64"),
+            "frankfurt.mirror.pkgbuild.com"
+        );
+    }
+
+    #[test]
     fn test_download_config_default() {
         let config = DownloadConfig::default();
         assert_eq!(config.concurrency, 5);
         assert_eq!(config.retries_per_mirror, 3);
         assert_eq!(config.connect_timeout, Duration::from_secs(10));
-        assert_eq!(config.idle_timeout, Duration::from_secs(30));
+        assert_eq!(config.idle_timeout, Duration::from_secs(10));
+        assert_eq!(config.min_speed_bps, 4 * 1024);
     }
 }
