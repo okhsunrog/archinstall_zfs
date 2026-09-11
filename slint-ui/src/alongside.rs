@@ -669,14 +669,6 @@ fn rebuild(app: &App, config: &mut GlobalConfig) {
         let max = gib(source.capacity) as f32;
         state.set_minimum(min);
         state.set_maximum(max);
-        state.set_use_all_label(
-            if source.is_unallocated() {
-                "Use the whole free extent"
-            } else {
-                "Leave the existing system only its minimum and take the rest"
-            }
-            .into(),
-        );
         let all_bytes = source.capacity / MIB * MIB;
         let allocation_bytes = if let Some(k) = kept {
             k.allocation_bytes

@@ -28,12 +28,19 @@ def run(binary, output, size, scale, small):
             assert not reuse.get('accessibleEnabled'), reuse
             p.click('RadioButton', 'Create a separate')
         # Widgets must follow state set by Rust after the user has touched
-        # them: taking everything moves the slider and the input to the
-        # resizer's limit (450 GiB minus the 187 GiB minimum).
-        p.reveal_by_tab('Checkbox', 'Leave the existing system')
-        p.click('Checkbox', 'Leave the existing system')
+        # them: re-selecting the source returns to the proposal, and the
+        # slider tops out at the resizer's limit (450 GiB minus the 187 GiB
+        # minimum), which is what a maximal drag reaches.
+        p.reveal_by_tab('Combobox', 'Space source')
+        p.click('Combobox', 'Space source')
+        p.click('ListItem', '/dev/nvme0n1p2')
+        p.wait_value('Slider', 'Space for installation', '140')
+        p.wait_value('TextInput', 'Allocation in GiB', '140')
+        assert abs(p.properties('Slider', 'Space for installation').get('accessibleValueMaximum', 0) - 263.0) < 0.01
+        p.click('TextInput', 'Allocation in GiB')
+        p.fill_labeled('Allocation in GiB', '263')
+        p.key('\n')
         p.wait_value('Slider', 'Space for installation', '263')
-        p.wait_value('TextInput', 'Allocation in GiB', '263')
         # A refresh keeps the current plan while the layout is unchanged.
         p.reveal_by_tab('Button', 'Refresh disks')
         p.click('Button', 'Refresh disks')

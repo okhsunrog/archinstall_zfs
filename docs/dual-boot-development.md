@@ -149,7 +149,7 @@ including maps, the compact layout and the review summary.
 | --- | --- |
 | Reuse ESP | Select source, enter allocation, switch to unallocated space |
 | Swap | Choose disk swap on Disk; map and Review subtract its size from the pool |
-| Whole extent | Free space is taken whole by default; a shrink proposes half of the free space (140 of 280 GiB) and "take the rest" moves to the resizer's limit |
+| Whole extent | Free space is taken whole by default; a shrink proposes half of the free space (140 of 280 GiB) and the slider tops out at the resizer's limit |
 | Insufficient ESP | Reuse option disabled with reason; select the separate ESP by keyboard |
 | Return navigation | Open Review, return to Disk, switch installation modes and return |
 | Missing NTFS tools | Select unavailable source; readable package hint; Install disabled |
