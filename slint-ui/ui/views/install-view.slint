@@ -23,6 +23,12 @@ export component InstallView inherits VerticalLayout {
     spacing: 16px;
 
     private property <bool> running: InstallState.state == 1 || InstallState.state == 4;
+    // The activity icon turns while the installer runs. The view is created
+    // already running, so the first step is taken in init; the animation
+    // repeats until `running` clears, then the property snaps to rest.
+    private property <angle> spin: 0deg;
+    animate spin { duration: 1500ms; easing: linear; iteration-count: -1; enabled: root.running; }
+    init => { root.spin = 360deg; }
     private property <bool> follow-output: true;
     private property <color> status-color: InstallState.state == 2 ? Theme.c.green
         : InstallState.state == 3 ? Theme.c.red
@@ -125,6 +131,7 @@ export component InstallView inherits VerticalLayout {
                     Icon {
                         size: 24px;
                         tint: root.status-color;
+                        transform-rotation: root.running ? root.spin : 0deg;
                         source: InstallState.state == 2 ? @image-url("../../assets/icons/check.svg")
                             : root.running ? @image-url("../../assets/icons/refresh-cw.svg")
                             : @image-url("../../assets/icons/x.svg");
