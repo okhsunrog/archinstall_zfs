@@ -347,12 +347,42 @@ fn progress(app: &App, state: i32) {
     install.set_download_active(state == 1);
     install.set_download_pct(62);
     install.set_download_status("62% · 24.8 MiB/s · 18 seconds remaining".into());
-    install.set_download_items(ModelRc::new(VecModel::from(vec![DownloadInfo {
-        filename: "linux-7.2.3.arch1-3-x86_64.pkg.tar.zst".into(),
-        pct: 62,
-        speed: "24.8 MiB/s".into(),
-        state: 0,
-    }])));
+    // The panel lists every transfer in flight; the fixture shows a full set
+    // of parallel downloads including a stalled one and one being verified.
+    let row = |filename: &str, pct: i32, speed: &str, state: i32| DownloadInfo {
+        filename: filename.into(),
+        pct,
+        speed: speed.into(),
+        state,
+    };
+    install.set_download_items(ModelRc::new(VecModel::from(vec![
+        row(
+            "linux-7.2.3.arch1-3-x86_64.pkg.tar.zst",
+            62,
+            "24.8 MiB/s",
+            0,
+        ),
+        row(
+            "linux-firmware-intel-20260810-2-any.pkg.tar.zst",
+            41,
+            "9.1 MiB/s",
+            0,
+        ),
+        row(
+            "gcc-16.2.1+r23+gd564253eb6c8-1-x86_64.pkg.tar.zst",
+            88,
+            "6.4 MiB/s",
+            0,
+        ),
+        row("perl-5.42.2-2-x86_64.pkg.tar.zst", 17, "3.2 MiB/s", 0),
+        row("systemd-261.2-1-x86_64.pkg.tar.zst", 100, "", 1),
+        row(
+            "glibc-2.44+r24+g16be1518495f-1-x86_64.pkg.tar.zst",
+            0,
+            "waiting for mirror",
+            0,
+        ),
+    ])));
     // Enough realistic output to review scrolling, wrapping and persistent actions.
     // All messages describe the preview fixture; no commands are executed here.
     let mut messages = vec![
