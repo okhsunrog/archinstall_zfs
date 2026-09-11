@@ -247,6 +247,9 @@ async fn install(
         let cancel = cancel.clone();
         let download_config = download_config.clone();
         tokio::task::spawn_blocking(move || {
+            if let Err(error) = crate::system::mirrors::refresh_live_once() {
+                tracing::warn!(%error, "keeping the medium's mirrorlist");
+            }
             crate::zfs_setup::initialize_zfs(
                 &*runner,
                 distro,
