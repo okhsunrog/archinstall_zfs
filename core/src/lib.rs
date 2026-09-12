@@ -13,6 +13,7 @@ pub mod packages;
 pub mod pool_picker;
 pub mod prepare;
 pub mod profile;
+pub mod resume;
 pub mod swap;
 pub mod system;
 pub mod zfs_cleanup;

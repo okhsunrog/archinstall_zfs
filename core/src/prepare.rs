@@ -18,6 +18,7 @@ use crate::system::cmd::CommandRunner;
 ///
 /// `zfs` is `None` for [`InstallationMode::ExistingPool`] — the pool is already
 /// present, so no partition is consumed.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PreparedPartitions {
     pub efi: PathBuf,
     pub zfs: Option<PathBuf>,

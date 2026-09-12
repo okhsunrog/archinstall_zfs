@@ -13,5 +13,12 @@ export global WelcomeState {
 
     out property <bool> all-checks-ok: net-ok && uefi-ok && zfs-ok;
 
+    // An installation that was cancelled or failed in this live session and
+    // whose settings can be loaded again.
+    in property <bool> interrupted-available: false;
+    in property <string> interrupted-summary: "";
+
     callback check-internet();
+    callback continue-interrupted();
+    callback discard-interrupted();
 }

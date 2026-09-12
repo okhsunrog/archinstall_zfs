@@ -301,6 +301,45 @@ export component WelcomeView inherits Rectangle {
                     wrap: word-wrap;
                     horizontal-alignment: center;
                 }
+                if WelcomeState.interrupted-available: Rectangle {
+                    background: Theme.c.surface0;
+                    border-radius: 8px;
+                    VerticalLayout {
+                        padding: 14px;
+                        spacing: 8px;
+                        Text {
+                            text: "An installation was interrupted: " + WelcomeState.interrupted-summary + ".";
+                            color: Theme.c.text;
+                            font-size: 14px;
+                            wrap: word-wrap;
+                            horizontal-alignment: center;
+                        }
+                        Text {
+                            text: "Its settings, including passwords, can be loaded so nothing has to be entered again.";
+                            color: Theme.c.subtext1;
+                            font-size: 13px;
+                            wrap: word-wrap;
+                            horizontal-alignment: center;
+                        }
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: 12px;
+                            StyledButton {
+                                label: "Load interrupted settings";
+                                height: 40px;
+                                style: Theme.button-primary;
+                                enabled: WelcomeState.all-checks-ok;
+                                clicked => { WelcomeState.continue-interrupted(); }
+                            }
+                            StyledButton {
+                                label: "Discard";
+                                height: 40px;
+                                outlined: true;
+                                clicked => { WelcomeState.discard-interrupted(); }
+                            }
+                        }
+                    }
+                }
                 HorizontalLayout {
                     alignment: center;
                     spacing: 12px;

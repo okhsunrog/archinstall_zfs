@@ -33,6 +33,7 @@ pub fn enable() {
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 pub enum Scene {
     Welcome,
+    Interrupted,
     Offline,
     NoUefi,
     ZfsPreparing,
@@ -450,6 +451,7 @@ pub fn show(app: &App, scene: Scene, size: Size) {
         .set_size(slint::PhysicalSize::new(size.0, size.1));
     let step = match scene {
         Scene::Welcome
+        | Scene::Interrupted
         | Scene::Offline
         | Scene::NoUefi
         | Scene::ZfsPreparing
@@ -474,6 +476,31 @@ pub fn show(app: &App, scene: Scene, size: Size) {
     }
     match scene {
         Scene::NoUefi => app.global::<WelcomeState>().set_uefi_ok(false),
+        Scene::Interrupted => {
+            // A record left by a cancelled alongside run: partitions exist,
+            // so continuing reuses them instead of resizing again.
+            let state = app.global::<WelcomeState>();
+            state.set_interrupted_summary(
+                "install alongside, started 12 minutes ago, partitions already created on /dev/nvme0n1p5"
+                    .into(),
+            );
+            state.set_interrupted_available(true);
+            let weak = app.as_weak();
+            state.on_continue_interrupted(move || {
+                if let Some(app) = weak.upgrade() {
+                    app.global::<WelcomeState>()
+                        .set_interrupted_available(false);
+                    app.global::<WizardState>().invoke_go_to(1);
+                }
+            });
+            let weak = app.as_weak();
+            state.on_discard_interrupted(move || {
+                if let Some(app) = weak.upgrade() {
+                    app.global::<WelcomeState>()
+                        .set_interrupted_available(false);
+                }
+            });
+        }
         Scene::ZfsPreparing | Scene::ZfsFailed => {
             let state = app.global::<WelcomeState>();
             state.set_zfs_ok(false);

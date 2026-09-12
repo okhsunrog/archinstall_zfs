@@ -11,7 +11,7 @@ use archinstall_zfs_core::distro::Distribution;
 use archinstall_zfs_core::kernel::scanner::CompatibilityResult;
 use slint::{ComponentHandle, SharedString};
 
-use crate::ui::{App, WelcomeState};
+use crate::ui::{App, WelcomeState, WizardState};
 
 /// Cached results of the background kernel compatibility scan. The wizard's
 /// "Kernel" item activation reads this to populate the kernel select popup
@@ -65,6 +65,7 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_scan: &Kernel
         return;
     }
     run_initial_checks(app, demo);
+    setup_interrupted(app, config);
 
     let weak = app.as_weak();
     let cfg = config.clone();
@@ -216,5 +217,49 @@ fn start_kernel_scan(
         }
         cache.store(distro, results);
         tracing::info!("kernel compatibility scan complete");
+    });
+}
+
+/// Offer the settings of an installation that was cancelled or failed in
+/// this live session. Loading them replaces the wizard's configuration and
+/// jumps to the Disk step; a run that had already partitioned the disk
+/// continues on those partitions.
+fn setup_interrupted(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
+    use archinstall_zfs_core::resume;
+    let state = app.global::<WelcomeState>();
+    let Some(interrupted) = resume::load() else {
+        state.set_interrupted_available(false);
+        return;
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    state.set_interrupted_summary(interrupted.summary(now).into());
+    state.set_interrupted_available(true);
+
+    let weak = app.as_weak();
+    let cfg = config.clone();
+    state.on_continue_interrupted(move || {
+        let Some(app) = weak.upgrade() else { return };
+        let Some(interrupted) = resume::load() else {
+            app.global::<WelcomeState>()
+                .set_interrupted_available(false);
+            return;
+        };
+        *cfg.borrow_mut() = interrupted.config_to_continue();
+        tracing::info!("loaded the settings of the interrupted installation");
+        app.global::<WelcomeState>()
+            .set_interrupted_available(false);
+        crate::refresh::refresh_items(&app, &cfg.borrow());
+        app.global::<WizardState>().invoke_go_to(1);
+    });
+    let weak = app.as_weak();
+    state.on_discard_interrupted(move || {
+        resume::clear();
+        if let Some(app) = weak.upgrade() {
+            app.global::<WelcomeState>()
+                .set_interrupted_available(false);
+        }
     });
 }
