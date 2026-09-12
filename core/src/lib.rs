@@ -16,6 +16,7 @@ pub mod profile;
 pub mod resume;
 pub mod swap;
 pub mod system;
+pub mod target_dir;
 pub mod zfs_cleanup;
 pub mod zfs_keyfile;
 pub mod zfs_setup;

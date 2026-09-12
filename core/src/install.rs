@@ -144,6 +144,9 @@ struct CleanupState {
     /// The pipeline started creating or importing the pool, so it is this
     /// installation's to export.
     pool_setup_started: AtomicBool,
+    /// The pipeline created the pool on this installation's own partition;
+    /// that settles ownership regardless of what was imported beforehand.
+    pool_created: AtomicBool,
     /// The pool was already imported before the pipeline ran, so it belongs to
     /// the live environment and must be left alone. Defaults to true so a pool
     /// whose initial ownership could not be established is never exported.
@@ -154,6 +157,7 @@ impl Default for CleanupState {
     fn default() -> Self {
         Self {
             pool_setup_started: AtomicBool::new(false),
+            pool_created: AtomicBool::new(false),
             pool_preexisting: AtomicBool::new(true),
         }
     }
@@ -173,9 +177,10 @@ impl CleanupState {
         root_dataset: &str,
         install_succeeded: bool,
     ) -> Result<()> {
-        if !self.pool_setup_started.load(Ordering::Acquire)
-            || self.pool_preexisting.load(Ordering::Acquire)
-        {
+        let owned = self.pool_created.load(Ordering::Acquire)
+            || (self.pool_setup_started.load(Ordering::Acquire)
+                && !self.pool_preexisting.load(Ordering::Acquire));
+        if !owned {
             return Ok(());
         }
 
@@ -234,6 +239,15 @@ async fn install(
     }
     tracing::info!("UEFI boot detected");
 
+    // What an earlier run left in the target directory stops the root
+    // dataset from mounting; find out now, before the disk is touched.
+    {
+        let runner = runner.clone();
+        let mountpoint = mountpoint.clone();
+        tokio::task::spawn_blocking(move || crate::target_dir::ensure_empty(&*runner, &mountpoint))
+            .await??;
+    }
+
     for warning in crate::kernel::scanner::validate_kernel_zfs_plan(
         config.distribution(),
         &kernel,
@@ -271,6 +285,17 @@ async fn install(
     }
     tracing::info!("ZFS initialized on host");
 
+    // An earlier attempt's pool on our own partition is exported here so it
+    // can be created again; anything else with that name is left alone.
+    {
+        let runner = runner.clone();
+        let config = config.clone();
+        let pool_name = pool_name.clone();
+        tokio::task::spawn_blocking(move || {
+            crate::zfs_cleanup::release_leftover_pool(&*runner, &pool_name, &config)
+        })
+        .await??;
+    }
     cleanup.pool_preexisting.store(
         crate::zfs_cleanup::pool_is_imported(&pool_name)
             .await
@@ -298,6 +323,11 @@ async fn install(
     tracing::info!(target: "metrics", event = "phase_start", num = 2u32, name = "ZFS pool and datasets");
     ensure_not_cancelled(&cancel)?;
     cleanup.pool_setup_started.store(true, Ordering::Release);
+    // A pool created on our own partition is ours to export whatever the
+    // pre-check said, and whether or not the creation itself got through.
+    if config.installation_mode != Some(crate::config::types::InstallationMode::ExistingPool) {
+        cleanup.pool_created.store(true, Ordering::Release);
+    }
     crate::prepare::prepare_zfs(&*runner, &config, zfs_partition.as_deref(), &mountpoint).await?;
 
     // ── Phase 3: EFI partition ─────────────────────────────────

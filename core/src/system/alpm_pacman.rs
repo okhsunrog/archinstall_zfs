@@ -1,5 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use alpm::{Alpm, DownloadEvent, LogLevel, TransFlag};
 use color_eyre::eyre::{Context, Result, bail, eyre};
@@ -37,6 +39,32 @@ impl Drop for TargetMounts {
             }
         }
     }
+}
+
+/// When the live system's databases were last synced. Every handle that
+/// syncs takes `db.lck`, and the package search opens a handle per
+/// keystroke, so two searches typed a second apart used to fight over the
+/// lock and one of them failed. One sync at a time, and none while the last
+/// one is fresh.
+static LIVE_SYNC: Mutex<Option<Instant>> = Mutex::new(None);
+const LIVE_SYNC_FRESH: Duration = Duration::from_secs(600);
+
+/// Sync the live system's databases through `handle`, unless another
+/// handle did so recently.
+pub fn sync_live_databases(handle: &mut Alpm, force: bool) -> Result<()> {
+    let mut last = LIVE_SYNC
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if !force && last.is_some_and(|at| at.elapsed() < LIVE_SYNC_FRESH) {
+        return Ok(());
+    }
+    tracing::info!("syncing package databases");
+    handle
+        .syncdbs_mut()
+        .update(force)
+        .map_err(|e| eyre!("failed to sync databases: {e}"))?;
+    *last = Some(Instant::now());
+    Ok(())
 }
 
 /// Wraps an alpm handle for host or target installs.
@@ -115,6 +143,9 @@ impl AlpmContext {
 
     /// Sync all registered databases (equivalent to `pacman -Sy`).
     pub fn sync_databases(&mut self, force: bool) -> Result<()> {
+        if !self.is_target {
+            return sync_live_databases(&mut self.handle, force);
+        }
         tracing::info!("syncing package databases");
         self.handle
             .syncdbs_mut()
