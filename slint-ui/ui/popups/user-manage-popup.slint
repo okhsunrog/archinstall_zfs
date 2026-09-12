@@ -16,6 +16,23 @@ export component UserManagePopup inherits Rectangle {
     callback user-sudo-toggled(int);
     callback password-edited(string);
     callback closed();
+    // The form is shown for the first account and on request; most systems
+    // have one user, so after adding one the cards are what is on screen.
+    in-out property <bool> adding;
+    // Mirrors of the form fields, so the action row outside the scrolling
+    // body can submit them; the form itself is destroyed after a submit.
+    property <string> form-username;
+    property <string> form-password;
+    property <bool> form-sudo: true;
+    property <bool> form-dirty: form-username != "" || form-password != "";
+    // Destroying the form clears its fields; the mirrors follow.
+    function reset-form() {
+        root.adding = false;
+        root.form-username = "";
+        root.form-password = "";
+        root.form-sudo = true;
+        root.password-edited("");
+    }
 
     if popup-visible: Rectangle {
         background: #00000080;
@@ -115,6 +132,16 @@ export component UserManagePopup inherits Rectangle {
                                     }
                                 }
                             }
+                            if root.users.length > 0 && !root.adding: StyledButton {
+                                label: "Add another user";
+                                height: 40px;
+                                outlined: true;
+                                changed has-focus => { form-scroll.reveal-if(self.has-focus, self.y, self.height); }
+                                clicked => { root.adding = true; EditingState.user-error = ""; }
+                            }
+                            if root.adding: VerticalLayout {
+                            spacing: 12px;
+                            init => { username-input.focus-input(); }
                             Rectangle {
                                 height: 1px;
                                 background: Theme.c.surface1;
@@ -137,7 +164,7 @@ export component UserManagePopup inherits Rectangle {
                                 height: 40px;
                                 placeholder: "e.g. alex";
                                 accessible-label: "Username";
-                                edited(_) => { EditingState.user-error = ""; }
+                                edited(val) => { EditingState.user-error = ""; root.form-username = val; }
                                 changed has-focus => { form-scroll.reveal-if(self.has-focus, self.y, self.height); }
                             }
 
@@ -153,35 +180,39 @@ export component UserManagePopup inherits Rectangle {
                                 accessible-label: "Account password";
                                 is-password: true;
                                 changed has-focus => { form-scroll.reveal-if(self.has-focus, self.y, self.height); }
-                                edited(val) => { root.password-edited(val); }
+                                edited(val) => { root.password-edited(val); root.form-password = val; }
                             }
 
-                            if password-input.text == "": Text {
-                                text: "Without a password, password login is unavailable. Configure another sign-in method before using this account.";
-                                color: Theme.c.subtext1;
-                                font-size: 13px;
-                                wrap: word-wrap;
-                            }
-                            if password-input.text != "" && PopupState.password-strength-score >= 0: VerticalLayout {
+                            // One fixed-size area for the rating or the no-password
+                            // note, so the form does not resize on every keystroke.
+                            rating := VerticalLayout {
                                 spacing: 6px;
+                                property <bool> rated: password-input.text != "" && PopupState.password-strength-score >= 0;
                                 ProgressBar {
-                                    value: PopupState.password-strength-score + 1;
+                                    value: rating.rated ? PopupState.password-strength-score + 1 : 0;
                                     max: 5;
-                                    fill-color: PopupState.password-strength-color;
+                                    fill-color: rating.rated ? PopupState.password-strength-color : Theme.c.overlay0;
                                 }
 
                                 Text {
-                                    text: PopupState.password-strength-label;
-                                    color: PopupState.password-strength-color;
+                                    text: rating.rated ? PopupState.password-strength-label : (password-input.text == "" ? "No password" : "Strength");
+                                    color: rating.rated ? PopupState.password-strength-color : Theme.c.overlay0;
                                     font-size: 13px;
                                     font-weight: 600;
+                                    height: 18px;
+                                    vertical-alignment: center;
                                 }
 
-                                if PopupState.password-strength-hint != "": Text {
-                                    text: PopupState.password-strength-hint;
+                                Text {
+                                    text: password-input.text == ""
+                                        ? "Without a password, password login is unavailable. Configure another sign-in method before using this account."
+                                        : (rating.rated ? PopupState.password-strength-hint : "The rating appears as you type.");
                                     color: Theme.c.subtext1;
                                     font-size: 13px;
                                     wrap: word-wrap;
+                                    overflow: elide;
+                                    height: 38px;
+                                    vertical-alignment: top;
                                 }
                             }
                             sudo-check := CheckBox {
@@ -189,6 +220,8 @@ export component UserManagePopup inherits Rectangle {
                                 height: 40px;
                                 checked: true;
                                 changed has-focus => { form-scroll.reveal-if(self.has-focus, self.y, self.height); }
+                                toggled => { root.form-sudo = self.checked; }
+                            }
                             }
                         }
                     }
@@ -201,21 +234,23 @@ export component UserManagePopup inherits Rectangle {
                     }
                     HorizontalLayout {
                         spacing: 12px;
-                        StyledButton {
+                        if root.adding: StyledButton {
                             label: "Add user";
                             height: 40px;
-                            style: username-input.text != "" ? Theme.button-primary : Theme.button-default;
-                            outlined: username-input.text == "";
-                            enabled: username-input.text != "";
+                            style: root.form-username != "" ? Theme.button-primary : Theme.button-default;
+                            outlined: root.form-username == "";
+                            enabled: root.form-username != "";
                             clicked => {
-                                if root.user-added(username-input.text, password-input.text, sudo-check.checked) {
-                                    username-input.text = "";
-                                    password-input.text = "";
-                                    sudo-check.checked = true;
-                                    root.password-edited("");
-                                    username-input.focus-input();
+                                if root.user-added(root.form-username, root.form-password, root.form-sudo) {
+                                    root.reset-form();
                                 }
                             }
+                        }
+                        if root.adding && root.users.length > 0: StyledButton {
+                            label: "Cancel";
+                            height: 40px;
+                            outlined: true;
+                            clicked => { EditingState.user-error = ""; root.reset-form(); }
                         }
 
                         Rectangle {
@@ -225,18 +260,18 @@ export component UserManagePopup inherits Rectangle {
                         StyledButton {
                             label: "Done";
                             height: 40px;
-                            style: username-input.text == "" ? Theme.button-primary : Theme.button-default;
-                            outlined: username-input.text != "";
+                            style: root.form-dirty ? Theme.button-default : Theme.button-primary;
+                            outlined: root.form-dirty;
                             clicked => {
-                                if username-input.text != "" || password-input.text != "" {
-                                    EditingState.user-error = "Click Add user to save this account, or clear the form to finish.";
+                                if root.adding && root.form-dirty {
+                                    EditingState.user-error = "Click Add user to save this account, or Cancel to discard it.";
                                 } else { root.closed(); }
                             }
                         }
                     }
                 }
 
-                init => { username-input.focus-input(); root.password-edited(""); EditingState.user-error = ""; }
+                init => { root.reset-form(); root.adding = root.users.length == 0; EditingState.user-error = ""; }
             }
         }
     }

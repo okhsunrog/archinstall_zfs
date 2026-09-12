@@ -19,9 +19,41 @@ use std::{cell::RefCell, path::PathBuf, rc::Rc};
 struct Source {
     source: SpaceSource,
     label: String,
+    /// Hard maximum: the whole extent, or what the resizer allows.
     capacity: u64,
+    /// For a shrink source: partition size and the filesystem's resize limits.
+    shrink: Option<(u64, ShrinkLimits)>,
     detail: String,
     error: String,
+}
+
+impl Source {
+    fn is_unallocated(&self) -> bool {
+        matches!(self.source, SpaceSource::Unallocated { .. })
+    }
+
+    /// The allocation proposed for `needed` bytes, and whether it exceeds the
+    /// margin the retained system keeps by default.
+    fn proposal(&self, needed: u64) -> Option<(u64, bool)> {
+        match self.shrink {
+            Some((size, limits)) => {
+                let d = ShrinkDefaults::compute(size, limits, needed);
+                d.default.map(|bytes| (bytes, d.cramped()))
+            }
+            None => (self.capacity >= needed).then_some((self.capacity / MIB * MIB, false)),
+        }
+    }
+}
+
+/// What shrinking `node` leaves for its current system, for the source line.
+fn shrink_detail(node: &std::path::Path, size: u64, limits: ShrinkLimits) -> String {
+    let free = size.saturating_sub(limits.used_bytes);
+    format!(
+        "{} uses {:.0} GiB and has {:.0} GiB free. Only its end moves; the proposal shares that free space and leaves it a working margin.",
+        node.display(),
+        gib(limits.used_bytes),
+        gib(free)
+    )
 }
 #[derive(Clone)]
 struct Efi {
@@ -139,23 +171,21 @@ fn survey(disk: &std::path::Path, previous: Option<&Survey>) -> Result<Survey, S
             sources.push(cached.clone());
             continue;
         }
-        let minimum = minimum_size(&RealRunner, p, fs);
-        let (capacity, error) = match minimum {
-            Ok(min) => (
-                size.saturating_sub(min.saturating_add(2 * MIB)),
+        let (capacity, shrink, detail, error) = match shrink_limits(&RealRunner, p, fs) {
+            Ok(limits) => (
+                ShrinkDefaults::compute(size, limits, 0).hard_max,
+                Some((size, limits)),
+                shrink_detail(&p.node, size, limits),
                 String::new(),
             ),
-            Err(e) => (0, format!("{e:#}")),
+            Err(e) => (0, None, String::new(), format!("{e:#}")),
         };
         sources.push(Source {
             source: SpaceSource::Shrink { partition: number },
             label,
             capacity,
-            detail: format!(
-                "Keep {} at its current start; reduce only its end. Up to {:.0} GiB can be allocated here.",
-                p.node.display(),
-                gib(capacity)
-            ),
+            shrink,
+            detail,
             error,
         });
     }
@@ -167,6 +197,7 @@ fn survey(disk: &std::path::Path, previous: Option<&Survey>) -> Result<Survey, S
                 source: SpaceSource::Unallocated { start, end },
                 label: format!("Unallocated space — {:.1} GiB", gib(bytes)),
                 capacity: bytes,
+                shrink: None,
                 detail: "Create a ZFS partition here without shrinking an existing filesystem."
                     .into(),
                 error: String::new(),
@@ -223,12 +254,21 @@ fn fixture() -> Survey {
     let mut survey = Survey {
         layout: layout.clone(),
         sources: vec![
-            Source {
-                source: SpaceSource::Shrink { partition: 2 },
-                label: "/dev/nvme0n1p2 — NTFS — 450 GiB".into(),
-                capacity: 240 * GIB,
-                detail: "Windows keeps at least 210 GiB, including working space. Only the end of this partition will move.".into(),
-                error: String::new(),
+            {
+                // 170 GiB in use: 280 GiB free, 140 GiB proposed, 263 GiB at most.
+                let size = 450 * GIB;
+                let limits = ShrinkLimits {
+                    used_bytes: 170 * GIB,
+                    minimum_bytes: 187 * GIB,
+                };
+                Source {
+                    source: SpaceSource::Shrink { partition: 2 },
+                    label: "/dev/nvme0n1p2 — NTFS — 450 GiB".into(),
+                    capacity: ShrinkDefaults::compute(size, limits, 0).hard_max,
+                    shrink: Some((size, limits)),
+                    detail: shrink_detail(std::path::Path::new("/dev/nvme0n1p2"), size, limits),
+                    error: String::new(),
+                }
             },
             Source {
                 source: SpaceSource::Unallocated {
@@ -237,6 +277,7 @@ fn fixture() -> Survey {
                 },
                 label: "Unallocated space — 60 GiB".into(),
                 capacity: ((layout.lastlba + 1) * 512 - 452 * GIB) / MIB * MIB,
+                shrink: None,
                 detail: "Use free space without resizing Windows.".into(),
                 error: String::new(),
             },
@@ -258,6 +299,7 @@ fn fixture() -> Survey {
         }
         Ok("missing-tools") => {
             survey.sources[0].capacity = 0;
+            survey.sources[0].shrink = None;
             survey.sources[0].error =
                 "Resizing NTFS requires ntfsresize (package ntfs-3g). Install it in the live system and refresh, or use unallocated space."
                     .into();
@@ -266,6 +308,34 @@ fn fixture() -> Survey {
         _ => {}
     }
     survey
+}
+
+/// Free space that belongs to nobody comes first. Otherwise prefer the
+/// partition whose proposal stays within its system's margin, then any
+/// partition the resizer can make room on.
+fn default_source(sources: &[Source]) -> Option<usize> {
+    let usable = |s: &Source| s.error.is_empty();
+    sources
+        .iter()
+        .position(|s| usable(s) && s.is_unallocated() && s.capacity >= MIN_LINUX_BYTES)
+        .or_else(|| {
+            sources
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| usable(s))
+                .filter_map(|(i, s)| {
+                    s.proposal(MIN_LINUX_BYTES)
+                        .filter(|(_, cramped)| !cramped)
+                        .map(|(bytes, _)| (i, bytes))
+                })
+                .max_by_key(|(_, bytes)| *bytes)
+                .map(|(i, _)| i)
+        })
+        .or_else(|| {
+            sources
+                .iter()
+                .position(|s| usable(s) && s.proposal(MIN_LINUX_BYTES).is_some())
+        })
 }
 
 impl Guarded for AlongsideState<'_> {
@@ -363,6 +433,7 @@ fn load(app: &App, index: Option<usize>, keep: Option<Request>) {
                     state.set_efi_index(efi as i32);
                     state.set_additional_efi(matches!(r.efi, EfiChoice::CreateSeparate { .. }));
                     state.set_use_all(false);
+                    state.set_custom_allocation(true);
                     state.set_allocation(gib(r.allocation_bytes) as f32);
                     if r.swap_bytes > 0 {
                         state.set_swap_size((r.swap_bytes / GIB) as f32);
@@ -376,24 +447,10 @@ fn load(app: &App, index: Option<usize>, keep: Option<Request>) {
                         "The previous plan no longer matches this disk; this is a new plan built from the current layout.",
                     );
                 }
-                state.set_source_index(
-                    survey
-                        .sources
-                        .iter()
-                        .position(|s| {
-                            matches!(s.source, SpaceSource::Unallocated { .. })
-                                && s.error.is_empty()
-                                && s.capacity >= MIN_LINUX_BYTES
-                        })
-                        .or_else(|| {
-                            survey
-                                .sources
-                                .iter()
-                                .position(|s| s.error.is_empty() && s.capacity >= MIN_LINUX_BYTES)
-                        })
-                        .map(|i| i as i32)
-                        .unwrap_or(0),
-                );
+                let chosen = default_source(&survey.sources);
+                state.set_source_index(chosen.map(|i| i as i32).unwrap_or(0));
+                state.set_use_all(chosen.is_some_and(|i| survey.sources[i].is_unallocated()));
+                state.set_custom_allocation(false);
                 state.set_efi_index(
                     survey
                         .efis
@@ -406,7 +463,6 @@ fn load(app: &App, index: Option<usize>, keep: Option<Request>) {
                         .unwrap_or(0) as i32,
                 );
                 state.set_additional_efi(false);
-                state.set_use_all(true);
                 Session::set_survey(Some(survey));
                 state.invoke_rebuild();
             }
@@ -525,6 +581,34 @@ fn efi_details(space: &EfiSpace, budget: BootSpace, insufficient: bool) -> Resul
     ))
 }
 
+/// Both sides of a shrink: the new size, what the retained system keeps
+/// free, and a warning when that is little.
+fn shrink_outcome(
+    old: &Partition,
+    new_sectors: u64,
+    sectorsize: u64,
+    limits: Option<ShrinkLimits>,
+) -> String {
+    let before = sectors_gib(old.size, sectorsize);
+    let after = sectors_gib(new_sectors, sectorsize);
+    let mut text = format!(
+        "{}: {before:.0} → {after:.0} GiB. Its start and existing data are preserved.",
+        old.node.display()
+    );
+    if let Some(limits) = limits {
+        let size = old.size * sectorsize;
+        let allocation = (old.size - new_sectors) * sectorsize;
+        let (free_after, low) = retained_free(size, limits.used_bytes, allocation);
+        text.push_str(&format!(" It keeps {:.0} GiB free.", gib(free_after)));
+        if low {
+            text.push_str(&format!(
+                " That is under {WARN_FREE_PERCENT}% of the partition; updates and everyday use need room."
+            ));
+        }
+    }
+    text
+}
+
 fn allocation_summary(plan: &Plan, layout: &Layout, swap_bytes: u64) -> String {
     let zfs_sectors = plan.swap_start.unwrap_or(plan.end) - plan.zfs_start;
     let efi = if plan.efi_start.is_some() {
@@ -580,7 +664,8 @@ fn rebuild(app: &App, config: &mut GlobalConfig) {
         } else {
             0
         };
-        let min = gib(MIN_LINUX_BYTES + swap_bytes + extra) as f32;
+        let needed = MIN_LINUX_BYTES + swap_bytes + extra;
+        let min = gib(needed) as f32;
         let max = gib(source.capacity) as f32;
         state.set_minimum(min);
         state.set_maximum(max);
@@ -589,10 +674,15 @@ fn rebuild(app: &App, config: &mut GlobalConfig) {
             k.allocation_bytes
         } else if state.get_use_all() {
             all_bytes
-        } else {
+        } else if state.get_custom_allocation() {
             (state.get_allocation().round().max(min) as u64)
                 .saturating_mul(GIB)
                 .min(all_bytes)
+        } else {
+            source
+                .proposal(needed)
+                .map(|(bytes, _)| bytes)
+                .unwrap_or(all_bytes)
         };
         state.set_allocation((gib(allocation_bytes) * 10.0).round() as f32 / 10.0);
         let efi = s.efis.get(state.get_efi_index() as usize).ok_or(
@@ -638,11 +728,11 @@ fn rebuild(app: &App, config: &mut GlobalConfig) {
         state.set_allocation_summary(allocation_summary(&plan, &s.layout, swap_bytes).into());
         if let Some((old, size)) = &plan.shrink {
             state.set_details(
-                format!(
-                    "{}: {:.0} → {:.0} GiB. Its start and existing data are preserved.",
-                    old.node.display(),
-                    sectors_gib(old.size, s.layout.sectorsize),
-                    sectors_gib(*size, s.layout.sectorsize)
+                shrink_outcome(
+                    old,
+                    *size,
+                    s.layout.sectorsize,
+                    source.shrink.map(|(_, limits)| limits),
                 )
                 .into(),
             );
@@ -698,7 +788,16 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
     let state = app.global::<AlongsideState>();
     state.on_select_source(edit(app, |s, index: i32| {
         s.set_source_index(index);
-        s.set_use_all(true);
+        // Free space is taken whole; a shrink starts from the proposal.
+        let unallocated = Session::with(|session| {
+            session
+                .survey
+                .as_ref()
+                .and_then(|survey| survey.sources.get(index as usize))
+                .is_some_and(Source::is_unallocated)
+        });
+        s.set_use_all(unallocated);
+        s.set_custom_allocation(false);
         true
     }));
     state.on_select_efi(edit(app, |s, index: i32| {
@@ -711,11 +810,14 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
             return false;
         }
         s.set_use_all(false);
+        s.set_custom_allocation(true);
         s.set_allocation(value);
         true
     }));
     state.on_all_space(edit(app, |s, value: bool| {
         s.set_use_all(value);
+        // Unticking returns to the proposal rather than a stale number.
+        s.set_custom_allocation(false);
         true
     }));
     let cfg = config.clone();

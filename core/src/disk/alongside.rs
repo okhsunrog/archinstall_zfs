@@ -15,7 +15,7 @@ mod execute;
 pub use execute::execute;
 mod probe;
 pub use efi::{BootSpace, EfiChoice, EfiSpace, inspect_efi};
-pub use probe::{Filesystem, inspect, minimum_size};
+pub use probe::{Filesystem, ShrinkLimits, inspect, minimum_size, shrink_limits};
 
 pub const MIB: u64 = 1024 * 1024;
 pub const GIB: u64 = 1024 * MIB;
@@ -27,6 +27,64 @@ pub const ESP_BYTES: u64 = 512 * MIB;
 /// added to the boot image budget, and reserved again when checking that the
 /// budget fits a newly created ESP.
 pub const ESP_SLACK_BYTES: u64 = 8 * MIB;
+/// Free space the retained system keeps by default: this share of its
+/// partition, but at least [`KEEP_FREE_MIN_BYTES`].
+pub const KEEP_FREE_FRACTION: u64 = 5;
+pub const KEEP_FREE_MIN_BYTES: u64 = 20 * GIB;
+/// Below this share of free space the retained system is warned about.
+pub const WARN_FREE_PERCENT: u64 = 15;
+
+/// How much of a shrinkable partition to propose for the new system. Space
+/// that belongs to nobody (an unallocated extent) is taken whole; space that
+/// another operating system is using is shared: half of what it has free,
+/// leaving it a working margin, and never more than the resizer allows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShrinkDefaults {
+    /// What the resizer allows at most, MiB-aligned.
+    pub hard_max: u64,
+    /// What can be taken while the retained system keeps its margin.
+    pub soft_max: u64,
+    /// The proposed allocation: half of the free space within `soft_max`,
+    /// or the required minimum when only the hard limit accommodates it.
+    /// `None` when even `needed` does not fit.
+    pub default: Option<u64>,
+}
+
+impl ShrinkDefaults {
+    pub fn compute(size: u64, limits: ShrinkLimits, needed: u64) -> Self {
+        let hard_max =
+            size.saturating_sub(limits.minimum_bytes.saturating_add(2 * MIB)) / MIB * MIB;
+        let free = size.saturating_sub(limits.used_bytes);
+        let keep = (size / KEEP_FREE_FRACTION).max(KEEP_FREE_MIN_BYTES);
+        let soft_max = free.saturating_sub(keep).min(hard_max) / MIB * MIB;
+        let default = if needed <= soft_max {
+            Some((free / 2 / MIB * MIB).clamp(needed, soft_max))
+        } else if needed <= hard_max {
+            Some(needed)
+        } else {
+            None
+        };
+        Self {
+            hard_max,
+            soft_max,
+            default,
+        }
+    }
+
+    /// Whether `default` had to go beyond the margin the retained system
+    /// keeps by default.
+    pub fn cramped(&self) -> bool {
+        self.default.is_some_and(|d| d > self.soft_max)
+    }
+}
+
+/// Free space the retained system has left after giving `allocation` away,
+/// and whether that is below the warning threshold.
+pub fn retained_free(size: u64, used: u64, allocation: u64) -> (u64, bool) {
+    let free_after = size.saturating_sub(used).saturating_sub(allocation);
+    (free_after, free_after * 100 < size * WARN_FREE_PERCENT)
+}
+
 pub const EFI_TYPE: &str = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B";
 pub const BASIC_TYPE: &str = "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7";
 pub const LINUX_TYPE: &str = "0FC63DAF-8483-4772-8E79-3D69D8477DE4";
@@ -347,6 +405,52 @@ pub fn check_tools(tools: &[(&str, &str)]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn limits(used: u64) -> ShrinkLimits {
+        ShrinkLimits {
+            used_bytes: used,
+            minimum_bytes: used + (used / 10).max(GIB),
+        }
+    }
+
+    #[test]
+    fn shrinking_proposes_half_of_the_free_space_and_keeps_a_margin() {
+        // 450 GiB with 170 GiB used: free 280, half 140, margin 90 GiB.
+        let d = ShrinkDefaults::compute(450 * GIB, limits(170 * GIB), MIN_LINUX_BYTES);
+        assert_eq!(d.default, Some(140 * GIB));
+        assert_eq!(d.soft_max, 190 * GIB);
+        assert_eq!(d.hard_max, 450 * GIB - 187 * GIB - 2 * MIB);
+        assert!(!d.cramped());
+        // Nearly empty 450 GiB: the old rule left it 37 GiB; now 240 GiB.
+        let d = ShrinkDefaults::compute(450 * GIB, limits(30 * GIB), MIN_LINUX_BYTES);
+        assert_eq!(d.default, Some(210 * GIB));
+        // A 256 GiB laptop disk with 90 GiB used.
+        let d = ShrinkDefaults::compute(256 * GIB, limits(90 * GIB), MIN_LINUX_BYTES);
+        assert_eq!(d.default, Some(83 * GIB));
+        // Small partitions keep at least 20 GiB free, not 20 percent.
+        let d = ShrinkDefaults::compute(80 * GIB, limits(20 * GIB), MIN_LINUX_BYTES);
+        assert_eq!(d.soft_max, 40 * GIB);
+        assert_eq!(d.default, Some(32 * GIB));
+    }
+
+    #[test]
+    fn a_cramped_partition_yields_only_the_minimum_or_nothing() {
+        // 200 GiB with 150 used: free 50, margin 40 -> soft 10 < 32 needed,
+        // but the resizer allows 200 - 166 = 34: propose the minimum, flagged.
+        let d = ShrinkDefaults::compute(200 * GIB, limits(150 * GIB), MIN_LINUX_BYTES);
+        assert_eq!(d.default, Some(MIN_LINUX_BYTES));
+        assert!(d.cramped());
+        assert!(retained_free(200 * GIB, 150 * GIB, MIN_LINUX_BYTES).1);
+        // 200 GiB with 160 used: 200 - 177 = 23 < 32: nothing to propose.
+        let d = ShrinkDefaults::compute(200 * GIB, limits(160 * GIB), MIN_LINUX_BYTES);
+        assert_eq!(d.default, None);
+        // A larger requirement (swap, separate ESP) moves the default up.
+        let d = ShrinkDefaults::compute(450 * GIB, limits(170 * GIB), 150 * GIB);
+        assert_eq!(d.default, Some(150 * GIB));
+        assert_eq!(
+            retained_free(450 * GIB, 170 * GIB, 140 * GIB),
+            (140 * GIB, false)
+        );
+    }
 
     fn layout(sectorsize: u64) -> Layout {
         Layout {

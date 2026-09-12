@@ -149,7 +149,7 @@ including maps, the compact layout and the review summary.
 | --- | --- |
 | Reuse ESP | Select source, enter allocation, switch to unallocated space |
 | Swap | Choose disk swap on Disk; map and Review subtract its size from the pool |
-| Whole extent | Default to all MiB-aligned space; preserve fractional-GiB capacity |
+| Whole extent | Free space is taken whole by default; a shrink proposes half of the free space (140 of 280 GiB) and the slider tops out at the resizer's limit |
 | Insufficient ESP | Reuse option disabled with reason; select the separate ESP by keyboard |
 | Return navigation | Open Review, return to Disk, switch installation modes and return |
 | Missing NTFS tools | Select unavailable source; readable package hint; Install disabled |
@@ -163,8 +163,14 @@ can satisfy the minimum allocation. These preview results do not establish real
 filesystem safety or existing-OS bootability; use the execution tests separately.
 
 
-Allocation defaults to the entire selected free extent (or the maximum safe
-shrink allocation), aligned down to MiB without discarding a fractional GiB.
+Unallocated space is proposed whole, aligned down to MiB without discarding a
+fractional GiB. Shrinking another system's partition proposes half of that
+filesystem's free space, so that it keeps at least 20 % of its partition (or
+20 GiB) free; the slider still reaches the resizer's limit, and below 15 %
+free the details line warns. The resize limit itself is the resizer's minimum
+plus 10 % (at least 1 GiB) as a margin against the estimate. When several
+partitions qualify, the one with the roomiest proposal is preselected; free
+space always wins over shrinking. See `ShrinkDefaults` in `core`.
 The Disk page owns swap selection for alongside installs. None/ZRAM consume no
 disk space; plain/encrypted swap reserves the chosen GiB inside the allocation.
 A minimum of 32 GiB remains for ZFS after subtracting swap and an optional new

@@ -137,7 +137,28 @@ pub(super) fn ext_size(runner: &dyn CommandRunner, device: &str) -> Result<(u64,
 
 /// Returns a conservative lower bound. Passing this check does not bypass the
 /// resizer's own checks. Failed or unparseable probes never enable shrinking.
+/// What a filesystem occupies and the smallest size it may be shrunk to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShrinkLimits {
+    /// Bytes the filesystem needs for its data and metadata, as reported by
+    /// the resizer. This is the basis for "free space" in the planner.
+    pub used_bytes: u64,
+    /// The hard lower bound for resizing: `used_bytes` plus a safety margin
+    /// against the resizer's estimate.
+    pub minimum_bytes: u64,
+}
+
+/// The smallest size the filesystem may safely be shrunk to. See
+/// [`shrink_limits`] for the numbers behind it.
 pub fn minimum_size(runner: &dyn CommandRunner, part: &Partition, fs: &str) -> Result<u64> {
+    Ok(shrink_limits(runner, part, fs)?.minimum_bytes)
+}
+
+pub fn shrink_limits(
+    runner: &dyn CommandRunner,
+    part: &Partition,
+    fs: &str,
+) -> Result<ShrinkLimits> {
     check_tools(required_tools(fs)?)?;
     ensure!(
         part.attrs.is_empty(),
@@ -169,11 +190,16 @@ pub fn minimum_size(runner: &dyn CommandRunner, part: &Partition, fs: &str) -> R
         }
         _ => unreachable!("required_tools rejected an unsupported filesystem"),
     };
-    // Leave working space for the retained OS, and avoid trusting a minimum
-    // estimate as an exact safe boundary (notably resize2fs with small blocks).
-    raw.checked_add(raw / 5)
-        .and_then(|n| n.checked_add(GIB))
-        .ok_or_else(|| eyre!("Minimum size overflow"))
+    // The resizer's minimum is an estimate (notably resize2fs with small
+    // blocks); keep a margin above it. Working space for the retained system
+    // is a planning default, not a resize limit: see `shrink_defaults`.
+    let minimum_bytes = raw
+        .checked_add((raw / 10).max(GIB))
+        .ok_or_else(|| eyre!("Minimum size overflow"))?;
+    Ok(ShrinkLimits {
+        used_bytes: raw,
+        minimum_bytes,
+    })
 }
 
 #[cfg(test)]
