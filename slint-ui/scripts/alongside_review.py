@@ -94,6 +94,9 @@ def errors(binary, output):
             p.ready()
             p.wait('Combobox', 'Installation disk')
             if case == 'missing-tools':
+                # The disk overview above pushes the panel down; bring the
+                # control into view so its popup list opens on screen.
+                p.reveal_by_tab('Combobox', 'Space source')
                 p.click('Combobox', 'Space source')
                 p.click('ListItem', '/dev/nvme0n1p2')
                 p.wait('Text', 'Resizing NTFS requires')

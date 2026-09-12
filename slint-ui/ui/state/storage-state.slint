@@ -1,3 +1,26 @@
+import { DiskSegment } from "alongside-state.slint";
+
+// One disk on the Disk step: what is on it, drawn to scale, and the
+// installation the findings suggest for it.
+export struct DiskOverviewRow {
+    path: string,
+    title: string,
+    subtitle: string,
+    installer: bool,
+    segments: [DiskSegment],
+    findings: string,
+    // Button text of the suggestion, empty when there is none.
+    action: string,
+    reason: string,
+    recommended: bool,
+}
+
+// What one installation mode would do on this machine.
+export struct ModeHint {
+    hint: string,
+    available: bool,
+}
+
 export struct StorageCandidate {
     key: string,
     name: string,
@@ -23,6 +46,10 @@ export global StorageState {
     in-out property <string> selected-name;
     in-out property <string> selected-details;
     in-out property <[StorageCandidate]> candidates;
+    in-out property <[DiskOverviewRow]> overview;
+    in-out property <[ModeHint]> mode-hints;
+    in-out property <bool> overview-busy;
+    in-out property <string> overview-error;
     callback open(string);
     callback refresh();
     callback filter-changed();
@@ -31,4 +58,7 @@ export global StorageState {
     callback confirm();
     callback cancel();
     callback inventory-changed();
+    // Take the suggestion shown for the disk at this index of `overview`.
+    callback apply-suggestion(int);
+    callback rescan();
 }

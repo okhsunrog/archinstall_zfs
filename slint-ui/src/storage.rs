@@ -2,14 +2,18 @@
 use crate::{
     busy::{self, Guarded},
     refresh::refresh_items,
-    ui::{App, StorageCandidate, StorageState},
+    ui::{App, DiskOverviewRow, DiskSegment, ModeHint, StorageCandidate, StorageState},
 };
 use archinstall_zfs_core::{
     config::{
+        choices::Choice as _,
         edit::{DeviceSetting, apply_device},
         types::{GlobalConfig, InstallationMode},
     },
-    disk::device::{self, DeviceChoice},
+    disk::{
+        device::{self, DeviceChoice},
+        overview::{self, DiskOverview},
+    },
 };
 use slint::{ComponentHandle, ModelRc, VecModel};
 use std::{cell::RefCell, path::Path, rc::Rc};
@@ -20,6 +24,7 @@ struct Inventory {
     partitions: Vec<DeviceChoice>,
     pools: Vec<StorageCandidate>,
     datasets: Vec<String>,
+    overview: DiskOverview,
 }
 thread_local! { static INVENTORY: RefCell<Inventory> = RefCell::default(); }
 impl Inventory {
@@ -40,6 +45,7 @@ impl Inventory {
     }
     fn set_devices(disks: Vec<DeviceChoice>, partitions: Vec<DeviceChoice>) {
         Self::update(|i| {
+            i.overview = overview::build(&disks, &partitions);
             i.disks = disks;
             i.partitions = partitions;
         });
@@ -351,9 +357,107 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
             crate::refresh::focus_item(&app, &format!("storage:{role}"));
         }
     });
-    if !crate::preview::enabled() {
+    let weak = app.as_weak();
+    app.global::<StorageState>().on_rescan(move || {
+        if let Some(app) = weak.upgrade() {
+            scan(&app, false);
+        }
+    });
+    let weak = app.as_weak();
+    let cfg = config.clone();
+    app.global::<StorageState>()
+        .on_apply_suggestion(move |index| {
+            let Some(app) = weak.upgrade() else { return };
+            let Some(disk) = Inventory::with(|i| i.overview.disks.get(index as usize).cloned())
+            else {
+                return;
+            };
+            let Some(suggestion) = disk.suggestion else {
+                return;
+            };
+            {
+                let mut c = cfg.borrow_mut();
+                // Choosing a mode drops the devices of the previous one, so set
+                // the mode first and the disk after.
+                archinstall_zfs_core::config::edit::apply_choice(
+                    &mut c,
+                    archinstall_zfs_core::config::edit::ChoiceSetting::InstallationMode,
+                    suggestion.mode.index(),
+                );
+                match suggestion.mode {
+                    InstallationMode::FullDisk => {
+                        apply_device(&mut c, DeviceSetting::Disk, &disk.path)
+                    }
+                    InstallationMode::ExistingPool => c.pool_name = suggestion.pool.clone(),
+                    InstallationMode::Alongside | InstallationMode::NewPool => {}
+                }
+                refresh_items(&app, &c);
+            }
+            if suggestion.mode == InstallationMode::Alongside {
+                crate::alongside::select_disk(&app, disk.path.clone());
+            }
+            crate::refresh::focus_item(&app, "installation_mode");
+        });
+    if crate::preview::enabled() {
+        Inventory::set_devices(crate::preview::disks(), crate::preview::partitions());
+        publish_overview(app);
+    } else {
         scan(app, false);
     }
+}
+
+/// Show the inventory's overview on the Disk step.
+fn publish_overview(app: &App) {
+    let state = app.global::<StorageState>();
+    let overview = Inventory::with(|i| i.overview.clone());
+    let rows: Vec<DiskOverviewRow> = overview
+        .disks
+        .iter()
+        .enumerate()
+        .map(|(index, disk)| DiskOverviewRow {
+            path: disk.path.to_string_lossy().to_string().into(),
+            title: disk.title.clone().into(),
+            subtitle: disk.subtitle.clone().into(),
+            installer: disk.installer_medium,
+            segments: ModelRc::new(VecModel::from(
+                disk.segments
+                    .iter()
+                    .map(|s| DiskSegment {
+                        offset: s.offset,
+                        fraction: s.fraction,
+                        kind: s.kind as i32,
+                        label: s.label.clone().into(),
+                        short_label: s.short_label.clone().into(),
+                    })
+                    .collect::<Vec<_>>(),
+            )),
+            findings: disk.findings.clone().into(),
+            action: disk
+                .suggestion
+                .as_ref()
+                .map(|s| s.title.clone())
+                .unwrap_or_default()
+                .into(),
+            reason: disk
+                .suggestion
+                .as_ref()
+                .map(|s| s.reason.clone())
+                .unwrap_or_default()
+                .into(),
+            recommended: overview.recommended == Some(index),
+        })
+        .collect();
+    state.set_overview(ModelRc::new(VecModel::from(rows)));
+    state.set_mode_hints(ModelRc::new(VecModel::from(
+        overview
+            .hints
+            .iter()
+            .map(|h| ModeHint {
+                hint: h.hint.clone().into(),
+                available: h.available,
+            })
+            .collect::<Vec<_>>(),
+    )));
 }
 impl Guarded for StorageState<'_> {
     fn generation(app: &App) -> i32 {
@@ -398,8 +502,18 @@ fn scan(app: &App, pools: bool) {
         .await
         .unwrap_or_else(|_| Err("Storage discovery timed out. Check the devices and retry.".into()))
     };
+    if !pools {
+        app.global::<StorageState>().set_overview_busy(true);
+        app.global::<StorageState>().set_overview_error("".into());
+    }
     busy::spawn::<StorageState, _>(app, generation, work, move |app, result| {
         let state = app.global::<StorageState>();
+        if !pools {
+            state.set_overview_busy(false);
+            if let Err(e) = &result {
+                state.set_overview_error(e.clone().into());
+            }
+        }
         match result {
             Ok((_, _, found, datasets)) if pools => Inventory::set_pools(
                 found
@@ -416,7 +530,10 @@ fn scan(app: &App, pools: bool) {
                     .collect(),
                 datasets,
             ),
-            Ok((disks, parts, _, _)) => Inventory::set_devices(disks, parts),
+            Ok((disks, parts, _, _)) => {
+                Inventory::set_devices(disks, parts);
+                publish_overview(app);
+            }
             Err(e) => {
                 state.set_error(e.into());
                 if pools {

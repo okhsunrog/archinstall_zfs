@@ -1,5 +1,6 @@
 import { WizardState } from "../state/wizard-state.slint";
 import { RadioCard } from "radio-card.slint";
+import { StorageState } from "../state/storage-state.slint";
 export component StorageMode inherits Rectangle {
     callback activated(string);
     height: 106px;
@@ -9,7 +10,12 @@ export component StorageMode inherits Rectangle {
         padding-bottom: 14px;
         for label[index] in ["Erase a disk", "Use existing partitions", "Use an existing pool", "Install alongside"]: RadioCard {
             title: label;
-            description: index == 0 ? "Create a new partition layout" : index == 1 ? "Create a new ZFS pool" : index == 2 ? "Create a new boot environment" : "Keep another operating system";
+            // What the mode means on this machine once the disks are known;
+            // the generic description until then.
+            description: StorageState.mode-hints.length > index && StorageState.mode-hints[index].hint != ""
+                ? StorageState.mode-hints[index].hint
+                : index == 0 ? "Create a new partition layout" : index == 1 ? "Create a new ZFS pool" : index == 2 ? "Create a new boot environment" : "Keep another operating system";
+            available: StorageState.mode-hints.length > index ? StorageState.mode-hints[index].available : true;
             selected: WizardState.storage-mode == index;
             text-dot: true;
             activated => { root.activated("radio:installation_mode:" + index); }

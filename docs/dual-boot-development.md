@@ -95,6 +95,17 @@ Windows boot remains unverified.
 
 ## Graphical editor and integration checks
 
+The Disk step opens with a card per disk: model, size and bus, the
+partitions drawn to scale, one line of findings (Windows, Linux filesystems,
+ZFS pools by label, the EFI partition, swap, free space) and, where the
+findings point to one, a suggestion button that selects the mode and the disk
+in one step. The installer medium is shown but never suggested. The mode
+cards below say what each mode means on this machine, and a mode with nothing
+to act on (no pool found, no system with room beside it) is dimmed. The
+overview is built in `core::disk::overview` from the same `lsblk` inventory
+the pickers use, so it needs no extra probing; the alongside survey still does
+the precise resize checks once that mode is chosen.
+
 The GUI's **Install alongside** mode shows proportional current/planned maps,
 separate filesystem/free-space choices, and an allocation slider plus exact GiB
 input. Disk discovery and filesystem checks run off the UI thread. Errors on

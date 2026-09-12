@@ -11,7 +11,10 @@ import { Badge } from "badge.slint";
 // the other choices.
 export component DiskOverview inherits VerticalLayout {
     callback apply(int);
-    spacing: 8px;
+    // On a short window the cards give up their reasons and padding so the
+    // mode cards and the assignments below stay within reach.
+    in property <bool> compact: false;
+    spacing: root.compact ? 6px : 8px;
 
     HorizontalLayout {
         spacing: 12px;
@@ -59,10 +62,10 @@ export component DiskOverview inherits VerticalLayout {
         border-color: row.recommended ? Theme.c.blue : Theme.c.surface1;
         opacity: row.installer ? 0.6 : 1;
         VerticalLayout {
-            padding: 12px;
-            padding-top: row.installer ? 8px : 12px;
-            padding-bottom: row.installer ? 8px : 12px;
-            spacing: 6px;
+            padding: root.compact ? 8px : 12px;
+            padding-top: row.installer || root.compact ? 6px : 12px;
+            padding-bottom: row.installer || root.compact ? 6px : 12px;
+            spacing: root.compact ? 4px : 6px;
             HorizontalLayout {
                 spacing: 10px;
                 Text {
@@ -76,7 +79,7 @@ export component DiskOverview inherits VerticalLayout {
                 }
                 if row.recommended: Badge { label: "Recommended"; }
                 Text {
-                    text: row.subtitle;
+                    text: row.installer && root.compact ? row.findings + " · " + row.subtitle : row.subtitle;
                     color: Theme.c.subtext1;
                     font-size: 12px;
                     vertical-alignment: center;
@@ -85,9 +88,9 @@ export component DiskOverview inherits VerticalLayout {
             // The installer medium is not a choice, so one line says so.
             if !row.installer: DiskMap {
                 segments: row.segments;
-                map-height: 26px;
+                map-height: root.compact ? 20px : 26px;
             }
-            HorizontalLayout {
+            if !(row.installer && root.compact): HorizontalLayout {
                 spacing: 12px;
                 alignment: space-between;
                 VerticalLayout {
@@ -100,7 +103,7 @@ export component DiskOverview inherits VerticalLayout {
                         font-size: 12px;
                         wrap: word-wrap;
                     }
-                    if row.action != "": Text {
+                    if row.action != "" && !root.compact: Text {
                         text: row.reason;
                         color: Theme.c.subtext0;
                         font-size: 12px;
