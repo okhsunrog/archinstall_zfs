@@ -89,9 +89,9 @@ fn devices() -> Vec<BlockDevice> {
         ),
         (
             "sda",
-            "KINGSTON RBUSNS8180S3128GJ",
+            "KINGSTON SKC600512G",
             "50026B76825246C7",
-            119,
+            512,
             "sata",
             false,
         ),
@@ -160,6 +160,9 @@ pub fn partitions() -> Vec<DeviceChoice> {
                 2
             };
             let total = disk.size_bytes.unwrap();
+            // The SATA layout is the one the alongside panel's fixture
+            // describes: EFI, reserved, Windows, a small Linux partition and
+            // 60 GiB left free.
             let used = if sata {
                 total * 85 / 100
             } else {
@@ -169,11 +172,13 @@ pub fn partitions() -> Vec<DeviceChoice> {
             (1..=count)
                 .map(move |number| {
                     let size = if number == 1 {
-                        if sata { 100 * MIB } else { GIB }
+                        if sata { 500 * MIB } else { GIB }
                     } else if sata && number == 2 {
                         16 * MIB
+                    } else if sata && count == 4 {
+                        if number == 3 { 450 * GIB } else { GIB }
                     } else {
-                        (used - if sata { 116 * MIB } else { GIB }) / (count - 1)
+                        (used - if sata { 516 * MIB } else { GIB }) / (count - 1)
                     };
                     let start = next_start;
                     next_start += size;

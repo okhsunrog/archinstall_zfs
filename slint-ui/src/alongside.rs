@@ -212,40 +212,57 @@ fn survey(disk: &std::path::Path, previous: Option<&Survey>) -> Result<Survey, S
 }
 
 fn fixture() -> Survey {
+    // The same disk the preview inventory lists as /dev/sda, so the Disk
+    // overview and this panel describe one machine.
+    const SECTOR: u64 = 512;
+    let efi_start = 2048;
+    let msr_start = efi_start + 500 * MIB / SECTOR;
+    let windows_start = msr_start + 16 * MIB / SECTOR;
+    let linux_start = windows_start + 450 * GIB / SECTOR;
+    let free_start = linux_start + GIB / SECTOR;
     let layout = Layout {
         label: "gpt".into(),
         id: "preview-disk".into(),
-        device: "/dev/nvme0n1".into(),
+        device: "/dev/sda".into(),
         unit: "sectors".into(),
-        sectorsize: 512,
+        sectorsize: SECTOR,
         firstlba: 2048,
-        lastlba: 512 * GIB / 512 - 34,
+        lastlba: 512 * GIB / SECTOR - 34,
         partitions: vec![
             Partition {
-                node: "/dev/nvme0n1p1".into(),
-                start: 2048,
-                size: 500 * MIB / 512,
+                node: "/dev/sda1".into(),
+                start: efi_start,
+                size: 500 * MIB / SECTOR,
                 kind: EFI_TYPE.into(),
                 uuid: "preview-efi".into(),
                 name: "EFI".into(),
                 attrs: "".into(),
             },
             Partition {
-                node: "/dev/nvme0n1p2".into(),
-                start: GIB / 512,
-                size: 450 * GIB / 512,
+                node: "/dev/sda2".into(),
+                start: msr_start,
+                size: 16 * MIB / SECTOR,
+                kind: "e3c9e316-0b5c-4db8-817d-f92df00215ae".into(),
+                uuid: "preview-msr".into(),
+                name: "Microsoft reserved".into(),
+                attrs: "".into(),
+            },
+            Partition {
+                node: "/dev/sda3".into(),
+                start: windows_start,
+                size: 450 * GIB / SECTOR,
                 kind: BASIC_TYPE.into(),
                 uuid: "preview-data".into(),
                 name: "Windows".into(),
                 attrs: "".into(),
             },
             Partition {
-                node: "/dev/nvme0n1p3".into(),
-                start: 451 * GIB / 512,
-                size: GIB / 512,
-                kind: BASIC_TYPE.into(),
-                uuid: "preview-recovery".into(),
-                name: "Recovery".into(),
+                node: "/dev/sda4".into(),
+                start: linux_start,
+                size: GIB / SECTOR,
+                kind: LINUX_TYPE.into(),
+                uuid: "preview-linux".into(),
+                name: "Previous-Linux-4".into(),
                 attrs: "".into(),
             },
         ],
@@ -262,21 +279,21 @@ fn fixture() -> Survey {
                     minimum_bytes: 187 * GIB,
                 };
                 Source {
-                    source: SpaceSource::Shrink { partition: 2 },
-                    label: "/dev/nvme0n1p2 — NTFS — 450 GiB".into(),
+                    source: SpaceSource::Shrink { partition: 3 },
+                    label: "/dev/sda3 — NTFS — 450 GiB".into(),
                     capacity: ShrinkDefaults::compute(size, limits, 0).hard_max,
                     shrink: Some((size, limits)),
-                    detail: shrink_detail(std::path::Path::new("/dev/nvme0n1p2"), size, limits),
+                    detail: shrink_detail(std::path::Path::new("/dev/sda3"), size, limits),
                     error: String::new(),
                 }
             },
             Source {
                 source: SpaceSource::Unallocated {
-                    start: 452 * GIB / 512,
+                    start: free_start,
                     end: layout.lastlba + 1,
                 },
                 label: "Unallocated space — 60 GiB".into(),
-                capacity: ((layout.lastlba + 1) * 512 - 452 * GIB) / MIB * MIB,
+                capacity: ((layout.lastlba + 1 - free_start) * SECTOR) / MIB * MIB,
                 shrink: None,
                 detail: "Use free space without resizing Windows.".into(),
                 error: String::new(),
@@ -284,7 +301,7 @@ fn fixture() -> Survey {
         ],
         efis: vec![Efi {
             number: 1,
-            label: "/dev/nvme0n1p1 — EFI — 500 MiB".into(),
+            label: "/dev/sda1 — EFI — 500 MiB".into(),
             space: Ok(EfiSpace {
                 partition: 1,
                 free_bytes: if low { 40 * MIB } else { 350 * MIB },
@@ -293,9 +310,9 @@ fn fixture() -> Survey {
     };
     match std::env::var("AZFS_PREVIEW_ALONGSIDE").as_deref() {
         Ok("ext4") => {
-            survey.layout.partitions[1].kind = LINUX_TYPE.into();
-            survey.layout.partitions[1].name = "Linux".into();
-            survey.sources[0].label = "/dev/nvme0n1p2 — ext4 — 450 GiB".into();
+            survey.layout.partitions[2].kind = LINUX_TYPE.into();
+            survey.layout.partitions[2].name = "Linux".into();
+            survey.sources[0].label = "/dev/sda3 — ext4 — 450 GiB".into();
         }
         Ok("missing-tools") => {
             survey.sources[0].capacity = 0;
@@ -369,8 +386,8 @@ fn load(app: &App, disk: Option<PathBuf>, keep: Option<Request>) {
         tokio::task::spawn_blocking(move || -> Result<_, String> {
             if crate::preview::enabled() {
                 return Ok((
-                    vec![PathBuf::from("/dev/nvme0n1")],
-                    vec!["Samsung SSD — 512 GiB".into()],
+                    vec![PathBuf::from("/dev/sda")],
+                    vec!["/dev/sda — KINGSTON SKC600512G — 512 GiB".into()],
                     0,
                     if std::env::var("AZFS_PREVIEW_ALONGSIDE").as_deref() == Ok("mbr") {
                         Err(
