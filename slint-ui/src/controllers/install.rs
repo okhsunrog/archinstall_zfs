@@ -217,6 +217,7 @@ fn spawn_download_pump(app: &App, mut rx: tokio::sync::watch::Receiver<PackagePr
                     active_downloads,
                     completed,
                     failed,
+                    ref note,
                 } => {
                     let is_active = total_bytes > 0
                         && (active_downloads > 0
@@ -234,22 +235,42 @@ fn spawn_download_pump(app: &App, mut rx: tokio::sync::watch::Receiver<PackagePr
                         .eta()
                         .map(format_duration)
                         .unwrap_or_else(|| "--:--".to_string());
-                    let status = format!(
+                    let mut status = format!(
                         "Downloads {}/{} | {} | ETA {}",
                         completed,
                         packages.len(),
                         speed_str,
                         eta_str,
                     );
+                    if !note.is_empty() {
+                        status.push_str(" · ");
+                        status.push_str(note);
+                    }
 
+                    // Transfers that move come first; a row that shows no
+                    // bytes is waiting on a mirror, which is what it says.
+                    let mut rows: Vec<&PackageState> = packages
+                        .iter()
+                        .filter(|p| {
+                            matches!(
+                                p,
+                                PackageState::Downloading { .. } | PackageState::Verifying { .. }
+                            )
+                        })
+                        .collect();
+                    rows.sort_by_key(|p| match p {
+                        PackageState::Downloading { downloaded, .. } => {
+                            std::cmp::Reverse((p.live_speed_bps(), *downloaded))
+                        }
+                        _ => std::cmp::Reverse((u64::MAX, u64::MAX)),
+                    });
                     let mut dl_items = Vec::new();
-                    for pkg in packages {
+                    for pkg in rows {
                         match pkg {
                             PackageState::Downloading {
                                 filename,
                                 downloaded,
                                 total,
-                                speed_bps,
                                 ..
                             } => {
                                 let pkg_pct = if *total > 0 {
@@ -257,10 +278,16 @@ fn spawn_download_pump(app: &App, mut rx: tokio::sync::watch::Receiver<PackagePr
                                 } else {
                                     0
                                 };
+                                let live = pkg.live_speed_bps();
+                                let speed = if live == 0 {
+                                    "waiting for mirror".to_string()
+                                } else {
+                                    format_speed(live)
+                                };
                                 dl_items.push(DownloadInfo {
                                     filename: truncate_str(filename, 30).into(),
                                     pct: pkg_pct,
-                                    speed: format_speed(*speed_bps).into(),
+                                    speed: speed.into(),
                                     state: 0,
                                 });
                             }

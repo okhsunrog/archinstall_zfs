@@ -243,7 +243,7 @@ impl Installer {
 
         // Mirror config
         if let Some(ref regions) = self.config.mirror_regions {
-            mirrors::configure_mirrors(&*self.runner, &self.target, regions)?;
+            mirrors::configure_mirrors(&self.target, regions)?;
         }
 
         // Network

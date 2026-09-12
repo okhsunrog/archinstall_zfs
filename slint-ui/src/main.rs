@@ -86,7 +86,7 @@ fn setup_logging(ui_log_tx: crossbeam_channel::Sender<(String, i32)>) -> Result<
 
     let file_appender = tracing_appender::rolling::never("/tmp", "archinstall-zfs.log");
     let file_filter = tracing_subscriber::EnvFilter::new(
-        "trace,h2=warn,hyper=warn,reqwest=warn,rustls=warn,pacman=info",
+        "trace,h2=warn,hyper=warn,reqwest=warn,rustls=warn,pacman=info,calloop=info,i_slint_backend_linuxkms=info,i_slint_core=info,i_slint_renderer_skia=info",
     );
     let file_layer = tracing_subscriber::fmt::layer()
         .with_writer(file_appender)

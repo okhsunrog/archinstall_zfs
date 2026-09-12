@@ -151,11 +151,13 @@ fn start_zfs_init(app: &App, config: &GlobalConfig) {
         let w = weak.clone();
         let _ = w.upgrade_in_event_loop(|app| {
             app.global::<WelcomeState>()
-                .set_zfs_install_status(SharedString::from("Checking reflector..."));
+                .set_zfs_install_status(SharedString::from("Measuring mirrors..."));
         });
 
         archinstall_zfs_core::zfs_setup::ensure_reflector_finished_and_stopped(&*runner).ok();
-        archinstall_zfs_core::zfs_setup::refresh_mirrors_if_stale(&*runner).ok();
+        if let Err(error) = archinstall_zfs_core::system::mirrors::refresh_live_once() {
+            tracing::warn!(%error, "keeping the medium's mirrorlist");
+        }
 
         let w = weak.clone();
         let _ = w.upgrade_in_event_loop(|app| {

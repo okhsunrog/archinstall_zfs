@@ -135,58 +135,6 @@ pub fn ensure_reflector_finished_and_stopped(runner: &dyn CommandRunner) -> Resu
     Ok(())
 }
 
-/// Check if the mirrorlist is stale and refresh it with reflector.
-/// The testing ISO bakes in a mirrorlist at build time; if the ISO is old,
-/// pacman downloads will be extremely slow or fail entirely.
-pub fn refresh_mirrors_if_stale(runner: &dyn CommandRunner) -> Result<()> {
-    let mirrorlist = std::path::Path::new("/etc/pacman.d/mirrorlist");
-    if !mirrorlist.exists() {
-        return Ok(());
-    }
-
-    // Check the age of the mirrorlist
-    let stale = match std::fs::metadata(mirrorlist) {
-        Ok(meta) => match meta.modified() {
-            Ok(mtime) => {
-                let age = std::time::SystemTime::now()
-                    .duration_since(mtime)
-                    .unwrap_or_default();
-                // Consider stale if older than 24 hours
-                age.as_secs() > 86400
-            }
-            Err(_) => true,
-        },
-        Err(_) => true,
-    };
-
-    if !stale {
-        tracing::info!("mirrorlist is fresh, skipping reflector");
-        return Ok(());
-    }
-
-    tracing::info!("mirrorlist is stale, refreshing with reflector...");
-    let output = runner.run(
-        "reflector",
-        &[
-            "--latest",
-            "20",
-            "--protocol",
-            "https",
-            "--sort",
-            "rate",
-            "--save",
-            "/etc/pacman.d/mirrorlist",
-        ],
-    )?;
-    if output.success() {
-        tracing::info!("mirrors refreshed successfully");
-    } else {
-        tracing::warn!("reflector failed: {}", output.stderr.trim());
-        // Not fatal — old mirrors may still work, just slowly
-    }
-    Ok(())
-}
-
 pub fn install_zfs_on_host(
     kernel: &str,
     precompiled: bool,
@@ -223,13 +171,12 @@ pub fn initialize_zfs(
     cancel: &tokio_util::sync::CancellationToken,
     download_config: DownloadConfig,
 ) -> Result<()> {
-    // 1. Wait for reflector and stop it
+    // 1. Wait for reflector and stop it, so it cannot overwrite the ranked
+    //    mirrorlist behind the installer's back. Ranking itself happens in
+    //    `system::mirrors`, called by the interfaces before this step.
     ensure_reflector_finished_and_stopped(runner)?;
 
-    // 2. Refresh mirrors if the mirrorlist is stale
-    refresh_mirrors_if_stale(runner)?;
-
-    // 3. Check if ZFS is already available
+    // 2. Check if ZFS is already available
     let module_ok = check_zfs_module(runner).unwrap_or(false);
     let utils_ok = check_zfs_utils(runner).unwrap_or(false);
     if module_ok && utils_ok {
@@ -333,8 +280,6 @@ mod tests {
             // stop reflector.service
             CannedResponse::default(),
             // stop reflector.timer
-            CannedResponse::default(),
-            // refresh_mirrors_if_stale: reflector (may or may not be called depending on FS state)
             CannedResponse::default(),
             // check_zfs_module: lsmod (contains zfs)
             CannedResponse {

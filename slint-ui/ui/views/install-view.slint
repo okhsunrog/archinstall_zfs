@@ -43,9 +43,23 @@ export component InstallView inherits VerticalLayout {
         vertical-alignment: center;
     }
 
+    // Following the log is deferred to a timer rather than done inside the
+    // change handlers: moving content-y re-estimates the virtualized list's
+    // content-height, whose change handler would move content-y again, and
+    // the runtime cuts such chains off after ten rounds with a warning per
+    // frame. The timer runs once per batch of changes, outside that pass.
     property <int> scroll-trigger: InstallState.log-messages.length;
-    changed scroll-trigger => {
-        root.follow-latest();
+    changed scroll-trigger => { root.queue-follow(); }
+    follow-timer := Timer {
+        interval: 16ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            root.follow-latest();
+        }
+    }
+    function queue-follow() {
+        if root.follow-output { follow-timer.running = true; }
     }
     function follow-latest() {
         if root.follow-output {
@@ -87,8 +101,8 @@ export component InstallView inherits VerticalLayout {
             log-view := ListView {
                 vertical-stretch: 1;
                 min-height: 0px;
-                changed content-height => { root.follow-latest(); }
-                changed visible-height => { root.follow-latest(); }
+                changed content-height => { root.queue-follow(); }
+                changed visible-height => { root.queue-follow(); }
                 scrolled => {
                     root.follow-output = self.content-y <= -max(0px, self.content-height - self.visible-height) + 2px;
                 }
@@ -214,10 +228,12 @@ export component InstallView inherits VerticalLayout {
                         border-radius: 2px;
                     }
                 }
-                ListView {
-                    height: min(3, InstallState.download-items.length) * 20px;
-                    for dl in InstallState.download-items: Rectangle {
-                        height: 20px;
+                // Every transfer in flight, each with its own bar: at most
+                // the configured parallelism, so no scrolling is needed.
+                VerticalLayout {
+                    spacing: 4px;
+                    for dl in InstallState.download-items: VerticalLayout {
+                        spacing: 2px;
                         HorizontalLayout {
                             spacing: 12px;
                             Text {
@@ -232,9 +248,24 @@ export component InstallView inherits VerticalLayout {
                             Text {
                                 text: dl.state == 1 ? "Verifying"
                                     : dl.state == 2 ? "Done" : dl.pct + "%  " + dl.speed;
-                                color: dl.state == 2 ? Theme.c.green : Theme.c.subtext0;
+                                color: dl.state == 2 ? Theme.c.green
+                                    : dl.state == 0 && dl.speed == "waiting for mirror" ? Theme.c.yellow
+                                    : Theme.c.subtext0;
                                 font-size: 11px;
                                 vertical-alignment: center;
+                            }
+                        }
+                        Rectangle {
+                            height: 3px;
+                            background: Theme.c.mantle;
+                            border-radius: 1.5px;
+                            clip: true;
+                            Rectangle {
+                                x: 0; y: 0;
+                                height: parent.height;
+                                width: parent.width * clamp(dl.pct / 100, 0, 1);
+                                background: dl.state == 1 ? Theme.c.green : Theme.c.teal;
+                                border-radius: 1.5px;
                             }
                         }
                     }

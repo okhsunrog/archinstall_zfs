@@ -4,6 +4,7 @@ pub mod cmd;
 pub(crate) mod conf;
 pub mod fs;
 pub mod gpu;
+pub mod mirrors;
 pub mod net;
 pub mod pacman;
 pub mod sysinfo;
