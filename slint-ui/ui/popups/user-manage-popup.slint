@@ -142,7 +142,9 @@ export component UserManagePopup inherits Rectangle {
                                 changed has-focus => { form-scroll.reveal-if(self.has-focus, self.y, self.height); }
                                 clicked => { root.adding = true; EditingState.user-error = ""; }
                             }
-                            if root.adding: VerticalLayout {
+                            // Removing the last account brings the form back, with focus in
+                            // it so Escape still reaches the dialog.
+                            if root.adding || root.users.length == 0: VerticalLayout {
                             spacing: 12px;
                             init => { username-input.focus-input(); }
                             Rectangle {

@@ -9,15 +9,21 @@ from pathlib import Path
 from review import Preview
 
 
-def assign(p, label, device):
+def open_row(p, label):
+    """The disk overview above can push an assignment row below the fold."""
+    p.reveal_by_tab('Button', label)
     p.click('Button', label)
+
+
+def assign(p, label, device):
+    open_row(p, label)
     p.fill_labeled('Search storage', device)
     p.click('ListItem', device)
     p.click('Button', 'Use this device')
 
 
 def storage(p):
-    p.click('Button', 'Change New ZFS pool')
+    open_row(p, 'Change New ZFS pool')
     p.wait('ListItem', '/dev/nvme0n1p2')
     p.screenshot('partition-picker')
     p.fill_labeled('Search storage', '/dev/sdb')
@@ -35,12 +41,12 @@ def storage(p):
     p.click('Button', 'Use this device')
     p.wait('Text', '/dev/sda4')
     p.screenshot('new-pool-assigned')
-    p.click('Button', 'Change EFI boot partition')
+    open_row(p, 'Change EFI boot partition')
     p.fill_labeled('Search storage', '/dev/sda4')
     p.wait('ListItem', '/dev/sda4')
     assert p.properties('ListItem', '/dev/sda4').get('accessibleEnabled', False) is False
     p.key('\u001b')
-    p.wait('Button', 'Change EFI boot partition')
+    p.reveal_by_tab('Button', 'Change EFI boot partition')
     p.screenshot('cancel-preserves-selection')
     p.click('Button', 'ZFS')
     p.click('TextInput', 'New pool name')
@@ -67,9 +73,9 @@ def storage(p):
     p.wait('Text', '2 / 6')
     p.click('Button', 'Disk')
     p.click('RadioButton', 'Use an existing pool')
-    p.wait('Button', 'Choose Existing ZFS pool')
+    p.reveal_by_tab('Button', 'Choose Existing ZFS pool')
     p.screenshot('existing-pool-empty')
-    p.click('Button', 'Choose Existing ZFS pool')
+    open_row(p, 'Choose Existing ZFS pool')
     p.wait('ListItem', 'zroot')
     p.screenshot('pool-picker')
     p.click('ListItem', 'zroot')
@@ -90,7 +96,7 @@ def storage(p):
     p.screenshot('existing-pool-review')
     p.click('Button', 'Disk')
     p.click('RadioButton', 'Erase a disk')
-    p.click('Button', 'Choose Disk to erase')
+    open_row(p, 'Choose Disk to erase')
     p.wait('ListItem', '/dev/sdb')
     assert not p.properties('ListItem', '/dev/sdb').get('accessibleEnabled', False)
     p.screenshot('disk-picker')
@@ -109,7 +115,7 @@ def storage(p):
 
 
 def keyboard(p):
-    p.click('Button', 'Change EFI boot partition')
+    open_row(p, 'Change EFI boot partition')
     p.fill_labeled('Search storage', '/dev/sda1')
     p.click('ListItem', '/dev/sda1')
     p.click('TextInput', 'Search storage')
@@ -133,7 +139,7 @@ def keyboard(p):
 
 
 def edge(p, fixture):
-    p.click('Button', 'Choose New ZFS pool' if fixture == 'empty' else 'Change New ZFS pool')
+    open_row(p, 'Choose New ZFS pool' if fixture == 'empty' else 'Change New ZFS pool')
     if fixture == 'empty':
         p.wait('Text', 'No devices found.')
         assert p.properties('Button', 'Use this device').get('accessibleEnabled', False) is False

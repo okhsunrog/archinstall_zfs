@@ -353,13 +353,17 @@ impl Guarded for AlongsideState<'_> {
     }
 }
 
-fn load(app: &App, index: Option<usize>, keep: Option<Request>) {
+/// Survey `disk` for the alongside panel, as the Disk overview's
+/// suggestion does; the panel's own disk list catches up when it loads.
+pub fn select_disk(app: &App, disk: PathBuf) {
+    load(app, Some(disk), None);
+}
+
+fn load(app: &App, disk: Option<PathBuf>, keep: Option<Request>) {
     let generation = busy::begin::<AlongsideState>(app);
     Session::touch();
     app.global::<AlongsideState>().invoke_rebuild();
-    let disk = index
-        .and_then(Session::disk)
-        .or_else(|| keep.as_ref().map(|r| r.before.device.clone()));
+    let disk = disk.or_else(|| keep.as_ref().map(|r| r.before.device.clone()));
     let previous = Session::survey();
     let work = async move {
         tokio::task::spawn_blocking(move || -> Result<_, String> {
@@ -775,7 +779,7 @@ pub fn setup(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
     let weak = app.as_weak();
     app.global::<AlongsideState>().on_select_disk(move |index| {
         if let Some(app) = weak.upgrade() {
-            load(&app, Some(index as usize), None);
+            load(&app, Session::disk(index as usize), None);
         }
     });
     let weak = app.as_weak();

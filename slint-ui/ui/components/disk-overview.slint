@@ -1,0 +1,123 @@
+import { StorageState } from "../state/storage-state.slint";
+import { Theme } from "../styling.slint";
+import { DiskMap } from "disk-map.slint";
+import { StyledButton } from "styled-button.slint";
+import { Badge } from "badge.slint";
+
+// The disks of this machine as the Disk step sees them: a card per disk
+// with its partitions drawn to scale, one line of findings, and the
+// installation those findings suggest. Choosing a suggestion selects the
+// mode and the disk in one step; the mode cards below stay available for
+// the other choices.
+export component DiskOverview inherits VerticalLayout {
+    callback apply(int);
+    // On a short window the cards give up their reasons and padding so the
+    // mode cards and the assignments below stay within reach.
+    in property <bool> compact: false;
+    spacing: root.compact ? 6px : 8px;
+
+    HorizontalLayout {
+        spacing: 12px;
+        Text {
+            text: "Disks found";
+            color: Theme.c.text;
+            font-size: 15px;
+            font-weight: 600;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        if StorageState.overview-busy: Text {
+            text: "Scanning…";
+            color: Theme.c.subtext1;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+        StyledButton {
+            label: "Rescan";
+            outlined: true;
+            height: 30px;
+            label-size: 12px;
+            enabled: !StorageState.overview-busy;
+            clicked => { StorageState.rescan(); }
+        }
+    }
+
+    if StorageState.overview-error != "": Text {
+        text: StorageState.overview-error;
+        color: Theme.c.red;
+        font-size: 13px;
+        wrap: word-wrap;
+    }
+    if StorageState.overview.length == 0 && !StorageState.overview-busy && StorageState.overview-error == "": Text {
+        text: "No disks were found. Connect a drive and rescan.";
+        color: Theme.c.subtext1;
+        font-size: 13px;
+        wrap: word-wrap;
+    }
+
+    for row[index] in StorageState.overview: Rectangle {
+        background: Theme.c.surface0.with-alpha(0.55);
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: row.recommended ? Theme.c.blue : Theme.c.surface1;
+        opacity: row.installer ? 0.6 : 1;
+        VerticalLayout {
+            padding: root.compact ? 8px : 12px;
+            padding-top: row.installer || root.compact ? 6px : 12px;
+            padding-bottom: row.installer || root.compact ? 6px : 12px;
+            spacing: root.compact ? 4px : 6px;
+            HorizontalLayout {
+                spacing: 10px;
+                Text {
+                    text: row.title;
+                    color: Theme.c.text;
+                    font-size: 14px;
+                    font-weight: 600;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+                if row.recommended: Badge { label: "Recommended"; }
+                Text {
+                    text: row.installer && root.compact ? row.findings + " · " + row.subtitle : row.subtitle;
+                    color: Theme.c.subtext1;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                }
+            }
+            // The installer medium is not a choice, so one line says so.
+            if !row.installer: DiskMap {
+                segments: row.segments;
+                map-height: root.compact ? 20px : 26px;
+            }
+            if !(row.installer && root.compact): HorizontalLayout {
+                spacing: 12px;
+                alignment: space-between;
+                VerticalLayout {
+                    spacing: 2px;
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    Text {
+                        text: row.findings;
+                        color: Theme.c.subtext1;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+                    if row.action != "" && !root.compact: Text {
+                        text: row.reason;
+                        color: Theme.c.subtext0;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+                }
+                if row.action != "": StyledButton {
+                    label: row.action;
+                    style: row.recommended ? Theme.button-primary : Theme.button-default;
+                    height: 34px;
+                    label-size: 13px;
+                    clicked => { root.apply(index); }
+                }
+            }
+        }
+    }
+}

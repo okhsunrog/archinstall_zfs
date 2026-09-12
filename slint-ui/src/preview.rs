@@ -9,6 +9,7 @@ use archinstall_zfs_core::config::types::{
     GlobalConfig, InstallationMode, ProfileSelection, UserConfig,
 };
 use archinstall_zfs_core::disk::alongside::GIB;
+use archinstall_zfs_core::disk::alongside::MIB;
 use archinstall_zfs_core::disk::device::{
     BlockDevice, BlockPartition, DeviceChoice, DevicePath, DevicePathKind,
 };
@@ -144,85 +145,105 @@ pub fn partitions() -> Vec<DeviceChoice> {
     if storage_fixture() == "empty" {
         return vec![];
     }
+    // Each disk tells a different story on the Disk step: the NVMe drive
+    // carries an earlier ZFS installation, the SATA drive a Windows layout
+    // with room left over, the USB stick is the installer medium.
     devices()
         .into_iter()
         .flat_map(|disk| {
+            let sata = disk.transport.as_deref() == Some("sata");
             let count = if storage_fixture() == "many" {
                 20
-            } else if disk.transport.as_deref() == Some("sata") {
+            } else if sata {
                 4
             } else {
                 2
             };
-            (1..=count).map(move |number| {
-                BlockPartition {
-                    devnode: format!(
-                        "{}{}{number}",
-                        disk.devnode.display(),
-                        if disk.transport.as_deref() == Some("nvme") {
-                            "p"
-                        } else {
-                            ""
-                        }
-                    )
-                    .into(),
-                    aliases: vec![DevicePath {
-                        path: format!("{}-part{number}", disk.aliases[0].path.display()).into(),
-                        kind: DevicePathKind::ById,
-                    }],
-                    parent_devnode: Some(disk.devnode.clone()),
-                    model: disk.model.clone(),
-                    serial: disk.serial.clone(),
-                    size_bytes: Some(if number == 1 {
-                        GIB
+            let total = disk.size_bytes.unwrap();
+            let used = if sata {
+                total * 85 / 100
+            } else {
+                total - 2 * MIB
+            };
+            let mut next_start = MIB;
+            (1..=count)
+                .map(move |number| {
+                    let size = if number == 1 {
+                        if sata { 100 * MIB } else { GIB }
+                    } else if sata && number == 2 {
+                        16 * MIB
                     } else {
-                        (disk.size_bytes.unwrap() - GIB) / (count - 1)
-                    }),
-                    parent_size_bytes: disk.size_bytes,
-                    transport: disk.transport.clone(),
-                    rotational: disk.rotational,
-                    removable: disk.removable,
-                    usage: archinstall_zfs_core::disk::device::DeviceUsage {
-                        filesystem: if storage_fixture() == "missing" {
-                            ""
-                        } else if number == 1 {
-                            "vfat"
-                        } else if number == 3 {
-                            "ntfs"
-                        } else {
-                            "ext4"
-                        }
+                        (used - if sata { 116 * MIB } else { GIB }) / (count - 1)
+                    };
+                    let start = next_start;
+                    next_start += size;
+                    (number, start, size)
+                })
+                .map(move |(number, start, size)| {
+                    let missing = storage_fixture() == "missing";
+                    let (filesystem, label, partition_type) = if missing {
+                        ("", String::new(), "")
+                    } else if number == 1 {
+                        ("vfat", "EFI".into(), "c12a7328-f81f-11d2-ba4b-00a0c93ec93b")
+                    } else if sata && number == 2 {
+                        ("", String::new(), "e3c9e316-0b5c-4db8-817d-f92df00215ae")
+                    } else if sata && number == 3 {
+                        (
+                            "ntfs",
+                            "Windows".into(),
+                            "ebd0a0a2-b4ca-4db8-817d-f92df00215ae",
+                        )
+                    } else if !sata && !disk.removable && number == 2 {
+                        (
+                            "zfs_member",
+                            "zroot".into(),
+                            "6a898cc3-1dd2-11b2-99a6-080020736631",
+                        )
+                    } else {
+                        (
+                            "ext4",
+                            format!("Previous-Linux-{number}"),
+                            "0fc63daf-8483-4772-8e79-3d69d8477de4",
+                        )
+                    };
+                    BlockPartition {
+                        devnode: format!(
+                            "{}{}{number}",
+                            disk.devnode.display(),
+                            if disk.transport.as_deref() == Some("nvme") {
+                                "p"
+                            } else {
+                                ""
+                            }
+                        )
                         .into(),
-                        label: if storage_fixture() == "missing" {
-                            "".into()
-                        } else if number == 1 {
-                            "EFI".into()
-                        } else {
-                            format!(
-                                "{}-partition-{number}",
-                                if number == 3 {
-                                    "Windows"
-                                } else {
-                                    "Previous-Linux"
-                                }
-                            )
+                        aliases: vec![DevicePath {
+                            path: format!("{}-part{number}", disk.aliases[0].path.display()).into(),
+                            kind: DevicePathKind::ById,
+                        }],
+                        parent_devnode: Some(disk.devnode.clone()),
+                        model: disk.model.clone(),
+                        serial: disk.serial.clone(),
+                        size_bytes: Some(size),
+                        start_bytes: Some(start),
+                        parent_size_bytes: disk.size_bytes,
+                        transport: disk.transport.clone(),
+                        rotational: disk.rotational,
+                        removable: disk.removable,
+                        usage: archinstall_zfs_core::disk::device::DeviceUsage {
+                            filesystem: filesystem.into(),
+                            label,
+                            partition_type: partition_type.into(),
+                            in_use: disk.removable,
+                            mountpoints: if disk.removable {
+                                vec!["/run/archiso/bootmnt".into()]
+                            } else {
+                                vec![]
+                            },
                         },
-                        partition_type: if number == 1 {
-                            "c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
-                        } else {
-                            "0fc63daf-8483-4772-8e79-3d69d8477de4"
-                        }
-                        .into(),
-                        in_use: disk.removable,
-                        mountpoints: if disk.removable {
-                            vec!["/run/archiso/bootmnt".into()]
-                        } else {
-                            vec![]
-                        },
-                    },
-                }
-                .into()
-            })
+                    }
+                    .into()
+                })
         })
         .collect()
 }

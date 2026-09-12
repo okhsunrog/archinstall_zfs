@@ -32,7 +32,9 @@ Preview scenes: `welcome`, `interrupted`, `offline`, `no-uefi`, `zfs-preparing`,
 `inspect` (simulated pool import, export, and selection), and `invalid` (an
 incomplete configuration for validation checks).
 The three simulated drives include NVMe, SATA, and removable USB, with long serials
-and persistent paths. The SATA drive has four partitions; NVMe and USB have two each. Filesystem, label,
+and persistent paths. The NVMe drive carries an EFI partition and a ZFS pool `zroot`;
+the SATA drive a Windows layout (EFI, reserved, NTFS, ext4) with free space at the end;
+the USB stick is the installer medium. Filesystem, label,
 EFI type, and installer-media usage are included. The wizard starts
 with a configured user, KDE Plasma, packages, and services; edits remain interactive.
 Wi-Fi uses the existing mock backend, including known, secured, open, and enterprise

@@ -2,6 +2,7 @@ import { AlongsidePanel } from "../components/alongside-panel.slint";
 import { StorageState } from "../state/storage-state.slint";
 import { SetupRow } from "../components/setup-row.slint";
 import { StorageMode } from "../components/storage-mode.slint";
+import { DiskOverview } from "../components/disk-overview.slint";
 import { ItemType } from "../types.slint";
 // Wizard config screen — title bar, sidebar with step list, content area
 // with the per-step ConfigItemRow list, and a footer with Quit / Back / Next.
@@ -185,6 +186,10 @@ export component WizardView inherits Rectangle {
                                     color: Theme.c.subtext1;
                                     font-size: 14px;
                                     wrap: word-wrap;
+                                }
+                                if WizardState.current-step == 1: DiskOverview {
+                                    compact: root.height < 900px;
+                                    apply(index) => { StorageState.apply-suggestion(index); }
                                 }
                                 if WizardState.current-step == 1: StorageMode {
                                     activated(key) => { root.item-activated(key); }

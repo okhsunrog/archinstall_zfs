@@ -32,8 +32,11 @@ def accounts(p):
     assert not p.element('Checkbox', 'Administrator alex').get('accessibleChecked', False)
     p.click('Checkbox', 'Administrator alex')
     assert p.element('Checkbox', 'Administrator alex').get('accessibleChecked', False)
+    # With an account present the dialog shows cards; the form is on request.
+    p.click('Button', 'Add another user')
     p.fill(0, 'Bad Name')
     p.fill(1, 'preview passphrase only')
+    p.fill(2, 'preview passphrase only')
     p.click('Button', 'Add user')
     p.wait('Text', 'Use up to 32')
     assert p.element('TextInput', 'Username').get('accessibleValue') == 'Bad Name'
@@ -43,8 +46,6 @@ def accounts(p):
     p.wait('Text', 'This username is already')
     p.screenshot('duplicate-username')
     p.fill(0, 'newuser')
-    p.click('Button', 'Done')
-    p.wait('Text', 'Click Add user')
     p.click('Button', 'Add user')
     p.wait('Button', 'Remove user newuser')
     p.screenshot('account-added')

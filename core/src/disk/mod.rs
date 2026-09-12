@@ -1,5 +1,6 @@
 pub mod alongside;
 pub mod device;
+pub mod overview;
 pub mod partition;
 
 /// sgdisk type codes for the partitions this installer creates. The GPT type
