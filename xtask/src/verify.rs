@@ -78,6 +78,13 @@ fn checks(config_path: &Path) -> Result<Vec<Check>, String> {
         Check::new("sshd", "systemctl is-active sshd", "active", |out| {
             out == "active"
         }),
+        // A network service is enabled whichever path configured it.
+        Check::new(
+            "network",
+            "systemctl is-enabled NetworkManager systemd-networkd 2>/dev/null",
+            "NetworkManager or systemd-networkd enabled",
+            |out| out.lines().any(|line| line.trim() == "enabled"),
+        ),
         Check::new("fstab", "cat /etc/fstab", "has root dataset", |out| {
             out.contains("testpool/arch0/root")
         }),

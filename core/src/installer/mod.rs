@@ -128,6 +128,7 @@ pub fn perform_installation(request: InstallRequest) -> Result<Vec<String>> {
         notices: Vec::new(),
     };
     installer.configure_target()?;
+    installer.log_enabled_units();
     Ok(installer.notices)
 }
 
@@ -149,6 +150,7 @@ impl Installer {
         tracing::info!("Phase 5: Configuring system...");
         tracing::info!(target: "metrics", event = "phase_start", num = 5u32, name = "Configuring system");
         self.configure_system()?;
+        self.configure_network()?;
         self.ensure_not_cancelled()?;
 
         // Phase 6: archzfs repo on target + ZFS packages
@@ -246,12 +248,46 @@ impl Installer {
             mirrors::configure_mirrors(&self.target, regions)?;
         }
 
-        // Network
-        if self.config.network_copy_iso {
-            network::copy_iso_network(&*self.runner, &self.target)?;
-        }
-
         Ok(())
+    }
+
+    /// Every installed system gets a network service. The live medium's
+    /// systemd-networkd and iwd setup is copied when asked for; otherwise
+    /// NetworkManager, which the desktop environments expect, is installed
+    /// and enabled. Before this, a system installed from the graphical
+    /// wizard came up with no network service at all.
+    fn configure_network(&mut self) -> Result<()> {
+        if self.config.network_copy_iso {
+            return network::copy_iso_network(&*self.runner, &self.target);
+        }
+        self.install_target_packages(&["networkmanager"])?;
+        services::enable_service(&*self.runner, &self.target, "NetworkManager")?;
+        tracing::info!("NetworkManager installed and enabled");
+        Ok(())
+    }
+
+    /// One line naming every enabled unit, so a missing service shows up in
+    /// the log without reading the whole run.
+    fn log_enabled_units(&self) {
+        let target = self.target.to_string_lossy();
+        let Ok(output) = self.runner.run(
+            "systemctl",
+            &[
+                "--root",
+                &target,
+                "list-unit-files",
+                "--state=enabled",
+                "--no-legend",
+            ],
+        ) else {
+            return;
+        };
+        let units: Vec<&str> = output
+            .stdout
+            .lines()
+            .filter_map(|line| line.split_whitespace().next())
+            .collect();
+        tracing::info!(count = units.len(), units = %units.join(" "), "enabled units on the target");
     }
 
     /// Install a ZFS module for every configured kernel.

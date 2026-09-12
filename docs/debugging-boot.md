@@ -250,7 +250,7 @@ cat /mnt/etc/ssh/sshd_config.d/10-root-login.conf
 ```
 
 ### Cause 2: Network not configured
-The installed system uses systemd-networkd with configs copied from the ISO. Interface names may differ between ISO and installed kernel.
+The installed system uses NetworkManager unless `network_copy_iso` is set, in which case systemd-networkd and iwd configs are copied from the ISO. With copied configs, interface names may differ between ISO and installed kernel.
 
 Check if network configs use wildcard matching:
 ```bash
