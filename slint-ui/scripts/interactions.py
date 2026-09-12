@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 import time
 
-from review import Preview
+from review import Preview, Results, SIZES
 
 
 def system(p):
@@ -216,26 +216,20 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, default=Path('target/debug/azfs'))
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--sizes', nargs='+', default=['1920x1080@1', '1366x768@1', '1280x800@1'])
+    parser.add_argument('--sizes', nargs='+', default=SIZES)
     flows = ['system', 'users', 'desktop', 'wifi', 'inspect', 'install', 'cancel', 'shell', 'logs', 'invalid']
     parser.add_argument('--flows', nargs='+', choices=flows, default=flows)
     args = parser.parse_args()
+    results = Results()
     for spec in args.sizes:
         size, scale = spec.split('@')
         for flow in args.flows:
             output = args.output / spec / flow
             output.mkdir(parents=True, exist_ok=True)
             scene = {'wifi': 'offline', 'install': 'review', 'cancel': 'install', 'shell': 'done', 'logs': 'done'}.get(flow, flow)
-            p = Preview(args.binary.resolve(), scene, size, scale, output)
-            try:
-                p.ready()
-                globals()[flow](p)
-                print(f'PASS {spec} {flow}', flush=True)
-            except Exception:
-                p.screenshot('failure')
-                raise
-            finally:
-                p.close()
+            preview = Preview(args.binary.resolve(), scene, size, scale, output)
+            results.run(f'{spec} {flow}', preview, globals()[flow])
+    raise SystemExit(results.finish())
 
 
 if __name__ == '__main__':
