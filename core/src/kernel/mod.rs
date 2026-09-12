@@ -51,7 +51,7 @@ pub fn zfs_module_packages(
 }
 
 /// Initialize an alpm handle from the system pacman.conf.
-pub(crate) fn init_alpm() -> Result<alpm::Alpm> {
+pub fn init_alpm() -> Result<alpm::Alpm> {
     let pacman_conf = pacmanconf::Config::from_file("/etc/pacman.conf")
         .wrap_err("failed to parse pacman.conf")?;
 

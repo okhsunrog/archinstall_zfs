@@ -67,6 +67,48 @@ pub fn sync_live_databases(handle: &mut Alpm, force: bool) -> Result<()> {
     Ok(())
 }
 
+/// The packages `name` stands for in `handle`'s sync databases: the package
+/// of that name from the first repository that has it, or every member of
+/// the group of that name. A group is what the desktop profiles list for
+/// their application suites; adding it as a package failed the install.
+pub fn resolve_name<'a>(handle: &'a Alpm, name: &str) -> Result<Vec<&'a alpm::Package>> {
+    for db in handle.syncdbs() {
+        if let Ok(pkg) = db.pkg(name) {
+            return Ok(vec![pkg]);
+        }
+    }
+    let mut members = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for db in handle.syncdbs() {
+        if let Ok(group) = db.group(name) {
+            for pkg in group.packages() {
+                if seen.insert(pkg.name().to_string()) {
+                    members.push(pkg);
+                }
+            }
+        }
+    }
+    if members.is_empty() {
+        bail!("package '{name}' not found in any repository")
+    }
+    tracing::info!(
+        group = name,
+        count = members.len(),
+        "group expands to packages"
+    );
+    Ok(members)
+}
+
+/// Names that neither a package nor a group in `handle`'s sync databases
+/// answers to, in the order given.
+pub fn unknown_names<'a>(handle: &Alpm, names: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    names
+        .into_iter()
+        .filter(|name| resolve_name(handle, name).is_err())
+        .map(str::to_string)
+        .collect()
+}
+
 /// Wraps an alpm handle for host or target installs.
 /// Does NOT own API filesystem mounts — use `TargetMounts` for that.
 pub struct AlpmContext {
@@ -197,12 +239,15 @@ impl AlpmContext {
         cancel: &CancellationToken,
         progress_tx: Option<std::sync::Arc<watch::Sender<DownloadProgress>>>,
     ) -> Result<()> {
-        // Find and add each package from sync databases
-        for &pkg_name in packages {
-            let pkg = self.find_package(pkg_name)?;
-            self.handle
-                .trans_add_pkg(pkg)
-                .map_err(|e| eyre!("failed to add package '{pkg_name}': {e}"))?;
+        // Add each name from the sync databases: a package as itself, a
+        // group (kde-applications, xfce4-goodies, gnome-extra) as its members.
+        for &name in packages {
+            let members = self.resolve_name(name)?;
+            for pkg in members {
+                self.handle
+                    .trans_add_pkg(pkg)
+                    .map_err(|e| eyre!("failed to add package '{name}': {e}"))?;
+            }
         }
 
         // Prepare (resolve deps, check conflicts)
@@ -362,13 +407,10 @@ impl AlpmContext {
         Ok(())
     }
 
-    fn find_package(&self, name: &str) -> Result<&alpm::Package> {
-        for db in self.handle.syncdbs() {
-            if let Ok(pkg) = db.pkg(name) {
-                return Ok(pkg);
-            }
-        }
-        bail!("package '{name}' not found in any repository")
+    /// The packages `name` stands for: one, or every member of the group
+    /// of that name across the repositories.
+    fn resolve_name(&self, name: &str) -> Result<Vec<&alpm::Package>> {
+        resolve_name(&self.handle, name)
     }
 
     fn setup_callbacks(&self) {

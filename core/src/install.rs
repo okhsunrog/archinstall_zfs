@@ -239,6 +239,14 @@ async fn install(
     }
     tracing::info!("UEFI boot detected");
 
+    // A misspelt package, or a name the repositories do not know, used to
+    // fail the run in phase 9 with the disk already partitioned; the live
+    // system's databases can answer that now.
+    {
+        let config = config.clone();
+        tokio::task::spawn_blocking(move || verify_repository_packages(&config)).await??;
+    }
+
     // What an earlier run left in the target directory stops the root
     // dataset from mounting; find out now, before the disk is touched.
     {
@@ -420,6 +428,56 @@ async fn install(
             Ok(None)
         }
     }
+}
+
+/// The repository packages the configuration asks for: the profile with
+/// its chosen optionals and display manager, and the additional packages.
+/// AUR packages are resolved by the AUR step and are not included.
+pub fn planned_repository_packages(config: &GlobalConfig) -> Vec<String> {
+    let mut names = Vec::new();
+    if let Some(selection) = &config.profile_selection {
+        names.extend(selection.resolved_packages());
+        if let Some(dm) = selection.effective_display_manager() {
+            names.push(dm.package().to_string());
+        }
+    }
+    names.extend(config.additional_packages.iter().cloned());
+    names.dedup();
+    names
+}
+
+/// Refuse to start when the live system's repositories know nothing of a
+/// requested package or group. Distributions with their own repositories
+/// are only warned about, since the live medium may not carry them.
+fn verify_repository_packages(config: &GlobalConfig) -> Result<()> {
+    let names = planned_repository_packages(config);
+    if names.is_empty() {
+        return Ok(());
+    }
+    let handle = match crate::kernel::init_alpm() {
+        Ok(handle) => handle,
+        Err(error) => {
+            tracing::warn!(%error, "cannot check package names against the repositories");
+            return Ok(());
+        }
+    };
+    let unknown =
+        crate::system::alpm_pacman::unknown_names(&handle, names.iter().map(String::as_str));
+    if unknown.is_empty() {
+        tracing::info!(
+            count = names.len(),
+            "requested packages found in the repositories"
+        );
+        return Ok(());
+    }
+    let list = unknown.join(", ");
+    if config.distribution().name != "arch" {
+        tracing::warn!(packages = %list, "not in the live system's repositories; the target's own repositories may still provide them");
+        return Ok(());
+    }
+    bail!(
+        "These packages are not in any repository: {list}. Check the spelling, or add them as AUR packages, then start again."
+    );
 }
 
 fn ensure_not_cancelled(cancel: &CancellationToken) -> Result<()> {

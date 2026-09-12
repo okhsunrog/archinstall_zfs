@@ -363,7 +363,7 @@ fn default_set_bootfs() -> bool {
 }
 
 fn default_parallel_downloads() -> u32 {
-    10
+    5
 }
 
 impl Default for GlobalConfig {
