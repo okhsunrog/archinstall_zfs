@@ -23,13 +23,16 @@ export component UserManagePopup inherits Rectangle {
     // body can submit them; the form itself is destroyed after a submit.
     property <string> form-username;
     property <string> form-password;
+    property <string> form-repeat;
     property <bool> form-sudo: true;
-    property <bool> form-dirty: form-username != "" || form-password != "";
+    property <bool> form-dirty: form-username != "" || form-password != "" || form-repeat != "";
+    property <bool> form-matches: form-password == form-repeat;
     // Destroying the form clears its fields; the mirrors follow.
     function reset-form() {
         root.adding = false;
         root.form-username = "";
         root.form-password = "";
+        root.form-repeat = "";
         root.form-sudo = true;
         root.password-edited("");
     }
@@ -183,6 +186,16 @@ export component UserManagePopup inherits Rectangle {
                                 edited(val) => { root.password-edited(val); root.form-password = val; }
                             }
 
+                            StyledTextInput {
+                                height: 40px;
+                                placeholder: "Repeat the password";
+                                accessible-label: "Repeat account password";
+                                is-password: true;
+                                border-color: root.form-matches ? Theme.c.text : Theme.c.red;
+                                changed has-focus => { form-scroll.reveal-if(self.has-focus, self.y, self.height); }
+                                edited(val) => { root.form-repeat = val; }
+                            }
+
                             // One fixed-size area for the rating or the no-password
                             // note, so the form does not resize on every keystroke.
                             rating := VerticalLayout {
@@ -204,10 +217,11 @@ export component UserManagePopup inherits Rectangle {
                                 }
 
                                 Text {
-                                    text: password-input.text == ""
+                                    text: !root.form-matches ? "The passwords do not match."
+                                        : password-input.text == ""
                                         ? "Without a password, password login is unavailable. Configure another sign-in method before using this account."
                                         : (rating.rated ? PopupState.password-strength-hint : "The rating appears as you type.");
-                                    color: Theme.c.subtext1;
+                                    color: root.form-matches ? Theme.c.subtext1 : Theme.c.red;
                                     font-size: 13px;
                                     wrap: word-wrap;
                                     overflow: elide;
@@ -237,9 +251,9 @@ export component UserManagePopup inherits Rectangle {
                         if root.adding: StyledButton {
                             label: "Add user";
                             height: 40px;
-                            style: root.form-username != "" ? Theme.button-primary : Theme.button-default;
-                            outlined: root.form-username == "";
-                            enabled: root.form-username != "";
+                            style: root.form-username != "" && root.form-matches ? Theme.button-primary : Theme.button-default;
+                            outlined: root.form-username == "" || !root.form-matches;
+                            enabled: root.form-username != "" && root.form-matches;
                             clicked => {
                                 if root.user-added(root.form-username, root.form-password, root.form-sudo) {
                                     root.reset-form();

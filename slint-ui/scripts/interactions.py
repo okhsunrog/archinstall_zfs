@@ -42,6 +42,7 @@ def users(p):
     p.click('Button', 'Add another user')
     p.fill(0, 'previewuser')
     p.fill(1, 'a long preview passphrase for testing')
+    p.fill(2, 'a long preview passphrase for testing')
     time.sleep(.5)
     p.screenshot('users-filled')
     p.click('Button', 'Add user')
@@ -215,7 +216,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, default=Path('target/debug/azfs'))
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--sizes', nargs='+', default=['1920x1080@1', '1366x768@1', '1920x1080@2'])
+    parser.add_argument('--sizes', nargs='+', default=['1920x1080@1', '1366x768@1', '1280x800@1'])
     flows = ['system', 'users', 'desktop', 'wifi', 'inspect', 'install', 'cancel', 'shell', 'logs', 'invalid']
     parser.add_argument('--flows', nargs='+', choices=flows, default=flows)
     args = parser.parse_args()

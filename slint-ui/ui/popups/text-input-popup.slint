@@ -16,6 +16,11 @@ export component TextInputPopup inherits Rectangle {
     callback confirmed(string);
     callback closed();
     callback text-edited(string);
+    // Mirrors of the fields, so the action row can judge them; the repeat
+    // field only exists for passwords.
+    property <string> entered;
+    property <string> repeated;
+    property <bool> matches: !root.is-password || root.entered == root.repeated;
 
     if popup-visible: Rectangle {
         background: #00000080;
@@ -62,11 +67,29 @@ export component TextInputPopup inherits Rectangle {
                         height: 40px;
                         accessible-label: root.title;
 
-                        edited(val) => { root.text-edited(val); }
-                        accepted(val) => { root.confirmed(val); }
+                        edited(val) => { root.entered = val; root.text-edited(val); }
+                        accepted(val) => { if root.matches { root.confirmed(val); } }
                     }
 
-                    init => { input.focus-input(); root.text-edited(root.input-text); }
+                    if root.is-password: StyledTextInput {
+                        is-password: true;
+                        font-size: Theme.font-base;
+                        placeholder: "Repeat the password";
+                        border-color: root.matches ? Theme.c.text : Theme.c.red;
+                        height: 40px;
+                        accessible-label: "Repeat " + root.title;
+                        edited(val) => { root.repeated = val; }
+                        accepted(val) => { if root.matches { root.confirmed(root.entered); } }
+                    }
+                    if root.is-password: Text {
+                        text: root.matches ? "" : "The passwords do not match.";
+                        color: Theme.c.red;
+                        font-size: 13px;
+                        height: 18px;
+                        vertical-alignment: center;
+                    }
+
+                    init => { input.focus-input(); root.entered = root.input-text; root.repeated = root.input-text; root.text-edited(root.input-text); }
 
                     // Password strength. The block keeps one size whatever the
                     // rating, so the popup neither resizes nor moves while typing.
@@ -115,7 +138,8 @@ export component TextInputPopup inherits Rectangle {
                             label: "Save";
                             height: 40px;
                             style: Theme.button-primary;
-                            clicked => { root.confirmed(input.text); }
+                            enabled: root.matches;
+                            clicked => { if root.matches { root.confirmed(input.text); } }
                         }
                     }
                 }
