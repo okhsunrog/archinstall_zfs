@@ -168,9 +168,22 @@ impl AlpmContext {
             .set_cachedirs([cache_dir.as_str()].iter())
             .map_err(|e| eyre!("failed to set cache dir: {e}"))?;
 
-        // Ensure hook directories are set (relative to root, libalpm prepends root)
+        // Hook directories are host paths: libalpm does not prefix them
+        // with the root, pacman's own front end does that. Given as bare
+        // paths they named the live system's hooks, so every target
+        // transaction ran archiso's mkinitcpio and dkms hooks (which failed
+        // inside the chroot) and none of the target's own: no icon cache,
+        // no MIME database, no GDK pixbuf loaders on the installed desktop.
+        let hookdirs = [
+            target.join("usr/share/libalpm/hooks/"),
+            target.join("etc/pacman.d/hooks/"),
+        ];
         handle
-            .set_hookdirs(["/usr/share/libalpm/hooks/", "/etc/pacman.d/hooks/"].iter())
+            .set_hookdirs(
+                hookdirs
+                    .iter()
+                    .map(|dir| dir.to_string_lossy().into_owned()),
+            )
             .map_err(|e| eyre!("failed to set hook dirs: {e}"))?;
 
         let ctx = Self {
