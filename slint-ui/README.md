@@ -22,9 +22,10 @@ and interaction scripts. Smaller windows and higher scales remain secondary
 checks for clipping and accessibility, not the main design reference.
 
 Omit `SLINT_BACKEND=headless` to interact in a desktop window. To reproduce a
-1920×1080 display with a 200% UI scale, use `--preview-size 1920x1080 --ui-scale 2`.
+4K display with a 200% UI scale, use `--preview-size 3840x2160 --ui-scale 2`; its logical
+size equals Full HD at 100%, so the review matrix uses the small panels instead.
 
-Preview scenes: `welcome`, `offline`, `no-uefi`, `zfs-preparing`, `zfs-failed`,
+Preview scenes: `welcome`, `interrupted`, `offline`, `no-uefi`, `zfs-preparing`, `zfs-failed`,
 `wifi-empty`, `wifi-unavailable`, `wifi-no-internet`, `wifi-verifying`,
 `disk`, `new-pool`, `existing-pool`, `zfs`, `system`, `users`, `desktop`, `review`,
 `install`, `done`, `failed`, `cancelling`, `cancelled`,
@@ -56,7 +57,7 @@ The output contains PNG screenshots, JSON element trees, process logs, and an
 establish that a layout is correct. Use `--scenes disk review` or
 `--sizes 1920x1080@1` to review only the primary configuration.
 
-Run repeatable interaction checks at Full HD with 100% and 200% scale and at 1366×768:
+Run repeatable interaction checks at Full HD, 1366×768 and 1280×800:
 
 ```sh
 uv run slint-ui/scripts/interactions.py --output /tmp/azfs-ui-interactions
@@ -87,7 +88,7 @@ cancel/confirm, keyboard focus, encryption, swap, pool selection, and Review:
 uv run slint-ui/scripts/storage_review.py --size 1920x1080 --output /tmp/azfs-storage-review
 uv run slint-ui/scripts/storage_review.py --size 1920x1080 --scale 1.5 \
   --output /tmp/azfs-storage-review-scaled
-uv run slint-ui/scripts/storage_review.py --keyboard-only --size 1920x1080 --scale 2 \
+uv run slint-ui/scripts/storage_review.py --keyboard-only --size 1280x800 \
   --output /tmp/azfs-storage-keyboard
 AZFS_PREVIEW_STORAGE=many uv run slint-ui/scripts/storage_review.py \
   --fixture many --output /tmp/azfs-storage-many

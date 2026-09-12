@@ -120,7 +120,7 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
-    for size, scale in [('1920x1080','1'), ('1366x768','1'), ('1920x1080','1.5'), ('1920x1080','2')]:
+    for size, scale in [('1920x1080','1'), ('1366x768','1'), ('1280x800','1'), ('1920x1080','1.5')]:
         for small in [False, True]:
             run(args.binary.resolve(), args.output, size, scale, small)
 

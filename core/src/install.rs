@@ -91,6 +91,8 @@ pub async fn run_install_with_target(
     if !problems.is_empty() {
         return Err(InstallError::InvalidConfig(problems));
     }
+    // From here on a cancelled or failed run can be picked up again.
+    crate::resume::record_start(&config);
 
     let pool_name = config
         .pool_name
@@ -100,8 +102,13 @@ pub async fn run_install_with_target(
     let root_dataset = BootEnvironment::new(&pool_name, config.dataset_prefix.as_str()).root();
     let cleanup = Arc::new(CleanupState::default());
 
+    // Every command the pipeline runs stops when the token fires; the
+    // cleanup below keeps the plain runner so it can still unmount and export.
+    let pipeline_runner: Arc<dyn CommandRunner> = Arc::new(
+        crate::system::cmd::CancellableRunner::new(runner.clone(), cancel.clone()),
+    );
     let result = install(
-        runner.clone(),
+        pipeline_runner,
         config,
         cancel.clone(),
         progress_tx,
@@ -126,6 +133,7 @@ pub async fn run_install_with_target(
             InstallError::Failed(error)
         }
     })?;
+    crate::resume::clear();
     tracing::info!("Installation complete!");
     Ok(target)
 }
@@ -279,6 +287,7 @@ async fn install(
         let config = config.clone();
         tokio::task::spawn_blocking(move || -> Result<_> {
             let parts = crate::prepare::prepare_disk(&*runner, &config)?;
+            crate::resume::record_prepared(&parts);
             Ok((parts.efi, parts.zfs, parts.swap))
         })
         .await??

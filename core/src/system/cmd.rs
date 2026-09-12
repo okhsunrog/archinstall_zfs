@@ -1,7 +1,11 @@
+use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Context, Result, bail};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone)]
 pub struct CmdOutput {
@@ -20,6 +24,29 @@ pub trait CommandRunner: Send + Sync {
     fn run(&self, program: &str, args: &[&str]) -> Result<CmdOutput>;
 
     fn run_with_stdin(&self, program: &str, args: &[&str], stdin: &[u8]) -> Result<CmdOutput>;
+
+    /// Like `run`, but stops the command when `cancel` fires instead of
+    /// waiting for it. Runners that cannot stop anything fall back to `run`.
+    fn run_cancellable(
+        &self,
+        program: &str,
+        args: &[&str],
+        cancel: &CancellationToken,
+    ) -> Result<CmdOutput> {
+        let _ = cancel;
+        self.run(program, args)
+    }
+
+    fn run_with_stdin_cancellable(
+        &self,
+        program: &str,
+        args: &[&str],
+        stdin: &[u8],
+        cancel: &CancellationToken,
+    ) -> Result<CmdOutput> {
+        let _ = cancel;
+        self.run_with_stdin(program, args, stdin)
+    }
 }
 
 pub struct RealRunner;
@@ -40,16 +67,7 @@ impl CommandRunner for RealRunner {
             exit_code: output.status.code().unwrap_or(-1),
         };
         tracing::debug!(exit_code = result.exit_code, "command finished");
-        for line in result.stdout.lines() {
-            if !line.trim().is_empty() {
-                tracing::trace!("[{program}] {line}");
-            }
-        }
-        for line in result.stderr.lines() {
-            if !line.trim().is_empty() {
-                tracing::trace!("[{program} stderr] {line}");
-            }
-        }
+        log_output(program, &result);
         Ok(result)
     }
 
@@ -79,17 +97,188 @@ impl CommandRunner for RealRunner {
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             exit_code: output.status.code().unwrap_or(-1),
         };
-        for line in result.stdout.lines() {
-            if !line.trim().is_empty() {
-                tracing::trace!("[{program}] {line}");
-            }
-        }
-        for line in result.stderr.lines() {
-            if !line.trim().is_empty() {
-                tracing::trace!("[{program} stderr] {line}");
-            }
-        }
+        log_output(program, &result);
         Ok(result)
+    }
+
+    fn run_cancellable(
+        &self,
+        program: &str,
+        args: &[&str],
+        cancel: &CancellationToken,
+    ) -> Result<CmdOutput> {
+        run_supervised(program, args, None, cancel)
+    }
+
+    fn run_with_stdin_cancellable(
+        &self,
+        program: &str,
+        args: &[&str],
+        stdin: &[u8],
+        cancel: &CancellationToken,
+    ) -> Result<CmdOutput> {
+        run_supervised(program, args, Some(stdin), cancel)
+    }
+}
+
+fn log_output(program: &str, result: &CmdOutput) {
+    for line in result.stdout.lines() {
+        if !line.trim().is_empty() {
+            tracing::trace!("[{program}] {line}");
+        }
+    }
+    for line in result.stderr.lines() {
+        if !line.trim().is_empty() {
+            tracing::trace!("[{program} stderr] {line}");
+        }
+    }
+}
+
+/// How long a stopped command's process group gets to exit on SIGTERM
+/// before it is killed. dracut, dkms and makepkg all clean up on SIGTERM;
+/// nothing here needs longer.
+const TERMINATE_GRACE: Duration = Duration::from_secs(5);
+const POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+/// Run a command in its own process group, stopping the whole group as soon
+/// as `cancel` fires. A build under arch-chroot forks compilers and
+/// compressors; killing only the direct child would leave those holding the
+/// target's mounts busy, so the cleanup could not unmount them.
+fn run_supervised(
+    program: &str,
+    args: &[&str],
+    stdin_data: Option<&[u8]>,
+    cancel: &CancellationToken,
+) -> Result<CmdOutput> {
+    use std::os::unix::process::CommandExt;
+
+    if cancel.is_cancelled() {
+        bail!("{program} not started: installation cancelled");
+    }
+    tracing::debug!(program, ?args, "running command");
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(if stdin_data.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .wrap_err_with(|| format!("failed to spawn: {program}"))?;
+
+    if let (Some(data), Some(mut stdin)) = (stdin_data, child.stdin.take()) {
+        use std::io::Write;
+        // The command may exit before reading it all; that shows up in its
+        // exit status, not here.
+        let _ = stdin.write_all(data);
+    }
+
+    // Drain both pipes on their own threads so a chatty command cannot fill
+    // one and block while this thread watches the token.
+    let stdout = child.stdout.take().map(drain);
+    let stderr = child.stderr.take().map(drain);
+
+    let status = loop {
+        if let Some(status) = child.try_wait().wrap_err("failed to wait on child")? {
+            break status;
+        }
+        if cancel.is_cancelled() {
+            tracing::info!(program, "stopping the running command");
+            stop_group(&mut child);
+            bail!("{program} stopped: installation cancelled");
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    };
+
+    let collect = |handle: Option<std::thread::JoinHandle<Vec<u8>>>| {
+        handle
+            .and_then(|h| h.join().ok())
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .unwrap_or_default()
+    };
+    let result = CmdOutput {
+        stdout: collect(stdout),
+        stderr: collect(stderr),
+        exit_code: status.code().unwrap_or(-1),
+    };
+    tracing::debug!(exit_code = result.exit_code, "command finished");
+    log_output(program, &result);
+    Ok(result)
+}
+
+fn drain<R: Read + Send + 'static>(mut reader: R) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = reader.read_to_end(&mut bytes);
+        bytes
+    })
+}
+
+/// SIGTERM the child's process group, then SIGKILL whatever is still there
+/// after the grace period. The child was spawned as its own group leader,
+/// so its pid is the group id.
+fn stop_group(child: &mut Child) {
+    use nix::sys::signal::{Signal, killpg};
+    use nix::unistd::Pid;
+
+    let group = Pid::from_raw(child.id() as i32);
+    let _ = killpg(group, Signal::SIGTERM);
+    let deadline = Instant::now() + TERMINATE_GRACE;
+    while Instant::now() < deadline {
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            return;
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    }
+    let _ = killpg(group, Signal::SIGKILL);
+    let _ = child.wait();
+}
+
+/// A runner whose every command stops when the token fires, for the
+/// install pipeline; the cleanup that follows keeps the plain runner so it
+/// can still unmount and export after a cancel.
+pub struct CancellableRunner {
+    inner: Arc<dyn CommandRunner>,
+    cancel: CancellationToken,
+}
+
+impl CancellableRunner {
+    pub fn new(inner: Arc<dyn CommandRunner>, cancel: CancellationToken) -> Self {
+        Self { inner, cancel }
+    }
+}
+
+impl CommandRunner for CancellableRunner {
+    fn run(&self, program: &str, args: &[&str]) -> Result<CmdOutput> {
+        self.inner.run_cancellable(program, args, &self.cancel)
+    }
+
+    fn run_with_stdin(&self, program: &str, args: &[&str], stdin: &[u8]) -> Result<CmdOutput> {
+        self.inner
+            .run_with_stdin_cancellable(program, args, stdin, &self.cancel)
+    }
+
+    fn run_cancellable(
+        &self,
+        program: &str,
+        args: &[&str],
+        cancel: &CancellationToken,
+    ) -> Result<CmdOutput> {
+        self.inner.run_cancellable(program, args, cancel)
+    }
+
+    fn run_with_stdin_cancellable(
+        &self,
+        program: &str,
+        args: &[&str],
+        stdin: &[u8],
+        cancel: &CancellationToken,
+    ) -> Result<CmdOutput> {
+        self.inner
+            .run_with_stdin_cancellable(program, args, stdin, cancel)
     }
 }
 
@@ -306,5 +495,48 @@ pub mod tests {
         let msg = format!("{err}");
         assert!(msg.contains("test command"));
         assert!(msg.contains("bad thing"));
+    }
+}
+
+#[cfg(test)]
+mod supervised_tests {
+    use super::*;
+
+    #[test]
+    fn a_cancelled_command_and_its_children_stop_promptly() {
+        let cancel = CancellationToken::new();
+        let stopper = cancel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            stopper.cancel();
+        });
+        let started = Instant::now();
+        // The shell forks sleep; only a group-wide signal reaches it.
+        let error = RealRunner
+            .run_cancellable("sh", &["-c", "sleep 30 & wait"], &cancel)
+            .expect_err("a stopped command is an error");
+        assert!(error.to_string().contains("cancelled"), "{error}");
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn a_finished_command_reports_its_output() {
+        let cancel = CancellationToken::new();
+        let output = RealRunner
+            .run_with_stdin_cancellable("cat", &[], b"hello", &cancel)
+            .unwrap();
+        assert!(output.success());
+        assert_eq!(output.stdout, "hello");
+    }
+
+    #[test]
+    fn a_cancelled_token_refuses_to_start_anything() {
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        assert!(RealRunner.run_cancellable("true", &[], &cancel).is_err());
     }
 }

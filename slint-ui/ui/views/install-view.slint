@@ -168,7 +168,7 @@ export component InstallView inherits VerticalLayout {
                     Text {
                         text: InstallState.state == 2 ? "Your system is ready. Reboot to start using it."
                             : InstallState.state == 3 ? "Check the log above for the error before trying again."
-                            : InstallState.state == 4 ? "Please wait while the installer finishes cleanup."
+                            : InstallState.state == 4 ? "Stopping \"" + InstallState.phase-label + "\", then unmounting the target and exporting the pool. Partitions already written stay as they are."
                             : InstallState.state == 5 ? "The installation stopped. You can return to the live console."
                             : InstallState.phase-label;
                         color: Theme.c.subtext0;
@@ -228,45 +228,48 @@ export component InstallView inherits VerticalLayout {
                         border-radius: 2px;
                     }
                 }
-                // Every transfer in flight, each with its own bar: at most
-                // the configured parallelism, so no scrolling is needed.
+                // Every transfer in flight on one line each: name, bar and
+                // figures. At most the configured parallelism, 18 px a row,
+                // so ten downloads take less than the old three-row list.
                 VerticalLayout {
-                    spacing: 4px;
-                    for dl in InstallState.download-items: VerticalLayout {
-                        spacing: 2px;
-                        HorizontalLayout {
-                            spacing: 12px;
-                            Text {
-                                text: dl.filename;
-                                color: Theme.c.subtext0;
-                                font-size: 11px;
-                                font-family: "Liberation Mono";
-                                overflow: elide;
-                                horizontal-stretch: 1;
-                                vertical-alignment: center;
-                            }
-                            Text {
-                                text: dl.state == 1 ? "Verifying"
-                                    : dl.state == 2 ? "Done" : dl.pct + "%  " + dl.speed;
-                                color: dl.state == 2 ? Theme.c.green
-                                    : dl.state == 0 && dl.speed == "waiting for mirror" ? Theme.c.yellow
-                                    : Theme.c.subtext0;
-                                font-size: 11px;
-                                vertical-alignment: center;
-                            }
+                    spacing: 3px;
+                    for dl in InstallState.download-items: HorizontalLayout {
+                        spacing: 10px;
+                        height: 18px;
+                        Text {
+                            text: dl.filename;
+                            width: 300px;
+                            color: Theme.c.subtext0;
+                            font-size: 11px;
+                            font-family: "Liberation Mono";
+                            overflow: elide;
+                            vertical-alignment: center;
                         }
                         Rectangle {
-                            height: 3px;
+                            horizontal-stretch: 1;
+                            height: 4px;
+                            y: (parent.height - self.height) / 2;
                             background: Theme.c.mantle;
-                            border-radius: 1.5px;
+                            border-radius: 2px;
                             clip: true;
                             Rectangle {
                                 x: 0; y: 0;
                                 height: parent.height;
                                 width: parent.width * clamp(dl.pct / 100, 0, 1);
                                 background: dl.state == 1 ? Theme.c.green : Theme.c.teal;
-                                border-radius: 1.5px;
+                                border-radius: 2px;
                             }
+                        }
+                        Text {
+                            text: dl.state == 1 ? "Verifying"
+                                : dl.state == 2 ? "Done" : dl.pct + "%  " + dl.speed;
+                            width: 150px;
+                            horizontal-alignment: right;
+                            color: dl.state == 2 ? Theme.c.green
+                                : dl.state == 0 && dl.speed == "waiting for mirror" ? Theme.c.yellow
+                                : Theme.c.subtext0;
+                            font-size: 11px;
+                            vertical-alignment: center;
                         }
                     }
                 }

@@ -68,11 +68,11 @@ after source changes; a running process does not pick up the new binary.
 | 1366×768, scale 1 | Smaller laptop viewport, density and scrolling |
 | 1280×800, scale 1 | Additional compact/aspect-ratio check |
 | 1920×1080, scale 1.5 | Fractional scaling, alignment and readable controls |
-| 1920×1080, scale 2 | Large UI, wrapping, footer and dialog constraints |
+| 1280×800, scale 1 | The smallest laptop panel: footer and dialog constraints |
 
 Treat 800×600 captures in older reports as historical stress checks, not the
 current design baseline. A screenshot's physical dimensions and UI scale both
-matter: 1920×1080 at scale 2 has roughly 960×540 logical pixels. Do not resize an
+matter: a 4K panel at 200 % has the same 1920×1080 logical pixels as Full HD at 100 %, so the small cases are the low-resolution panels themselves. Do not resize an
 existing PNG and call that a new display test. `Preview.ready()` checks the
 actual window size and scale reported by MCP.
 
@@ -92,7 +92,7 @@ uv run python slint-ui/scripts/design_review.py --output target/ui-review/editor
 uv run python slint-ui/scripts/storage_review.py --size 1920x1080 \
   --output target/ui-review/storage
 uv run python slint-ui/scripts/storage_review.py --keyboard-only \
-  --size 1920x1080 --scale 2 --output target/ui-review/storage-keyboard
+  --size 1280x800 --output target/ui-review/storage-keyboard
 AZFS_PREVIEW_STORAGE=many uv run python slint-ui/scripts/storage_review.py \
   --fixture many --size 1920x1080 --output target/ui-review/storage-many
 ```
@@ -102,7 +102,7 @@ rerunning every scenario:
 
 ```sh
 uv run python slint-ui/scripts/review.py --scenes welcome offline \
-  --sizes 1920x1080@1 1366x768@1 1920x1080@2 --output target/ui-review/network
+  --sizes 1920x1080@1 1366x768@1 1280x800@1 --output target/ui-review/network
 uv run python slint-ui/scripts/interactions.py --flows wifi \
   --output target/ui-review/network-flows
 ```
