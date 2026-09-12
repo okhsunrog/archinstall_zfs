@@ -201,6 +201,14 @@ pub async fn prepare_zfs(
     let datasets = crate::dataset_layout::default_datasets();
     crate::dataset_layout::mount_datasets_ordered(&zfs, &be, &datasets).await?;
     tracing::info!("Datasets mounted");
+    // The dataset gives /root mode 755; the filesystem package ships it as
+    // 750 and pacman warns about the difference on every transaction.
+    if let Err(error) = std::fs::set_permissions(
+        mountpoint.join("root"),
+        std::os::unix::fs::PermissionsExt::from_mode(0o750),
+    ) {
+        tracing::debug!(%error, "cannot set the mode of the root home dataset");
+    }
 
     Ok(())
 }

@@ -409,17 +409,20 @@ impl Installer {
                 }
 
                 // 4. Display manager — install + enable the effective DM.
-                //    If the user picked a different DM than the profile default,
-                //    install the override package and disable the original.
+                //    The package is installed whether or not the profile's
+                //    list happens to pull it in: plasma-desktop does not
+                //    depend on sddm, and a KDE install used to end up at a
+                //    console because "sddm.service does not exist".
+                //    If the user picked a different DM than the profile
+                //    default, the original service is disabled as well.
                 let profile_dm = p.default_display_manager();
                 let effective_dm = selection.effective_display_manager();
                 if let Some(dm) = effective_dm {
-                    let is_override = profile_dm != Some(dm);
-                    if is_override {
-                        self.install_target_packages(&[dm.package()])?;
-                        if let Some(old) = profile_dm {
-                            services::disable_service(&*self.runner, &self.target, old.service())?;
-                        }
+                    self.install_target_packages(&[dm.package()])?;
+                    if profile_dm != Some(dm)
+                        && let Some(old) = profile_dm
+                    {
+                        services::disable_service(&*self.runner, &self.target, old.service())?;
                     }
                     services::enable_service(&*self.runner, &self.target, dm.service())?;
 
