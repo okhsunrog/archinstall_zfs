@@ -189,6 +189,8 @@ fn setup_packages(app: &App, config: &Rc<RefCell<GlobalConfig>>, models: &Editin
     // Repo search (alpm — runs blocking inside a tokio task)
     let weak = app.as_weak();
     let search_model = models.package_search.clone();
+    // Typing restarts the timer, so a word costs one search, not one per key.
+    let debounce = Rc::new(slint::Timer::default());
     app.on_pkg_search_changed(move |text| {
         let request = epoch.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
         let Some(app) = weak.upgrade() else { return };
@@ -197,6 +199,7 @@ fn setup_packages(app: &App, config: &Rc<RefCell<GlobalConfig>>, models: &Editin
         search_model.set_vec(Vec::new());
         editing.set_package_status_text(SharedString::default());
         if text.is_empty() {
+            debounce.stop();
             return;
         }
         if crate::preview::enabled() {
@@ -207,31 +210,40 @@ fn setup_packages(app: &App, config: &Rc<RefCell<GlobalConfig>>, models: &Editin
         let query = text.to_string();
         let weak2 = app.as_weak();
         let epoch = epoch.clone();
-        tokio::spawn(async move {
-            let results = archinstall_zfs_core::packages::search_repo(&query, 20).await;
-            let (results, status) = match results {
-                Ok(results) => (results, SharedString::default()),
-                Err(error) => (
-                    Vec::new(),
-                    format!("Repository search failed: {error}").into(),
-                ),
-            };
-            let items: Vec<PackageSearchResult> = results
-                .into_iter()
-                .map(|p| PackageSearchResult {
-                    name: SharedString::from(&p.name),
-                    description: SharedString::from(&p.description),
-                    repo: SharedString::from(&p.repo),
-                })
-                .collect();
-            let _ = weak2.upgrade_in_event_loop(move |app| {
-                if epoch.load(Ordering::Relaxed) != request {
-                    return;
-                }
-                set_search_results(&app, items);
-                app.global::<EditingState>().set_package_status_text(status);
-            });
-        });
+        debounce.start(
+            slint::TimerMode::SingleShot,
+            std::time::Duration::from_millis(200),
+            move || {
+                let query = query.clone();
+                let weak2 = weak2.clone();
+                let epoch = epoch.clone();
+                tokio::spawn(async move {
+                    let results = archinstall_zfs_core::packages::search_repo(&query, 20).await;
+                    let (results, status) = match results {
+                        Ok(results) => (results, SharedString::default()),
+                        Err(error) => (
+                            Vec::new(),
+                            format!("Repository search failed: {error}").into(),
+                        ),
+                    };
+                    let items: Vec<PackageSearchResult> = results
+                        .into_iter()
+                        .map(|p| PackageSearchResult {
+                            name: SharedString::from(&p.name),
+                            description: SharedString::from(&p.description),
+                            repo: SharedString::from(&p.repo),
+                        })
+                        .collect();
+                    let _ = weak2.upgrade_in_event_loop(move |app| {
+                        if epoch.load(Ordering::Relaxed) != request {
+                            return;
+                        }
+                        set_search_results(&app, items);
+                        app.global::<EditingState>().set_package_status_text(status);
+                    });
+                });
+            },
+        );
     });
 
     // AUR search

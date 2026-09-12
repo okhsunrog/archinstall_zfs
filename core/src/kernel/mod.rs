@@ -70,11 +70,16 @@ pub(crate) fn init_alpm() -> Result<alpm::Alpm> {
         }
     }
 
-    // Sync databases so package queries return current data
-    handle
-        .syncdbs_mut()
-        .update(false)
-        .map_err(|e| color_eyre::eyre::eyre!("failed to sync databases: {e}"))?;
+    // Sync databases so package queries return current data. While another
+    // pacman holds the lock, the copies already on disk are still worth
+    // searching; only their absence is fatal.
+    if let Err(error) = crate::system::alpm_pacman::sync_live_databases(&mut handle, false) {
+        let have_databases = handle.syncdbs().iter().any(|db| !db.pkgs().is_empty());
+        if !have_databases {
+            return Err(error);
+        }
+        tracing::warn!(%error, "searching the package databases already on disk");
+    }
 
     Ok(handle)
 }
