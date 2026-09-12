@@ -16,6 +16,14 @@ import time
 import urllib.error
 import urllib.request
 
+# Interaction and invariant runs use the panels the installer really meets.
+# Page captures add fractional scaling on top.
+SIZES = ['1920x1080@1', '1366x768@1', '1280x800@1']
+REVIEW_SIZES = SIZES + ['1920x1080@1.5']
+# A preview log line with one of these is a failure in its own right: the
+# calloop and callback-chain spam went unnoticed because nobody read the logs.
+LOG_MARKERS = ('ERROR', 'WARN', 'panicked', 'long callback')
+
 SCENES = 'welcome interrupted offline no-uefi zfs-preparing zfs-failed wifi-empty wifi-unavailable wifi-no-internet wifi-verifying cancelling disk new-pool alongside existing-pool zfs system users desktop review install done failed cancelled inspect invalid'.split()
 
 class Preview:
@@ -28,6 +36,8 @@ class Preview:
             sock.bind(('127.0.0.1', 0))
             self.port = sock.getsockname()[1]
         self.log = (output / f'{self.label}.log').open('w')
+        # Called with (tree, preview, label) on every screenshot; raise to fail the case.
+        self.inspector = None
         env = dict(os.environ, SLINT_BACKEND='headless', SLINT_MCP_PORT=str(self.port))
         self.process = subprocess.Popen([str(binary), '--preview', scene, '--preview-size', size, '--ui-scale', scale], env=env, stdout=self.log, stderr=subprocess.STDOUT)
 
@@ -65,6 +75,8 @@ class Preview:
         tree = self.tree()
         assert not tree.get('truncated'), 'Element tree was truncated'
         (self.output / f'{label}.json').write_text(json.dumps(tree, indent=2))
+        if self.inspector:
+            self.inspector(tree, self, label)
         return label
 
     def element(self, role, label):
@@ -132,13 +144,52 @@ class Preview:
             self.process.wait()
         self.log.close()
 
+    def log_issues(self):
+        """Warnings, errors and panics the preview process logged; call after close."""
+        text = Path(self.log.name).read_text(errors='replace')
+        return [line for line in text.splitlines() if any(marker in line for marker in LOG_MARKERS)]
+
+
+class Results:
+    """Run every case, keep going after a failure, then summarise and set the exit code."""
+
+    def __init__(self):
+        self.rows = []
+
+    def run(self, name, preview, case):
+        status, detail = 'PASS', ''
+        try:
+            preview.ready()
+            case(preview)
+        except Exception as error:  # noqa: BLE001 - every failure is reported, not raised
+            status, detail = 'FAIL', f'{type(error).__name__}: {error}'
+            try:
+                preview.screenshot('failure')
+            except Exception:  # noqa: BLE001 - the process may already be gone
+                pass
+        finally:
+            preview.close()
+        issues = preview.log_issues()
+        if issues:
+            status = 'FAIL'
+            detail = (detail + '; ' if detail else '') + f'{len(issues)} log issue(s): {issues[0].strip()}'
+        print(f'{status} {name}' + (f': {detail}' if detail else ''), flush=True)
+        self.rows.append((name, status, detail))
+
+    def finish(self):
+        failed = [row for row in self.rows if row[1] != 'PASS']
+        print(f'{len(self.rows) - len(failed)} passed, {len(failed)} failed', flush=True)
+        for name, _, detail in failed:
+            print(f'  {name}: {detail}')
+        return 1 if failed else 0
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, default=Path('target/debug/azfs'))
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--scenes', nargs='+', choices=SCENES, default=SCENES)
-    parser.add_argument('--sizes', nargs='+', default=['1920x1080@1', '1366x768@1', '1280x800@1', '1920x1080@1.5'])
+    parser.add_argument('--sizes', nargs='+', default=REVIEW_SIZES)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     labels = []

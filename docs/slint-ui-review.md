@@ -66,9 +66,8 @@ after source changes; a running process does not pick up the new binary.
 | --- | --- |
 | 1920×1080, scale 1 | Primary composition, typography and screenshot baseline |
 | 1366×768, scale 1 | Smaller laptop viewport, density and scrolling |
-| 1280×800, scale 1 | Additional compact/aspect-ratio check |
-| 1920×1080, scale 1.5 | Fractional scaling, alignment and readable controls |
 | 1280×800, scale 1 | The smallest laptop panel: footer and dialog constraints |
+| 1920×1080, scale 1.5 | Fractional scaling, alignment and readable controls |
 
 Treat 800×600 captures in older reports as historical stress checks, not the
 current design baseline. A screenshot's physical dimensions and UI scale both
@@ -117,6 +116,25 @@ The [GUI README](../slint-ui/README.md) lists scenes and additional flows.
 Scripts emit individual PNGs, element trees, window metadata and process logs.
 `review.py` also writes an HTML gallery. Passing assertions is evidence of the
 asserted behavior, not an automated design score.
+
+### Layout invariants and CI
+
+Check the layout invariants on every scene before reading screenshots. The
+script walks the element tree of each scene at each size and fails on a
+control that crosses the window, is smaller than 28 px, has no accessible
+label or overlaps another control, and on any warning, error or panic in the
+preview log:
+
+```sh
+uv run python slint-ui/scripts/invariants.py --output target/ui-review/invariants
+```
+
+The same checks run on every screenshot the interaction flows take, and CI
+runs both in the `ui-review` job of `check.yml`, keeping the captures as an
+artifact; `just ui-review` does the same locally. The element tree holds only
+what is on screen: a control that has scrolled away is not in it, so scripts
+reveal a control (by Tab) before clicking it, and the invariants judge what
+the user actually sees.
 
 ## 5. Inspect full-size images, not just galleries
 

@@ -487,6 +487,7 @@ export component WifiPopup inherits Rectangle {
                                 text <=> WifiState.password;
                                 is-password: !WifiState.show-password;
                                 placeholder: "Enter network passphrase";
+                                accessible-label: "Network passphrase";
                                 horizontal-stretch: 1;
                                 accepted(v) => { WifiState.submit-password(); }
                             }

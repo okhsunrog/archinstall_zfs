@@ -59,6 +59,14 @@ The output contains PNG screenshots, JSON element trees, process logs, and an
 establish that a layout is correct. Use `--scenes disk review` or
 `--sizes 1920x1080@1` to review only the primary configuration.
 
+Check the layout invariants on every scene (window bounds, minimum control
+size, accessible labels, overlapping controls, clean preview log); `just
+ui-review` runs this and the interaction flows the way CI does:
+
+```sh
+uv run slint-ui/scripts/invariants.py --output /tmp/azfs-ui-invariants
+```
+
 Run repeatable interaction checks at Full HD, 1366×768 and 1280×800:
 
 ```sh
