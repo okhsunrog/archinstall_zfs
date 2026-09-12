@@ -216,11 +216,23 @@ impl Installer {
 
     /// Install packages into the target via libalpm (replaces pacstrap calls).
     fn install_target_packages(&mut self, packages: &[&str]) -> Result<()> {
+        self.install_target_packages_excluding(packages, &[])
+    }
+
+    fn install_target_packages_excluding(
+        &mut self,
+        packages: &[&str],
+        excluded: &[&str],
+    ) -> Result<()> {
         if packages.is_empty() {
             return Ok(());
         }
-        self.alpm
-            .install_packages(packages, &self.cancel, self.download_progress_tx.clone())
+        self.alpm.install_packages_excluding(
+            packages,
+            excluded,
+            &self.cancel,
+            self.download_progress_tx.clone(),
+        )
     }
 
     fn configure_system(&self) -> Result<()> {
@@ -431,7 +443,7 @@ impl Installer {
                 let pkgs = selection.resolved_packages();
                 if !pkgs.is_empty() {
                     let pkg_refs: Vec<&str> = pkgs.iter().map(|s| s.as_str()).collect();
-                    self.install_target_packages(&pkg_refs)?;
+                    self.install_target_packages_excluding(&pkg_refs, &p.excluded_packages)?;
                 }
 
                 // 2. Enable system services

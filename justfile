@@ -354,7 +354,9 @@ upload:
 
 # Requires cargo-build or cargo-build-container first.
 # Full cycle: fresh disk, install, boot, verify.
-test-vm *ARGS:
+# Builds first: the harness runs target/release/azfs-tui, and a stale one
+# quietly tests old code.
+test-vm *ARGS: cargo-build
     ./target/release/xtask test-vm {{ARGS}}
 
 # Requires cargo-build or cargo-build-container first.

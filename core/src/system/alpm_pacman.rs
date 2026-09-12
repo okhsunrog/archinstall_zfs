@@ -219,6 +219,18 @@ impl AlpmContext {
         cancel: &CancellationToken,
         progress_tx: Option<std::sync::Arc<watch::Sender<DownloadProgress>>>,
     ) -> Result<()> {
+        self.install_packages_excluding(packages, &[], cancel, progress_tx)
+    }
+
+    /// Like `install_packages`, leaving out `excluded` members of any group
+    /// among `packages`.
+    pub fn install_packages_excluding(
+        &mut self,
+        packages: &[&str],
+        excluded: &[&str],
+        cancel: &CancellationToken,
+        progress_tx: Option<std::sync::Arc<watch::Sender<DownloadProgress>>>,
+    ) -> Result<()> {
         if packages.is_empty() {
             return Ok(());
         }
@@ -233,7 +245,7 @@ impl AlpmContext {
         // Returning early through `?` used to leave it open and the database
         // locked, so a later install on the same handle failed with "a
         // transaction is already initialized" rather than the original error.
-        let result = self.run_transaction(packages, cancel, progress_tx);
+        let result = self.run_transaction(packages, excluded, cancel, progress_tx);
         let released = self
             .handle
             .trans_release()
@@ -249,14 +261,21 @@ impl AlpmContext {
     fn run_transaction(
         &mut self,
         packages: &[&str],
+        excluded: &[&str],
         cancel: &CancellationToken,
         progress_tx: Option<std::sync::Arc<watch::Sender<DownloadProgress>>>,
     ) -> Result<()> {
         // Add each name from the sync databases: a package as itself, a
-        // group (kde-applications, xfce4-goodies, gnome-extra) as its members.
+        // group (kde-applications, xfce4-goodies, gnome-extra) as its members
+        // minus the excluded ones.
         for &name in packages {
             let members = self.resolve_name(name)?;
+            let expanded = members.len() > 1;
             for pkg in members {
+                if expanded && excluded.contains(&pkg.name()) {
+                    tracing::debug!(group = name, package = pkg.name(), "left out of the group");
+                    continue;
+                }
                 self.handle
                     .trans_add_pkg(pkg)
                     .map_err(|e| eyre!("failed to add package '{name}': {e}"))?;

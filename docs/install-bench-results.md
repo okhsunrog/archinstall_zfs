@@ -20,8 +20,8 @@ cargo xtask analyze-metrics --dir bench-results-kde
 
 - Host: Arch Linux development workstation, KVM acceleration
 - Network: residential broadband, Fastly CDN mirrors
-- Config: KDE Plasma (`plasma-desktop`, `konsole`, `kate`, `dolphin`, `ark`,
-  `plasma-workspace`) + `linux-lts` + dracut + ZFS precompiled
+- Config: KDE Plasma (at the time `plasma-desktop`, `konsole`, `kate`, `dolphin`,
+  `ark`, `plasma-workspace`; the profile now installs the `plasma` group) + `linux-lts` + dracut + ZFS precompiled
 - Packages: 574 total — 187 base system (Phase 4), ~5 ZFS (Phase 6),
   387 KDE + deps (Phase 9)
 - 3 samples per concurrency level; median reported for download wall time

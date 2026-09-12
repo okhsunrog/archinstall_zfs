@@ -17,6 +17,7 @@ fn desktop(
         display_name,
         description: "",
         packages,
+        excluded_packages: Vec::new(),
         services: Vec::new(),
         user_services: Vec::new(),
         post_install_steps: Vec::new(),
@@ -28,6 +29,22 @@ fn desktop(
             optional_packages,
         }),
     }
+}
+
+/// The tray applets a window manager does not bring itself: without them
+/// Wi-Fi, Bluetooth and volume can only be managed from a terminal.
+fn tray_opts() -> Vec<OptionalPackage> {
+    opts(&[
+        ("network-manager-applet", "Network tray applet (nm-applet)"),
+        ("blueman", "Bluetooth manager and tray applet"),
+        ("pavucontrol", "Volume control"),
+    ])
+}
+
+/// `base` followed by the tray applets.
+fn with_tray(mut base: Vec<OptionalPackage>) -> Vec<OptionalPackage> {
+    base.extend(tray_opts());
+    base
 }
 
 /// Convenience: build a `Vec<OptionalPackage>` from `(package, description)`
@@ -73,17 +90,13 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 ("flatpak", "Sandboxed application runtime"),
             ]),
         ),
+        // The plasma group is the complete desktop: network and Bluetooth
+        // applets, volume control, power management, the SDDM settings
+        // module, Discover. A hand-picked list used to leave all of those out.
         desktop(
             "kde",
             "KDE Plasma",
-            vec![
-                "plasma-desktop",
-                "konsole",
-                "kate",
-                "dolphin",
-                "ark",
-                "plasma-workspace",
-            ],
+            vec!["plasma", "konsole", "kate", "dolphin", "ark"],
             Both,
             Some(Sddm),
             false,
@@ -94,13 +107,29 @@ pub fn desktop_profiles() -> Vec<Profile> {
                     "Full KDE application suite (Okular, Gwenview, …)",
                 ),
                 ("flatpak", "Sandboxed application runtime"),
-                ("discover", "KDE software centre"),
             ]),
-        ),
+        )
+        .excluding(&[
+            // A second login manager beside SDDM.
+            "plasma-login-manager",
+            // A TV interface, developer tools, remote desktop, tablet setup.
+            "plasma-bigscreen",
+            "plasma-sdk",
+            "krdp",
+            "wacomtablet",
+        ]),
         desktop(
             "xfce",
             "Xfce",
-            vec!["xfce4", "xfce4-goodies", "pavucontrol", "gvfs", "xarchiver"],
+            vec![
+                "xfce4",
+                "xfce4-goodies",
+                "network-manager-applet",
+                "blueman",
+                "pavucontrol",
+                "gvfs",
+                "xarchiver",
+            ],
             Xorg,
             Some(Lightdm),
             false,
@@ -124,6 +153,7 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "gvfs-smb",
                 "xed",
                 "xdg-user-dirs-gtk",
+                "blueman",
             ],
             Xorg,
             Some(Lightdm),
@@ -150,7 +180,7 @@ pub fn desktop_profiles() -> Vec<Profile> {
         desktop(
             "mate",
             "MATE",
-            vec!["mate", "mate-extra"],
+            vec!["mate", "mate-extra", "network-manager-applet", "blueman"],
             Xorg,
             Some(Lightdm),
             false,
@@ -178,6 +208,8 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "ttf-freefont",
                 "l3afpad",
                 "slock",
+                "network-manager-applet",
+                "blueman",
             ],
             Xorg,
             Some(Sddm),
@@ -206,14 +238,14 @@ pub fn desktop_profiles() -> Vec<Profile> {
             Some(Sddm),
             true,
             Some("hyprland"),
-            opts(&[
+            with_tray(opts(&[
                 ("hyprpaper", "Wallpaper utility from the Hyprland project"),
                 ("hypridle", "Idle daemon (auto-lock, dim, sleep)"),
                 ("hyprlock", "Screen locker"),
                 ("swww", "Animated wallpaper daemon"),
                 ("mako", "Wayland notification daemon"),
                 ("wl-clipboard", "Clipboard helper (wl-copy / wl-paste)"),
-            ]),
+            ])),
         ),
         desktop(
             "sway",
@@ -236,14 +268,14 @@ pub fn desktop_profiles() -> Vec<Profile> {
             Some(Lightdm),
             true,
             Some("sway"),
-            opts(&[
+            with_tray(opts(&[
                 (
                     "swaylock-effects",
                     "swaylock fork with blur/screenshot effects",
                 ),
                 ("wl-clipboard", "Clipboard helper (wl-copy / wl-paste)"),
                 ("mako", "Wayland notification daemon"),
-            ]),
+            ])),
         ),
         desktop(
             "i3",
@@ -262,12 +294,12 @@ pub fn desktop_profiles() -> Vec<Profile> {
             Some(Lightdm),
             false,
             Some("i3"),
-            opts(&[
+            with_tray(opts(&[
                 ("polybar", "Modular status bar"),
                 ("rofi", "Application launcher and dmenu replacement"),
                 ("feh", "Image viewer often used to set wallpaper"),
                 ("nitrogen", "Graphical wallpaper setter"),
-            ]),
+            ])),
         ),
         desktop(
             "cosmic",
@@ -292,7 +324,7 @@ pub fn desktop_profiles() -> Vec<Profile> {
             Some(Lightdm),
             false,
             None,
-            Vec::new(),
+            tray_opts(),
         ),
         desktop(
             "awesome",
@@ -309,7 +341,7 @@ pub fn desktop_profiles() -> Vec<Profile> {
             Some(Lightdm),
             false,
             None,
-            Vec::new(),
+            tray_opts(),
         ),
         desktop(
             "bspwm",
@@ -327,7 +359,7 @@ pub fn desktop_profiles() -> Vec<Profile> {
             Some(Lightdm),
             false,
             None,
-            Vec::new(),
+            tray_opts(),
         ),
         desktop(
             "labwc",
@@ -344,7 +376,7 @@ pub fn desktop_profiles() -> Vec<Profile> {
             Some(Sddm),
             true,
             Some("labwc"),
-            Vec::new(),
+            tray_opts(),
         ),
         desktop(
             "niri",
@@ -362,7 +394,7 @@ pub fn desktop_profiles() -> Vec<Profile> {
             Some(Sddm),
             true,
             Some("niri"),
-            Vec::new(),
+            tray_opts(),
         ),
         desktop(
             "qtile",
@@ -378,7 +410,7 @@ pub fn desktop_profiles() -> Vec<Profile> {
             Some(Lightdm),
             false,
             None,
-            Vec::new(),
+            tray_opts(),
         ),
         desktop(
             "river",
@@ -395,7 +427,7 @@ pub fn desktop_profiles() -> Vec<Profile> {
             Some(Sddm),
             true,
             Some("river"),
-            Vec::new(),
+            tray_opts(),
         ),
         desktop(
             "xmonad",
@@ -412,7 +444,7 @@ pub fn desktop_profiles() -> Vec<Profile> {
             Some(Lightdm),
             false,
             None,
-            Vec::new(),
+            tray_opts(),
         ),
     ]
 }

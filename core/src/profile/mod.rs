@@ -53,12 +53,24 @@ pub struct Profile {
     /// Short user-facing description. May be empty.
     pub description: &'static str,
     pub packages: Vec<&'static str>,
+    /// Members of the groups in `packages` that are left out: a group is
+    /// the distribution's idea of a complete desktop, and a few members
+    /// (a second login manager, a TV interface) do not belong on a laptop.
+    pub excluded_packages: Vec<&'static str>,
     pub services: Vec<&'static str>,
     /// User-level systemd units enabled globally via `systemctl --global enable`.
     pub user_services: Vec<&'static str>,
     /// Steps run after packages and services are set up.
     pub post_install_steps: Vec<PostInstallStep>,
     pub kind: ProfileKind,
+}
+
+impl Profile {
+    /// Leave these members of the listed groups out.
+    pub fn excluding(mut self, names: &[&'static str]) -> Self {
+        self.excluded_packages.extend_from_slice(names);
+        self
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -273,6 +285,53 @@ mod tests {
             assert!(
                 p.needs_seat_access(),
                 "{name} should have needs_seat_access=true"
+            );
+        }
+    }
+
+    #[test]
+    fn kde_installs_the_plasma_group_without_a_second_login_manager() {
+        let p = get_profile("kde").unwrap();
+        assert!(p.packages.contains(&"plasma"));
+        assert!(!p.packages.contains(&"plasma-desktop"));
+        assert!(p.excluded_packages.contains(&"plasma-login-manager"));
+        assert!(
+            !p.optional_packages()
+                .iter()
+                .any(|o| o.package == "discover")
+        );
+    }
+
+    #[test]
+    fn every_desktop_can_manage_network_and_sound_graphically() {
+        // Either the environment brings its own applets (a full group or a
+        // desktop with built-in ones) or the profile offers the generic ones.
+        let self_contained = [
+            "gnome", "kde", "cinnamon", "budgie", "deepin", "cosmic", "xorg",
+        ];
+        for p in crate::profile::desktop::desktop_profiles() {
+            if self_contained.contains(&p.name) {
+                continue;
+            }
+            let names: Vec<&str> = p
+                .packages
+                .iter()
+                .copied()
+                .chain(p.optional_packages().iter().map(|o| o.package))
+                .collect();
+            assert!(
+                names.contains(&"network-manager-applet"),
+                "{} has no network applet",
+                p.name
+            );
+            assert!(
+                names.contains(&"pavucontrol")
+                    || names.contains(&"pavucontrol-qt")
+                    || names.contains(&"xfce4-pulseaudio-plugin")
+                    || names.contains(&"mate-extra") // brings mate-media
+                    || names.contains(&"lxqt"), // brings pavucontrol-qt
+                "{} has no volume control",
+                p.name
             );
         }
     }
