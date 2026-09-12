@@ -168,7 +168,7 @@ export component InstallView inherits VerticalLayout {
                     Text {
                         text: InstallState.state == 2 ? "Your system is ready. Reboot to start using it."
                             : InstallState.state == 3 ? "Check the log above for the error before trying again."
-                            : InstallState.state == 4 ? "Please wait while the installer finishes cleanup."
+                            : InstallState.state == 4 ? "Stopping \"" + InstallState.phase-label + "\", then unmounting the target and exporting the pool. Partitions already written stay as they are."
                             : InstallState.state == 5 ? "The installation stopped. You can return to the live console."
                             : InstallState.phase-label;
                         color: Theme.c.subtext0;

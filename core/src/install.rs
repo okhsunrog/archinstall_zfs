@@ -102,8 +102,13 @@ pub async fn run_install_with_target(
     let root_dataset = BootEnvironment::new(&pool_name, config.dataset_prefix.as_str()).root();
     let cleanup = Arc::new(CleanupState::default());
 
+    // Every command the pipeline runs stops when the token fires; the
+    // cleanup below keeps the plain runner so it can still unmount and export.
+    let pipeline_runner: Arc<dyn CommandRunner> = Arc::new(
+        crate::system::cmd::CancellableRunner::new(runner.clone(), cancel.clone()),
+    );
     let result = install(
-        runner.clone(),
+        pipeline_runner,
         config,
         cancel.clone(),
         progress_tx,
