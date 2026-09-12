@@ -51,6 +51,9 @@ pub struct BlockPartition {
     pub model: Option<String>,
     pub serial: Option<String>,
     pub size_bytes: Option<u64>,
+    /// Where the partition starts on its disk, for the disk map and the
+    /// gaps between partitions.
+    pub start_bytes: Option<u64>,
     pub parent_size_bytes: Option<u64>,
     pub transport: Option<String>,
     pub rotational: Option<bool>,
@@ -79,6 +82,10 @@ pub struct DeviceChoice {
     pub group_media: String,
     pub group_removable: bool,
     pub usage: DeviceUsage,
+    /// The whole disk a partition belongs to; empty for a disk.
+    pub parent_path: Option<PathBuf>,
+    pub start_bytes: Option<u64>,
+    pub size_bytes: Option<u64>,
 }
 
 impl DeviceChoice {
@@ -142,6 +149,9 @@ impl From<BlockDevice> for DeviceChoice {
             group_media: String::new(),
             group_removable: false,
             usage: device.usage.clone(),
+            parent_path: None,
+            start_bytes: None,
+            size_bytes: device.size_bytes,
         }
     }
 }
@@ -168,6 +178,9 @@ impl From<BlockPartition> for DeviceChoice {
             group_media: partition.selection_group_media(),
             group_removable: partition.removable,
             usage: partition.usage.clone(),
+            parent_path: partition.parent_devnode.clone(),
+            start_bytes: partition.start_bytes,
+            size_bytes: partition.size_bytes,
         }
     }
 }
@@ -317,6 +330,10 @@ struct LsblkDevice {
     #[serde(rename = "type")]
     device_type: Option<String>,
     size: Option<Value>,
+    /// Start sector, in logical sectors of `log-sec` bytes.
+    start: Option<Value>,
+    #[serde(rename = "log-sec")]
+    log_sec: Option<Value>,
     model: Option<String>,
     serial: Option<String>,
     tran: Option<String>,
@@ -379,7 +396,7 @@ fn inspect_block_devices() -> Result<(LsblkOutput, HashMap<PathBuf, Vec<DevicePa
             "--json",
             "--bytes",
             "--output",
-            "PATH,TYPE,SIZE,MODEL,SERIAL,TRAN,ROTA,RM,FSTYPE,LABEL,PARTTYPE,MOUNTPOINTS",
+            "PATH,TYPE,SIZE,START,LOG-SEC,MODEL,SERIAL,TRAN,ROTA,RM,FSTYPE,LABEL,PARTTYPE,MOUNTPOINTS",
         ])
         .output()
         .wrap_err("failed to run lsblk")?;
@@ -492,6 +509,11 @@ fn collect_lsblk_partitions(
             model: details.and_then(|details| details.model.clone()),
             serial: details.and_then(|details| details.serial.clone()),
             size_bytes: node.size.as_ref().and_then(value_as_u64),
+            start_bytes: node
+                .start
+                .as_ref()
+                .and_then(value_as_u64)
+                .map(|sector| sector * node.log_sec.as_ref().and_then(value_as_u64).unwrap_or(512)),
             parent_size_bytes: details.and_then(|details| details.size_bytes),
             transport: details.and_then(|details| details.transport.clone()),
             rotational: details.and_then(|details| details.rotational),
@@ -711,7 +733,7 @@ fn value_as_bool(value: &Value) -> Option<bool> {
     }
 }
 
-fn format_size(bytes: u64) -> String {
+pub fn format_size(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
     let mut value = bytes as f64;
     let mut unit = 0;
@@ -861,6 +883,7 @@ mod tests {
             parent_devnode: Some(PathBuf::from("/dev/vda")),
             model: Some("VirtIO Block Device".to_string()),
             serial: Some("test-serial".to_string()),
+            start_bytes: None,
             size_bytes: Some(512 * 1024 * 1024),
             parent_size_bytes: Some(64 * 1024 * 1024 * 1024),
             transport: Some("virtio".to_string()),
