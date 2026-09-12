@@ -142,7 +142,7 @@ shellcheck core/assets/azfs-install-zbm core/assets/azfs-update-zbm \
 ## Visual review coverage (2026-09-10)
 
 Real headless Slint captures and callbacks were exercised at 1920×1080 / 100%,
-1366×768 / 100%, 1920×1080 / 150% and 1920×1080 / 200%. Individual captures were inspected,
+1366×768 / 100%, 1280×800 / 100% and 1920×1080 / 150%. Individual captures were inspected,
 including maps, the compact layout and the review summary.
 
 | Case | Interaction checked |

@@ -141,7 +141,7 @@ def desktop(p):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--sizes', nargs='+', default=['1920x1080@1', '1366x768@1', '1920x1080@2'])
+    parser.add_argument('--sizes', nargs='+', default=['1920x1080@1', '1366x768@1', '1280x800@1'])
     parser.add_argument('--flows', nargs='+', choices=['accounts', 'system', 'desktop'], default=['accounts', 'system', 'desktop'])
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
