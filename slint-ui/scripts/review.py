@@ -36,6 +36,8 @@ class Preview:
             sock.bind(('127.0.0.1', 0))
             self.port = sock.getsockname()[1]
         self.log = (output / f'{self.label}.log').open('w')
+        # Called with (tree, preview, label) on every screenshot; raise to fail the case.
+        self.inspector = None
         env = dict(os.environ, SLINT_BACKEND='headless', SLINT_MCP_PORT=str(self.port))
         self.process = subprocess.Popen([str(binary), '--preview', scene, '--preview-size', size, '--ui-scale', scale], env=env, stdout=self.log, stderr=subprocess.STDOUT)
 
@@ -73,6 +75,8 @@ class Preview:
         tree = self.tree()
         assert not tree.get('truncated'), 'Element tree was truncated'
         (self.output / f'{label}.json').write_text(json.dumps(tree, indent=2))
+        if self.inspector:
+            self.inspector(tree, self, label)
         return label
 
     def element(self, role, label):

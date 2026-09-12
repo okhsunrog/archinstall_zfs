@@ -51,6 +51,13 @@ cargo-test:
 lint:
     cargo clippy --workspace --all-targets --locked -- -D warnings
 
+# Layout invariants and interaction flows on the headless preview build,
+# as CI runs them; output under target/ui-review.
+ui-review:
+    SLINT_EMIT_DEBUG_INFO=1 cargo build -p archinstall-zfs-slint --no-default-features --features desktop-mock,slint/mcp --locked
+    uv run slint-ui/scripts/invariants.py --output target/ui-review/invariants
+    uv run slint-ui/scripts/interactions.py --output target/ui-review/interactions
+
 # Format check
 fmt-check:
     cargo fmt --all -- --check

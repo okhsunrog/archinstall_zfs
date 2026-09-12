@@ -52,6 +52,51 @@ jobs:
     - name: Audit dependencies
       run: cargo audit
 
+  ui-review:
+    # Layout invariants and interaction flows on the headless preview build.
+    # Screenshots and element trees are kept as an artifact for review.
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository }}/ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Cache cargo
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-ui-review-${{ hashFiles('Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-ui-review-
+
+    - name: Install preview tooling when missing from the builder image
+      run: command -v uv >/dev/null || pacman -Sy --noconfirm --needed python uv
+
+    - name: Build the preview installer
+      run: SLINT_EMIT_DEBUG_INFO=1 cargo build -p archinstall-zfs-slint --no-default-features --features desktop-mock,slint/mcp --locked
+
+    - name: Check layout invariants on every scene
+      run: uv run slint-ui/scripts/invariants.py --output target/ui-review/invariants
+
+    - name: Run the interaction flows
+      if: success() || failure()
+      run: uv run slint-ui/scripts/interactions.py --output target/ui-review/interactions
+
+    - name: Keep screenshots and element trees
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ui-review
+        path: target/ui-review
+        retention-days: 14
+
   zbm-publisher:
     # Real FAT publication test for the boot image scripts. It mounts a loop
     # image, so it runs on the VM runner rather than in the builder container.

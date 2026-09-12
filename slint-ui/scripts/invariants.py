@@ -6,6 +6,9 @@ element tree of every scene instead, so a panel that grows past the window,
 a control too small to hit, an unlabelled input or two buttons drawn over
 each other are caught without a flow written for that screen.
 
+The element tree only holds what is on screen, so a control that has
+scrolled away is not seen; what is checked is what the user sees.
+
 Build desktop-mock,slint/mcp with SLINT_EMIT_DEBUG_INFO=1 first.
 """
 import argparse
@@ -34,7 +37,14 @@ def is_popup_root(element):
 
 
 def is_scroll_area(element):
-    return any(name.endswith(('lickable', '-scroll', 'ListView', '-list')) for name in names(element))
+    # An element's entries carry a type name and, for named elements, an id;
+    # a ListView named `choices` has both, so both are checked.
+    for entry in element.get('typeNamesAndIds', []):
+        if entry.get('typeName') in ('ListView', 'Flickable', 'ScrollView'):
+            return True
+        if (entry.get('id') or '').endswith(('lickable', '-scroll', '-list', 'choices')):
+            return True
+    return False
 
 
 def rect(element):
@@ -107,8 +117,21 @@ def check(tree, width, height):
             if not element.get('accessibleLabel'):
                 violations.append(f'{describe(element)} has no accessible label')
 
-    controls = [(rect(e), e) for i, e in enumerate(elements)
+    # A list row half-scrolled out of its ListView is clipped by it, not drawn
+    # over the button below, so controls are judged by their visible part.
+    def clipped_rect(box):
+        # Nested scroll areas (a popup's list over the page's scroll view)
+        # each clip; the innermost is the one that matters, so intersect all.
+        x, y, w, h = box
+        for sx, sy, sw, sh in scroll_areas:
+            if sx - EDGE_SLACK <= x and x + w <= sx + sw + EDGE_SLACK and y < sy + sh and y + h > sy:
+                top_edge, bottom_edge = max(y, sy), min(y + h, sy + sh)
+                y, h = top_edge, bottom_edge - top_edge
+        return x, y, w, h
+
+    controls = [(clipped_rect(rect(e)), e) for i, e in enumerate(elements)
                 if e.get('accessibleRole') in INTERACTIVE and visible(e) and layers[i] == top]
+    controls = [(box, e) for box, e in controls if box[3] > OVERLAP_SLACK]
     for i, (a, ea) in enumerate(controls):
         for b, eb in controls[i + 1:]:
             if within(a, b) or within(b, a):
@@ -124,6 +147,14 @@ def check(tree, width, height):
             notes.append(f'{describe(element)} shares its label with another {key[0]}')
         seen[key] = box
     return violations, notes
+
+
+def inspect(tree, preview, label):
+    """Preview inspector: fail a flow's screenshot on a layout violation."""
+    width, height = (side / preview.scale for side in preview.size)
+    violations, _ = check(tree, width, height)
+    if violations:
+        raise AssertionError(f'{label}: ' + '; '.join(violations))
 
 
 def scene_case(output, label):

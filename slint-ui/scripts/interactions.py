@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 import time
 
+import invariants
 from review import Preview, Results, SIZES
 
 
@@ -228,6 +229,8 @@ def main():
             output.mkdir(parents=True, exist_ok=True)
             scene = {'wifi': 'offline', 'install': 'review', 'cancel': 'install', 'shell': 'done', 'logs': 'done'}.get(flow, flow)
             preview = Preview(args.binary.resolve(), scene, size, scale, output)
+            # Every captured state must also satisfy the layout invariants.
+            preview.inspector = invariants.inspect
             results.run(f'{spec} {flow}', preview, globals()[flow])
     raise SystemExit(results.finish())
 
