@@ -67,6 +67,42 @@ pub fn sync_live_databases(handle: &mut Alpm, force: bool) -> Result<()> {
     Ok(())
 }
 
+/// What a transaction needs beyond the packages themselves: hooks, the
+/// local database and the files pacman writes while unpacking.
+const INSTALL_SLACK: u64 = 512 * 1024 * 1024;
+
+/// Refuse a transaction that cannot fit, before anything is downloaded.
+///
+/// The estimate is the sum of the packages' installed sizes plus slack;
+/// files an upgrade replaces are counted twice, which errs towards asking
+/// for more room than the transaction will use.
+fn check_free_space(root: &Path, installed_bytes: u64) -> Result<()> {
+    let stat = match nix::sys::statvfs::statvfs(root) {
+        Ok(stat) => stat,
+        Err(error) => {
+            tracing::warn!(%error, root = %root.display(), "cannot check free space");
+            return Ok(());
+        }
+    };
+    let free = stat.blocks_available() as u64 * stat.fragment_size() as u64;
+    let needed = installed_bytes + INSTALL_SLACK;
+    let gib = |bytes: u64| bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+    if free >= needed {
+        tracing::info!(
+            needed_gib = format!("{:.1}", gib(needed)),
+            free_gib = format!("{:.1}", gib(free)),
+            "the transaction fits"
+        );
+        return Ok(());
+    }
+    bail!(
+        "Not enough space in {}: the packages need about {:.1} GiB and {:.1} GiB is free. Choose a larger allocation, or fewer packages, and start again.",
+        root.display(),
+        gib(needed),
+        gib(free)
+    )
+}
+
 /// The packages `name` stands for in `handle`'s sync databases: the package
 /// of that name from the first repository that has it, or every member of
 /// the group of that name. A group is what the desktop profiles list for
@@ -295,6 +331,19 @@ impl AlpmContext {
             tracing::info!("all packages already up to date");
             return Ok(());
         }
+
+        // pacman only notices a full filesystem when it commits, which is
+        // after every package has been downloaded: a KDE install spent
+        // 1.9 GiB of transfer before failing on a pool that could never
+        // have held it. The resolved transaction knows its installed size,
+        // so the same answer is available now.
+        let installed_bytes: u64 = self
+            .handle
+            .trans_add()
+            .iter()
+            .map(|pkg| pkg.isize().max(0) as u64)
+            .sum();
+        check_free_space(&self.root, installed_bytes)?;
 
         tracing::info!(count, "transaction prepared, downloading packages");
 
@@ -683,4 +732,29 @@ fn mount_api_filesystems(target: &Path) -> Result<Vec<PathBuf>> {
 
     tracing::debug!("mounted API filesystems in target");
     Ok(mounts)
+}
+
+#[cfg(test)]
+mod space_tests {
+    use super::*;
+
+    #[test]
+    fn a_transaction_larger_than_the_filesystem_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let error = check_free_space(dir.path(), 1 << 60).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("Not enough space"), "{message}");
+        assert!(message.contains("GiB is free"), "{message}");
+    }
+
+    #[test]
+    fn a_small_transaction_is_allowed() {
+        let dir = tempfile::tempdir().unwrap();
+        check_free_space(dir.path(), 0).unwrap();
+    }
+
+    #[test]
+    fn an_unreadable_path_does_not_stop_the_installation() {
+        check_free_space(Path::new("/nonexistent-root-for-tests"), 1 << 30).unwrap();
+    }
 }
