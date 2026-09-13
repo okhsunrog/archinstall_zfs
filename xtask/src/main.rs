@@ -148,6 +148,12 @@ struct TestOpts {
     #[arg(long)]
     alongside: bool,
 
+    /// GiB to allocate to the installation in --alongside runs. A full
+    /// desktop profile needs far more than a console one; the fixture disk
+    /// is sized to match.
+    #[arg(long, default_value_t = 32)]
+    alongside_gib: u64,
+
     #[command(flatten)]
     paths: PathOpts,
 
@@ -490,10 +496,14 @@ fn cmd_test_install(opts: TestOpts) -> Result<(), String> {
     eprintln!("[1/4] Creating fresh disk and UEFI vars");
     qemu::create_fresh_disk(&paths.disk);
     if opts.alongside {
+        // The fixture is a 500 MiB ESP, an ext4 big enough to give up the
+        // allocation and its swap (allocation + 28 GiB), and a 1 GiB spare.
+        // The image is sparse, so a larger disk costs nothing unwritten.
+        let disk_gib = 2 * opts.alongside_gib + 40;
         let status = Command::new("qemu-img")
             .args(["resize"])
             .arg(&paths.disk)
-            .arg("80G")
+            .arg(format!("{disk_gib}G"))
             .status()
             .map_err(|e| e.to_string())?;
         if !status.success() {
@@ -521,7 +531,7 @@ fn cmd_test_install(opts: TestOpts) -> Result<(), String> {
     vm.scp_to(&paths.binary, "/root/archinstall-zfs-rs");
     vm.scp_to(&paths.config, "/root/config.json");
     if opts.alongside {
-        alongside::prepare(&vm, &paths.config)?;
+        alongside::prepare(&vm, &paths.config, opts.alongside_gib)?;
     }
     vm.ssh_run("chmod +x /root/archinstall-zfs-rs")
         .map_err(|e| format!("chmod failed: {e}"))?;

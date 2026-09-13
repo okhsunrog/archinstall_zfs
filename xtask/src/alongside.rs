@@ -2,10 +2,14 @@
 use crate::qemu::QemuVm;
 use std::{fs, io::Write, os::unix::fs::OpenOptionsExt, path::Path};
 
-pub fn prepare(vm: &QemuVm, config: &Path) -> Result<(), String> {
-    let output = vm.ssh_run(r#"set -euo pipefail
+pub fn prepare(vm: &QemuVm, config: &Path, allocation_gib: u64) -> Result<(), String> {
+    // The preserved ext4 has to be big enough to give up the allocation and
+    // its swap and still keep a working margin, or planning refuses the
+    // configuration before anything is installed.
+    let preserved_gib = allocation_gib + 8 + 20;
+    let output = vm.ssh_run(&format!(r#"set -euo pipefail
 [ "$(readlink -f /dev/disk/by-id/virtio-archzfs-test-disk)" = /dev/vda ]
-sgdisk --zap-all --new=1:2048:+500M --typecode=1:ef00 --new=2:0:+50G --typecode=2:8300 --new=3:0:+1G --typecode=3:8300 /dev/vda
+sgdisk --zap-all --new=1:2048:+500M --typecode=1:ef00 --new=2:0:+{preserved_gib}G --typecode=2:8300 --new=3:0:+1G --typecode=3:8300 /dev/vda
 udevadm settle
 mkfs.fat -F32 /dev/vda1
 mkfs.ext4 -F /dev/vda2
@@ -19,7 +23,7 @@ mount /dev/vda1 /run/preserved
 mkdir -p /run/preserved/EFI/FOREIGN
 printf 'foreign EFI payload\n' > /run/preserved/EFI/FOREIGN/KEEP.EFI
 umount /run/preserved
-"#).map_err(|e| e.to_string())?;
+"#)).map_err(|e| e.to_string())?;
     if !output.status.success() {
         return Err(format!(
             "Alongside fixture preparation failed: {}",
@@ -46,7 +50,7 @@ umount /run/preserved
         0
     };
     config["installation_mode"] = "alongside".into();
-    config["alongside"] = serde_json::json!({ "before": layout["partitiontable"], "source": {"Shrink":{"partition":2}}, "efi":{"Reuse":{"partition":1}}, "allocation_bytes":32_u64*1024*1024*1024 + swap_bytes, "swap_bytes": swap_bytes });
+    config["alongside"] = serde_json::json!({ "before": layout["partitiontable"], "source": {"Shrink":{"partition":2}}, "efi":{"Reuse":{"partition":1}}, "allocation_bytes": allocation_gib*1024*1024*1024 + swap_bytes, "swap_bytes": swap_bytes });
     let path = std::env::temp_dir().join(format!("archzfs-alongside-{}.json", std::process::id()));
     let mut file = fs::OpenOptions::new()
         .create_new(true)
