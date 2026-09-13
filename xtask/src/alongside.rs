@@ -78,9 +78,12 @@ mount -o ro /dev/vda2 /run/preserved
 value=$(cat /run/preserved/KEEP.txt)
 umount /run/preserved
 [ "$value" = 'preserved filesystem payload' ]
-# The installer leaves the ESP mounted under the target; FAT cannot be
-# mounted a second time, so read it where it is.
-esp=$(findmnt -n -o TARGET --source /dev/vda1 | head -n 1)
+# A successful install unmounts the target, so the ESP is usually not
+# mounted here; when it is (a failed run), FAT cannot be mounted a second
+# time, so read it where it is. findmnt exits non-zero when it finds
+# nothing, which under `set -e` used to end the script before the mount
+# below could run.
+esp=$(findmnt -n -o TARGET --source /dev/vda1 | head -n 1 || true)
 if [ -z "$esp" ]; then mount -o ro /dev/vda1 /run/preserved; esp=/run/preserved; fi
 value=$(cat "$esp/EFI/FOREIGN/KEEP.EFI")
 cp "$esp/EFI/zbm/vmlinuz.EFI" /run/installed-zbm.EFI
@@ -93,8 +96,11 @@ cp "$esp/EFI/zbm/vmlinuz.EFI" /run/installed-zbm.EFI
     if output.status.success() {
         Ok(())
     } else {
+        // e2fsck reports what it found on stdout; without it the failure
+        // says only which version of e2fsck ran.
         Err(format!(
-            "Preserved filesystem/ESP verification failed: {}",
+            "Preserved filesystem/ESP verification failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         ))
     }

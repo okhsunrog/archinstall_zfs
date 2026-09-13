@@ -558,10 +558,6 @@ fn cmd_test_install(opts: TestOpts) -> Result<(), String> {
         .ssh_run(&installer_command)
         .map_err(|e| format!("installer failed to execute: {e}"))?;
 
-    if opts.alongside && output.status.success() {
-        alongside::verify(&vm)?;
-    }
-
     // Pull installer logs from VM before shutdown (regardless of success/failure)
     let log_dest = PathBuf::from("test-install.log");
     if vm.scp_from("/tmp/archinstall-zfs.log", &log_dest) {
@@ -587,6 +583,14 @@ fn cmd_test_install(opts: TestOpts) -> Result<(), String> {
             output.status,
             log_dest.display()
         ));
+    }
+
+    // After the logs are saved: a failure here is one worth reading them for.
+    if opts.alongside {
+        if let Err(error) = alongside::verify(&vm) {
+            vm.shutdown();
+            return Err(format!("{error}\nLogs: {}", log_dest.display()));
+        }
     }
 
     // Shut down
