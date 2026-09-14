@@ -10,7 +10,8 @@ from review import Preview
 
 
 def open_row(p, label):
-    """The disk overview above can push an assignment row below the fold."""
+    """The disk overview, and the configuration rows on the review screen,
+    push later rows below the fold; reach them the way a user would."""
     p.reveal_by_tab('Button', label)
     p.click('Button', label)
 
@@ -69,7 +70,7 @@ def storage(p):
     p.wait('Text', 'Storage changes during installation')
     assert p.properties('Button', 'Install').get('accessibleEnabled', False) is True
     p.screenshot('new-pool-review')
-    p.click('Button', 'Edit ZFS')
+    open_row(p, 'Edit ZFS')
     p.wait('Text', '2 / 6')
     p.click('Button', 'Disk')
     p.click('RadioButton', 'Use an existing pool')
@@ -89,7 +90,7 @@ def storage(p):
     p.click('Button', 'Review')
     assert p.properties('Button', 'Install').get('accessibleEnabled', False) is False
     p.screenshot('existing-environment-conflict')
-    p.click('Button', 'Edit ZFS')
+    open_row(p, 'Edit ZFS')
     p.fill_labeled('Boot environment', 'freshbe')
     p.click('Button', 'Review')
     assert p.properties('Button', 'Install').get('accessibleEnabled', False) is True
