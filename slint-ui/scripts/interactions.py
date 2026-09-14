@@ -206,6 +206,37 @@ def installation_layout(p):
         assert button['absolutePosition']['y'] + button['size']['height'] <= y + actions['size']['height']
 
 
+def config_file(p):
+    """Save the configuration to a file, then read it back."""
+    import json
+    import tempfile
+
+    directory = Path(tempfile.mkdtemp())
+    saved = directory / 'azfs-config.json'
+    p.wait('Button', 'Save configuration')
+    p.click_exact('Button', 'Save configuration')
+    p.fill_labeled('Save configuration to', str(saved))
+    p.screenshot('save-dialog')
+    p.click_exact('Button', 'Save')
+    p.wait('Text', 'Saved ' + str(saved))
+    assert saved.is_file(), saved
+    written = json.loads(saved.read_text())
+    assert written['root_password'] is None, 'the configuration carries a password'
+    secrets = directory / 'azfs-config.secrets.json'
+    assert secrets.is_file(), 'the passwords were not written beside it'
+    assert json.loads(secrets.read_text())['root_password'], secrets
+    p.screenshot('configuration-saved')
+
+    # A file with one recognisable setting proves the load replaced the state.
+    other = directory / 'other.json'
+    other.write_text(json.dumps({'installation_mode': 'full_disk', 'pool_name': 'fromfile'}))
+    p.click_exact('Button', 'Load configuration')
+    p.fill_labeled('Load configuration from', str(other))
+    p.click_exact('Button', 'Save')
+    p.wait('Text', 'fromfile')
+    p.screenshot('configuration-loaded')
+
+
 def invalid(p):
     assert not p.properties('Button', 'Install').get('accessibleEnabled', False)
     p.wait('Text', 'Complete setup before installing')
@@ -218,7 +249,7 @@ def main():
     parser.add_argument('--binary', type=Path, default=Path('target/debug/azfs'))
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--sizes', nargs='+', default=SIZES)
-    flows = ['system', 'users', 'desktop', 'wifi', 'inspect', 'install', 'cancel', 'shell', 'logs', 'invalid']
+    flows = ['system', 'users', 'desktop', 'wifi', 'inspect', 'install', 'cancel', 'shell', 'logs', 'config-file', 'invalid']
     parser.add_argument('--flows', nargs='+', choices=flows, default=flows)
     args = parser.parse_args()
     results = Results()
@@ -227,11 +258,11 @@ def main():
         for flow in args.flows:
             output = args.output / spec / flow
             output.mkdir(parents=True, exist_ok=True)
-            scene = {'wifi': 'offline', 'install': 'review', 'cancel': 'install', 'shell': 'done', 'logs': 'done'}.get(flow, flow)
+            scene = {'wifi': 'offline', 'install': 'review', 'cancel': 'install', 'shell': 'done', 'logs': 'done', 'config-file': 'review'}.get(flow, flow)
             preview = Preview(args.binary.resolve(), scene, size, scale, output)
             # Every captured state must also satisfy the layout invariants.
             preview.inspector = invariants.inspect
-            results.run(f'{spec} {flow}', preview, globals()[flow])
+            results.run(f'{spec} {flow}', preview, globals()[flow.replace('-', '_')])
     raise SystemExit(results.finish())
 
 

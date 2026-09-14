@@ -59,6 +59,41 @@ pub fn build_step_items(step: usize, c: &GlobalConfig) -> Vec<ConfigItem> {
     items
 }
 
+/// The two rows that write the configuration out and read it back. They
+/// live on the review screen, where the whole configuration is in view.
+fn config_file_items(c: &GlobalConfig) -> Vec<ConfigItem> {
+    let mut items = vec![
+        section_header("Configuration file"),
+        ConfigItem {
+            key: "config_export".into(),
+            label: "Save configuration".into(),
+            description: if c.has_secrets() {
+                "Writes the settings, and the passwords into a second file beside them.".into()
+            } else {
+                "Writes the settings to a file for another installation.".into()
+            },
+            item_type: ItemType::Action,
+            ..Default::default()
+        },
+        ConfigItem {
+            key: "config_import".into(),
+            label: "Load configuration".into(),
+            description: "Replaces the settings with a saved file, and its passwords when they are beside it.".into(),
+            item_type: ItemType::Action,
+            ..Default::default()
+        },
+    ];
+    let result = crate::config_file::last_result();
+    if !result.is_empty() {
+        items.push(ConfigItem {
+            value: result.into(),
+            item_type: ItemType::Readonly,
+            ..Default::default()
+        });
+    }
+    items
+}
+
 fn build_welcome_items(_c: &GlobalConfig) -> Vec<ConfigItem> {
     // Welcome screen is handled by dedicated UI, no config items
     vec![]
@@ -599,6 +634,9 @@ fn build_review_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             });
         }
     }
+    // At the top: the whole configuration is what these act on, and the
+    // review list is long enough that anything below it needs scrolling.
+    items.extend(config_file_items(c));
     let mut storage_header = section_header("Storage changes during installation");
     storage_header.key = "edit:1".into();
     items.push(storage_header);
@@ -1087,6 +1125,14 @@ mod storage_design_tests {
             );
         }
     }
+    #[test]
+    fn review_offers_saving_and_loading_the_configuration() {
+        let items = build_review_items(&GlobalConfig::default());
+        let keys: Vec<&str> = items.iter().map(|i| i.key.as_str()).collect();
+        assert!(keys.contains(&"config_export"), "{keys:?}");
+        assert!(keys.contains(&"config_import"), "{keys:?}");
+    }
+
     #[test]
     fn review_uses_canonical_environment_path_and_never_copies_passphrases() {
         let c = GlobalConfig {

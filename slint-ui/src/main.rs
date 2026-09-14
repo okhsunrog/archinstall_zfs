@@ -1,6 +1,7 @@
 mod alongside;
 mod busy;
 mod completion;
+mod config_file;
 mod config_items;
 #[cfg(feature = "linuxkms")]
 mod console_session;

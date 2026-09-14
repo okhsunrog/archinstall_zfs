@@ -79,6 +79,19 @@ class Preview:
             self.inspector(tree, self, label)
         return label
 
+    def element_exact(self, role, label):
+        """`element` matches a label prefix; this one insists on the whole label,
+        for a button whose name is the start of another's ("Save" under "Save
+        configuration")."""
+        tree = self.tree()
+        return next((e for e in tree['elements']
+                     if e.get('accessibleRole') == role and e.get('accessibleLabel') == label), None)
+
+    def click_exact(self, role, label):
+        element = self.element_exact(role, label)
+        assert element, f'Missing {role}: {label}'
+        self.data('click_element', elementHandle=element['handle'])
+
     def element(self, role, label):
         tree = self.tree()
         return next((e for e in tree['elements'] if e.get('accessibleRole') == role and e.get('accessibleLabel','').startswith(label)), None)

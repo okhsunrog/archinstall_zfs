@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -25,7 +25,48 @@ pub struct UserSecrets {
     pub password: String,
 }
 
+/// Where the passwords for `config` live: the same name with `.secrets`
+/// before the extension, so a saved pair is `azfs.json` and
+/// `azfs.secrets.json` and the two travel together without the
+/// configuration itself ever holding a password.
+pub fn secrets_path_for(config: &Path) -> PathBuf {
+    let stem = config
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "config".into());
+    let extension = config
+        .extension()
+        .map(|ext| format!(".{}", ext.to_string_lossy()))
+        .unwrap_or_default();
+    config.with_file_name(format!("{stem}.secrets{extension}"))
+}
+
 impl GlobalConfig {
+    /// Save the configuration, and the passwords beside it when there are
+    /// any. Returns what was written, in order.
+    pub fn save_with_secrets(&self, path: &Path) -> Result<Vec<PathBuf>> {
+        self.save_to_file(path)?;
+        let mut written = vec![path.to_path_buf()];
+        if self.has_secrets() {
+            let secrets = secrets_path_for(path);
+            self.save_secrets_to_file(&secrets)?;
+            written.push(secrets);
+        }
+        Ok(written)
+    }
+
+    /// Load a configuration, applying the passwords beside it when that
+    /// file exists. A missing companion is not an error: a configuration
+    /// shared without its passwords is the point of the split.
+    pub fn load_with_secrets(path: &Path) -> Result<Self> {
+        let mut config = Self::load_from_file(path)?;
+        let secrets = secrets_path_for(path);
+        if secrets.is_file() {
+            config.apply_secrets_from_file(&secrets)?;
+        }
+        Ok(config)
+    }
+
     pub fn load_from_file(path: &Path) -> Result<Self> {
         let content = fs::read_to_string(path)
             .wrap_err_with(|| format!("failed to read config: {}", path.display()))?;
@@ -134,6 +175,80 @@ impl GlobalConfig {
 
 fn write_private_file(path: &Path, contents: &str, description: &str) -> Result<()> {
     write_file_with_mode(path, contents.as_bytes(), 0o600, description)
+}
+
+#[cfg(test)]
+mod pair_tests {
+    use super::*;
+    use crate::config::types::UserConfig;
+
+    fn config_with_secrets() -> GlobalConfig {
+        GlobalConfig {
+            hostname: Some("archzfs".into()),
+            root_password: Some("root secret".into()),
+            users: Some(vec![UserConfig {
+                username: "nika".into(),
+                password: Some("user secret".into()),
+                sudo: true,
+                shell: None,
+                groups: None,
+                ssh_authorized_keys: Vec::new(),
+                autologin: false,
+            }]),
+            ..GlobalConfig::default()
+        }
+    }
+
+    #[test]
+    fn the_companion_keeps_the_name_and_the_extension() {
+        assert_eq!(
+            secrets_path_for(Path::new("/root/azfs.json")),
+            Path::new("/root/azfs.secrets.json")
+        );
+        assert_eq!(
+            secrets_path_for(Path::new("azfs")),
+            Path::new("azfs.secrets")
+        );
+    }
+
+    #[test]
+    fn passwords_are_written_beside_the_configuration_and_read_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("azfs.json");
+        let written = config_with_secrets().save_with_secrets(&path).unwrap();
+        assert_eq!(written, vec![path.clone(), secrets_path_for(&path)]);
+        let saved = fs::read_to_string(&path).unwrap();
+        assert!(
+            !saved.contains("root secret"),
+            "the config holds a password"
+        );
+        assert!(
+            !saved.contains("user secret"),
+            "the config holds a password"
+        );
+
+        let loaded = GlobalConfig::load_with_secrets(&path).unwrap();
+        assert_eq!(loaded.root_password.as_deref(), Some("root secret"));
+        assert_eq!(
+            loaded.users.unwrap()[0].password.as_deref(),
+            Some("user secret")
+        );
+    }
+
+    #[test]
+    fn a_configuration_without_passwords_writes_one_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("azfs.json");
+        let config = GlobalConfig {
+            hostname: Some("archzfs".into()),
+            ..GlobalConfig::default()
+        };
+        assert_eq!(config.save_with_secrets(&path).unwrap(), vec![path.clone()]);
+        assert!(!secrets_path_for(&path).exists());
+        let loaded = GlobalConfig::load_with_secrets(&path).unwrap();
+        assert_eq!(loaded.hostname.as_deref(), Some("archzfs"));
+        assert!(loaded.root_password.is_none());
+    }
 }
 
 #[cfg(test)]

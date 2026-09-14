@@ -95,6 +95,22 @@ fn setup_item_activated(app: &App, config: &Rc<RefCell<GlobalConfig>>, kernel_sc
             return;
         }
 
+        if key == "config_export" || key == "config_import" {
+            let saving = key == "config_export";
+            show_text_input(
+                &app,
+                &key,
+                if saving {
+                    "Save configuration to"
+                } else {
+                    "Load configuration from"
+                },
+                &crate::config_file::default_path().to_string_lossy(),
+                false,
+            );
+            return;
+        }
+
         // Inline radio option clicks: "radio:{setting}:{index}"
         if let Some(rest) = key.strip_prefix("radio:") {
             match rest.rsplit_once(':').and_then(|(name, index)| {
@@ -281,6 +297,24 @@ fn setup_text_confirmed(app: &App, config: &Rc<RefCell<GlobalConfig>>) {
     let cfg = config.clone();
     app.on_text_confirmed(move |key, val| {
         let Some(app) = weak.upgrade() else { return };
+        if key == "config_export" || key == "config_import" {
+            let status = if key == "config_export" {
+                crate::config_file::export(&cfg.borrow(), val.as_str())
+            } else {
+                match crate::config_file::import(val.as_str()) {
+                    Ok((loaded, status)) => {
+                        *cfg.borrow_mut() = loaded;
+                        status
+                    }
+                    Err(status) => status,
+                }
+            };
+            // The rebuilt review carries the outcome as its own row; the
+            // footer says it too, where the validation summary leaves room.
+            refresh_items(&app, &cfg.borrow());
+            app.global::<WizardState>().set_status_text(status.into());
+            return;
+        }
         match TextSetting::parse(&key) {
             Some(setting) => {
                 let mut c = cfg.borrow_mut();

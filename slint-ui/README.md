@@ -67,6 +67,11 @@ ui-review` runs this and the interaction flows the way CI does:
 uv run slint-ui/scripts/invariants.py --output /tmp/azfs-ui-invariants
 ```
 
+The review screen saves the configuration to a file and reads it back;
+passwords go into a companion `*.secrets.json` next to it, the two halves
+`--config` and `--secrets` already accept. A finished installation keeps its
+own copy at `/etc/archinstall-zfs/installation.json`, passwords stripped.
+
 Run repeatable interaction checks at Full HD, 1366×768 and 1280×800:
 
 ```sh
