@@ -586,11 +586,11 @@ fn cmd_test_install(opts: TestOpts) -> Result<(), String> {
     }
 
     // After the logs are saved: a failure here is one worth reading them for.
-    if opts.alongside {
-        if let Err(error) = alongside::verify(&vm) {
-            vm.shutdown();
-            return Err(format!("{error}\nLogs: {}", log_dest.display()));
-        }
+    if opts.alongside
+        && let Err(error) = alongside::verify(&vm)
+    {
+        vm.shutdown();
+        return Err(format!("{error}\nLogs: {}", log_dest.display()));
     }
 
     // Shut down

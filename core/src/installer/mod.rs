@@ -12,7 +12,7 @@ pub mod users;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use color_eyre::eyre::{Result, bail};
+use color_eyre::eyre::{Result, bail, eyre};
 use tokio_util::sync::CancellationToken;
 
 use crate::config::types::{GlobalConfig, InitSystem, SwapMode, ZfsEncryptionMode};
@@ -128,6 +128,9 @@ pub fn perform_installation(request: InstallRequest) -> Result<Vec<String>> {
         notices: Vec::new(),
     };
     installer.configure_target()?;
+    if let Err(error) = installer.save_installation_config() {
+        tracing::warn!(%error, "could not save the installation's configuration");
+    }
     installer.log_enabled_units();
     Ok(installer.notices)
 }
@@ -270,11 +273,37 @@ impl Installer {
     /// wizard came up with no network service at all.
     fn configure_network(&mut self) -> Result<()> {
         if self.config.network_copy_iso {
-            return network::copy_iso_network(&*self.runner, &self.target);
+            let wifi = network::copy_iso_network(&*self.runner, &self.target)?;
+            if wifi {
+                self.install_target_packages(&["iwd"])?;
+                services::enable_service(&*self.runner, &self.target, "iwd")?;
+            }
+            tracing::info!(wifi, "the medium's network configuration is in place");
+            return Ok(());
         }
         self.install_target_packages(&["networkmanager"])?;
         services::enable_service(&*self.runner, &self.target, "NetworkManager")?;
         tracing::info!("NetworkManager installed and enabled");
+        Ok(())
+    }
+
+    /// Keep the configuration that produced this system inside it, with the
+    /// passwords stripped. A reinstall, or a second machine set up the same
+    /// way, then starts from `azfs --config` instead of from memory; until
+    /// now the only record was the installer's log.
+    fn save_installation_config(&self) -> Result<()> {
+        let dir = self.target.join("etc/archinstall-zfs");
+        std::fs::create_dir_all(&dir)
+            .map_err(|error| eyre!("cannot create {}: {error}", dir.display()))?;
+        let path = dir.join("installation.json");
+        let json = self.config.to_redacted_json_string()?;
+        crate::system::fs::write_file_with_mode(
+            &path,
+            json.as_bytes(),
+            0o644,
+            "installation configuration",
+        )?;
+        tracing::info!(path = %path.display(), "saved the installation's configuration");
         Ok(())
     }
 
