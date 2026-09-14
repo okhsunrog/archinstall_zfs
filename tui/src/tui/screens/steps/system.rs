@@ -50,7 +50,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     items.extend(radio_group(
         ChoiceSetting::NetworkCopyIso.as_str(),
         "Network",
-        &["Copy from ISO", "Manual"],
+        &["Copy from the installer medium", "NetworkManager"],
         if config.network_copy_iso { 0 } else { 1 },
     ));
 

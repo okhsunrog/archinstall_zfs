@@ -388,6 +388,31 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     items
 }
 
+/// How the installed system will manage its network. The medium's own
+/// setup can be carried over, Wi-Fi passphrases and all; otherwise the
+/// system gets NetworkManager, which every desktop here expects.
+fn network_choice(c: &GlobalConfig) -> ConfigItem {
+    // Index 0 is the copying mode: `apply_choice` reads it that way.
+    let labels = ["Copy from the installer medium", "NetworkManager"];
+    let index = usize::from(!c.network_copy_iso);
+    ConfigItem {
+        key: ChoiceSetting::NetworkCopyIso.as_str().into(),
+        label: "Network management".into(),
+        value: labels[index].into(),
+        choices: slint::ModelRc::new(slint::VecModel::from(
+            labels.map(SharedString::from).to_vec(),
+        )),
+        choice_index: index as i32,
+        description: if c.network_copy_iso {
+            "Carries this medium's wired setup and saved Wi-Fi into the installed system.".into()
+        } else {
+            "Installs and enables NetworkManager, which the desktop environments expect.".into()
+        },
+        item_type: ItemType::CompactChoice,
+        ..Default::default()
+    }
+}
+
 fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     vec![
         section_header("Base system"),
@@ -420,6 +445,7 @@ fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
             ItemType::Text,
         ),
         ci_toggle("ntp", "NTP (time sync)", c.ntp),
+        network_choice(c),
         ci(
             TextSetting::ParallelDownloads.as_str(),
             "Parallel downloads",
@@ -1125,6 +1151,24 @@ mod storage_design_tests {
             );
         }
     }
+    #[test]
+    fn the_system_step_offers_a_network_manager() {
+        let mut c = GlobalConfig::default();
+        let row = build_system_items(&c)
+            .into_iter()
+            .find(|i| i.key == "network")
+            .expect("no network row");
+        assert_eq!(row.value, "NetworkManager");
+        assert_eq!(row.choice_index, 1);
+        c.network_copy_iso = true;
+        let row = build_system_items(&c)
+            .into_iter()
+            .find(|i| i.key == "network")
+            .expect("no network row");
+        assert_eq!(row.choice_index, 0);
+        assert!(row.value.starts_with("Copy from"), "{}", row.value);
+    }
+
     #[test]
     fn review_offers_saving_and_loading_the_configuration() {
         let items = build_review_items(&GlobalConfig::default());

@@ -97,19 +97,31 @@ def check(tree, width, height):
     top = max(populated)
     scroll_areas = [rect(e) for e in elements if is_scroll_area(e) and visible(e)]
 
+    # A scroll area clips its content: what falls outside it is not on
+    # screen, however the element tree reports the row's own position.
+    def clipped_rect(box):
+        # Nested scroll areas (a popup's list over the page's scroll view)
+        # each clip; intersect with every one that holds this element.
+        x, y, w, h = box
+        for sx, sy, sw, sh in scroll_areas:
+            if sx - EDGE_SLACK <= x and x + w <= sx + sw + EDGE_SLACK:
+                top_edge, bottom_edge = max(y, sy), min(y + h, sy + sh)
+                y, h = top_edge, bottom_edge - top_edge
+        return x, y, w, h
+
+    def on_screen(element):
+        x, y, w, h = clipped_rect(rect(element))
+        return h > EDGE_SLACK and x + w > 0 and y + h > 0 and x < width and y < height
+
     for element in elements:
         role = element.get('accessibleRole')
-        if not role or not visible(element):
+        if not role or not visible(element) or not on_screen(element):
             continue
-        x, y, w, h = box = rect(element)
-        if x + w <= 0 or y + h <= 0 or x >= width or y >= height:
-            continue  # scrolled away entirely
-        # Content of a scroll area is clipped by it, not by the window.
-        clipped = any(sx - EDGE_SLACK <= x and x + w <= sx + sw + EDGE_SLACK and y < sy + sh and y + h > sy
-                      for sx, sy, sw, sh in scroll_areas)
+        x, y, w, h = rect(element)
+        box = clipped_rect((x, y, w, h))
         if x < -EDGE_SLACK or x + w > width + EDGE_SLACK:
             violations.append(f'{describe(element)} crosses the window horizontally')
-        elif not clipped and not within(box, window):
+        elif not within(box, window):
             violations.append(f'{describe(element)} crosses the window vertically')
         if role in INTERACTIVE:
             if w < MIN_CONTROL or h < MIN_CONTROL:
@@ -117,20 +129,11 @@ def check(tree, width, height):
             if not element.get('accessibleLabel'):
                 violations.append(f'{describe(element)} has no accessible label')
 
-    # A list row half-scrolled out of its ListView is clipped by it, not drawn
-    # over the button below, so controls are judged by their visible part.
-    def clipped_rect(box):
-        # Nested scroll areas (a popup's list over the page's scroll view)
-        # each clip; the innermost is the one that matters, so intersect all.
-        x, y, w, h = box
-        for sx, sy, sw, sh in scroll_areas:
-            if sx - EDGE_SLACK <= x and x + w <= sx + sw + EDGE_SLACK and y < sy + sh and y + h > sy:
-                top_edge, bottom_edge = max(y, sy), min(y + h, sy + sh)
-                y, h = top_edge, bottom_edge - top_edge
-        return x, y, w, h
-
+    # A row half-scrolled out of its list is clipped by it, not drawn over
+    # the button below, so controls are judged by their visible part.
     controls = [(clipped_rect(rect(e)), e) for i, e in enumerate(elements)
-                if e.get('accessibleRole') in INTERACTIVE and visible(e) and layers[i] == top]
+                if e.get('accessibleRole') in INTERACTIVE and visible(e) and layers[i] == top
+                and on_screen(e)]
     controls = [(box, e) for box, e in controls if box[3] > OVERLAP_SLACK]
     for i, (a, ea) in enumerate(controls):
         for b, eb in controls[i + 1:]:
