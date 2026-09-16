@@ -28,6 +28,8 @@
 //! installer picks that file up and copies it to the target so the
 //! installed system reconnects without re-prompting for credentials.
 
+use std::time::Duration;
+
 use futures::StreamExt;
 use iwdrs::{
     agent::Agent,
@@ -118,23 +120,94 @@ pub async fn backend_available() -> bool {
 /// the backend is swapped.
 pub use backend_available as iwd_available;
 
+/// How long to wait for iwd to report that the scan it was asked for has
+/// started. `Scan()` returns once the request is queued, and `Scanning`
+/// turns true a moment later.
+const SCAN_START_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long a single scan may take before it is given up on.
+const SCAN_COMPLETE_TIMEOUT: Duration = Duration::from_secs(30);
+/// How many scans have to come back with nothing before the daemon
+/// itself is suspected. The second one is what tells a one-off apart
+/// from the stuck state, which answers every scan with nothing.
+const EMPTY_SCAN_ATTEMPTS: usize = 2;
+/// How long to keep trying to reach iwd again after restarting it.
+const RESTART_REJOIN_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Trigger a scan on the first station and return all discovered
 /// networks, sorted roughly strongest-first by iwd itself. Networks
 /// already in iwd's known-network database are flagged with
 /// `known: true`.
+///
+/// An empty result is not taken at face value. iwd splits a scan over
+/// subsets of the channels, and on some adapters a subset comes back
+/// with nothing and iwd drops every network the earlier subsets found:
+///
+/// ```text
+/// station_dbus_scan_triggered() Scan triggered for wlan0 subset 1
+/// scan_notify() Scan notification New Scan Results
+/// process_network() No remaining BSSs for SSID: … -- Removing network
+/// ```
+///
+/// The station stays in that state — further scans, including iwd's own
+/// periodic ones, keep answering with nothing — while the kernel still
+/// scans perfectly well, so the installer used to offer an empty list on
+/// hardware with networks all around it. Scanning again clears a one-off;
+/// only restarting iwd clears the stuck state, and a station with no
+/// connection to lose can be restarted under the user.
 pub async fn scan_networks() -> Result<Vec<WifiNetwork>, WifiError> {
     let session = Session::new().await.map_err(|_| WifiError::NotAvailable)?;
-    let station = first_station(&session).await?;
+    let mut station = first_station(&session).await?;
 
+    for attempt in 1..=EMPTY_SCAN_ATTEMPTS {
+        let networks = scan_once(&station).await?;
+        if !networks.is_empty() {
+            return Ok(networks);
+        }
+        tracing::debug!(attempt, "the scan found no networks");
+    }
+
+    // Leave a working connection alone: restarting iwd would drop it, and
+    // a station that is connected has something better to say than an
+    // empty list anyway.
+    if !matches!(station.state().await, Ok(IwdState::Disconnected)) {
+        tracing::info!("no networks found; leaving the connected station alone");
+        return Ok(Vec::new());
+    }
+
+    tracing::warn!("no networks after {EMPTY_SCAN_ATTEMPTS} scans; restarting iwd");
+    let session = match restart_iwd().await {
+        Ok(session) => session,
+        Err(error) => {
+            tracing::warn!(%error, "could not restart iwd");
+            return Ok(Vec::new());
+        }
+    };
+    station = first_station(&session).await?;
+    scan_once(&station).await
+}
+
+/// One scan: ask for it, wait for it to finish, read what it found.
+async fn scan_once(station: &Station) -> Result<Vec<WifiNetwork>, WifiError> {
     // Trigger a fresh scan. iwd reports "already scanning" as a method
     // error — treat it as success and fall through to fetching results.
     if let Err(e) = station.scan().await {
         tracing::debug!(?e, "iwd scan() returned error (may already be scanning)");
     }
 
+    // `Scanning` is still false for a moment after `Scan()` returns, and
+    // waiting for "not scanning" in that moment is answered by the state
+    // from before the scan — leaving the results of the previous one, or
+    // nothing at all, to be read as this scan's answer.
+    wait_for_scan_start(station).await;
+
     // Block until the scan finishes (iwd emits Scanning=false).
-    if station.wait_for_scan_complete().await.is_err() {
-        return Err(WifiError::ScanFailed);
+    match tokio::time::timeout(SCAN_COMPLETE_TIMEOUT, station.wait_for_scan_complete()).await {
+        Ok(Ok(())) => {}
+        Ok(Err(_)) => return Err(WifiError::ScanFailed),
+        Err(_) => {
+            tracing::warn!("iwd is still scanning after {SCAN_COMPLETE_TIMEOUT:?}");
+            return Err(WifiError::ScanFailed);
+        }
     }
 
     let discovered = station
@@ -168,6 +241,47 @@ pub async fn scan_networks() -> Result<Vec<WifiNetwork>, WifiError> {
     }
 
     Ok(out)
+}
+
+/// Wait for iwd to report the scan as running, giving up after
+/// `SCAN_START_TIMEOUT`: a scan that finished that quickly is one whose
+/// results are already there to read.
+async fn wait_for_scan_start(station: &Station) {
+    let deadline = tokio::time::Instant::now() + SCAN_START_TIMEOUT;
+    while tokio::time::Instant::now() < deadline {
+        match station.is_scanning().await {
+            Ok(true) => return,
+            Ok(false) => {}
+            Err(_) => return,
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    tracing::debug!("iwd did not report a scan starting");
+}
+
+/// Restart iwd and return a session on the daemon that comes back.
+async fn restart_iwd() -> Result<Session, WifiError> {
+    let status = tokio::process::Command::new("systemctl")
+        .args(["restart", "iwd"])
+        .status()
+        .await
+        .map_err(|_| WifiError::NotAvailable)?;
+    if !status.success() {
+        return Err(WifiError::NotAvailable);
+    }
+
+    // The daemon takes a moment to claim its bus name again.
+    let deadline = tokio::time::Instant::now() + RESTART_REJOIN_TIMEOUT;
+    loop {
+        if let Ok(session) = Session::new().await {
+            tracing::info!("iwd restarted");
+            return Ok(session);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(WifiError::NotAvailable);
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
 }
 
 /// Connect to `ssid` by triggering iwd's connect flow and providing
