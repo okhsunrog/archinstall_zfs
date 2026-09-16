@@ -95,7 +95,7 @@ pub fn server_profiles() -> Vec<Profile> {
         server(
             "tomcat",
             "Tomcat",
-            vec!["tomcat10", "java-runtime"],
+            vec!["tomcat10", "jre-openjdk"],
             vec!["tomcat10"],
             Vec::new(),
         ),
