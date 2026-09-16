@@ -76,7 +76,7 @@ hyperv
 intel-ucode
 irssi
 iw
-iwd
+{% if use_nm %}networkmanager{% else %}iwd{% endif %}
 jfsutils
 kitty-terminfo
 ldns

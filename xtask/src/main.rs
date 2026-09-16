@@ -139,6 +139,10 @@ enum Commands {
         /// Fast build mode (minimal packages, erofs)
         #[arg(long)]
         fast: bool,
+
+        /// Wireless daemon the live system runs (iwd or nm)
+        #[arg(long, default_value = "iwd")]
+        wifi: String,
     },
 }
 
@@ -374,7 +378,8 @@ fn main() -> ExitCode {
             zfs,
             headers,
             fast,
-        } => iso::render_profile(&profile_dir, &out_dir, &kernel, &zfs, &headers, fast),
+            wifi,
+        } => iso::render_profile(&profile_dir, &out_dir, &kernel, &zfs, &headers, fast, &wifi),
     };
     match result {
         Ok(()) => {

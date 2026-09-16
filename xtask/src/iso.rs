@@ -10,7 +10,9 @@ pub fn render_profile(
     zfs_mode: &str,
     headers: &str,
     fast_build: bool,
+    wifi: &str,
 ) -> Result<(), String> {
+    let use_nm = wifi == "nm";
     if !profile_dir.exists() {
         return Err(format!(
             "Profile directory not found: {}",
@@ -51,6 +53,7 @@ pub fn render_profile(
         include_headers => include_headers,
         headers => headers_pkg,
         fast_build => fast_build,
+        use_nm => use_nm,
     };
 
     // Walk source directory and render/copy
@@ -68,7 +71,56 @@ pub fn render_profile(
         let _ = std::os::unix::fs::symlink(&target, &dst);
     }
 
+    if use_nm {
+        switch_to_network_manager(out_dir)?;
+    }
+
     eprintln!("{}", out_dir.display());
+    Ok(())
+}
+
+/// Hand the live system's networking to NetworkManager.
+///
+/// The medium's own units are the ones the Arch profile enables —
+/// systemd-networkd for the wiring and iwd for the radio. NetworkManager
+/// wants both jobs, and leaving either of them enabled gives it something
+/// to fight with over the same interfaces.
+fn switch_to_network_manager(out_dir: &Path) -> Result<(), String> {
+    let units = out_dir.join("airootfs/etc/systemd/system");
+    for unit in [
+        "multi-user.target.wants/iwd.service",
+        "multi-user.target.wants/systemd-networkd.service",
+        "network-online.target.wants/systemd-networkd-wait-online.service",
+    ] {
+        let path = units.join(unit);
+        if path.symlink_metadata().is_ok() {
+            fs::remove_file(&path).map_err(|e| format!("remove {}: {e}", path.display()))?;
+        }
+    }
+
+    // The .network files belong to the daemon that just left.
+    let networkd_conf = out_dir.join("airootfs/etc/systemd/network");
+    if networkd_conf.exists() {
+        fs::remove_dir_all(&networkd_conf)
+            .map_err(|e| format!("remove {}: {e}", networkd_conf.display()))?;
+    }
+
+    for (wants, unit) in [
+        ("multi-user.target.wants", "NetworkManager.service"),
+        (
+            "network-online.target.wants",
+            "NetworkManager-wait-online.service",
+        ),
+    ] {
+        let dir = units.join(wants);
+        fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+        let link = dir.join(unit);
+        let _ = fs::remove_file(&link);
+        std::os::unix::fs::symlink(format!("/usr/lib/systemd/system/{unit}"), &link)
+            .map_err(|e| format!("link {}: {e}", link.display()))?;
+    }
+
+    eprintln!("profile switched to NetworkManager");
     Ok(())
 }
 

@@ -91,12 +91,13 @@ test-live-update:
 
 # Internal: render profile templates using the prebuilt xtask binary.
 # Requires cargo-build or cargo-build-container to have run first.
-_render-profile MODE="precompiled" KERNEL="linux-lts" FAST="":
+_render-profile MODE="precompiled" KERNEL="linux-lts" FAST="" WIFI="iwd":
     ./target/release/xtask render-profile \
         --profile-dir {{PROFILE_DIR}} \
         --out-dir {{PROFILE_OUT}} \
         --kernel {{KERNEL}} \
         --zfs {{MODE}} \
+        --wifi {{WIFI}} \
         {{FAST}}
 
 # Internal: copy installer binaries into rendered profile
@@ -138,6 +139,24 @@ iso-full MODE="precompiled" KERNEL="linux-lts":
     @echo "Building full ISO (mode={{MODE}}, kernel={{KERNEL}})"
     just _iso {{MODE}} {{KERNEL}}
     @echo "Full ISO built in {{ISO_OUT}}"
+
+# The full ISO with NetworkManager in place of iwd, installer included, for
+# comparing the two wireless daemons on the same hardware.
+# Usage: just iso-full-nm [--mode precompiled|dkms] [--kernel linux|linux-lts|linux-zen]
+[arg("MODE", long="mode")]
+[arg("KERNEL", long="kernel")]
+iso-full-nm MODE="precompiled" KERNEL="linux-lts":
+    @echo "Building full ISO with NetworkManager (mode={{MODE}}, kernel={{KERNEL}})"
+    cargo build --release --locked --bin azfs-tui --bin xtask
+    cargo build --release --locked --bin azfs \
+        -p archinstall-zfs-slint --no-default-features --features linuxkms-nm
+    just _render-profile {{MODE}} {{KERNEL}} "" nm
+    just _prepare-binary
+    @echo "Building ISO..."
+    sudo rm -rf gen_iso/workdir
+    sudo mkarchiso -v -w "gen_iso/workdir" -o {{ISO_OUT}} {{PROFILE_OUT}}
+    sudo chown -R "$(id -u):$(id -g)" {{ISO_OUT}} gen_iso/workdir
+    @echo "NetworkManager ISO built in {{ISO_OUT}}"
 
 # Build the full hardware profile into a dedicated mkarchiso workdir.
 # The workdir intentionally remains root-owned: changing its ownership would
