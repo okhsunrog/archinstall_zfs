@@ -49,11 +49,43 @@ fn wanted(source: &str, names: impl IntoIterator<Item = String>) -> Vec<Wanted> 
         .collect()
 }
 
+/// The package lists of rendered live-image profiles, as `just
+/// check-packages` renders them: one path per kernel, separated by colons.
+///
+/// The image's own list is the other half of this check. A name that has
+/// left the repositories stops `mkarchiso` rather than an installation —
+/// which is how September's monthly build died on `broadcom-wl`, five days
+/// before anyone noticed the release had not appeared.
+const ISO_PACKAGE_LISTS: &str = "AZFS_ISO_PACKAGE_LISTS";
+
+fn iso_profile_packages() -> Vec<Wanted> {
+    let Ok(lists) = std::env::var(ISO_PACKAGE_LISTS) else {
+        println!("{ISO_PACKAGE_LISTS} is unset: the live image's own list is not checked");
+        return Vec::new();
+    };
+
+    let mut names = Vec::new();
+    for path in lists.split(':').filter(|p| !p.is_empty()) {
+        let listing = std::fs::read_to_string(path)
+            .unwrap_or_else(|error| panic!("cannot read the rendered list {path}: {error}"));
+        let source = format!("live image {}", std::path::Path::new(path).display());
+        names.extend(wanted(
+            &source,
+            listing
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                .map(str::to_string),
+        ));
+    }
+    names
+}
+
 /// Every Arch package name that is written down in this repository rather
 /// than typed by the user.
 fn every_package_name() -> Vec<Wanted> {
     let arch = &distro::ARCH;
-    let mut names = Vec::new();
+    let mut names = iso_profile_packages();
 
     names.extend(wanted(
         "distro::ARCH base_packages",

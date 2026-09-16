@@ -47,10 +47,24 @@ cargo-build-container:
 cargo-test:
     cargo test --workspace --locked
 
-# Hold every package name the installer can ask for against the live Arch
-# repositories. Needs an Arch system with core, extra, multilib and archzfs.
+# Hold every package name this repository writes down against the live Arch
+# repositories: the installer's tables, and the live image's own list for
+# each kernel it is built with. Needs an Arch system with core, extra,
+# multilib and archzfs. A name that has left the repositories stops an
+# installation on the user's machine, or the monthly image build in CI.
 check-packages:
-    cargo test -p archinstall-zfs-core --test repo_packages --locked -- --ignored --nocapture
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --release --locked --bin xtask
+    lists=""
+    for kernel in linux linux-lts; do
+        out="$PWD/target/package-check/$kernel"
+        ./target/release/xtask render-profile \
+            --profile-dir {{PROFILE_DIR}} --out-dir "$out" --kernel "$kernel" --zfs dkms >/dev/null
+        lists="$lists:$out/packages.x86_64"
+    done
+    AZFS_ISO_PACKAGE_LISTS="${lists#:}" \
+        cargo test -p archinstall-zfs-core --test repo_packages --locked -- --ignored --nocapture
 
 # Run clippy
 lint:
