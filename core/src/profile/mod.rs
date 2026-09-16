@@ -71,6 +71,13 @@ impl Profile {
         self.excluded_packages.extend_from_slice(names);
         self
     }
+
+    /// Enable these user units globally, for the pieces of a session that
+    /// have to be running rather than merely installed.
+    pub fn with_user_services(mut self, names: &[&'static str]) -> Self {
+        self.user_services.extend_from_slice(names);
+        self
+    }
 }
 
 #[derive(Debug, Clone)]

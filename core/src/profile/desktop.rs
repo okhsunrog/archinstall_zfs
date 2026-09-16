@@ -222,6 +222,7 @@ pub fn desktop_profiles() -> Vec<Profile> {
             "Hyprland",
             vec![
                 "hyprland",
+                "waybar",
                 "dunst",
                 "kitty",
                 "uwsm",
@@ -230,7 +231,10 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "xdg-desktop-portal-hyprland",
                 "qt5-wayland",
                 "qt6-wayland",
-                "polkit-kde-agent",
+                // The Hyprland project's own agent, which unlike
+                // polkit-kde-agent ships a user unit and so actually runs
+                // without the user writing an exec-once for it.
+                "hyprpolkitagent",
                 "grim",
                 "slurp",
             ],
@@ -246,7 +250,8 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 ("mako", "Wayland notification daemon"),
                 ("wl-clipboard", "Clipboard helper (wl-copy / wl-paste)"),
             ])),
-        ),
+        )
+        .with_user_services(&["hyprpolkitagent"]),
         desktop(
             "sway",
             "Sway",
