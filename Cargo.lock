@@ -235,7 +235,7 @@ dependencies = [
 
 [[package]]
 name = "archinstall-zfs-core"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "alpm",
  "alpm-utils",
@@ -272,7 +272,7 @@ dependencies = [
 
 [[package]]
 name = "archinstall-zfs-slint"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "archinstall-zfs-core",
  "clap",
@@ -296,7 +296,7 @@ dependencies = [
 
 [[package]]
 name = "archinstall-zfs-tui"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "archinstall-zfs-core",
  "clap",
@@ -7845,7 +7845,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "clap",
  "minijinja",
