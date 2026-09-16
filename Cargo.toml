@@ -8,7 +8,7 @@ clap = { version = "4.6.5", features = ["derive"] }
 color-eyre = "0.6.5"
 futures = "0.3.33"
 nix = { version = "0.31.3", features = ["fs"] }
-nmrs = "3.4.2"
+nmrs = "3.5.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sublime_fuzzy = "0.7.0"

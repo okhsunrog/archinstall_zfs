@@ -227,13 +227,23 @@ pub async fn connect(ssid: &str, passphrase: Option<String>) -> Result<(), WifiE
     // We need to know the security type before deciding what to pass
     // to nmrs. List the current scan, find the matching SSID, infer
     // security from its flags.
-    let networks = nm.list_networks(None).await?;
-    let net = networks
-        .iter()
-        .find(|n| n.ssid == ssid)
-        .ok_or_else(|| WifiError::NetworkNotFound(ssid.to_string()))?;
-
-    let security = network_to_security(net);
+    //
+    // The network the user picked can be missing from the list a moment
+    // after they picked it: this adapter drops a different set of
+    // channels on every pass, so a scan of its own is worth asking for
+    // before taking "not there" as the answer.
+    let security = match find_network(&nm, ssid).await? {
+        Some(net) => network_to_security(&net),
+        None => {
+            let before = last_scan_finished().await;
+            let _ = nm.scan_networks(None).await;
+            wait_for_scan(before).await;
+            let net = find_network(&nm, ssid)
+                .await?
+                .ok_or_else(|| WifiError::NetworkNotFound(ssid.to_string()))?;
+            network_to_security(&net)
+        }
+    };
 
     let psk = match security {
         Security::Open => None,
@@ -278,6 +288,12 @@ pub async fn connect(ssid: &str, passphrase: Option<String>) -> Result<(), WifiE
         wait_for_scan(before).await;
     }
     unreachable!("the loop returns on its last attempt")
+}
+
+/// The access point NetworkManager is currently holding for `ssid`.
+async fn find_network(nm: &NetworkManager, ssid: &str) -> Result<Option<NmNetwork>, WifiError> {
+    let networks = nm.list_networks(None).await?;
+    Ok(networks.into_iter().find(|n| n.ssid == ssid))
 }
 
 /// Whether a failed connection is worth another attempt.
