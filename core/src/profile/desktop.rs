@@ -205,7 +205,7 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "breeze-icons",
                 "oxygen-icons",
                 "xdg-utils",
-                "ttf-freefont",
+                "gnu-free-fonts",
                 "l3afpad",
                 "slock",
                 "network-manager-applet",
@@ -242,7 +242,7 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 ("hyprpaper", "Wallpaper utility from the Hyprland project"),
                 ("hypridle", "Idle daemon (auto-lock, dim, sleep)"),
                 ("hyprlock", "Screen locker"),
-                ("swww", "Animated wallpaper daemon"),
+                ("awww", "Animated wallpaper daemon (formerly swww)"),
                 ("mako", "Wayland notification daemon"),
                 ("wl-clipboard", "Clipboard helper (wl-copy / wl-paste)"),
             ])),
@@ -269,10 +269,6 @@ pub fn desktop_profiles() -> Vec<Profile> {
             true,
             Some("sway"),
             with_tray(opts(&[
-                (
-                    "swaylock-effects",
-                    "swaylock fork with blur/screenshot effects",
-                ),
                 ("wl-clipboard", "Clipboard helper (wl-copy / wl-paste)"),
                 ("mako", "Wayland notification daemon"),
             ])),
@@ -298,7 +294,6 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 ("polybar", "Modular status bar"),
                 ("rofi", "Application launcher and dmenu replacement"),
                 ("feh", "Image viewer often used to set wallpaper"),
-                ("nitrogen", "Graphical wallpaper setter"),
             ])),
         ),
         desktop(

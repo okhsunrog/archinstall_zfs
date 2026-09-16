@@ -47,6 +47,11 @@ cargo-build-container:
 cargo-test:
     cargo test --workspace --locked
 
+# Hold every package name the installer can ask for against the live Arch
+# repositories. Needs an Arch system with core, extra, multilib and archzfs.
+check-packages:
+    cargo test -p archinstall-zfs-core --test repo_packages --locked -- --ignored --nocapture
+
 # Run clippy
 lint:
     cargo clippy --workspace --all-targets --locked -- -D warnings
