@@ -227,7 +227,9 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 "kitty",
                 "uwsm",
                 "dolphin",
-                "wofi",
+                // Hyprland's first-run screen offers its own launcher as the
+                // default; shipping it means nothing in that screen is red.
+                "hyprlauncher",
                 "xdg-desktop-portal-hyprland",
                 "qt5-wayland",
                 "qt6-wayland",
@@ -248,6 +250,7 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 ("hyprlock", "Screen locker"),
                 ("awww", "Animated wallpaper daemon (formerly swww)"),
                 ("mako", "Wayland notification daemon"),
+                ("wofi", "Application launcher, in place of hyprlauncher"),
                 ("wl-clipboard", "Clipboard helper (wl-copy / wl-paste)"),
             ])),
         )
