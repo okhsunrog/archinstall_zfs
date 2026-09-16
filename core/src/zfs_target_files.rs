@@ -114,13 +114,22 @@ pub fn install_zed_cache_hook(runner: &dyn CommandRunner, target: &Path) -> Resu
 
     let hook_path = zed_dir.join("history_event-zfs-list-cacher.sh");
 
-    // Remove immutable flag if file already exists (e.g., from ZFS package)
-    let _ = chroot_cmd(
-        runner,
-        target,
-        "chattr",
-        &["-i", "/etc/zfs/zed.d/history_event-zfs-list-cacher.sh"],
-    );
+    // Take the immutable flag off a hook an earlier run left behind, so it
+    // can be replaced. The distribution's own hook is a symlink into
+    // /usr/lib/zfs, and a symlink has no flags to take off: asking anyway
+    // answers "Operation not supported while reading flags" and leaves that
+    // in the log of every first installation.
+    if hook_path
+        .symlink_metadata()
+        .is_ok_and(|meta| meta.file_type().is_file())
+    {
+        let _ = chroot_cmd(
+            runner,
+            target,
+            "chattr",
+            &["-i", "/etc/zfs/zed.d/history_event-zfs-list-cacher.sh"],
+        );
+    }
 
     // Remove existing file
     if hook_path.exists() {

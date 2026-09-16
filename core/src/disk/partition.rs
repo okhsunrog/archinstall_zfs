@@ -199,6 +199,11 @@ pub fn partition_path(disk: &Path, part_num: u32) -> PathBuf {
     PathBuf::from(format!("{disk_str}{separator}{part_num}"))
 }
 
+/// How the ESP is mounted, and so how the installed system keeps mounting
+/// it: readable and writable by root, and by nobody else. FAT carries no
+/// permissions of its own, so they are decided here.
+pub const ESP_MOUNT_OPTIONS: &str = "fmask=0137,dmask=0027";
+
 pub fn mount_efi(
     runner: &dyn CommandRunner,
     efi_partition: &Path,
@@ -208,7 +213,12 @@ pub fn mount_efi(
     let mount_path = mountpoint.join("boot/efi");
     std::fs::create_dir_all(&mount_path)?;
     let mount_str = mount_path.to_string_lossy();
-    let output = runner.run("mount", &[&*efi_str, &*mount_str])?;
+    // genfstab writes down whatever the partition is mounted with, so these
+    // options are the ones the installed system keeps. A FAT filesystem
+    // mounted with the defaults hands every file on the ESP to every user,
+    // which systemd notices on each boot: "Random seed file … is world
+    // accessible, which is a security hole!".
+    let output = runner.run("mount", &["-o", ESP_MOUNT_OPTIONS, &*efi_str, &*mount_str])?;
     check_exit(&output, "mount EFI")?;
     Ok(())
 }
