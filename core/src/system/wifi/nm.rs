@@ -32,6 +32,8 @@
 //! * WEP networks are mapped to `Psk` — nmrs's `Network` struct doesn't
 //!   distinguish them and WEP is effectively extinct.
 
+use std::time::Duration;
+
 use futures::stream;
 use nmrs::{
     ConnectionError as NmConnectionError, Network as NmNetwork, NetworkManager,
@@ -39,6 +41,93 @@ use nmrs::{
 };
 
 use super::{KnownNetworkInfo, Security, StationState, StationStateStream, WifiError, WifiNetwork};
+
+/// How long to wait for the scan the listing asked for to finish.
+const SCAN_TIMEOUT: Duration = Duration::from_secs(10);
+/// How often to ask the adapter whether its scan has finished.
+const SCAN_POLL: Duration = Duration::from_millis(250);
+/// NM's device type for a wireless device.
+const DEVICE_TYPE_WIFI: u32 = 2;
+/// How many times a connection that fails for a reason another attempt
+/// could fix is tried.
+const CONNECT_ATTEMPTS: usize = 3;
+
+#[zbus::proxy(
+    interface = "org.freedesktop.NetworkManager",
+    default_service = "org.freedesktop.NetworkManager",
+    default_path = "/org/freedesktop/NetworkManager"
+)]
+trait NetworkManagerRoot {
+    fn get_devices(&self) -> zbus::Result<Vec<zbus::zvariant::OwnedObjectPath>>;
+}
+
+#[zbus::proxy(
+    interface = "org.freedesktop.NetworkManager.Device",
+    default_service = "org.freedesktop.NetworkManager"
+)]
+trait NmDevice {
+    #[zbus(property)]
+    fn device_type(&self) -> zbus::Result<u32>;
+}
+
+#[zbus::proxy(
+    interface = "org.freedesktop.NetworkManager.Device.Wireless",
+    default_service = "org.freedesktop.NetworkManager"
+)]
+trait NmWireless {
+    /// When the device's last scan finished, in CLOCK_BOOTTIME
+    /// milliseconds. -1 until it has ever scanned.
+    #[zbus(property)]
+    fn last_scan(&self) -> zbus::Result<i64>;
+}
+
+/// The wireless device's record of when it last finished scanning.
+///
+/// `RequestScan` returns as soon as NetworkManager accepts the request,
+/// and the access points arrive seconds later, so this is what says
+/// whether the list is the answer to the scan just asked for or the one
+/// before it.
+async fn last_scan_finished() -> Option<i64> {
+    let conn = zbus::Connection::system().await.ok()?;
+    let nm = NetworkManagerRootProxy::new(&conn).await.ok()?;
+    for path in nm.get_devices().await.ok()? {
+        let device = NmDeviceProxy::builder(&conn)
+            .path(path.clone())
+            .ok()?
+            .build()
+            .await
+            .ok()?;
+        if device.device_type().await.ok()? != DEVICE_TYPE_WIFI {
+            continue;
+        }
+        let wireless = NmWirelessProxy::builder(&conn)
+            .path(path)
+            .ok()?
+            .build()
+            .await
+            .ok()?;
+        return wireless.last_scan().await.ok();
+    }
+    None
+}
+
+/// Wait for a scan that finished later than `before`, giving up after
+/// `SCAN_TIMEOUT`.
+async fn wait_for_scan(before: Option<i64>) {
+    let deadline = tokio::time::Instant::now() + SCAN_TIMEOUT;
+    loop {
+        tokio::time::sleep(SCAN_POLL).await;
+        match (last_scan_finished().await, before) {
+            (Some(now), Some(before)) if now > before => return,
+            (Some(now), None) if now >= 0 => return,
+            _ => {}
+        }
+        if tokio::time::Instant::now() >= deadline {
+            tracing::debug!("NetworkManager did not report a finished scan");
+            return;
+        }
+    }
+}
 
 // ─── type conversions ───────────────────────────────────────────────────
 
@@ -93,7 +182,14 @@ pub async fn scan_networks() -> Result<Vec<WifiNetwork>, WifiError> {
         .await
         .map_err(|_| WifiError::NotAvailable)?;
 
+    // NetworkManager answers RequestScan as soon as it takes the request,
+    // and the access points arrive seconds afterwards. Reading the list
+    // straight after the call hands back the results of the scan before
+    // this one — on the test laptop, a list without the network the user
+    // was reaching for, which the connection then could not find.
+    let before = last_scan_finished().await;
     nm.scan_networks(None).await?;
+    wait_for_scan(before).await;
 
     // Pull saved connection names so we can flag known networks in
     // the scan result. `list_saved_connection_ids` returns the NM
@@ -139,14 +235,14 @@ pub async fn connect(ssid: &str, passphrase: Option<String>) -> Result<(), WifiE
 
     let security = network_to_security(net);
 
-    let creds = match security {
-        Security::Open => NmWifiSecurity::Open,
+    let psk = match security {
+        Security::Open => None,
         Security::Wep | Security::Psk => {
             let psk = passphrase.ok_or_else(|| WifiError::PassphraseRequired(ssid.to_string()))?;
             if psk.is_empty() {
                 return Err(WifiError::PassphraseRequired(ssid.to_string()));
             }
-            NmWifiSecurity::WpaPsk { psk }
+            Some(psk)
         }
         Security::Enterprise => {
             return Err(WifiError::ConnectFailed(
@@ -155,8 +251,51 @@ pub async fn connect(ssid: &str, passphrase: Option<String>) -> Result<(), WifiE
         }
     };
 
-    nm.connect(ssid, None, creds).await?;
-    Ok(())
+    for attempt in 1..=CONNECT_ATTEMPTS {
+        let creds = match &psk {
+            None => NmWifiSecurity::Open,
+            Some(psk) => NmWifiSecurity::WpaPsk { psk: psk.clone() },
+        };
+        let error = match nm.connect(ssid, None, creds).await {
+            Ok(()) => return Ok(()),
+            Err(error) => error,
+        };
+
+        if attempt == CONNECT_ATTEMPTS || !worth_another_attempt(&error) {
+            return Err(match error {
+                // The generic conversion has no SSID to put in the message.
+                NmConnectionError::NotFound => WifiError::NetworkNotFound(ssid.to_string()),
+                other => other.into(),
+            });
+        }
+        tracing::warn!(attempt, %error, "connect failed; trying again");
+
+        // The access point the connection could not find may be back in
+        // the next scan: this adapter drops a different set of them on
+        // every pass.
+        let before = last_scan_finished().await;
+        let _ = nm.scan_networks(None).await;
+        wait_for_scan(before).await;
+    }
+    unreachable!("the loop returns on its last attempt")
+}
+
+/// Whether a failed connection is worth another attempt.
+///
+/// NetworkManager says which part gave way, so a passphrase it rejected
+/// is reported at once and only the failures another attempt could fix
+/// are repeated: an access point that was not in the list this time, and
+/// the association timeouts this adapter produces for the first minutes
+/// after a boot.
+fn worth_another_attempt(error: &NmConnectionError) -> bool {
+    matches!(
+        error,
+        NmConnectionError::NotFound
+            | NmConnectionError::Timeout
+            | NmConnectionError::SupplicantTimeout
+            | NmConnectionError::SupplicantConfigFailed
+            | NmConnectionError::Stuck(_)
+    )
 }
 
 /// Hidden-SSID connect is not implemented on the NM backend — nmrs
