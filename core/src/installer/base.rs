@@ -7,6 +7,14 @@ use crate::config::types::GlobalConfig;
 use crate::system::alpm_pacman::{AlpmContext, TargetMounts};
 use crate::system::sysinfo;
 
+/// The package that builds the initramfs for this choice.
+pub const fn initramfs_package(init_system: crate::config::types::InitSystem) -> &'static str {
+    match init_system {
+        crate::config::types::InitSystem::Dracut => "dracut",
+        crate::config::types::InitSystem::Mkinitcpio => "mkinitcpio",
+    }
+}
+
 /// Install base system packages into target.
 /// Returns `TargetMounts` which must be kept alive for the duration of the
 /// installation — dropping it unmounts API filesystems (proc, sys, dev, etc.).
@@ -24,11 +32,7 @@ pub fn install_base(
     packages.extend(config.effective_kernels());
 
     // Add initramfs package
-    let initramfs_pkg = match config.init_system {
-        crate::config::types::InitSystem::Dracut => "dracut",
-        crate::config::types::InitSystem::Mkinitcpio => "mkinitcpio",
-    };
-    packages.push(initramfs_pkg);
+    packages.push(initramfs_package(config.init_system));
 
     // Microcode
     if let Some(ucode) = sysinfo::cpu_vendor().microcode_package() {

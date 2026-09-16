@@ -37,8 +37,14 @@ Useful targeted checks:
 cargo test -p archinstall-zfs-core prepare --locked
 cargo test -p archinstall-zfs-slint --locked
 cargo check -p archinstall-zfs-slint --no-default-features --features desktop-mock --locked
+just check-packages
 just test-live-update
 ```
+
+`just check-packages` holds every package name in the distribution, profile,
+driver and installer tables against the live Arch repositories. Run it when a
+package list changes and before a release: a package renamed or dropped
+upstream otherwise fails the install on a user's machine.
 
 Documentation-only edits need accurate commands and working links. UI changes
 need runtime checks in addition to Rust checks. Boot/input/cleanup changes need

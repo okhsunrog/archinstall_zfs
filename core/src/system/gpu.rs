@@ -96,6 +96,16 @@ impl std::fmt::Display for GfxDriver {
 }
 
 impl GfxDriver {
+    /// Every driver the installer offers, in the order the pickers show them.
+    pub const ALL: &'static [GfxDriver] = &[
+        Self::AllOpenSource,
+        Self::Amd,
+        Self::Intel,
+        Self::NvidiaOpen,
+        Self::NvidiaNouveau,
+        Self::Vm,
+    ];
+
     /// Return the packages that should be installed for this driver.
     pub fn packages(&self) -> &'static [&'static str] {
         match self {

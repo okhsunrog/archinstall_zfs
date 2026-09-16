@@ -15,10 +15,42 @@ use std::sync::Arc;
 use color_eyre::eyre::{Result, bail, eyre};
 use tokio_util::sync::CancellationToken;
 
-use crate::config::types::{GlobalConfig, InitSystem, SwapMode, ZfsEncryptionMode};
+use crate::config::types::{AudioServer, GlobalConfig, InitSystem, SwapMode, ZfsEncryptionMode};
 use crate::system::alpm_pacman::{AlpmContext, TargetMounts};
 use crate::system::async_download::DownloadProgress;
 use crate::system::cmd::CommandRunner;
+
+/// Packages installed by name rather than from the distribution, profile or
+/// driver tables. They are named here, and not at the call sites, so that
+/// `tests/repo_packages.rs` can hold every one of them against the
+/// repositories: a package renamed or dropped upstream otherwise surfaces as
+/// a failed installation on a user's machine.
+pub mod fixed_packages {
+    /// Wi-Fi on a system that keeps the medium's iwd configuration.
+    pub const IWD: &[&str] = &["iwd"];
+    /// The network service every other installation gets.
+    pub const NETWORK_MANAGER: &[&str] = &["networkmanager"];
+    pub const PIPEWIRE: &[&str] = &["pipewire", "pipewire-alsa", "pipewire-pulse", "wireplumber"];
+    pub const PULSEAUDIO: &[&str] = &["pulseaudio", "pulseaudio-alsa"];
+    pub const BLUETOOTH: &[&str] = &["bluez", "bluez-utils"];
+    /// Seat access for a Wayland compositor, either way of granting it.
+    pub const SEATD: &[&str] = &["seatd"];
+    pub const POLKIT: &[&str] = &["polkit"];
+    /// Shared by every kernel's ZFS module package.
+    pub const ZFS_UTILS: &[&str] = &["zfs-utils"];
+
+    /// Every set above, for the repository check.
+    pub const ALL: &[&[&str]] = &[
+        IWD,
+        NETWORK_MANAGER,
+        PIPEWIRE,
+        PULSEAUDIO,
+        BLUETOOTH,
+        SEATD,
+        POLKIT,
+        ZFS_UTILS,
+    ];
+}
 
 /// What an installation needs to know before it starts.
 pub struct InstallRequest {
@@ -275,13 +307,13 @@ impl Installer {
         if self.config.network_copy_iso {
             let wifi = network::copy_iso_network(&*self.runner, &self.target)?;
             if wifi {
-                self.install_target_packages(&["iwd"])?;
+                self.install_target_packages(fixed_packages::IWD)?;
                 services::enable_service(&*self.runner, &self.target, "iwd")?;
             }
             tracing::info!(wifi, "the medium's network configuration is in place");
             return Ok(());
         }
-        self.install_target_packages(&["networkmanager"])?;
+        self.install_target_packages(fixed_packages::NETWORK_MANAGER)?;
         services::enable_service(&*self.runner, &self.target, "NetworkManager")?;
         tracing::info!("NetworkManager installed and enabled");
         Ok(())
@@ -358,7 +390,7 @@ impl Installer {
         self.alpm.sync_databases(true)?;
 
         // zfs-utils is shared by every kernel's module package.
-        self.install_target_packages(&["zfs-utils"])?;
+        self.install_target_packages(fixed_packages::ZFS_UTILS)?;
 
         let kernels: Vec<String> = self
             .config
@@ -532,20 +564,16 @@ impl Installer {
 
         // Audio server
         if let Some(audio) = self.config.audio {
-            let pkgs: Vec<&str> = match audio {
-                crate::config::types::AudioServer::Pipewire => {
-                    vec!["pipewire", "pipewire-alsa", "pipewire-pulse", "wireplumber"]
-                }
-                crate::config::types::AudioServer::Pulseaudio => {
-                    vec!["pulseaudio", "pulseaudio-alsa"]
-                }
+            let pkgs = match audio {
+                AudioServer::Pipewire => fixed_packages::PIPEWIRE,
+                AudioServer::Pulseaudio => fixed_packages::PULSEAUDIO,
             };
-            self.install_target_packages(&pkgs)?;
+            self.install_target_packages(pkgs)?;
 
             // PipeWire user services must be enabled globally for auto-start.
             // system services (like pipewire-pulse.socket) are not enough —
             // each user session needs the user units enabled.
-            if matches!(audio, crate::config::types::AudioServer::Pipewire) {
+            if matches!(audio, AudioServer::Pipewire) {
                 for svc in &["pipewire", "pipewire-pulse", "wireplumber"] {
                     services::enable_user_service(&*self.runner, &self.target, svc)?;
                 }
@@ -554,7 +582,7 @@ impl Installer {
 
         // Bluetooth
         if self.config.bluetooth {
-            self.install_target_packages(&["bluez", "bluez-utils"])?;
+            self.install_target_packages(fixed_packages::BLUETOOTH)?;
             services::enable_service(&*self.runner, &self.target, "bluetooth")?;
         }
 
@@ -578,7 +606,7 @@ impl Installer {
 
         match seat {
             Some(SeatAccess::Seatd) => {
-                self.install_target_packages(&["seatd"])?;
+                self.install_target_packages(fixed_packages::SEATD)?;
                 services::enable_service(&*self.runner, &self.target, "seatd")?;
                 // Add all installer-created users to the `seat` group
                 if let Some(user_list) = &self.config.users {
@@ -590,7 +618,7 @@ impl Installer {
             Some(SeatAccess::Polkit) => {
                 // polkit is typically already a compositor dependency; ensure it
                 // is present and let dbus activate it on demand.
-                self.install_target_packages(&["polkit"])?;
+                self.install_target_packages(fixed_packages::POLKIT)?;
                 tracing::info!("configured polkit for seat access");
             }
             None => {

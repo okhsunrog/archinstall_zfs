@@ -44,6 +44,15 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 just check-features
 ```
 
+`just check-packages` is the one check the workspace tests cannot do for
+themselves: it asks the live Arch repositories whether every package name in
+the distribution, profile, driver and installer tables still exists and is
+still installable from core, extra, multilib or archzfs. Package names age —
+`swww` became `awww`, `nitrogen` was dropped — and a name that no longer
+resolves stops the installation on the phase that installs it. Run it when a
+package list changes and before cutting a release; it needs an Arch host with
+those repositories configured.
+
 `just cargo-build` produces production `target/release/azfs`, `azfs-tui`, and
 `xtask`. `just check` also runs the dependency audit. On a non-Arch host, use the
 documented container build for binaries intended for an Arch ISO; a host-linked
