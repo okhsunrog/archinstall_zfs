@@ -484,13 +484,13 @@ pub fn pick_display_manager(
 /// Returns `None` if the user cancels.
 pub fn pick_seat_access(terminal: &mut ratatui::DefaultTerminal) -> Result<Option<SeatAccess>> {
     let options = [
-        "seatd  — dedicated seat daemon + add users to seat group",
-        "polkit — rely on polkit (often already a compositor dependency)",
+        "polkit — recommended: systemd-logind already grants the seat",
+        "seatd  — dedicated seat daemon, for systems without logind",
     ];
     let result = run_select(terminal, "Seat access (Wayland)", &options, 0)?;
     match result.selected {
-        Some(0) => Ok(Some(SeatAccess::Seatd)),
-        Some(1) => Ok(Some(SeatAccess::Polkit)),
+        Some(0) => Ok(Some(SeatAccess::Polkit)),
+        Some(1) => Ok(Some(SeatAccess::Seatd)),
         _ => Ok(None),
     }
 }

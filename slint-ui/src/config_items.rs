@@ -561,7 +561,9 @@ fn build_desktop_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                 ChoiceSetting::SeatAccess,
                 "Seat access",
                 sel.seat_access,
-                "How the compositor accesses input and display devices.",
+                "How the compositor accesses input and display devices. \
+                 polkit is recommended: systemd-logind already grants the \
+                 seat, and seatd is for systems without it.",
             ));
         }
     }

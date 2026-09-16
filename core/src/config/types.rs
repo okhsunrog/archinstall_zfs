@@ -283,10 +283,14 @@ impl ProfileSelection {
             profile: profile_name.to_string(),
             optional_packages: BTreeSet::new(),
             display_manager_override: None,
-            // Pre-fill seatd as a sensible default for Wayland compositors
-            // that need explicit seat access; user can override.
+            // A compositor reaches its seat through libseat, which asks
+            // logind first and only falls back to seatd where there is no
+            // logind to ask. Every system this installs has one, so polkit
+            // — which the session needs anyway, for mounting a disk or
+            // suspending the machine — is the default, and seatd is there
+            // for whoever knows they want it.
             seat_access: if p.needs_seat_access() {
-                Some(SeatAccess::Seatd)
+                Some(SeatAccess::Polkit)
             } else {
                 None
             },
