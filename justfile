@@ -91,7 +91,7 @@ test-live-update:
 
 # Internal: render profile templates using the prebuilt xtask binary.
 # Requires cargo-build or cargo-build-container to have run first.
-_render-profile MODE="precompiled" KERNEL="linux-lts" FAST="" WIFI="iwd" CMDLINE="":
+_render-profile MODE="precompiled" KERNEL="linux-lts" FAST="" WIFI="iwd" CMDLINE="" ACCESS="":
     ./target/release/xtask render-profile \
         --profile-dir {{PROFILE_DIR}} \
         --out-dir {{PROFILE_OUT}} \
@@ -99,6 +99,7 @@ _render-profile MODE="precompiled" KERNEL="linux-lts" FAST="" WIFI="iwd" CMDLINE
         --zfs {{MODE}} \
         --wifi {{WIFI}} \
         --cmdline-extra "{{CMDLINE}}" \
+        {{ACCESS}} \
         {{FAST}}
 
 # Internal: copy installer binaries into rendered profile
@@ -179,7 +180,7 @@ iso-wifi-test MODE="precompiled" KERNEL="linux-lts" WIFI="nm" CMDLINE="rtl8723be
         cargo build --release --locked --bin azfs; \
         cargo build --release --locked -p archinstall-zfs-core --example wifi_probe; \
     fi
-    just _render-profile {{MODE}} {{KERNEL}} "" {{WIFI}} "{{CMDLINE}}"
+    just _render-profile {{MODE}} {{KERNEL}} "" {{WIFI}} "{{CMDLINE}}" "--test-access"
     just _prepare-binary
     install -m 0755 target/release/examples/wifi_probe {{PROFILE_OUT}}/airootfs/usr/local/bin/azfs-wifi-probe
     @echo "Building ISO..."

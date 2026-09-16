@@ -147,6 +147,10 @@ enum Commands {
         /// Extra kernel parameters for every boot entry
         #[arg(long, default_value = "")]
         cmdline_extra: String,
+
+        /// Allow root in over SSH with no password, as the fast image does
+        #[arg(long)]
+        test_access: bool,
     },
 }
 
@@ -384,6 +388,7 @@ fn main() -> ExitCode {
             fast,
             wifi,
             cmdline_extra,
+            test_access,
         } => iso::render_profile(
             &profile_dir,
             &out_dir,
@@ -394,6 +399,7 @@ fn main() -> ExitCode {
                 fast_build: fast,
                 wifi: &wifi,
                 cmdline_extra: &cmdline_extra,
+                test_access,
             },
         ),
     };

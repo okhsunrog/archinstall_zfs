@@ -18,6 +18,9 @@ pub struct ProfileOptions<'a> {
     pub wifi: &'a str,
     /// Kernel parameters appended to every boot entry.
     pub cmdline_extra: &'a str,
+    /// Reachable over SSH as root with no password, the way the fast
+    /// image already is. For test images on a private network only.
+    pub test_access: bool,
 }
 
 pub fn render_profile(
@@ -32,6 +35,7 @@ pub fn render_profile(
         fast_build,
         wifi,
         cmdline_extra,
+        test_access,
     } = *options;
     let use_nm = wifi == "nm";
     // Goes at the end of every boot entry's kernel line, with the space
@@ -82,6 +86,7 @@ pub fn render_profile(
         fast_build => fast_build,
         use_nm => use_nm,
         cmdline_extra => cmdline_extra,
+        test_access => test_access,
     };
 
     // Walk source directory and render/copy
