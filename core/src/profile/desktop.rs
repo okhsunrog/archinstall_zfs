@@ -254,7 +254,11 @@ pub fn desktop_profiles() -> Vec<Profile> {
                 ("wl-clipboard", "Clipboard helper (wl-copy / wl-paste)"),
             ])),
         )
-        .with_user_services(&["hyprpolkitagent"]),
+        // Both ship a user unit wanted by graphical-session.target, so the
+        // session brings them up without the user writing an exec-once. A
+        // bar that is installed and never starts is a bar the user does not
+        // have.
+        .with_user_services(&["hyprpolkitagent", "waybar"]),
         desktop(
             "sway",
             "Sway",
