@@ -1,0 +1,54 @@
+{
+    "installation_mode": "full_disk",
+    "disk": "/dev/disk/by-id/virtio-archzfs-test-disk",
+    "pool_name": "testpool",
+    "dataset_prefix": "arch0",
+    "init_system": "dracut",
+    "zfs_module_mode": "precompiled",
+    "zfs_encryption_mode": "none",
+    "compression": "zstd",
+    "swap_mode": "zram",
+    "hostname": "archzfs",
+    "locale": "en_US.UTF-8 UTF-8",
+    "keyboard_layout": "us",
+    "timezone": "Europe/Rome",
+    "ntp": true,
+    "root_password": "test",
+    "users": [
+        {
+            "username": "nika",
+            "password": "test",
+            "sudo": true,
+            "autologin": false
+        }
+    ],
+    "kernels": [
+        "linux-lts"
+    ],
+    "profile_selection": {
+        "profile": "hyprland",
+        "optional_packages": [
+            "hyprpaper",
+            "hypridle",
+            "hyprlock",
+            "awww",
+            "mako",
+            "wl-clipboard",
+            "network-manager-applet",
+            "blueman",
+            "pavucontrol"
+        ]
+    },
+    "audio": "pipewire",
+    "bluetooth": true,
+    "additional_packages": [
+        "openssh"
+    ],
+    "aur_packages": [],
+    "network_copy_iso": false,
+    "parallel_downloads": 5,
+    "zrepl_enabled": false,
+    "extra_services": [
+        "sshd"
+    ]
+}
