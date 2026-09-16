@@ -132,6 +132,11 @@ const SCAN_COMPLETE_TIMEOUT: Duration = Duration::from_secs(30);
 const EMPTY_SCAN_ATTEMPTS: usize = 2;
 /// How long to keep trying to reach iwd again after restarting it.
 const RESTART_REJOIN_TIMEOUT: Duration = Duration::from_secs(10);
+/// How many times a connection that fails for a reason another attempt
+/// could fix is tried.
+const CONNECT_ATTEMPTS: usize = 3;
+/// How long to leave the adapter alone between connection attempts.
+const CONNECT_RETRY_DELAY: Duration = Duration::from_secs(2);
 
 /// Trigger a scan on the first station and return all discovered
 /// networks, sorted roughly strongest-first by iwd itself. Networks
@@ -333,8 +338,76 @@ pub async fn connect(ssid: &str, passphrase: Option<String>) -> Result<(), WifiE
         .await
         .map_err(WifiError::Dbus)?;
 
-    network.connect().await?;
-    Ok(())
+    connect_with_retries(&station, &network, ssid).await
+}
+
+/// Ask iwd to connect, and ask again when the answer is the kind of
+/// failure that another attempt can fix.
+///
+/// An adapter whose firmware has just come up can time out on the
+/// association itself, seconds into a connection to an access point a
+/// metre away:
+///
+/// ```text
+/// event: connect-info, ssid: …, signal: -35, load: 21/255
+/// event: state, old: autoconnect_full, new: connecting
+/// event: connect-timeout, reason: 2
+/// event: connect-failed, status: 1
+/// ```
+///
+/// The test laptop's RTL8723BE needed three goes at it after a boot,
+/// with nothing to tell the user but "connect failed" in between. A
+/// passphrase iwd rejects, and a request iwd cannot carry out at all,
+/// are answered on the first attempt as before.
+async fn connect_with_retries(
+    station: &Station,
+    network: &Network,
+    ssid: &str,
+) -> Result<(), WifiError> {
+    let mut network = network.clone();
+    for attempt in 1..=CONNECT_ATTEMPTS {
+        let error = match network.connect().await {
+            Ok(()) => return Ok(()),
+            Err(error) => error,
+        };
+
+        if attempt == CONNECT_ATTEMPTS || !worth_another_attempt(&error) {
+            return Err(error.into());
+        }
+        tracing::warn!(attempt, ?error, "connect failed; trying again");
+        tokio::time::sleep(CONNECT_RETRY_DELAY).await;
+
+        // iwd falls back to autoconnect after a failed connection and may
+        // have arrived where the user wanted while we waited.
+        if network.connected().await.unwrap_or(false) {
+            tracing::info!("iwd connected on its own");
+            return Ok(());
+        }
+
+        // The failed attempt can take the network object with it: iwd
+        // drops networks whose last BSS aged out of the scan results.
+        match find_network_by_ssid(station, ssid).await {
+            Ok(Some(found)) => network = found,
+            Ok(None) => return Err(WifiError::NetworkNotFound(ssid.to_string())),
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("the loop returns on its last attempt")
+}
+
+/// Whether a failed connection is worth another attempt: a timeout or an
+/// aborted attempt is the adapter having a bad moment, while a missing
+/// agent or an unsupported network will fail the same way every time.
+fn worth_another_attempt(error: &IWDError<ConnectError>) -> bool {
+    matches!(
+        error,
+        IWDError::OperationError(
+            ConnectError::Failed
+                | ConnectError::Aborted
+                | ConnectError::Busy
+                | ConnectError::InProgress
+        )
+    )
 }
 
 /// Connect to a hidden network — one that does not broadcast its SSID
