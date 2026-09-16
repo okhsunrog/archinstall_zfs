@@ -126,10 +126,14 @@ pub use backend_available as iwd_available;
 const SCAN_START_TIMEOUT: Duration = Duration::from_secs(2);
 /// How long a single scan may take before it is given up on.
 const SCAN_COMPLETE_TIMEOUT: Duration = Duration::from_secs(30);
-/// How many scans have to come back with nothing before the daemon
-/// itself is suspected. The second one is what tells a one-off apart
-/// from the stuck state, which answers every scan with nothing.
-const EMPTY_SCAN_ATTEMPTS: usize = 2;
+/// How many scans every listing is built from. One scan is one pass over
+/// the channels, and a pass that misses a subset misses every network on
+/// it — including, on the test laptop, the access point the user was
+/// looking for. Two passes are also what tells a daemon that has nothing
+/// to say once from one that is stuck saying it.
+const SCANS_PER_LISTING: usize = 2;
+/// How long to wait for iwd to put a station on the bus.
+const STATION_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long to keep trying to reach iwd again after restarting it.
 const RESTART_REJOIN_TIMEOUT: Duration = Duration::from_secs(10);
 /// How many times a connection that fails for a reason another attempt
@@ -161,14 +165,19 @@ const CONNECT_RETRY_DELAY: Duration = Duration::from_secs(2);
 /// connection to lose can be restarted under the user.
 pub async fn scan_networks() -> Result<Vec<WifiNetwork>, WifiError> {
     let session = Session::new().await.map_err(|_| WifiError::NotAvailable)?;
-    let mut station = first_station(&session).await?;
+    let station = station_once_iwd_has_one(&session).await?;
 
-    for attempt in 1..=EMPTY_SCAN_ATTEMPTS {
-        let networks = scan_once(&station).await?;
-        if !networks.is_empty() {
-            return Ok(networks);
-        }
-        tracing::debug!(attempt, "the scan found no networks");
+    // Whatever iwd's own periodic scanning already turned up costs one
+    // call to collect and is as good as anything this function asks for.
+    let mut found = Listing::default();
+    found.add(read_networks(&station).await.unwrap_or_default());
+
+    for attempt in 1..=SCANS_PER_LISTING {
+        found.add(scan_once(&station).await?);
+        tracing::debug!(attempt, networks = found.len(), "scanned");
+    }
+    if !found.is_empty() {
+        return Ok(found.into_networks());
     }
 
     // Leave a working connection alone: restarting iwd would drop it, and
@@ -179,7 +188,7 @@ pub async fn scan_networks() -> Result<Vec<WifiNetwork>, WifiError> {
         return Ok(Vec::new());
     }
 
-    tracing::warn!("no networks after {EMPTY_SCAN_ATTEMPTS} scans; restarting iwd");
+    tracing::warn!("no networks after {SCANS_PER_LISTING} scans; restarting iwd");
     let session = match restart_iwd().await {
         Ok(session) => session,
         Err(error) => {
@@ -187,8 +196,53 @@ pub async fn scan_networks() -> Result<Vec<WifiNetwork>, WifiError> {
             return Ok(Vec::new());
         }
     };
-    station = first_station(&session).await?;
-    scan_once(&station).await
+    let station = station_once_iwd_has_one(&session).await?;
+    for _ in 1..=SCANS_PER_LISTING {
+        found.add(scan_once(&station).await?);
+    }
+    Ok(found.into_networks())
+}
+
+/// The networks several scans found between them, strongest first.
+///
+/// One scan is not a complete picture on an adapter that drops a subset
+/// of the channels, and the networks it misses are not the same ones
+/// each time, so a listing is what the scans found together rather than
+/// what the last one happened to return.
+#[derive(Default)]
+struct Listing(std::collections::HashMap<String, WifiNetwork>);
+
+impl Listing {
+    fn add(&mut self, networks: Vec<WifiNetwork>) {
+        for network in networks {
+            match self.0.get(&network.ssid) {
+                // The same network seen twice is kept at its best, which
+                // is also the reading the user is nearest to.
+                Some(seen) if seen.signal_percent >= network.signal_percent => {}
+                _ => {
+                    self.0.insert(network.ssid.clone(), network);
+                }
+            }
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn into_networks(self) -> Vec<WifiNetwork> {
+        let mut networks: Vec<WifiNetwork> = self.0.into_values().collect();
+        networks.sort_by(|a, b| {
+            b.signal_percent
+                .cmp(&a.signal_percent)
+                .then_with(|| a.ssid.cmp(&b.ssid))
+        });
+        networks
+    }
 }
 
 /// One scan: ask for it, wait for it to finish, read what it found.
@@ -215,6 +269,12 @@ async fn scan_once(station: &Station) -> Result<Vec<WifiNetwork>, WifiError> {
         }
     }
 
+    read_networks(station).await
+}
+
+/// What iwd is holding as the networks it knows about, without asking it
+/// to look again.
+async fn read_networks(station: &Station) -> Result<Vec<WifiNetwork>, WifiError> {
     let discovered = station
         .discovered_networks()
         .await
@@ -302,7 +362,7 @@ async fn restart_iwd() -> Result<Session, WifiError> {
 /// `crate::system::net::check_internet`.
 pub async fn connect(ssid: &str, passphrase: Option<String>) -> Result<(), WifiError> {
     let session = Session::new().await.map_err(|_| WifiError::NotAvailable)?;
-    let station = first_station(&session).await?;
+    let station = station_once_iwd_has_one(&session).await?;
 
     let network = find_network_by_ssid(&station, ssid)
         .await?
@@ -414,7 +474,7 @@ fn worth_another_attempt(error: &IWDError<ConnectError>) -> bool {
 /// and therefore doesn't appear in scan results.
 pub async fn connect_hidden(ssid: &str, passphrase: Option<String>) -> Result<(), WifiError> {
     let session = Session::new().await.map_err(|_| WifiError::NotAvailable)?;
-    let station = first_station(&session).await?;
+    let station = station_once_iwd_has_one(&session).await?;
 
     let agent = PasswordAgent::new(passphrase);
     let _agent_guard = session
@@ -555,6 +615,24 @@ async fn first_station(session: &Session) -> Result<Station, WifiError> {
         return Err(WifiError::NoStation);
     }
     Ok(stations.swap_remove(0))
+}
+
+/// The first station, giving iwd time to put one on the bus.
+///
+/// A daemon that has only just started — at boot, or after this module
+/// restarted it — owns its bus name before it has enumerated the
+/// adapter, and answers in between with no stations at all. Asking once
+/// in that moment told the user their adapter may be powered off while
+/// iwd was seconds away from offering it.
+async fn station_once_iwd_has_one(session: &Session) -> Result<Station, WifiError> {
+    let deadline = tokio::time::Instant::now() + STATION_TIMEOUT;
+    loop {
+        match first_station(session).await {
+            Ok(station) => return Ok(station),
+            Err(error) if tokio::time::Instant::now() >= deadline => return Err(error),
+            Err(_) => tokio::time::sleep(Duration::from_millis(200)).await,
+        }
+    }
 }
 
 /// Walk the discovered networks of `station` looking for one whose SSID
