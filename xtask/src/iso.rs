@@ -3,16 +3,43 @@ use std::path::Path;
 
 use minijinja::Environment;
 
+/// What a rendered profile is made of, beyond where it comes from and
+/// where it goes.
+pub struct ProfileOptions<'a> {
+    /// Kernel package the image boots.
+    pub kernel: &'a str,
+    /// Where the ZFS module comes from: "precompiled" or "dkms".
+    pub zfs_mode: &'a str,
+    /// Whether to include kernel headers: "auto", "true" or "false".
+    pub headers: &'a str,
+    /// The minimal image for QEMU and CI.
+    pub fast_build: bool,
+    /// The wireless daemon the live system runs: "iwd" or "nm".
+    pub wifi: &'a str,
+    /// Kernel parameters appended to every boot entry.
+    pub cmdline_extra: &'a str,
+}
+
 pub fn render_profile(
     profile_dir: &Path,
     out_dir: &Path,
-    kernel: &str,
-    zfs_mode: &str,
-    headers: &str,
-    fast_build: bool,
-    wifi: &str,
+    options: &ProfileOptions<'_>,
 ) -> Result<(), String> {
+    let ProfileOptions {
+        kernel,
+        zfs_mode,
+        headers,
+        fast_build,
+        wifi,
+        cmdline_extra,
+    } = *options;
     let use_nm = wifi == "nm";
+    // Goes at the end of every boot entry's kernel line, with the space
+    // that separates it from what archiso puts there.
+    let cmdline_extra = match cmdline_extra.trim() {
+        "" => String::new(),
+        extra => format!(" {extra}"),
+    };
     if !profile_dir.exists() {
         return Err(format!(
             "Profile directory not found: {}",
@@ -54,6 +81,7 @@ pub fn render_profile(
         headers => headers_pkg,
         fast_build => fast_build,
         use_nm => use_nm,
+        cmdline_extra => cmdline_extra,
     };
 
     // Walk source directory and render/copy

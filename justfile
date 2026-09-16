@@ -91,13 +91,14 @@ test-live-update:
 
 # Internal: render profile templates using the prebuilt xtask binary.
 # Requires cargo-build or cargo-build-container to have run first.
-_render-profile MODE="precompiled" KERNEL="linux-lts" FAST="" WIFI="iwd":
+_render-profile MODE="precompiled" KERNEL="linux-lts" FAST="" WIFI="iwd" CMDLINE="":
     ./target/release/xtask render-profile \
         --profile-dir {{PROFILE_DIR}} \
         --out-dir {{PROFILE_OUT}} \
         --kernel {{KERNEL}} \
         --zfs {{MODE}} \
         --wifi {{WIFI}} \
+        --cmdline-extra "{{CMDLINE}}" \
         {{FAST}}
 
 # Internal: copy installer binaries into rendered profile
@@ -157,6 +158,42 @@ iso-full-nm MODE="precompiled" KERNEL="linux-lts":
     sudo mkarchiso -v -w "gen_iso/workdir" -o {{ISO_OUT}} {{PROFILE_OUT}}
     sudo chown -R "$(id -u):$(id -g)" {{ISO_OUT}} gen_iso/workdir
     @echo "NetworkManager ISO built in {{ISO_OUT}}"
+
+# A full ISO that boots with the wireless driver's power saving turned off,
+# for testing whether that is what makes the adapter drop scans and time out
+# on connections. WIFI picks the daemon, CMDLINE the parameters to test.
+# Usage: just iso-wifi-test [--wifi nm|iwd] [--cmdline "..."]
+[arg("MODE", long="mode")]
+[arg("KERNEL", long="kernel")]
+[arg("WIFI", long="wifi")]
+[arg("CMDLINE", long="cmdline")]
+iso-wifi-test MODE="precompiled" KERNEL="linux-lts" WIFI="nm" CMDLINE="rtl8723be.fwlps=0 rtl8723be.ips=0":
+    @echo "Building Wi-Fi test ISO (wifi={{WIFI}}, cmdline={{CMDLINE}})"
+    cargo build --release --locked --bin azfs-tui --bin xtask
+    @if [ "{{WIFI}}" = "nm" ]; then \
+        cargo build --release --locked --bin azfs -p archinstall-zfs-slint \
+            --no-default-features --features linuxkms-nm; \
+        cargo build --release --locked -p archinstall-zfs-core \
+            --no-default-features --features wifi-nm --example wifi_probe; \
+    else \
+        cargo build --release --locked --bin azfs; \
+        cargo build --release --locked -p archinstall-zfs-core --example wifi_probe; \
+    fi
+    just _render-profile {{MODE}} {{KERNEL}} "" {{WIFI}} "{{CMDLINE}}"
+    just _prepare-binary
+    install -m 0755 target/release/examples/wifi_probe {{PROFILE_OUT}}/airootfs/usr/local/bin/azfs-wifi-probe
+    @echo "Building ISO..."
+    sudo rm -rf gen_iso/workdir
+    sudo mkarchiso -v -w "gen_iso/workdir" -o {{ISO_OUT}} {{PROFILE_OUT}}
+    sudo chown -R "$(id -u):$(id -g)" {{ISO_OUT}} gen_iso/workdir
+    @echo "Wi-Fi test ISO built in {{ISO_OUT}}"
+
+# Run the Wi-Fi comparison against a booted test ISO over SSH: scans and cold
+# connections with the driver's power saving as booted, then toggled, then
+# back. Needs sshpass and the probe the test ISO carries.
+# Usage: just wifi-matrix 10.77.77.60 JustANet 'passphrase'
+wifi-matrix HOST SSID PASSPHRASE="" *ARGS:
+    uv run gen_iso/wifi_matrix.py --host {{HOST}} --ssid {{SSID}} --passphrase '{{PASSPHRASE}}' {{ARGS}}
 
 # Build the full hardware profile into a dedicated mkarchiso workdir.
 # The workdir intentionally remains root-owned: changing its ownership would

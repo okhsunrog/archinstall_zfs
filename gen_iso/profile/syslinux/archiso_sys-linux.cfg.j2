@@ -6,7 +6,7 @@ ENDTEXT
 MENU LABEL Arch Linux install medium (%ARCH%, BIOS)
 LINUX /%INSTALL_DIR%/boot/%ARCH%/vmlinuz-{{ kernel }}
 INITRD /%INSTALL_DIR%/boot/%ARCH%/initramfs-{{ kernel }}.img
-APPEND archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID%{% if fast_build %} console=tty0 console=ttyS0,115200{% endif %}
+APPEND archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID%{% if fast_build %} console=tty0 console=ttyS0,115200{% endif %}{{ cmdline_extra }}
 
 LABEL arch-demo
 TEXT HELP
@@ -15,7 +15,7 @@ ENDTEXT
 MENU LABEL Arch Linux installer - safe LinuxKMS ^demo (%ARCH%, BIOS)
 LINUX /%INSTALL_DIR%/boot/%ARCH%/vmlinuz-{{ kernel }}
 INITRD /%INSTALL_DIR%/boot/%ARCH%/initramfs-{{ kernel }}.img
-APPEND archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID% archinstall_zfs.demo=1{% if fast_build %} console=tty0 console=ttyS0,115200{% endif %}
+APPEND archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID% archinstall_zfs.demo=1{% if fast_build %} console=tty0 console=ttyS0,115200{% endif %}{{ cmdline_extra }}
 
 # Accessibility boot option
 LABEL archspeech
@@ -26,4 +26,4 @@ ENDTEXT
 MENU LABEL Arch Linux install medium (%ARCH%, BIOS) with ^speech
 LINUX /%INSTALL_DIR%/boot/%ARCH%/vmlinuz-{{ kernel }}
 INITRD /%INSTALL_DIR%/boot/%ARCH%/initramfs-{{ kernel }}.img
-APPEND archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID% accessibility=on{% if fast_build %} console=tty0 console=ttyS0,115200{% endif %}
+APPEND archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID% accessibility=on{% if fast_build %} console=tty0 console=ttyS0,115200{% endif %}{{ cmdline_extra }}

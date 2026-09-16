@@ -143,6 +143,10 @@ enum Commands {
         /// Wireless daemon the live system runs (iwd or nm)
         #[arg(long, default_value = "iwd")]
         wifi: String,
+
+        /// Extra kernel parameters for every boot entry
+        #[arg(long, default_value = "")]
+        cmdline_extra: String,
     },
 }
 
@@ -379,7 +383,19 @@ fn main() -> ExitCode {
             headers,
             fast,
             wifi,
-        } => iso::render_profile(&profile_dir, &out_dir, &kernel, &zfs, &headers, fast, &wifi),
+            cmdline_extra,
+        } => iso::render_profile(
+            &profile_dir,
+            &out_dir,
+            &iso::ProfileOptions {
+                kernel: &kernel,
+                zfs_mode: &zfs,
+                headers: &headers,
+                fast_build: fast,
+                wifi: &wifi,
+                cmdline_extra: &cmdline_extra,
+            },
+        ),
     };
     match result {
         Ok(()) => {
