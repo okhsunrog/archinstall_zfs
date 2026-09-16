@@ -28,7 +28,7 @@
 //! installer picks that file up and copies it to the target so the
 //! installed system reconnects without re-prompting for credentials.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use iwdrs::{
@@ -134,6 +134,10 @@ const SCAN_COMPLETE_TIMEOUT: Duration = Duration::from_secs(30);
 const SCANS_PER_LISTING: usize = 2;
 /// How long to wait for iwd to put a station on the bus.
 const STATION_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long a network stays in the listing after the last scan that saw
+/// it. Long enough to survive the scans that drop it, short enough that
+/// a network really gone is not offered for the rest of the session.
+const NETWORK_MEMORY: Duration = Duration::from_secs(120);
 /// How long to keep trying to reach iwd again after restarting it.
 const RESTART_REJOIN_TIMEOUT: Duration = Duration::from_secs(10);
 /// How many times a connection that fails for a reason another attempt
@@ -177,7 +181,7 @@ pub async fn scan_networks() -> Result<Vec<WifiNetwork>, WifiError> {
         tracing::debug!(attempt, networks = found.len(), "scanned");
     }
     if !found.is_empty() {
-        return Ok(found.into_networks());
+        return Ok(remember(found));
     }
 
     // Leave a working connection alone: restarting iwd would drop it, and
@@ -197,10 +201,31 @@ pub async fn scan_networks() -> Result<Vec<WifiNetwork>, WifiError> {
         }
     };
     let station = station_once_iwd_has_one(&session).await?;
-    for _ in 1..=SCANS_PER_LISTING {
+    for attempt in 1..=SCANS_PER_LISTING {
         found.add(scan_once(&station).await?);
+        tracing::debug!(attempt, networks = found.len(), "scanned after the restart");
     }
-    Ok(found.into_networks())
+    Ok(remember(found))
+}
+
+/// Add what earlier scans saw to this listing, and keep the result for
+/// the scans that come after it.
+fn remember(mut found: Listing) -> Vec<WifiNetwork> {
+    let mut remembered = REMEMBERED.lock().unwrap_or_else(|e| e.into_inner());
+    let fresh = found.len();
+    if let Some(previous) = remembered.as_ref() {
+        found.carried_over(previous);
+    }
+    if found.len() > fresh {
+        tracing::debug!(
+            fresh,
+            listed = found.len(),
+            "some networks are from earlier scans"
+        );
+    }
+    let networks = found.clone_networks();
+    *remembered = Some(found);
+    networks
 }
 
 /// The networks several scans found between them, strongest first.
@@ -210,17 +235,22 @@ pub async fn scan_networks() -> Result<Vec<WifiNetwork>, WifiError> {
 /// each time, so a listing is what the scans found together rather than
 /// what the last one happened to return.
 #[derive(Default)]
-struct Listing(std::collections::HashMap<String, WifiNetwork>);
+struct Listing(std::collections::HashMap<String, (WifiNetwork, Option<Instant>)>);
 
 impl Listing {
     fn add(&mut self, networks: Vec<WifiNetwork>) {
+        let now = Instant::now();
         for network in networks {
             match self.0.get(&network.ssid) {
                 // The same network seen twice is kept at its best, which
                 // is also the reading the user is nearest to.
-                Some(seen) if seen.signal_percent >= network.signal_percent => {}
+                Some((seen, _)) if seen.signal_percent >= network.signal_percent => {
+                    self.0
+                        .entry(network.ssid)
+                        .and_modify(|(_, at)| *at = Some(now));
+                }
                 _ => {
-                    self.0.insert(network.ssid.clone(), network);
+                    self.0.insert(network.ssid.clone(), (network, Some(now)));
                 }
             }
         }
@@ -234,8 +264,8 @@ impl Listing {
         self.0.is_empty()
     }
 
-    fn into_networks(self) -> Vec<WifiNetwork> {
-        let mut networks: Vec<WifiNetwork> = self.0.into_values().collect();
+    fn clone_networks(&self) -> Vec<WifiNetwork> {
+        let mut networks: Vec<WifiNetwork> = self.0.values().map(|(n, _)| n.clone()).collect();
         networks.sort_by(|a, b| {
             b.signal_percent
                 .cmp(&a.signal_percent)
@@ -243,7 +273,29 @@ impl Listing {
         });
         networks
     }
+
+    /// Everything still worth showing from an earlier listing, and
+    /// everything this one found.
+    fn carried_over(&mut self, previous: &Listing) {
+        let now = Instant::now();
+        for (ssid, (network, seen_at)) in &previous.0 {
+            let fresh = seen_at.is_some_and(|at| now.duration_since(at) < NETWORK_MEMORY);
+            if fresh && !self.0.contains_key(ssid) {
+                self.0.insert(ssid.clone(), (network.clone(), *seen_at));
+            }
+        }
+    }
 }
+
+/// The listing the last scan produced, kept so that a network this scan
+/// missed is still offered.
+///
+/// An adapter that drops a subset of the channels drops different
+/// networks each time, and a list rebuilt from nothing on every press of
+/// Rescan loses the one the user is waiting for as readily as it finds
+/// it. Remembering what the last minutes saw turns "press it again and
+/// hope" into a list that only grows more complete.
+static REMEMBERED: std::sync::Mutex<Option<Listing>> = std::sync::Mutex::new(None);
 
 /// One scan: ask for it, wait for it to finish, read what it found.
 async fn scan_once(station: &Station) -> Result<Vec<WifiNetwork>, WifiError> {
