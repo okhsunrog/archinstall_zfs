@@ -38,6 +38,8 @@ pub mod fixed_packages {
     pub const POLKIT: &[&str] = &["polkit"];
     /// Shared by every kernel's ZFS module package.
     pub const ZFS_UTILS: &[&str] = &["zfs-utils"];
+    /// What reads `/etc/systemd/zram-generator.conf` and creates the device.
+    pub const ZRAM_GENERATOR: &[&str] = &["zram-generator"];
 
     /// Every set above, for the repository check.
     pub const ALL: &[&[&str]] = &[
@@ -49,6 +51,7 @@ pub mod fixed_packages {
         SEATD,
         POLKIT,
         ZFS_UTILS,
+        ZRAM_GENERATOR,
     ];
 }
 
@@ -225,6 +228,12 @@ impl Installer {
         // Phase 11: mount entries, then swap.
         tracing::info!("Phase 11: Configuring swap...");
         tracing::info!(target: "metrics", event = "phase_start", num = 11u32, name = "Configuring swap");
+        if self.config.swap_mode == SwapMode::Zram {
+            // systemd has no zram generator of its own: without this package
+            // the configuration written below is read by nothing and the
+            // system comes up with no swap at all.
+            self.install_target_packages(fixed_packages::ZRAM_GENERATOR)?;
+        }
         write_fstab_and_swap(
             &*self.runner,
             &self.target,
