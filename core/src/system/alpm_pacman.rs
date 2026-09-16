@@ -104,9 +104,12 @@ fn check_free_space(root: &Path, installed_bytes: u64) -> Result<()> {
 }
 
 /// The packages `name` stands for in `handle`'s sync databases: the package
-/// of that name from the first repository that has it, or every member of
-/// the group of that name. A group is what the desktop profiles list for
-/// their application suites; adding it as a package failed the install.
+/// of that name from the first repository that has it, every member of the
+/// group of that name, or whatever provides it. A group is what the desktop
+/// profiles list for their application suites; adding it as a package failed
+/// the install. A provider is what `pacman -S` settles for when a package was
+/// renamed upstream and keeps its old name in `provides`, or when the name is
+/// virtual to begin with.
 pub fn resolve_name<'a>(handle: &'a Alpm, name: &str) -> Result<Vec<&'a alpm::Package>> {
     for db in handle.syncdbs() {
         if let Ok(pkg) = db.pkg(name) {
@@ -125,6 +128,10 @@ pub fn resolve_name<'a>(handle: &'a Alpm, name: &str) -> Result<Vec<&'a alpm::Pa
         }
     }
     if members.is_empty() {
+        if let Some(pkg) = handle.syncdbs().find_satisfier(name) {
+            tracing::info!(name, package = pkg.name(), "provided by a renamed package");
+            return Ok(vec![pkg]);
+        }
         bail!("package '{name}' not found in any repository")
     }
     tracing::info!(
