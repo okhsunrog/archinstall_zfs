@@ -77,6 +77,12 @@ ui-review:
     uv run slint-ui/scripts/invariants.py --output target/ui-review/invariants
     uv run slint-ui/scripts/interactions.py --output target/ui-review/interactions
 
+# Rewrite the README screenshots in assets/ from the preview fixtures.
+# Review the images afterwards; capturing them proves nothing about the design.
+readme-shots:
+    SLINT_EMIT_DEBUG_INFO=1 cargo build -p archinstall-zfs-slint --no-default-features --features desktop-mock,slint/mcp --locked
+    uv run slint-ui/scripts/readme_shots.py
+
 # Format check
 fmt-check:
     cargo fmt --all -- --check

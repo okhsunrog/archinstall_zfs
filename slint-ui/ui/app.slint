@@ -51,6 +51,10 @@ import { InstallView } from "views/install-view.slint";
 export component App inherits Window {
     default-font-size: 14px;
     in property <bool> preview-mode: false;
+    // The README screenshot script turns the preview banner off; every other
+    // preview run keeps it so a capture is never mistaken for a real install.
+    in property <bool> preview-banner: true;
+    property <bool> banner-visible: DemoState.enabled || (root.preview-mode && root.preview-banner);
     init => { StandardPalette.color-scheme = Catppuccin.is-dark ? ColorScheme.dark : ColorScheme.light; }
     property <bool> popup-open: PopupState.select-visible || PopupState.text-input-visible
         || PopupState.users-visible || PopupState.pkg-search-visible || PopupState.strlist-visible
@@ -138,7 +142,7 @@ export component App inherits Window {
         }
     }
 
-    if root.preview-mode: Rectangle {
+    if root.preview-mode && root.preview-banner: Rectangle {
         y: 0px;
         height: 32px;
         background: Theme.c.surface0;
@@ -153,14 +157,14 @@ export component App inherits Window {
 
     // ── Welcome screen (step 0, no sidebar) ───────────
     if InstallState.state == 0 && WizardState.current-step == 0: WelcomeView {
-        y: DemoState.enabled || root.preview-mode ? 32px : 0px;
+        y: root.banner-visible ? 32px : 0px;
         height: root.height - self.y;
         quit-requested() => { quit-requested(); }
     }
 
     // ── Wizard config screen (steps 1+, with sidebar) ──
     if InstallState.state == 0 && WizardState.current-step > 0: WizardView {
-        y: DemoState.enabled || root.preview-mode ? 32px : 0px;
+        y: root.banner-visible ? 32px : 0px;
         height: root.height - self.y;
         item-activated(key) => { item-activated(key); }
         inline-edited(key,value) => { inline-edited(key,value); }
@@ -177,7 +181,7 @@ export component App inherits Window {
     if InstallState.state >= 1: InstallView {
         width: min(root.width, 1280px);
         x: (root.width - self.width) / 2;
-        y: DemoState.enabled || root.preview-mode ? 32px : 0px;
+        y: root.banner-visible ? 32px : 0px;
         height: root.height - self.y;
         quit-requested() => { quit-requested(); }
         reboot-requested() => { reboot-requested(); }

@@ -118,6 +118,20 @@ Storage discovery in the production picker is read-only; choosing an existing
 pool does not import it. Space and dataset details for unimported pools remain
 unknown until installation imports them.
 
+Regenerate the screenshots in the project README from the same fixtures, at Full
+HD and 100%, writing straight into `assets/`:
+
+```sh
+just readme-shots
+uv run slint-ui/scripts/readme_shots.py --shots disk-step review-step
+```
+
+`AZFS_PREVIEW_BANNER=0`, which the script sets, drops the preview banner so the
+captures show the installer's own layout; keep the banner in every other preview
+run. The intermediate screenshots, element trees and logs stay in
+`target/readme-shots`. Review the images before committing them: the script only
+checks that each scene rendered and logged nothing.
+
 For additional interaction checks, use Slint MCP's `get_element_tree`, `click_element`,
 `set_element_value`, and `dispatch_key_event`. Check password entry, Wi-Fi connect,
 verification, success, disconnect, forget, and unsupported enterprise networks.

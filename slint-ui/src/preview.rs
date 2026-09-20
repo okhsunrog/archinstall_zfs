@@ -463,6 +463,9 @@ fn progress(app: &App, state: i32) {
 
 pub fn show(app: &App, scene: Scene, size: Size) {
     app.set_preview_mode(true);
+    // Only the README screenshot script sets this; a preview otherwise keeps
+    // the banner that says the devices and the installation are simulated.
+    app.set_preview_banner(std::env::var("AZFS_PREVIEW_BANNER").as_deref() != Ok("0"));
     // The headless backend does not consume SLINT_SCALE_FACTOR. Deliver the
     // same event a desktop backend emits so screenshot tests exercise real DPI.
     if let Ok(value) = std::env::var("SLINT_SCALE_FACTOR")

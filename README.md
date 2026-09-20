@@ -40,13 +40,24 @@ Key improvements over the Python version:
 
 ### Screenshots
 
-| Disk selection | ZFS configuration | Download progress |
-|:-:|:-:|:-:|
-| <img src="assets/disk-step.png" width="280"> | <img src="assets/zfs-step.png" width="280"> | <img src="assets/install-progress.png" width="280"> |
+| Disk selection | ZFS configuration |
+|:-:|:-:|
+| <img src="assets/disk-step.png" width="420"> | <img src="assets/zfs-step.png" width="420"> |
 
-| Package installation | ZFS on target | Installation complete |
-|:-:|:-:|:-:|
-| <img src="assets/install-packages.png" width="280"> | <img src="assets/install-zfs.png" width="280"> | <img src="assets/install-complete.png" width="280"> |
+| System settings | Users and administration |
+|:-:|:-:|
+| <img src="assets/system-step.png" width="420"> | <img src="assets/users-step.png" width="420"> |
+
+| Desktop and software | Review |
+|:-:|:-:|
+| <img src="assets/desktop-step.png" width="420"> | <img src="assets/review-step.png" width="420"> |
+
+| Installation progress | Installation complete |
+|:-:|:-:|
+| <img src="assets/install-progress.png" width="420"> | <img src="assets/install-complete.png" width="420"> |
+
+The images come from the deterministic UI preview on simulated devices
+(`just readme-shots`), not from a real installation.
 
 ---
 
