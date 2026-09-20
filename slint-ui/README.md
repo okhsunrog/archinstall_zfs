@@ -134,9 +134,13 @@ uv run slint-ui/scripts/readme_shots.py --shots disk-step review-step
 captures show the installer's own layout; keep the banner in every other preview
 run. The intermediate screenshots, element trees and logs stay in
 `target/readme-shots`. Review the images before committing them: the script only
-checks that each scene rendered and logged nothing. A rerun reproduces every
-capture byte for byte except `install-progress.png`, whose spinner is caught
-mid-rotation; its contents do not change.
+checks that each scene rendered and logged nothing. A rerun reproduces the
+captures byte for byte, apart from `install-progress.png`, which can differ by
+the few pixels its spinner turned; its contents do not change.
+
+A shot may open a dialog first: `users-step` fills the account form through the
+real controls, the way `interactions.py` does, because a wizard page on its own
+never shows one. Add such a step beside its scene in the script's `SHOTS`.
 
 For additional interaction checks, use Slint MCP's `get_element_tree`, `click_element`,
 `set_element_value`, and `dispatch_key_event`. Check password entry, Wi-Fi connect,

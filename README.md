@@ -44,7 +44,7 @@ Key improvements over the Python version:
 |:-:|:-:|
 | <img src="assets/disk-step.png" width="420"> | <img src="assets/zfs-step.png" width="420"> |
 
-| System settings | Users and administration |
+| System settings | Adding a user account |
 |:-:|:-:|
 | <img src="assets/system-step.png" width="420"> | <img src="assets/users-step.png" width="420"> |
 

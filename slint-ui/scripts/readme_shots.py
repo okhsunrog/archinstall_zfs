@@ -14,20 +14,36 @@ import os
 from pathlib import Path
 import shutil
 import sys
+import time
 
 from review import Preview
 
-# README image stem -> preview scene, in the order the README shows them.
+
+def add_user(p):
+    """The wizard keeps accounts, packages and services behind dialogs, so a
+    page on its own never shows one. Fill the account form through the real
+    controls, the way interactions.py does, and leave it open for the shot."""
+    p.click('Button', 'User accounts')
+    p.click('Button', 'Add another user')
+    p.fill(0, 'maria')
+    p.fill(1, 'a long preview passphrase for the README')
+    p.fill(2, 'a long preview passphrase for the README')
+    # The strength meter and the button state follow the input by a frame.
+    time.sleep(.5)
+
+
+# README image stem -> preview scene and the interaction to run before the
+# capture, in the order the README shows them.
 SHOTS = {
-    'welcome-screen': 'welcome',
-    'disk-step': 'disk',
-    'zfs-step': 'zfs',
-    'system-step': 'system',
-    'users-step': 'users',
-    'desktop-step': 'desktop',
-    'review-step': 'review',
-    'install-progress': 'install',
-    'install-complete': 'done',
+    'welcome-screen': ('welcome', None),
+    'disk-step': ('disk', None),
+    'zfs-step': ('zfs', None),
+    'system-step': ('system', None),
+    'users-step': ('users', add_user),
+    'desktop-step': ('desktop', None),
+    'review-step': ('review', None),
+    'install-progress': ('install', None),
+    'install-complete': ('done', None),
 }
 
 
@@ -53,9 +69,12 @@ def main():
     os.environ['AZFS_PREVIEW_BANNER'] = '0'
     failures = []
     for name in args.shots:
-        preview = Preview(binary, SHOTS[name], args.size, args.scale, args.work)
+        scene, action = SHOTS[name]
+        preview = Preview(binary, scene, args.size, args.scale, args.work)
         try:
             preview.ready()
+            if action:
+                action(preview)
             preview.screenshot(name)
         except Exception as error:  # noqa: BLE001 - report every scene, then exit non-zero
             failures.append(f'{name}: {type(error).__name__}: {error}')
@@ -67,7 +86,7 @@ def main():
             failures.append(f'{name}: {len(issues)} log issue(s): {issues[0].strip()}')
             continue
         shutil.copyfile(args.work / f'{name}.png', args.assets / f'{name}.png')
-        print(f'{args.assets / name}.png ({SHOTS[name]} @ {args.size}@{args.scale}x)', flush=True)
+        print(f'{args.assets / name}.png ({scene} @ {args.size}@{args.scale}x)', flush=True)
     for failure in failures:
         print(f'FAIL {failure}', file=sys.stderr)
     if failures:
