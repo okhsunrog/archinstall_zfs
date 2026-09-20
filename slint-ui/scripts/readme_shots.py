@@ -37,8 +37,11 @@ def main():
     parser.add_argument('--assets', type=Path, default=Path('assets'))
     parser.add_argument('--work', type=Path, default=Path('target/readme-shots'),
                         help='Screenshots, element trees and preview logs before copying')
-    parser.add_argument('--size', default='1920x1080', help='The README baseline is Full HD')
-    parser.add_argument('--scale', default='1')
+    # 3:2 at 150%: the logical 1280x853 viewport is about as wide as the content
+    # itself, so a shot has no empty bands beside the panel, and every element is
+    # rendered at one and a half times the pixels a README scales it down from.
+    parser.add_argument('--size', default='1920x1280')
+    parser.add_argument('--scale', default='1.5')
     parser.add_argument('--shots', nargs='+', choices=list(SHOTS), default=list(SHOTS))
     args = parser.parse_args()
     binary = args.binary.resolve()
