@@ -138,7 +138,7 @@ checks that each scene rendered and logged nothing. A rerun reproduces the
 captures byte for byte, apart from `install-progress.png`, which can differ by
 the few pixels its spinner turned; its contents do not change.
 
-A shot may open a dialog first: `users-step` fills the account form through the
+A shot may open a dialog first: `users-dialog` fills the account form through the
 real controls, the way `interactions.py` does, because a wizard page on its own
 never shows one. Add such a step beside its scene in the script's `SHOTS`.
 

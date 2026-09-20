@@ -46,7 +46,7 @@ Key improvements over the Python version:
 
 | System settings | Adding a user account |
 |:-:|:-:|
-| <img src="assets/system-step.png" width="420"> | <img src="assets/users-step.png" width="420"> |
+| <img src="assets/system-step.png" width="420"> | <img src="assets/users-dialog.png" width="420"> |
 
 | Desktop and software | Review |
 |:-:|:-:|

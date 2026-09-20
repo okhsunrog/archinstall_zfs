@@ -39,7 +39,7 @@ SHOTS = {
     'disk-step': ('disk', None),
     'zfs-step': ('zfs', None),
     'system-step': ('system', None),
-    'users-step': ('users', add_user),
+    'users-dialog': ('users', add_user),
     'desktop-step': ('desktop', None),
     'review-step': ('review', None),
     'install-progress': ('install', None),
