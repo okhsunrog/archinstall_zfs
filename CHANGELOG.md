@@ -7,6 +7,17 @@ latest release with fresh packages and ZFS modules, so they are not listed here.
 
 ## [Unreleased]
 
+### Changed
+
+- The graphical installer takes the screen and keyboard through libseat and
+  logind. Start it from a console login rather than over SSH; on the official Arch
+  ISO, install `seatd` along with its other runtime dependencies.
+
+### Fixed
+
+- Killing the graphical installer together with its supervisor left the console
+  keyboard switched off; logind now restores it.
+
 ## [0.5.1] - 2026-09-23
 
 ### Changed

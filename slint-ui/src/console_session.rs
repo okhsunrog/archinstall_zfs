@@ -1,5 +1,6 @@
 //! The parent owns VT recovery and the GUI/chroot/GUI process lifecycle.
-//! Slint isolates keyboard input while the graphical child is running.
+//! While the graphical child runs, logind (through Slint's libseat backend)
+//! switches the console keyboard off, and restores it even if the child is killed.
 
 use crate::completion::Completion;
 use std::fs::{File, OpenOptions};

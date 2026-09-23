@@ -26,6 +26,7 @@ Options:
     -h              Print help
     -i [image]      ISO image to boot into
     -D [image]      Disk image (*.qcow2) to use
+    -T [image]      Second disk (*.qcow2) for the post-install shell fixture
     -s              Use Secure Boot (only relevant when using UEFI)
     -u              Set boot type to 'UEFI' (default)
     -v              Use VNC display (instead of default SDL)
@@ -157,6 +158,12 @@ run_image() {
         qemu_options+=('-device' "virtio-blk-pci,drive=disk0,serial=archzfs-test-disk")
     fi
 
+    if [[ -n "${shell_fixture_disk}" ]]; then
+        # slint-ui/scripts/shell-vm-fixture.sh overwrites only a disk with this serial.
+        qemu_options+=('-drive' "file=${shell_fixture_disk},format=qcow2,if=none,id=shelltest")
+        qemu_options+=('-device' "virtio-blk-pci,drive=shelltest,serial=azfs-shell-test-disk")
+    fi
+
     if [[ -n "${oddimage}" ]]; then
         qemu_options+=(
             '-device' 'ide-cd,drive=cdrom1'
@@ -194,6 +201,7 @@ run_image() {
 
 iso_image=''
 disk_image=''
+shell_fixture_disk=''
 oddimage=''
 accessibility='off'
 boot_type='uefi'
@@ -213,7 +221,7 @@ if (( ${#} == 0 )); then
     exit 1
 fi
 
-while getopts 'abhi:sD:uvSc:U:C:m:p:' flag; do
+while getopts 'abhi:sD:T:uvSc:U:C:m:p:' flag; do
     case "$flag" in
         a)
             accessibility='on'
@@ -233,6 +241,9 @@ while getopts 'abhi:sD:uvSc:U:C:m:p:' flag; do
             ;;
         D)
             disk_image="$OPTARG"
+            ;;
+        T)
+            shell_fixture_disk="$OPTARG"
             ;;
         u)
             boot_type='uefi'
