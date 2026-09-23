@@ -256,14 +256,18 @@ async fn install(
             .await??;
     }
 
-    for warning in crate::kernel::scanner::validate_kernel_zfs_plan(
-        config.distribution(),
-        &kernel,
-        config.zfs_module_mode,
-    )
-    .await
-    {
-        tracing::warn!("kernel compatibility: {warning}");
+    // The live system carries only Arch's and archzfs's repositories, so other
+    // distributions' kernels and ZFS modules can't be looked up yet.
+    if config.distribution().name == "arch" {
+        for warning in crate::kernel::scanner::validate_kernel_zfs_plan(
+            config.distribution(),
+            &kernel,
+            config.zfs_module_mode,
+        )
+        .await
+        {
+            tracing::warn!("kernel compatibility: {warning}");
+        }
     }
 
     // ZFS on the live system. Returns early when the module and tools are
