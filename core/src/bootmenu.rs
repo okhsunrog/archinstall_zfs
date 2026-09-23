@@ -57,18 +57,23 @@ struct ZbmKernel {
 
 /// Image size settings for the dracut build. The image must fit next to an
 /// existing operating system on a stock 100 MiB Windows ESP, so it is built
-/// for this machine's hardware. dracut's default host-only mode keeps every
-/// storage, USB and keyboard driver; only unrelated device classes are left
-/// out. `xz -9` is slower to build than the default zstd level but produces
-/// a smaller image. Measured on a stock `linux-lts` target: 36 MiB without
-/// this file, 33 MiB with it. Omitting `i18n` saves 50 KiB, but it loads the
-/// configured console keymap, so it stays.
+/// for this machine's hardware. `xz -9` is slower to build than the default
+/// zstd level but produces a smaller image. Measured on a stock `linux-lts`
+/// target: 36 MiB without this file, 33 MiB with it. Omitting `i18n` saves
+/// 50 KiB, but it loads the configured console keymap, so it stays.
+///
+/// Keyboard drivers are listed by name. dracut 111 installs nothing for the
+/// whole-directory entries (`=drivers/hid`) its kernel-modules step relies on,
+/// so a USB keyboard whose receiver needs a vendor driver, such as `hid-apple`,
+/// was dead in the menu. Drivers built into the kernel are skipped.
 const ZBM_DRACUT_CONF: &str = r#"# Written by archinstall_zfs; keep ZFSBootMenu small enough for a shared ESP.
 hostonly="yes"
 hostonly_cmdline="no"
 # ZFSBootMenu never runs filesystem checks or mounts /usr.
 omit_dracutmodules+=" fs-lib usrmount "
 compress="xz -9 --check=crc32 -T0"
+# USB and laptop keyboards, including receivers that need a vendor driver.
+add_drivers+=" usbhid hid-generic xhci-pci ehci-pci i2c-hid-acpi hid-multitouch hid-apple hid-asus hid-cherry hid-chicony hid-corsair hid-holtek-kbd hid-kensington hid-lenovo hid-logitech-dj hid-logitech-hidpp hid-microsoft "
 "#;
 
 /// Write /etc/zfsbootmenu/config.yaml and the image size settings inside the
@@ -481,6 +486,7 @@ mod tests {
         assert!(dracut.contains("hostonly_cmdline=\"no\""));
         assert!(dracut.contains("omit_dracutmodules+=\" fs-lib usrmount \""));
         assert!(dracut.contains("compress=\"xz -9 --check=crc32 -T0\""));
+        assert!(dracut.contains(" usbhid ") && dracut.contains(" hid-apple "));
         assert!(!dracut.contains("i18n"));
         assert!(!dir.path().join("etc/zfsbootmenu/mkinitcpio.conf").exists());
     }
