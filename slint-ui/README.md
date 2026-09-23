@@ -163,8 +163,9 @@ Slint is built from the `feat/linuxkms-integration` branch of the fork, with the
 exact revision recorded in `Cargo.lock`. On top of upstream it carries the
 cursor damage, scrolling and console keyboard changes that are still in review.
 
-The installer turns on tap-to-click for every touchpad libinput reports, through
-Slint's libinput event hook. Pointer acceleration keeps libinput's defaults.
+The installer turns on tap-to-click and natural scrolling for every touchpad
+libinput reports, through Slint's libinput event hook. Mouse wheels keep the
+traditional direction, and pointer acceleration keeps libinput's defaults.
 
 For the post-install chroot shell, automatic cleanup, completion-screen return,
 and disposable VM test fixture, see [Post-install shell](POST_INSTALL_SHELL.md).

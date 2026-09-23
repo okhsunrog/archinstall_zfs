@@ -184,7 +184,9 @@ fn main() -> Result<()> {
         })
 }
 
-/// libinput leaves tapping off on touchpads; there is no desktop here to turn it on.
+/// libinput leaves tapping and natural scrolling off on touchpads, and there is no
+/// desktop here to turn them on. Only devices that report tap fingers are touchpads,
+/// so mouse wheels keep scrolling the traditional way.
 #[cfg(feature = "linuxkms")]
 fn select_kms_backend() -> Result<()> {
     slint::BackendSelector::new()
@@ -194,6 +196,9 @@ fn select_kms_backend() -> Result<()> {
                 let mut device = added.device();
                 if device.config_tap_finger_count() > 0 {
                     let _ = device.config_tap_set_enabled(true);
+                    if device.config_scroll_has_natural_scroll() {
+                        let _ = device.config_scroll_set_natural_scroll_enabled(true);
+                    }
                 }
             }
             false
