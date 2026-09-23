@@ -56,6 +56,13 @@ For disposable install tests, build with `just cargo-build`, then use
 
 - Work from a feature branch off `main`; preserve unrelated local changes.
 - Commit completed, validated logical steps separately with clear messages.
+- Record every user-visible change under `## [Unreleased]` in `CHANGELOG.md`, in
+  the same commit as the change: one line on what a user notices, under Changed,
+  Added, Fixed or Removed. Put anything that breaks an existing configuration or
+  workflow under Changed. Refactors, tests and CI need no entry.
+- To release, rename `[Unreleased]` to the version and date, add a fresh empty
+  `[Unreleased]` and its compare link, then tag `vX.Y.Z`. The release job takes the
+  release notes from that section and fails if it is missing.
 - Delete local branches only when merged and unrelated to active work.
 - Never mention assistants or AI tools in commit messages, trailers, branch
   names, PR titles or PR descriptions. Do not add generated-by/session trailers.

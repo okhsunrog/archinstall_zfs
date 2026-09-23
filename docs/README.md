@@ -2,6 +2,7 @@
 
 | Document | Purpose |
 | --- | --- |
+| [Changelog](../CHANGELOG.md) | User-visible changes per release, and the release notes source |
 | [Developer guide](development.md) | Build environments, checks, release/USB workflow and validation boundaries |
 | [Alongside installation development](dual-boot-development.md) | Storage safety contract, EFI policy and disposable resize tests; integration in progress |
 | [Slint coding and visual review](slint-ui-review.md) | Practical design, interaction, rendering and implementation procedure |

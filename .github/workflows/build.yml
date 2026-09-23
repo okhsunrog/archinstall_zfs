@@ -123,6 +123,13 @@ jobs:
       contents: write
 
     steps:
+    - name: Check out the changelog
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: actions/checkout@v7
+      with:
+        sparse-checkout: CHANGELOG.md
+        sparse-checkout-cone-mode: false
+
     - name: Download binaries
       uses: actions/download-artifact@v8
       with:
@@ -170,9 +177,22 @@ jobs:
             } >> "$GITHUB_ENV"
             ;;
           *)
+            # The release notes are the version's section of CHANGELOG.md, up to
+            # the next section or the link references at the bottom.
+            version="${REF_NAME#v}"
+            awk -v heading="## [$version]" '
+              index($0, heading) == 1 { found = 1; next }
+              found && (/^## \[/ || /^\[[^]]+\]: /) { exit }
+              found { print }
+            ' CHANGELOG.md > release-notes.md
+            if ! grep -q '[^[:space:]]' release-notes.md; then
+              echo "::error::CHANGELOG.md has no section for $version"
+              exit 1
+            fi
             {
               printf 'TAG_NAME=%s\n' "$REF_NAME"
               printf 'RELEASE_NAME=Release %s\n' "$REF_NAME"
+              printf 'BODY_PATH=%s\n' release-notes.md
             } >> "$GITHUB_ENV"
             ;;
         esac
@@ -183,6 +203,7 @@ jobs:
         tag_name: ${{ env.TAG_NAME }}
         name: ${{ env.RELEASE_NAME }}
         body: ${{ env.BODY || '' }}
+        body_path: ${{ env.BODY_PATH || '' }}
         generate_release_notes: ${{ startsWith(github.ref, 'refs/tags/v') }}
         draft: false
         files: |
