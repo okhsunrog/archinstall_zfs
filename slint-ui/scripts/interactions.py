@@ -115,6 +115,8 @@ def wifi(p):
 
 
 def inspect(p):
+    p.wait('Button', 'Import read-only')
+    p.screenshot('pools')
     p.click('Button', 'Import read-only')
     p.wait('Text', 'read-only demo import')
     p.screenshot('pool-imported')

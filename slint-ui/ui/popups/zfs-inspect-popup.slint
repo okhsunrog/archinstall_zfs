@@ -102,31 +102,36 @@ export component ZfsInspectPopup inherits Rectangle {
                                     overflow: elide;
                                 }
                             }
-                            VerticalLayout {
+                            // "Use" stays on the right edge in every row; the
+                            // import/export action sits to its left.
+                            if !pool.imported: VerticalLayout {
                                 alignment: center;
                                 StyledButton {
-                                    label: "Use";
-                                    width: 64px;
-                                    height: 32px;
-                                    enabled: !DemoState.busy;
-                                    clicked => { DemoState.select-pool(pool.name); }
-                                }
-                            }
-                            Rectangle {
-                                width: 132px;
-                                if !pool.imported: StyledButton {
-                                    width: 100%;
                                     height: 32px;
                                     label: "Import read-only";
+                                    outlined: true;
                                     enabled: !DemoState.busy;
                                     clicked => { DemoState.import-readonly(pool.name); }
                                 }
-                                if pool.owned: StyledButton {
-                                    width: 100%;
+                            }
+                            if pool.owned: VerticalLayout {
+                                alignment: center;
+                                StyledButton {
                                     height: 32px;
                                     label: "Export";
+                                    outlined: true;
                                     enabled: !DemoState.busy;
                                     clicked => { DemoState.export-pool(pool.name); }
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                StyledButton {
+                                    height: 32px;
+                                    label: "Use";
+                                    style: Theme.button-primary;
+                                    enabled: !DemoState.busy;
+                                    clicked => { DemoState.select-pool(pool.name); }
                                 }
                             }
                         }
