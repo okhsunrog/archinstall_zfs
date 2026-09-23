@@ -7,6 +7,8 @@ latest release with fresh packages and ZFS modules, so they are not listed here.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-23
+
 ### Changed
 
 - Tap-to-click and natural scrolling are turned on for touchpads in the live
@@ -177,7 +179,8 @@ A complete rewrite in Rust. The Python version is preserved on the
 
 The first release: a ZFS-on-root installer built on archinstall.
 
-[Unreleased]: https://github.com/okhsunrog/archinstall_zfs/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/okhsunrog/archinstall_zfs/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/okhsunrog/archinstall_zfs/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/okhsunrog/archinstall_zfs/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/okhsunrog/archinstall_zfs/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/okhsunrog/archinstall_zfs/compare/v0.3.5...v0.4.0
