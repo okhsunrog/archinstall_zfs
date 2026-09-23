@@ -1,0 +1,9 @@
+#!/bin/sh
+# Written by archinstall_zfs; overrides flatpak's system environment generator.
+# Generators run before /root is mounted, and flatpak creates its cache in
+# $HOME: /root/.cache would land on the root dataset and keep the /root dataset
+# (overlay=off) from mounting. Keep the cache in /run instead.
+command -v flatpak >/dev/null 2>&1 || exit 0
+export GIO_USE_VFS=local
+export XDG_CACHE_HOME=/run/flatpak-envgen-cache
+exec flatpak --print-updated-env --print-system-only

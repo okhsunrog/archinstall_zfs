@@ -12,6 +12,13 @@ use crate::system::cmd::{CommandRunner, check_exit, chroot_cmd};
 /// Installed as immutable to prevent ZFS package updates from overwriting it.
 const ZED_HISTORY_CACHER: &str = include_str!("../../assets/history_event-zfs-list-cacher.sh");
 
+/// Replaces flatpak's system environment generator, which creates `/root/.cache`
+/// before `/root` is mounted. Takes effect whether or not flatpak is installed
+/// yet, so a later `pacman -S flatpak` can't break the `/root` mount either.
+const FLATPAK_ENVGEN_OVERRIDE: &str = include_str!("../assets/60-flatpak-system-only");
+const FLATPAK_ENVGEN_PATH: &str =
+    "etc/systemd/system-environment-generators/60-flatpak-system-only";
+
 pub fn create_hostid(runner: &dyn CommandRunner) -> Result<()> {
     let output = runner.run("zgenhostid", &["-f", HOSTID_VALUE])?;
     check_exit(&output, "zgenhostid")?;
@@ -56,6 +63,21 @@ pub fn copy_zfs_cache(target: &Path, be: &BootEnvironment, mountpoint: &Path) ->
         let modified = rewrite_cache_mountpoints(&content, mountpoint);
         let modified = keep_boot_environment(&modified, &be.base());
         fs::write(&dst_cache, modified).wrap_err("failed to write ZFS cache to target")?;
+    }
+    Ok(())
+}
+
+fn install_flatpak_envgen_override(target: &Path) -> Result<()> {
+    let path = target.join(FLATPAK_ENVGEN_PATH);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, FLATPAK_ENVGEN_OVERRIDE)
+        .wrap_err("failed to write the flatpak environment generator override")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755))?;
     }
     Ok(())
 }
@@ -216,6 +238,7 @@ pub fn copy_misc_files(
 ) -> Result<()> {
     copy_hostid(target)?;
     copy_zfs_cache(target, be, mountpoint)?;
+    install_flatpak_envgen_override(target)?;
     install_zed_cache_hook(runner, target)?;
     Ok(())
 }
@@ -278,6 +301,21 @@ mod tests {
         let result = rewrite_cache_mountpoints(content, Path::new("/mnt"));
         assert!(result.ends_with('\n'), "got: {result:?}");
         assert_eq!(result.lines().count(), 2);
+    }
+
+    #[test]
+    fn flatpak_envgen_override_keeps_its_cache_out_of_root() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        install_flatpak_envgen_override(dir.path()).unwrap();
+        let path = dir.path().join(FLATPAK_ENVGEN_PATH);
+        let script = fs::read_to_string(&path).unwrap();
+        assert!(script.contains("XDG_CACHE_HOME=/run/"));
+        assert!(script.contains("--print-system-only"));
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
     }
 
     #[test]
