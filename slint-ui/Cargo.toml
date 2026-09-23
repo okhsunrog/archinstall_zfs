@@ -18,7 +18,10 @@ path = "src/main.rs"
 # canned data (useful in CI and on hosts without a wifi stack).
 default = ["linuxkms"]
 linuxkms = [
-    "slint/backend-linuxkms-noseat",
+    # libseat takes the seat through logind, which switches the console keyboard
+    # off while the GUI runs and restores it even if the GUI is killed.
+    "slint/backend-linuxkms-libseat",
+    "slint/backend-linuxkms-libinput",
     "slint/renderer-skia-software",
     "slint/unstable-libinput-09",
     "dep:input",
