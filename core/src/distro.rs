@@ -311,6 +311,9 @@ pub const CACHYOS: Distribution = Distribution {
         "cachyos-v3-mirrorlist",
         "cachyos-v4-mirrorlist",
         "cachyos-settings",
+        // os-release comes from Arch's filesystem package; these hooks rewrite
+        // it (and lsb-release, issue) to CachyOS after every filesystem update.
+        "cachyos-hooks",
     ],
     repositories: RepositorySelection::ByIsaLevel {
         v3: CACHYOS_V3,
