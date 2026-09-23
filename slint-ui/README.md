@@ -160,16 +160,11 @@ The supervisor must remain alive for crash recovery; SIGKILL of both processes
 cannot run userspace cleanup.
 
 Slint is built from the `feat/linuxkms-integration` branch of the fork, with the
-exact revision recorded in `Cargo.lock`. This combines the independent Skia
-software, cursor damage, pointer input, and console isolation changes.
+exact revision recorded in `Cargo.lock`. On top of upstream it carries the
+cursor damage, scrolling and console keyboard changes that are still in review.
 
-When started from a VT, the installer enables tap-to-click for its GUI child.
-Set `SLINT_LIBINPUT_TAP_TO_CLICK=0` to disable it. Explicit values are preserved
-when returning from the post-install shell.
-
-Libinput uses neutral pointer acceleration by default. Override it with
-`SLINT_LIBINPUT_ACCEL_SPEED=0.3` (finite values from -1 to 1). Test the resulting
-feel on the target mouse or touchpad; headless rendering cannot validate it.
+The installer turns on tap-to-click for every touchpad libinput reports, through
+Slint's libinput event hook. Pointer acceleration keeps libinput's defaults.
 
 For the post-install chroot shell, automatic cleanup, completion-screen return,
 and disposable VM test fixture, see [Post-install shell](POST_INSTALL_SHELL.md).

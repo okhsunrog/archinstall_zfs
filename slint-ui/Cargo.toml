@@ -20,6 +20,8 @@ default = ["linuxkms"]
 linuxkms = [
     "slint/backend-linuxkms-noseat",
     "slint/renderer-skia-software",
+    "slint/unstable-libinput-09",
+    "dep:input",
     "archinstall-zfs-core/wifi-iwd",
 ]
 desktop = [
@@ -43,6 +45,7 @@ archinstall-zfs-core = { path = "../core", default-features = false }
 clap.workspace = true
 color-eyre.workspace = true
 crossbeam-channel = "0.5.16"
+input = { version = "0.10", default-features = false, optional = true }
 nix.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

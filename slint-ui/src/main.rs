@@ -184,6 +184,24 @@ fn main() -> Result<()> {
         })
 }
 
+/// libinput leaves tapping off on touchpads; there is no desktop here to turn it on.
+#[cfg(feature = "linuxkms")]
+fn select_kms_backend() -> Result<()> {
+    slint::BackendSelector::new()
+        .with_libinput_event_hook(|event| {
+            use input::event::{DeviceEvent, EventTrait};
+            if let input::Event::Device(DeviceEvent::Added(added)) = event {
+                let mut device = added.device();
+                if device.config_tap_finger_count() > 0 {
+                    let _ = device.config_tap_set_enabled(true);
+                }
+            }
+            false
+        })
+        .select()?;
+    Ok(())
+}
+
 fn run_gui(
     config: GlobalConfig,
     demo: bool,
@@ -192,6 +210,8 @@ fn run_gui(
     size: preview::Size,
     resumed: Option<completion::Completion>,
 ) -> Result<()> {
+    #[cfg(feature = "linuxkms")]
+    select_kms_backend()?;
     let app = App::new()?;
     let completion = Arc::new(std::sync::Mutex::new(resumed.clone().unwrap_or_default()));
     controllers::quit::setup(&app, &completion);
