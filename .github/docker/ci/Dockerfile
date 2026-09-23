@@ -1,7 +1,7 @@
 FROM archlinux@sha256:b0deabeb3d283da2c7f7dbf0eea051b7b2cd0554e0b737cc457fd21683bdcdd1
 
 # Rust build deps: base-devel, pkgconf, clang for C-FFI crates.
-# UI libs: libxkbcommon/libinput/libdrm/freetype2/fontconfig/ttf-dejavu for the slint UI
+# UI libs: libxkbcommon/libinput/seatd(libseat)/libdrm/freetype2/fontconfig/ttf-dejavu for the slint UI
 #   (ttf-dejavu is also what the ISO ships, so headless captures use the same fonts).
 # python/uv run the UI review scripts in the ui-review job.
 # ISO build deps: archiso (mkarchiso), pacman-contrib (paccache), rsync, sudo, just
@@ -11,7 +11,7 @@ RUN pacman-key --init && \
     pacman -Syu --noconfirm && \
     pacman -S --noconfirm \
         base-devel git pkgconf clang \
-        libxkbcommon libinput libdrm freetype2 fontconfig ttf-dejavu \
+        libxkbcommon libinput seatd libdrm freetype2 fontconfig ttf-dejavu \
         python uv \
         archiso just pacman-contrib rsync sudo && \
     pacman -Scc --noconfirm && \
