@@ -6,7 +6,7 @@ Read [Developer guide](docs/development.md) for environments, checks, release
 artifacts and USB updates. For Slint work, also read
 [Slint coding and visual review](docs/slint-ui-review.md) and the
 [GUI README](slint-ui/README.md). [Documentation index](docs/README.md) links the
-remaining guides. Keep shared rules in this file; `CLAUDE.md` points here.
+remaining guides. Keep shared rules in this file.
 
 `archinstall_zfs` is a Rust workspace: `core/` owns installer operations and
 validation, `tui/` the terminal frontend, `slint-ui/` the GUI, `xtask/` build/test
@@ -120,8 +120,10 @@ for the LinuxKMS release binary. Read the runtime and `slint-build` pins in
   conditional layout in `if` so an empty layout does not consume space.
 - Revisit consumers when a shared component changes. Do not call the entire UI
   reviewed after opening each page once or merely passing capture assertions.
-- State exactly what was checked. Headless previews do not establish physical
-  touchpad feel, KMS cursor damage, VT keyboard isolation or real chroot cleanup.
+- State exactly what was checked, and keep preview, VM and hardware claims
+  separate. Compilation, passing assertions or a contact sheet do not make UI work
+  complete. Headless previews do not establish physical touchpad feel, KMS cursor
+  damage, VT keyboard isolation or real chroot cleanup.
 
 ## Live image and physical media
 
