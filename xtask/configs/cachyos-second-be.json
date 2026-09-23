@@ -1,0 +1,42 @@
+{
+    "installation_mode": "existing_pool",
+    "efi_partition": "/dev/disk/by-id/virtio-archzfs-test-disk-part1",
+    "pool_name": "testpool",
+    "dataset_prefix": "cachy0",
+    "distribution": "cachyos",
+    "init_system": "dracut",
+    "zfs_module_mode": "precompiled",
+    "zfs_encryption_mode": "none",
+    "compression": "lz4",
+    "swap_mode": "zram",
+    "hostname": "cachyos-second-be",
+    "locale": "en_US.UTF-8 UTF-8",
+    "keyboard_layout": "us",
+    "timezone": "UTC",
+    "ntp": true,
+    "root_password": "test",
+    "users": [
+        {
+            "username": "second",
+            "password": "test",
+            "sudo": false,
+            "shell": null,
+            "groups": null
+        }
+    ],
+    "kernels": [
+        "linux-cachyos-lts"
+    ],
+    "additional_packages": [
+        "openssh",
+        "flatpak"
+    ],
+    "aur_packages": [],
+    "network_copy_iso": true,
+    "parallel_downloads": 10,
+    "zrepl_enabled": false,
+    "bluetooth": false,
+    "extra_services": [
+        "sshd"
+    ]
+}

@@ -152,6 +152,11 @@ just cargo-build
 just test-install-encrypted-pool --tmpfs --timeout 1800
 ```
 
+`just test-second-be` installs Arch, then CachyOS into the same pool as a second
+boot environment, and checks the second one's first boot: that boot still runs on
+the mount cache the installer wrote, so it is where another environment's `/home`
+or a stray `/root/.cache` shows up. It takes the same options as `test-install`.
+
 The install harness selects only `*-testing-*.iso` images because that profile
 enables the passwordless root SSH session used to upload and run the current
 installer binary. A newer full hardware ISO in `gen_iso/out` is ignored. Use

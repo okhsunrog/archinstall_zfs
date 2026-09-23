@@ -157,8 +157,105 @@ fn checks(config_path: &Path) -> Result<Vec<Check>, String> {
     ])
 }
 
+/// Checks for the first boot of a boot environment installed into a pool that
+/// already held `first`. That boot runs on the mount cache the installer wrote,
+/// before the target's own ZED hook has rewritten it.
+fn second_boot_environment_checks(first: &Path, second: &Path) -> Result<Vec<Check>, String> {
+    let read = |path: &Path| -> Result<Value, String> {
+        serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())
+    };
+    let (first, second) = (read(first)?, read(second)?);
+    let pool = second["pool_name"]
+        .as_str()
+        .unwrap_or("testpool")
+        .to_string();
+    let base = format!("{pool}/{}", second["dataset_prefix"].as_str().unwrap_or(""));
+    let other = format!("{pool}/{}", first["dataset_prefix"].as_str().unwrap_or(""));
+    let user = second["users"][0]["username"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    let distro = second["distribution"]
+        .as_str()
+        .unwrap_or("arch")
+        .to_string();
+
+    let mount = |label: &'static str, path: &'static str, dataset: String| {
+        Check::new(
+            label,
+            format!("findmnt -n -o SOURCE {path}"),
+            dataset.clone(),
+            move |out| out == dataset,
+        )
+    };
+    Ok(vec![
+        mount("root", "/", format!("{base}/root")),
+        // The other environment's /home listed first in the cache won the mount.
+        mount("home", "/home", format!("{base}/data/home")),
+        Check::new(
+            "user home",
+            format!("stat -c %U /home/{user} 2>&1"),
+            user.clone(),
+            {
+                let user = user.clone();
+                move |out| out == user
+            },
+        ),
+        // flatpak's environment generator used to create /root/.cache first.
+        Check::new(
+            "flatpak",
+            "pacman -Q flatpak >/dev/null 2>&1 && echo installed",
+            "installed",
+            |out| out == "installed",
+        ),
+        mount("/root", "/root", format!("{base}/data/root")),
+        Check::new(
+            "mount generator",
+            "journalctl -b -o cat | grep -c 'already exists. Skipping'",
+            "no competing mount units",
+            |out| out == "0",
+        ),
+        Check::new(
+            "os-release",
+            ". /etc/os-release && echo $ID",
+            distro.clone(),
+            move |out| out == distro,
+        ),
+        Check::new(
+            "bootfs",
+            format!("zpool get -H -o value bootfs {pool}"),
+            format!("{base}/root"),
+            {
+                let root = format!("{base}/root");
+                move |out| out == root
+            },
+        ),
+        Check::new(
+            "first environment",
+            format!("zfs list -H -o name {other}/root {other}/data/home 2>&1 | wc -l"),
+            "still present",
+            |out| out == "2",
+        ),
+    ])
+}
+
+pub fn verify_second_boot_environment(
+    vm: &QemuVm,
+    first_config: &Path,
+    second_config: &Path,
+) -> Result<(), String> {
+    run_checks(
+        vm,
+        second_boot_environment_checks(first_config, second_config)?,
+    )
+}
+
 pub fn verify_system(vm: &QemuVm, config_path: &Path) -> Result<(), String> {
-    let checks = checks(config_path)?;
+    run_checks(vm, checks(config_path)?)
+}
+
+fn run_checks(vm: &QemuVm, checks: Vec<Check>) -> Result<(), String> {
     let total = checks.len();
     let mut passed = 0;
     let mut lines = Vec::new();

@@ -89,6 +89,17 @@ enum Commands {
         opts: TestOpts,
     },
 
+    /// Install --config on a fresh disk, install --second-config into the same
+    /// pool as another boot environment, then check the second one's first boot
+    TestSecondBe {
+        #[command(flatten)]
+        opts: TestOpts,
+
+        /// Existing-pool config for the second boot environment
+        #[arg(long, default_value = "xtask/configs/cachyos-second-be.json")]
+        second_config: PathBuf,
+    },
+
     /// Run installs at multiple concurrency levels and collect metrics JSONL files
     BenchDownloads {
         #[command(flatten)]
@@ -359,6 +370,11 @@ fn main() -> ExitCode {
         Commands::TestBoot { opts } => {
             materialize_config(apply_tmpfs(opts)).and_then(cmd_test_boot)
         }
+        Commands::TestSecondBe {
+            opts,
+            second_config,
+        } => materialize_config(apply_tmpfs(opts))
+            .and_then(|opts| cmd_test_second_be(opts, &second_config)),
         Commands::BenchDownloads {
             opts,
             concurrency,
@@ -480,7 +496,38 @@ fn seed_aur_sources(dir: &Path) {
 }
 
 fn cmd_test_install(opts: TestOpts) -> Result<(), String> {
-    check_prerequisites(&opts)?;
+    run_install(&opts, true)
+}
+
+fn cmd_test_second_be(opts: TestOpts, second_config: &Path) -> Result<(), String> {
+    run_install(&opts, true)?;
+
+    let mut second = opts.clone();
+    second.paths.config = second_config.to_path_buf();
+    second.alongside = false;
+    eprintln!("=== test-second-be: second boot environment in the same pool ===");
+    run_install(&second, false)?;
+
+    eprintln!("=== test-second-be: first boot of the second boot environment ===");
+    let timeout = Duration::from_secs(opts.ssh.timeout);
+    qemu::reset_uefi_vars(&opts.paths.vars);
+    let vm = QemuVm::boot_disk(&opts.paths.disk, &opts.paths.vars, opts.ssh.boot_port)
+        .with_password(&opts.ssh.password);
+    if !vm.wait_for_ssh(timeout) {
+        return Err(format!(
+            "Second boot environment not SSH-accessible within {timeout:?}"
+        ));
+    }
+    verify::verify_second_boot_environment(&vm, &opts.paths.config, second_config)?;
+    eprintln!("=== test-second-be: PASSED ===\n");
+    Ok(())
+}
+
+/// Boot the testing ISO on `opts.paths.disk` and run the installer with
+/// `opts.paths.config`. `fresh` starts from an empty disk and UEFI vars;
+/// otherwise the disk keeps what an earlier install put there.
+fn run_install(opts: &TestOpts, fresh: bool) -> Result<(), String> {
+    check_prerequisites(opts)?;
     let paths = &opts.paths;
     let timeout = Duration::from_secs(opts.ssh.timeout);
     let iso = match &paths.iso {
@@ -489,12 +536,15 @@ fn cmd_test_install(opts: TestOpts) -> Result<(), String> {
         None => qemu::find_latest_testing_iso()?,
     };
 
-    eprintln!("=== test-install: Fresh disk + install ===");
+    eprintln!("=== test-install: install {} ===", paths.config.display());
     eprintln!("Using testing ISO: {}", iso.display());
 
-    // Fresh environment
-    eprintln!("[1/4] Creating fresh disk and UEFI vars");
-    qemu::create_fresh_disk(&paths.disk);
+    if fresh {
+        eprintln!("[1/4] Creating fresh disk and UEFI vars");
+        qemu::create_fresh_disk(&paths.disk);
+    } else {
+        eprintln!("[1/4] Keeping the disk from the previous install");
+    }
     if opts.alongside {
         // The fixture is a 500 MiB ESP, an ext4 big enough to give up the
         // allocation and its swap (allocation + 28 GiB), and a 1 GiB spare.

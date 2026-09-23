@@ -394,6 +394,12 @@ test-install *ARGS:
 test-boot *ARGS:
     ./target/release/xtask test-boot {{ARGS}}
 
+# Requires cargo-build or cargo-build-container first. Checks the second boot
+# environment's own /home and /root on its first boot, and CachyOS branding.
+# Install Arch, then CachyOS into the same pool as a second boot environment.
+test-second-be *ARGS:
+    ./target/release/xtask test-second-be {{ARGS}}
+
 # Install with pool-level ZFS encryption; regression cover for load-key-after-reimport
 test-install-encrypted-pool *ARGS:
     just test-install --encryption pool --zfs-mode dkms {{ARGS}}
