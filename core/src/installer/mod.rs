@@ -768,12 +768,7 @@ impl Installer {
         // currently mounted under is the install target itself — it is what
         // gets stripped from the cached mountpoints so they are correct once
         // the system boots on its own root.
-        crate::zfs_target_files::copy_misc_files(
-            &*self.runner,
-            &self.target,
-            be.pool(),
-            &self.target,
-        )?;
+        crate::zfs_target_files::copy_misc_files(&*self.runner, &self.target, &be, &self.target)?;
 
         // zrepl
         if self.config.zrepl_enabled {

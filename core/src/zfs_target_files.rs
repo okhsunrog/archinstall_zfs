@@ -3,6 +3,7 @@ use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 
+use crate::boot_environment::BootEnvironment;
 use crate::bootmenu::HOSTID_VALUE;
 use crate::system::cmd::{CommandRunner, check_exit, chroot_cmd};
 
@@ -42,9 +43,9 @@ pub fn copy_hostid(target: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn copy_zfs_cache(target: &Path, pool_name: &str, mountpoint: &Path) -> Result<()> {
-    let src_cache = Path::new("/etc/zfs/zfs-list.cache").join(pool_name);
-    let dst_cache = target.join("etc/zfs/zfs-list.cache").join(pool_name);
+pub fn copy_zfs_cache(target: &Path, be: &BootEnvironment, mountpoint: &Path) -> Result<()> {
+    let src_cache = Path::new("/etc/zfs/zfs-list.cache").join(be.pool());
+    let dst_cache = target.join("etc/zfs/zfs-list.cache").join(be.pool());
     if src_cache.exists() {
         if let Some(parent) = dst_cache.parent() {
             fs::create_dir_all(parent)?;
@@ -53,9 +54,40 @@ pub fn copy_zfs_cache(target: &Path, pool_name: &str, mountpoint: &Path) -> Resu
         // mountpoint prefix (e.g. /mnt) so paths are correct on the target.
         let content = fs::read_to_string(&src_cache).wrap_err("failed to read ZFS cache file")?;
         let modified = rewrite_cache_mountpoints(&content, mountpoint);
+        let modified = keep_boot_environment(&modified, &be.base());
         fs::write(&dst_cache, modified).wrap_err("failed to write ZFS cache to target")?;
     }
     Ok(())
+}
+
+/// Drop the datasets of the pool's other boot environments, as the ZED hook
+/// does once the target runs. The live system's cache lists every environment,
+/// and on the first boot zfs-mount-generator would mount whichever of their
+/// `/home` datasets comes first.
+///
+/// Kept: the environment's own datasets, the pool itself, and datasets outside
+/// every environment. An environment is the parent of a dataset mounted at `/`.
+fn keep_boot_environment(content: &str, be_base: &str) -> String {
+    let is_below =
+        |name: &str, ancestor: &str| name == ancestor || name.starts_with(&format!("{ancestor}/"));
+    let rows: Vec<Vec<&str>> = content.lines().map(|l| l.split('\t').collect()).collect();
+    let boot_envs: Vec<&str> = rows
+        .iter()
+        .filter(|row| row.get(1) == Some(&"/"))
+        .filter_map(|row| row[0].rsplit_once('/').map(|(parent, _)| parent))
+        .collect();
+    let mut out = String::new();
+    for (line, row) in content.lines().zip(&rows) {
+        let name = row[0];
+        if is_below(name, be_base)
+            || !name.contains('/')
+            || !boot_envs.iter().any(|be| is_below(name, be))
+        {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
 }
 
 /// Rewrite mountpoints in the zfs-list.cache file by stripping the temporary
@@ -179,11 +211,11 @@ pub fn write_zfs_preset(target: &Path) -> Result<()> {
 pub fn copy_misc_files(
     runner: &dyn CommandRunner,
     target: &Path,
-    pool_name: &str,
+    be: &BootEnvironment,
     mountpoint: &Path,
 ) -> Result<()> {
     copy_hostid(target)?;
-    copy_zfs_cache(target, pool_name, mountpoint)?;
+    copy_zfs_cache(target, be, mountpoint)?;
     install_zed_cache_hook(runner, target)?;
     Ok(())
 }
@@ -246,6 +278,34 @@ mod tests {
         let result = rewrite_cache_mountpoints(content, Path::new("/mnt"));
         assert!(result.ends_with('\n'), "got: {result:?}");
         assert_eq!(result.lines().count(), 2);
+    }
+
+    #[test]
+    fn cache_keeps_only_the_new_boot_environment_and_shared_datasets() {
+        let content = "zroot\tnone\ton\n\
+                       zroot/arch0\tnone\ton\n\
+                       zroot/arch0/data/home\t/home\ton\n\
+                       zroot/arch0/root\t/\tnoauto\n\
+                       zroot/arch01/root\t/\tnoauto\n\
+                       zroot/cachy0\tnone\ton\n\
+                       zroot/cachy0/data/home\t/home\ton\n\
+                       zroot/cachy0/root\t/\tnoauto\n\
+                       zroot/shared\t/srv\ton\n";
+        let cache = keep_boot_environment(content, "zroot/cachy0");
+        let kept: Vec<&str> = cache
+            .lines()
+            .map(|line| line.split('\t').next().unwrap())
+            .collect();
+        assert_eq!(
+            kept,
+            [
+                "zroot",
+                "zroot/cachy0",
+                "zroot/cachy0/data/home",
+                "zroot/cachy0/root",
+                "zroot/shared"
+            ]
+        );
     }
 
     #[test]
