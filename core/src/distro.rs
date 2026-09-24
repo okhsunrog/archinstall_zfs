@@ -151,6 +151,76 @@ impl SystemPackages {
 pub enum Family {
     /// Arch and the distributions that extend its repositories.
     Arch(Pacman),
+    /// Debian, bootstrapped with debootstrap and completed with apt.
+    Debian(Apt),
+}
+
+/// Where an apt-based distribution is fetched from.
+#[derive(Debug, Clone, Copy)]
+pub struct Apt {
+    /// The archive the release and its companion suites are served from.
+    pub mirror: &'static str,
+    /// The release debootstrap installs.
+    pub suite: &'static str,
+    /// Suites served from `mirror` next to the release: updates, backports.
+    pub companion_suites: &'static [&'static str],
+    /// Security updates live in an archive of their own.
+    pub security_mirror: &'static str,
+    pub security_suite: &'static str,
+    /// Every suite is written with these components. ZFS is in `contrib`,
+    /// because its licence keeps it out of `main`.
+    pub components: &'static [&'static str],
+    /// The keyring on the live medium the release is verified against, and
+    /// that the installed system keeps trusting.
+    pub keyring: &'static str,
+    /// Source packages taken from a suite other than the release.
+    pub pins: &'static [Pin],
+}
+
+/// Keeps a source package's binaries on one suite.
+///
+/// Pinning by source package rather than by binary is what keeps them in
+/// step: trixie-backports serves two OpenZFS branches at once, and
+/// `zfsutils-linux` from one breaks `zfs-dkms` from the other.
+#[derive(Debug, Clone, Copy)]
+pub struct Pin {
+    pub source_package: &'static str,
+    pub suite: &'static str,
+}
+
+impl Apt {
+    /// The installed system's `/etc/apt/sources.list.d/debian.sources`.
+    pub fn sources(&self) -> String {
+        let components = self.components.join(" ");
+        let mut suites = vec![self.suite];
+        suites.extend_from_slice(self.companion_suites);
+        format!(
+            "Types: deb\nURIs: {}\nSuites: {}\nComponents: {components}\nSigned-By: {}\n\n\
+             Types: deb\nURIs: {}\nSuites: {}\nComponents: {components}\nSigned-By: {}\n",
+            self.mirror,
+            suites.join(" "),
+            self.keyring,
+            self.security_mirror,
+            self.security_suite,
+            self.keyring,
+        )
+    }
+
+    /// The installed system's apt preferences for `pins`. Priority 990 is
+    /// what `apt-get -t` would give the suite, here limited to the pinned
+    /// packages and kept for later upgrades.
+    pub fn preferences(&self) -> String {
+        self.pins
+            .iter()
+            .map(|pin| {
+                format!(
+                    "Package: src:{}\nPin: release n={}\nPin-Priority: 990\n",
+                    pin.source_package, pin.suite
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 }
 
 /// What a pacman-based distribution adds to Arch.
@@ -260,6 +330,15 @@ impl Distribution {
     pub fn pacman(&self) -> Option<&Pacman> {
         match &self.family {
             Family::Arch(pacman) => Some(pacman),
+            Family::Debian(_) => None,
+        }
+    }
+
+    /// The apt side of the distribution, when it has one.
+    pub fn apt(&self) -> Option<&Apt> {
+        match &self.family {
+            Family::Debian(apt) => Some(apt),
+            Family::Arch(_) => None,
         }
     }
 }
@@ -430,6 +509,62 @@ pub const CACHYOS: Distribution = Distribution {
     }),
 };
 
+/// Debian's names for the role packages. ZFS is DKMS-only: Debian ships no
+/// prebuilt module, and the kernels carry no ZFS of their own.
+const DEBIAN_PACKAGES: SystemPackages = SystemPackages {
+    zfs_utils: &["zfsutils-linux", "zfs-zed"],
+    zfs_dkms: "zfs-dkms",
+    network_manager: &["network-manager"],
+    iwd: &["iwd"],
+    zram_generator: &["systemd-zram-generator"],
+    intel_microcode: "intel-microcode",
+    amd_microcode: "amd64-microcode",
+    dracut: Some(&["dracut", "zfs-dracut"]),
+    mkinitcpio: None,
+};
+
+const DEBIAN_KERNELS: &[KernelInfo] = &[KernelInfo {
+    name: "linux-image-amd64",
+    display_name: "Debian stable",
+    precompiled_package: None,
+    headers_package: "linux-headers-amd64",
+}];
+
+/// Debian stable with OpenZFS from backports.
+///
+/// Not in [`ALL`] until the installer can complete a Debian installation.
+pub const DEBIAN: Distribution = Distribution {
+    name: "debian",
+    display_name: "Debian",
+    base_packages: &[
+        "locales",
+        "console-setup",
+        "keyboard-configuration",
+        "sudo",
+        "systemd-timesyncd",
+        "ca-certificates",
+        "dosfstools",
+        "efibootmgr",
+        "firmware-linux",
+        "firmware-sof-signed",
+    ],
+    kernels: DEBIAN_KERNELS,
+    packages: &DEBIAN_PACKAGES,
+    family: Family::Debian(Apt {
+        mirror: "http://deb.debian.org/debian",
+        suite: "trixie",
+        companion_suites: &["trixie-updates", "trixie-backports"],
+        security_mirror: "http://security.debian.org/debian-security",
+        security_suite: "trixie-security",
+        components: &["main", "contrib", "non-free-firmware"],
+        keyring: "/usr/share/keyrings/debian-archive-keyring.gpg",
+        pins: &[Pin {
+            source_package: "zfs-linux",
+            suite: "trixie-backports",
+        }],
+    }),
+};
+
 /// Every distribution the installer knows.
 pub const ALL: &[Distribution] = &[ARCH, CACHYOS];
 
@@ -467,6 +602,51 @@ mod tests {
                 distro.packages.initramfs(InitSystem::default()).is_some(),
                 "{} cannot build the default initramfs",
                 distro.name
+            );
+        }
+    }
+
+    #[test]
+    fn debian_is_installed_with_apt() {
+        assert!(DEBIAN.pacman().is_none());
+        assert!(DEBIAN.apt().is_some());
+        assert!(ARCH.apt().is_none());
+        assert!(DEBIAN.packages.initramfs(InitSystem::default()).is_some());
+        assert!(DEBIAN.packages.initramfs(InitSystem::Mkinitcpio).is_none());
+    }
+
+    #[test]
+    fn debian_sources_list_every_suite_with_zfs_reachable() {
+        let apt = DEBIAN.apt().unwrap();
+        let sources = apt.sources();
+
+        let stanzas: Vec<&str> = sources.split_inclusive("\n\n").collect();
+        assert_eq!(stanzas.len(), 2, "archive and security: {sources}");
+        assert!(stanzas[0].contains("Suites: trixie trixie-updates trixie-backports\n"));
+        assert!(stanzas[1].contains("URIs: http://security.debian.org/debian-security\n"));
+        assert!(stanzas[1].contains("Suites: trixie-security\n"));
+        for stanza in stanzas {
+            assert!(stanza.contains("Components: main contrib non-free-firmware\n"));
+            assert!(stanza.contains("Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg\n"));
+        }
+    }
+
+    #[test]
+    fn zfs_is_pinned_to_backports_by_source_package() {
+        assert_eq!(
+            DEBIAN.apt().unwrap().preferences(),
+            "Package: src:zfs-linux\nPin: release n=trixie-backports\nPin-Priority: 990\n"
+        );
+    }
+
+    #[test]
+    fn debian_zfs_module_is_always_built_with_dkms() {
+        use crate::config::types::ZfsModuleMode;
+        let kernel = DEBIAN.kernels[0].name;
+        for mode in [ZfsModuleMode::Precompiled, ZfsModuleMode::Dkms] {
+            assert_eq!(
+                crate::kernel::zfs_module_packages(&DEBIAN, kernel, mode),
+                ["zfs-dkms", "linux-headers-amd64"]
             );
         }
     }

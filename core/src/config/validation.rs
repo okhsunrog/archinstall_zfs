@@ -40,6 +40,11 @@ pub enum ValidationError {
     HostnameInvalid(String),
     UnknownKernel(String),
     UsernameInvalid(String),
+    /// Something the chosen distribution cannot install.
+    NotSupported {
+        distribution: &'static str,
+        feature: &'static str,
+    },
 }
 
 /// Valid Linux hostname: 1-63 chars, alphanumeric + hyphens, no leading/trailing hyphen.
@@ -130,6 +135,13 @@ impl fmt::Display for ValidationError {
                     known.join(", ")
                 )
             }
+            Self::NotSupported {
+                distribution,
+                feature,
+            } => write!(
+                f,
+                "{distribution} installations do not support {feature} yet"
+            ),
             Self::UsernameInvalid(name) => write!(
                 f,
                 "Username '{name}' is invalid: must be 1-32 chars, start with lowercase letter or \
@@ -261,7 +273,61 @@ impl GlobalConfig {
             }
         }
 
+        errors.extend(self.validate_distribution_support(self.distribution()));
+
         errors
+    }
+
+    /// What this configuration asks for that `distro` cannot install.
+    fn validate_distribution_support(
+        &self,
+        distro: &'static crate::distro::Distribution,
+    ) -> Vec<ValidationError> {
+        let mut unsupported = Vec::new();
+        if distro.packages.initramfs(self.init_system).is_none() {
+            unsupported.push(match self.init_system {
+                crate::config::types::InitSystem::Dracut => "dracut",
+                crate::config::types::InitSystem::Mkinitcpio => "mkinitcpio",
+            });
+        }
+
+        // The first Debian installations are the minimal system that boots:
+        // everything below names Arch packages or builds from the AUR.
+        if distro.apt().is_some() {
+            if self.installation_mode == Some(InstallationMode::Alongside) {
+                unsupported.push("installing alongside another system");
+            }
+            if !self.aur_packages.is_empty() {
+                unsupported.push("AUR packages");
+            }
+            if self.zrepl_enabled {
+                unsupported.push("zrepl");
+            }
+            if self
+                .profile_selection
+                .as_ref()
+                .is_some_and(|selection| selection.profile != "minimal")
+            {
+                unsupported.push("profiles other than Minimal");
+            }
+            if self.audio.is_some() {
+                unsupported.push("an audio server");
+            }
+            if self.bluetooth {
+                unsupported.push("Bluetooth");
+            }
+            if self.gfx_driver.is_some() {
+                unsupported.push("graphics drivers");
+            }
+        }
+
+        unsupported
+            .into_iter()
+            .map(|feature| ValidationError::NotSupported {
+                distribution: distro.display_name,
+                feature,
+            })
+            .collect()
     }
 }
 
@@ -717,6 +783,44 @@ mod tests {
         assert_eq!(
             cfg.swap_partition.as_deref(),
             Some(std::path::Path::new("/dev/disk/by-id/legacy-disk-part3"))
+        );
+    }
+
+    #[test]
+    fn debian_accepts_the_minimal_system_it_can_install() {
+        let c = valid_full_disk_config();
+        assert!(
+            c.validate_distribution_support(&crate::distro::DEBIAN)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn debian_rejects_what_it_cannot_install_yet() {
+        let c = GlobalConfig {
+            init_system: crate::config::types::InitSystem::Mkinitcpio,
+            aur_packages: vec!["paru".into()],
+            bluetooth: true,
+            ..valid_full_disk_config()
+        };
+
+        let features: Vec<&str> = c
+            .validate_distribution_support(&crate::distro::DEBIAN)
+            .into_iter()
+            .map(|e| match e {
+                ValidationError::NotSupported {
+                    distribution: "Debian",
+                    feature,
+                } => feature,
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect();
+        assert_eq!(features, ["mkinitcpio", "AUR packages", "Bluetooth"]);
+
+        // Arch installs all of it.
+        assert!(
+            c.validate_distribution_support(&crate::distro::ARCH)
+                .is_empty()
         );
     }
 }
