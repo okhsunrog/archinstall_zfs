@@ -511,15 +511,19 @@ pub const CACHYOS: Distribution = Distribution {
 
 /// Debian's names for the role packages. ZFS is DKMS-only: Debian ships no
 /// prebuilt module, and the kernels carry no ZFS of their own.
+///
+/// dracut's ZFS module goes in with the utilities rather than with dracut:
+/// `zfs-dracut` depends on `zfs-dkms`, and installed with the base system it
+/// would pull the module in before the ZFS phase has set it up.
 const DEBIAN_PACKAGES: SystemPackages = SystemPackages {
-    zfs_utils: &["zfsutils-linux", "zfs-zed"],
+    zfs_utils: &["zfsutils-linux", "zfs-zed", "zfs-dracut"],
     zfs_dkms: "zfs-dkms",
     network_manager: &["network-manager"],
     iwd: &["iwd"],
     zram_generator: &["systemd-zram-generator"],
     intel_microcode: "intel-microcode",
     amd_microcode: "amd64-microcode",
-    dracut: Some(&["dracut", "zfs-dracut"]),
+    dracut: Some(&["dracut"]),
     mkinitcpio: None,
 };
 

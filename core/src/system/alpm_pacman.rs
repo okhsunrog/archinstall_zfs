@@ -21,7 +21,14 @@ impl TargetMounts {
     /// Prepare target directories and mount API filesystems.
     /// The mounts persist until this struct is dropped.
     pub fn setup(target: &Path) -> Result<Self> {
-        prepare_target_dirs(target)?;
+        prepare_pacman_dirs(target)?;
+        Self::mount(target)
+    }
+
+    /// Mount the API filesystems alone, for a target that is not a pacman
+    /// root.
+    pub fn mount(target: &Path) -> Result<Self> {
+        prepare_api_dirs(target)?;
         let mounts = mount_api_filesystems(target)?;
         Ok(Self { mounts })
     }
@@ -613,7 +620,7 @@ pub fn install_into_target(
 
 // ── Target preparation ───────────────────────────────
 
-fn prepare_target_dirs(target: &Path) -> Result<()> {
+fn prepare_pacman_dirs(target: &Path) -> Result<()> {
     let dirs = [
         "var/lib/pacman",
         "var/log",
@@ -623,7 +630,10 @@ fn prepare_target_dirs(target: &Path) -> Result<()> {
     for dir in &dirs {
         fs::create_dir_all(target.join(dir)).wrap_err_with(|| format!("failed to create {dir}"))?;
     }
+    Ok(())
+}
 
+fn prepare_api_dirs(target: &Path) -> Result<()> {
     // These need specific permissions
     for (dir, mode) in [
         ("run", 0o755),

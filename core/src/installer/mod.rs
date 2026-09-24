@@ -16,7 +16,9 @@ use color_eyre::eyre::{Result, bail, eyre};
 use tokio_util::sync::CancellationToken;
 
 use crate::config::types::{AudioServer, GlobalConfig, InitSystem, SwapMode, ZfsEncryptionMode};
+use crate::distro::Family;
 use crate::system::alpm_pacman::{AlpmContext, TargetMounts};
+use crate::system::apt::AptTarget;
 use crate::system::async_download::DownloadProgress;
 use crate::system::cmd::CommandRunner;
 
@@ -73,13 +75,25 @@ struct Installer {
     /// Unmounts the target's API filesystems when dropped; kept alive for as
     /// long as anything runs inside the chroot.
     _target_mounts: TargetMounts,
-    alpm: AlpmContext,
+    packages: TargetPackages,
     /// Kernels that ended up with a working ZFS module. Only these get an
     /// initramfs: one built for a kernel with no module produces a boot entry
     /// that cannot import the pool.
     kernels_with_zfs: Vec<String>,
     /// Things the user should be told once the installation finishes.
     notices: Vec<String>,
+}
+
+/// How packages reach the target, which is the distribution's own package
+/// manager.
+// One value per installation, held in place; boxing the larger variant would
+// buy nothing.
+#[expect(clippy::large_enum_variant)]
+enum TargetPackages {
+    /// libalpm on the medium, installing into the target's root.
+    Alpm(AlpmContext),
+    /// apt inside the target.
+    Apt(AptTarget),
 }
 
 /// Put the pool's passphrase in the target, where the initramfs will find it.
@@ -114,24 +128,42 @@ pub fn perform_installation(request: InstallRequest) -> Result<Vec<String>> {
         bail!("installation cancelled");
     }
 
-    // The medium fetches the base system from the distribution's own
-    // repositories, so they have to be configured here rather than in the
-    // phase that installs ZFS: CachyOS's keyring and mirrorlists are part of
-    // its base, and they live in those repositories.
     let isa = crate::system::sysinfo::detect_isa_level(&*runner);
     let distro = config.distribution();
-    crate::system::pacman::add_repositories(&*runner, None, distro, isa)?;
 
     tracing::info!("Phase 4: Installing base system...");
     tracing::info!(target: "metrics", event = "phase_start", num = 4u32, name = "Installing base system");
-    let target_mounts =
-        base::install_base(&target, &config, &cancel, download_progress_tx.clone())?;
+    let (target_mounts, packages) = match &distro.family {
+        Family::Arch(_) => {
+            // The medium fetches the base system from the distribution's own
+            // repositories, so they have to be configured here rather than in
+            // the phase that installs ZFS: CachyOS's keyring and mirrorlists
+            // are part of its base, and they live in those repositories.
+            crate::system::pacman::add_repositories(&*runner, None, distro, isa)?;
+            let target_mounts =
+                base::install_base(&target, &config, &cancel, download_progress_tx.clone())?;
 
-    // The target now has pacman.conf, keyring and mirrorlist from
-    // finalize_target(), so the handle for the remaining phases can be made.
-    let target_conf = target.join("etc/pacman.conf");
-    let mut alpm = AlpmContext::for_target(&target, &target_conf, config.download_config())?;
-    alpm.sync_databases(false)?;
+            // The target now has pacman.conf, keyring and mirrorlist from
+            // finalize_target(), so the handle for the remaining phases can be
+            // made.
+            let target_conf = target.join("etc/pacman.conf");
+            let mut alpm =
+                AlpmContext::for_target(&target, &target_conf, config.download_config())?;
+            alpm.sync_databases(false)?;
+            (target_mounts, TargetPackages::Alpm(alpm))
+        }
+        Family::Debian(apt) => {
+            let (target_mounts, apt) = base::install_base_apt(
+                runner.clone(),
+                &target,
+                &config,
+                apt,
+                &cancel,
+                download_progress_tx.clone(),
+            )?;
+            (target_mounts, TargetPackages::Apt(apt))
+        }
+    };
 
     let mut installer = Installer {
         runner,
@@ -143,7 +175,7 @@ pub fn perform_installation(request: InstallRequest) -> Result<Vec<String>> {
         download_progress_tx,
         swap_partition,
         _target_mounts: target_mounts,
-        alpm,
+        packages,
         kernels_with_zfs: Vec::new(),
         notices: Vec::new(),
     };
@@ -243,7 +275,7 @@ impl Installer {
         Ok(())
     }
 
-    /// Install packages into the target via libalpm (replaces pacstrap calls).
+    /// Install packages into the target with its package manager.
     fn install_target_packages(&mut self, packages: &[&str]) -> Result<()> {
         self.install_target_packages_excluding(packages, &[])
     }
@@ -256,12 +288,22 @@ impl Installer {
         if packages.is_empty() {
             return Ok(());
         }
-        self.alpm.install_packages_excluding(
-            packages,
-            excluded,
-            &self.cancel,
-            self.download_progress_tx.clone(),
-        )
+        match &mut self.packages {
+            TargetPackages::Alpm(alpm) => alpm.install_packages_excluding(
+                packages,
+                excluded,
+                &self.cancel,
+                self.download_progress_tx.clone(),
+            ),
+            // Exclusion picks members out of a pacman group; apt has no
+            // groups to pick from.
+            TargetPackages::Apt(_) if !excluded.is_empty() => {
+                bail!("apt cannot leave out {excluded:?}: exclusions apply to pacman groups")
+            }
+            TargetPackages::Apt(apt) => {
+                apt.install(packages, &self.cancel, self.download_progress_tx.as_ref())
+            }
+        }
     }
 
     fn configure_system(&self) -> Result<()> {
@@ -271,6 +313,9 @@ impl Installer {
 
         if let Some(ref locale) = self.config.locale {
             locale::set_locale(&*self.runner, &self.target, locale)?;
+            if self.distro.apt().is_some() {
+                locale::set_default_locale(&self.target, locale)?;
+            }
         }
 
         locale::set_keyboard(&self.target, &self.config.keyboard_layout)?;
@@ -284,8 +329,11 @@ impl Installer {
             services::enable_service(&*self.runner, &self.target, "systemd-timesyncd")?;
         }
 
-        // Mirror config
-        if let Some(ref regions) = self.config.mirror_regions {
+        // Mirror regions rank pacman mirrors; apt is pointed at Debian's
+        // CDN, which chooses a mirror by itself.
+        if let Some(ref regions) = self.config.mirror_regions
+            && self.distro.pacman().is_some()
+        {
             mirrors::configure_mirrors(&self.target, regions)?;
         }
 
@@ -368,20 +416,25 @@ impl Installer {
     /// its own root. Kernels left without a module are recorded so the
     /// initramfs phase can skip them and the user can be told.
     fn install_zfs_on_target(&mut self) -> Result<()> {
-        // Edit pacman.conf and import GPG keys (still needs shell for pacman-key)
-        crate::system::pacman::add_repositories(
-            &*self.runner,
-            Some(&self.target),
-            self.distro,
-            self.isa,
-        )?;
+        // apt was given every suite ZFS comes from when the target was
+        // bootstrapped; pacman learns about archzfs here.
+        if let TargetPackages::Alpm(alpm) = &mut self.packages {
+            // Edit pacman.conf and import GPG keys (still needs shell for pacman-key)
+            crate::system::pacman::add_repositories(
+                &*self.runner,
+                Some(&self.target),
+                self.distro,
+                self.isa,
+            )?;
 
-        // The repositories are already registered: they were written into
-        // pacman.conf before this handle was opened from it. Registering one
-        // again is an error, and doing it here used to be the only way the
-        // handle learned about archzfs at all — from a second copy of its
-        // address and a signature level that disagreed with the file's.
-        self.alpm.sync_databases(true)?;
+            // The repositories are already registered: they were written into
+            // pacman.conf before this handle was opened from it. Registering
+            // one again is an error, and doing it here used to be the only way
+            // the handle learned about archzfs at all — from a second copy of
+            // its address and a signature level that disagreed with the
+            // file's.
+            alpm.sync_databases(true)?;
+        }
 
         // zfs-utils is shared by every kernel's module package.
         self.install_target_packages(self.distro.packages.zfs_utils)?;
@@ -424,11 +477,14 @@ impl Installer {
         }
 
         for (kernel, error) in failures {
+            let install = match self.packages {
+                TargetPackages::Alpm(_) => format!("`pacman -S zfs-{kernel}` (or zfs-dkms)"),
+                TargetPackages::Apt(_) => "`apt install zfs-dkms`".to_string(),
+            };
             self.notices.push(format!(
                 "No ZFS module is available for {kernel}, so it was left without an initramfs \
-                 and will not be offered at boot. Install one later with \
-                 `pacman -S zfs-{kernel}` (or zfs-dkms) and regenerate the initramfs. \
-                 Reason: {error}"
+                 and will not be offered at boot. Install one later with {install} and \
+                 regenerate the initramfs. Reason: {error}"
             ));
         }
 
