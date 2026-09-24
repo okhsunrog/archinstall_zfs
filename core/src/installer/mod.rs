@@ -25,34 +25,19 @@ use crate::system::cmd::CommandRunner;
 /// `tests/repo_packages.rs` can hold every one of them against the
 /// repositories: a package renamed or dropped upstream otherwise surfaces as
 /// a failed installation on a user's machine.
+///
+/// Packages every distribution names differently are in
+/// [`crate::distro::SystemPackages`] instead.
 pub mod fixed_packages {
-    /// Wi-Fi on a system that keeps the medium's iwd configuration.
-    pub const IWD: &[&str] = &["iwd"];
-    /// The network service every other installation gets.
-    pub const NETWORK_MANAGER: &[&str] = &["networkmanager"];
     pub const PIPEWIRE: &[&str] = &["pipewire", "pipewire-alsa", "pipewire-pulse", "wireplumber"];
     pub const PULSEAUDIO: &[&str] = &["pulseaudio", "pulseaudio-alsa"];
     pub const BLUETOOTH: &[&str] = &["bluez", "bluez-utils"];
     /// Seat access for a Wayland compositor, either way of granting it.
     pub const SEATD: &[&str] = &["seatd"];
     pub const POLKIT: &[&str] = &["polkit"];
-    /// Shared by every kernel's ZFS module package.
-    pub const ZFS_UTILS: &[&str] = &["zfs-utils"];
-    /// What reads `/etc/systemd/zram-generator.conf` and creates the device.
-    pub const ZRAM_GENERATOR: &[&str] = &["zram-generator"];
 
     /// Every set above, for the repository check.
-    pub const ALL: &[&[&str]] = &[
-        IWD,
-        NETWORK_MANAGER,
-        PIPEWIRE,
-        PULSEAUDIO,
-        BLUETOOTH,
-        SEATD,
-        POLKIT,
-        ZFS_UTILS,
-        ZRAM_GENERATOR,
-    ];
+    pub const ALL: &[&[&str]] = &[PIPEWIRE, PULSEAUDIO, BLUETOOTH, SEATD, POLKIT];
 }
 
 /// What an installation needs to know before it starts.
@@ -232,7 +217,7 @@ impl Installer {
             // systemd has no zram generator of its own: without this package
             // the configuration written below is read by nothing and the
             // system comes up with no swap at all.
-            self.install_target_packages(fixed_packages::ZRAM_GENERATOR)?;
+            self.install_target_packages(self.distro.packages.zram_generator)?;
         }
         write_fstab_and_swap(
             &*self.runner,
@@ -316,13 +301,13 @@ impl Installer {
         if self.config.network_copy_iso {
             let wifi = network::copy_iso_network(&*self.runner, &self.target)?;
             if wifi {
-                self.install_target_packages(fixed_packages::IWD)?;
+                self.install_target_packages(self.distro.packages.iwd)?;
                 services::enable_service(&*self.runner, &self.target, "iwd")?;
             }
             tracing::info!(wifi, "the medium's network configuration is in place");
             return Ok(());
         }
-        self.install_target_packages(fixed_packages::NETWORK_MANAGER)?;
+        self.install_target_packages(self.distro.packages.network_manager)?;
         services::enable_service(&*self.runner, &self.target, "NetworkManager")?;
         tracing::info!("NetworkManager installed and enabled");
         Ok(())
@@ -399,7 +384,7 @@ impl Installer {
         self.alpm.sync_databases(true)?;
 
         // zfs-utils is shared by every kernel's module package.
-        self.install_target_packages(fixed_packages::ZFS_UTILS)?;
+        self.install_target_packages(self.distro.packages.zfs_utils)?;
 
         let kernels: Vec<String> = self
             .config

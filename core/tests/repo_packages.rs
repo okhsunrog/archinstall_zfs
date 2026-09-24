@@ -16,15 +16,12 @@
 //! cargo test -p archinstall-zfs-core --test repo_packages -- --ignored --nocapture
 //! ```
 
-use archinstall_zfs_core::config::choices::Choice;
-use archinstall_zfs_core::config::types::InitSystem;
 use archinstall_zfs_core::distro;
-use archinstall_zfs_core::installer::{base, fixed_packages};
+use archinstall_zfs_core::installer::fixed_packages;
 use archinstall_zfs_core::kernel;
 use archinstall_zfs_core::profile;
 use archinstall_zfs_core::system::alpm_pacman::resolve_name;
 use archinstall_zfs_core::system::gpu::GfxDriver;
-use archinstall_zfs_core::system::sysinfo::CpuVendor;
 
 /// The repositories an installation can actually install from: what the live
 /// medium carries, plus the archzfs repository the installer adds itself.
@@ -112,17 +109,8 @@ fn every_package_name() -> Vec<Wanted> {
     }
 
     names.extend(wanted(
-        "installer::base::initramfs_package",
-        InitSystem::CHOICES
-            .iter()
-            .map(|(init, _)| base::initramfs_package(*init).to_string()),
-    ));
-
-    names.extend(wanted(
-        "sysinfo::CpuVendor::microcode_package",
-        [CpuVendor::Intel, CpuVendor::Amd]
-            .into_iter()
-            .filter_map(|vendor| vendor.microcode_package().map(str::to_string)),
+        "distro::ARCH packages",
+        arch.packages.all().into_iter().map(str::to_string),
     ));
 
     for profile in profile::all_profiles() {

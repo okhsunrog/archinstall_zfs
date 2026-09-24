@@ -7,8 +7,9 @@
 //!
 //! A distribution is data, so a second one is an entry rather than a branch.
 
+use crate::config::types::InitSystem;
 use crate::kernel::KernelInfo;
-use crate::system::sysinfo::IsaLevel;
+use crate::system::sysinfo::{CpuVendor, IsaLevel};
 
 /// How much pacman verifies of what a repository serves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,9 +83,67 @@ pub struct Distribution {
     /// The kernels this distribution offers, and where each one's ZFS module
     /// comes from.
     pub kernels: &'static [KernelInfo],
+    /// What the installer asks for by role rather than by name.
+    pub packages: &'static SystemPackages,
     /// The packaging the distribution is built on, which decides how
     /// everything above is fetched and installed.
     pub family: Family,
+}
+
+/// Packages the installer installs for what they do, under the names a
+/// distribution gives them.
+#[derive(Debug, Clone, Copy)]
+pub struct SystemPackages {
+    /// ZFS userland, shared by every kernel's module.
+    pub zfs_utils: &'static [&'static str],
+    /// The ZFS module built by DKMS against a kernel's headers.
+    pub zfs_dkms: &'static str,
+    pub network_manager: &'static [&'static str],
+    pub iwd: &'static [&'static str],
+    /// What reads `/etc/systemd/zram-generator.conf` and creates the device.
+    pub zram_generator: &'static [&'static str],
+    pub intel_microcode: &'static str,
+    pub amd_microcode: &'static str,
+    /// Each initramfs generator together with its ZFS support. `None` where
+    /// the distribution does not offer that generator.
+    pub dracut: Option<&'static [&'static str]>,
+    pub mkinitcpio: Option<&'static [&'static str]>,
+}
+
+impl SystemPackages {
+    pub fn microcode(&self, vendor: CpuVendor) -> Option<&'static str> {
+        match vendor {
+            CpuVendor::Intel => Some(self.intel_microcode),
+            CpuVendor::Amd => Some(self.amd_microcode),
+            CpuVendor::Unknown => None,
+        }
+    }
+
+    /// What builds the initramfs for this choice, when the distribution
+    /// offers it.
+    pub fn initramfs(&self, init_system: InitSystem) -> Option<&'static [&'static str]> {
+        match init_system {
+            InitSystem::Dracut => self.dracut,
+            InitSystem::Mkinitcpio => self.mkinitcpio,
+        }
+    }
+
+    /// Every name in the table, for the repository check.
+    pub fn all(&self) -> Vec<&'static str> {
+        let mut names = vec![self.zfs_dkms, self.intel_microcode, self.amd_microcode];
+        for set in [
+            self.zfs_utils,
+            self.network_manager,
+            self.iwd,
+            self.zram_generator,
+        ] {
+            names.extend_from_slice(set);
+        }
+        for set in [self.dracut, self.mkinitcpio].into_iter().flatten() {
+            names.extend_from_slice(set);
+        }
+        names
+    }
 }
 
 /// The packaging a distribution is built on.
@@ -134,6 +193,20 @@ const ARCHZFS: Repository = Repository {
     signatures: Signatures::Never,
 };
 
+/// Arch's names, which CachyOS shares: it extends Arch's repositories rather
+/// than replacing them.
+const ARCH_PACKAGES: SystemPackages = SystemPackages {
+    zfs_utils: &["zfs-utils"],
+    zfs_dkms: "zfs-dkms",
+    network_manager: &["networkmanager"],
+    iwd: &["iwd"],
+    zram_generator: &["zram-generator"],
+    intel_microcode: "intel-ucode",
+    amd_microcode: "amd-ucode",
+    dracut: Some(&["dracut"]),
+    mkinitcpio: Some(&["mkinitcpio"]),
+};
+
 /// Arch's own kernels, each with the archzfs module built for it.
 const ARCH_KERNELS: &[KernelInfo] = &[
     KernelInfo {
@@ -173,6 +246,7 @@ pub const ARCH: Distribution = Distribution {
         "sof-firmware",
     ],
     kernels: ARCH_KERNELS,
+    packages: &ARCH_PACKAGES,
     family: Family::Arch(Pacman {
         repositories: RepositorySelection::Fixed(&[ARCHZFS]),
         optimised_builds: false,
@@ -342,6 +416,7 @@ pub const CACHYOS: Distribution = Distribution {
         "cachyos-hooks",
     ],
     kernels: CACHYOS_KERNELS,
+    packages: &ARCH_PACKAGES,
     family: Family::Arch(Pacman {
         repositories: RepositorySelection::ByIsaLevel {
             v3: CACHYOS_V3,
@@ -381,6 +456,19 @@ mod tests {
         assert_eq!(get("arch").map(|d| d.display_name), Some("Arch Linux"));
         assert!(get("plan9").is_none());
         assert_eq!(default().name, "arch");
+    }
+
+    /// A configuration that does not choose a generator gets the default one,
+    /// so every distribution has to be able to install it.
+    #[test]
+    fn every_distribution_offers_the_default_initramfs() {
+        for distro in ALL {
+            assert!(
+                distro.packages.initramfs(InitSystem::default()).is_some(),
+                "{} cannot build the default initramfs",
+                distro.name
+            );
+        }
     }
 
     #[test]

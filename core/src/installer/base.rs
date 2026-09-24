@@ -7,14 +7,6 @@ use crate::config::types::GlobalConfig;
 use crate::system::alpm_pacman::{AlpmContext, TargetMounts};
 use crate::system::sysinfo;
 
-/// The package that builds the initramfs for this choice.
-pub const fn initramfs_package(init_system: crate::config::types::InitSystem) -> &'static str {
-    match init_system {
-        crate::config::types::InitSystem::Dracut => "dracut",
-        crate::config::types::InitSystem::Mkinitcpio => "mkinitcpio",
-    }
-}
-
 /// Install base system packages into target.
 /// Returns `TargetMounts` which must be kept alive for the duration of the
 /// installation — dropping it unmounts API filesystems (proc, sys, dev, etc.).
@@ -26,16 +18,22 @@ pub fn install_base(
         std::sync::Arc<tokio::sync::watch::Sender<crate::system::async_download::DownloadProgress>>,
     >,
 ) -> Result<TargetMounts> {
-    let mut packages: Vec<&str> = config.distribution().base_packages.to_vec();
+    let distro = config.distribution();
+    let mut packages: Vec<&str> = distro.base_packages.to_vec();
 
     // Add selected kernels
     packages.extend(config.effective_kernels());
 
-    // Add initramfs package
-    packages.push(initramfs_package(config.init_system));
+    let Some(initramfs) = distro.packages.initramfs(config.init_system) else {
+        color_eyre::eyre::bail!(
+            "{} does not offer {:?} for the initramfs",
+            distro.display_name,
+            config.init_system
+        );
+    };
+    packages.extend_from_slice(initramfs);
 
-    // Microcode
-    if let Some(ucode) = sysinfo::cpu_vendor().microcode_package() {
+    if let Some(ucode) = distro.packages.microcode(sysinfo::cpu_vendor()) {
         packages.push(ucode);
     }
 

@@ -40,13 +40,15 @@ pub fn zfs_module_packages(
     };
 
     match mode {
-        ZfsModuleMode::Precompiled => match info.precompiled_package {
-            Some(pkg) => vec![pkg.to_string()],
-            None => vec!["zfs-dkms".to_string(), info.headers_package.to_string()],
-        },
-        ZfsModuleMode::Dkms => {
-            vec!["zfs-dkms".to_string(), info.headers_package.to_string()]
-        }
+        ZfsModuleMode::Precompiled if info.precompiled_package.is_some() => info
+            .precompiled_package
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        ZfsModuleMode::Precompiled | ZfsModuleMode::Dkms => vec![
+            distro.packages.zfs_dkms.to_string(),
+            info.headers_package.to_string(),
+        ],
     }
 }
 
