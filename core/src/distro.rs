@@ -79,6 +79,24 @@ pub struct Distribution {
     /// What a base installation starts from, before kernels, initramfs and
     /// microcode are added.
     pub base_packages: &'static [&'static str],
+    /// The kernels this distribution offers, and where each one's ZFS module
+    /// comes from.
+    pub kernels: &'static [KernelInfo],
+    /// The packaging the distribution is built on, which decides how
+    /// everything above is fetched and installed.
+    pub family: Family,
+}
+
+/// The packaging a distribution is built on.
+#[derive(Debug, Clone, Copy)]
+pub enum Family {
+    /// Arch and the distributions that extend its repositories.
+    Arch(Pacman),
+}
+
+/// What a pacman-based distribution adds to Arch.
+#[derive(Debug, Clone, Copy)]
+pub struct Pacman {
     /// Repositories to add, in the order they should appear. Order matters:
     /// pacman prefers the first repository that offers a package.
     pub repositories: RepositorySelection,
@@ -93,9 +111,6 @@ pub struct Distribution {
     pub optimised_builds: bool,
     /// The keyring `pacman-key --populate` is given.
     pub keyring: &'static str,
-    /// The kernels this distribution offers, and where each one's ZFS module
-    /// comes from.
-    pub kernels: &'static [KernelInfo],
     /// The package providing ZFSBootMenu, when the distribution has one.
     /// `None` means building it from the AUR, which is what Arch needs.
     pub zfsbootmenu_package: Option<&'static str>,
@@ -157,14 +172,25 @@ pub const ARCH: Distribution = Distribution {
         "linux-firmware-marvell",
         "sof-firmware",
     ],
-    repositories: RepositorySelection::Fixed(&[ARCHZFS]),
-    optimised_builds: false,
-    keyring: "archlinux",
     kernels: ARCH_KERNELS,
-    zfsbootmenu_package: None,
+    family: Family::Arch(Pacman {
+        repositories: RepositorySelection::Fixed(&[ARCHZFS]),
+        optimised_builds: false,
+        keyring: "archlinux",
+        zfsbootmenu_package: None,
+    }),
 };
 
 impl Distribution {
+    /// The pacman side of the distribution, when it has one.
+    pub fn pacman(&self) -> Option<&Pacman> {
+        match &self.family {
+            Family::Arch(pacman) => Some(pacman),
+        }
+    }
+}
+
+impl Pacman {
     /// The architectures pacman should accept on this machine, when that
     /// needs saying at all.
     pub fn architectures(&self, isa: IsaLevel) -> Option<&'static str> {
@@ -315,16 +341,18 @@ pub const CACHYOS: Distribution = Distribution {
         // it (and lsb-release, issue) to CachyOS after every filesystem update.
         "cachyos-hooks",
     ],
-    repositories: RepositorySelection::ByIsaLevel {
-        v3: CACHYOS_V3,
-        v4: CACHYOS_V4,
-        znver4: CACHYOS_ZNVER4,
-    },
-    optimised_builds: true,
-    keyring: "archlinux",
     kernels: CACHYOS_KERNELS,
-    // Theirs is packaged, so there is nothing to build.
-    zfsbootmenu_package: Some("zfsbootmenu"),
+    family: Family::Arch(Pacman {
+        repositories: RepositorySelection::ByIsaLevel {
+            v3: CACHYOS_V3,
+            v4: CACHYOS_V4,
+            znver4: CACHYOS_ZNVER4,
+        },
+        optimised_builds: true,
+        keyring: "archlinux",
+        // Theirs is packaged, so there is nothing to build.
+        zfsbootmenu_package: Some("zfsbootmenu"),
+    }),
 };
 
 /// Every distribution the installer knows.
@@ -343,6 +371,10 @@ pub fn default() -> &'static Distribution {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pacman(distro: &'static Distribution) -> &'static Pacman {
+        distro.pacman().expect("a pacman-based distribution")
+    }
 
     #[test]
     fn distributions_are_found_by_name() {
@@ -364,9 +396,9 @@ mod tests {
 
     #[test]
     fn cachyos_serves_a_different_build_per_processor() {
-        let v3 = CACHYOS.repositories(IsaLevel::V3);
-        let v4 = CACHYOS.repositories(IsaLevel::V4);
-        let zen = CACHYOS.repositories(IsaLevel::Znver4);
+        let v3 = pacman(&CACHYOS).repositories(IsaLevel::V3);
+        let v4 = pacman(&CACHYOS).repositories(IsaLevel::V4);
+        let zen = pacman(&CACHYOS).repositories(IsaLevel::Znver4);
 
         assert!(v3.iter().any(|r| r.name == "cachyos-v3"));
         assert!(v4.iter().any(|r| r.name == "cachyos-v4"));
@@ -384,7 +416,7 @@ mod tests {
 
         // A processor below the baseline gets nothing, as with their own
         // tooling; add_repositories turns that into a refusal.
-        assert!(CACHYOS.repositories(IsaLevel::Baseline).is_empty());
+        assert!(pacman(&CACHYOS).repositories(IsaLevel::Baseline).is_empty());
     }
 
     /// The directory a repository is served from is the instruction set, not
@@ -417,22 +449,22 @@ mod tests {
         // Their packages carry x86_64_v3 and x86_64_v4; Zen 4 builds are
         // stamped x86_64_v4 like the rest of that baseline.
         assert_eq!(
-            CACHYOS.architectures(IsaLevel::V3),
+            pacman(&CACHYOS).architectures(IsaLevel::V3),
             Some("x86_64 x86_64_v3")
         );
         assert_eq!(
-            CACHYOS.architectures(IsaLevel::V4),
+            pacman(&CACHYOS).architectures(IsaLevel::V4),
             Some("x86_64 x86_64_v3 x86_64_v4")
         );
         assert_eq!(
-            CACHYOS.architectures(IsaLevel::Znver4),
-            CACHYOS.architectures(IsaLevel::V4)
+            pacman(&CACHYOS).architectures(IsaLevel::Znver4),
+            pacman(&CACHYOS).architectures(IsaLevel::V4)
         );
-        assert_eq!(CACHYOS.architectures(IsaLevel::Baseline), None);
+        assert_eq!(pacman(&CACHYOS).architectures(IsaLevel::Baseline), None);
 
         // A distribution without optimised builds says nothing about it.
         for isa in [IsaLevel::V3, IsaLevel::V4, IsaLevel::Znver4] {
-            assert_eq!(ARCH.architectures(isa), None);
+            assert_eq!(pacman(&ARCH).architectures(isa), None);
         }
     }
 
@@ -444,7 +476,7 @@ mod tests {
             IsaLevel::V4,
             IsaLevel::Znver4,
         ] {
-            assert_eq!(ARCH.repositories(isa).len(), 1);
+            assert_eq!(pacman(&ARCH).repositories(isa).len(), 1);
         }
     }
 

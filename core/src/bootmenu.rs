@@ -213,7 +213,7 @@ pub async fn install_and_generate_zbm(
     //    has it and from the AUR when it does not. Asking the AUR for a
     //    package the repositories already satisfy resolves to nothing to
     //    build, and nothing gets installed at all.
-    if let Some(package) = distro.zfsbootmenu_package {
+    if let Some(package) = distro.pacman().and_then(|p| p.zfsbootmenu_package) {
         tracing::info!(package, "installing ZFSBootMenu from the distribution");
         let target_owned = target.to_path_buf();
         let cancel_owned = cancel.clone();
