@@ -47,6 +47,22 @@ pub trait CommandRunner: Send + Sync {
         let _ = cancel;
         self.run_with_stdin(program, args, stdin)
     }
+
+    /// Like `run_cancellable`, handing each line of standard output to
+    /// `on_line` as it arrives, for commands that report progress there.
+    /// Runners that cannot stream hand the lines over once the command has
+    /// finished.
+    fn run_streaming(
+        &self,
+        program: &str,
+        args: &[&str],
+        cancel: &CancellationToken,
+        on_line: &mut dyn FnMut(&str),
+    ) -> Result<CmdOutput> {
+        let output = self.run_cancellable(program, args, cancel)?;
+        output.stdout.lines().for_each(&mut *on_line);
+        Ok(output)
+    }
 }
 
 pub struct RealRunner;
@@ -107,7 +123,7 @@ impl CommandRunner for RealRunner {
         args: &[&str],
         cancel: &CancellationToken,
     ) -> Result<CmdOutput> {
-        run_supervised(program, args, None, cancel)
+        run_supervised(program, args, None, cancel, None)
     }
 
     fn run_with_stdin_cancellable(
@@ -117,7 +133,17 @@ impl CommandRunner for RealRunner {
         stdin: &[u8],
         cancel: &CancellationToken,
     ) -> Result<CmdOutput> {
-        run_supervised(program, args, Some(stdin), cancel)
+        run_supervised(program, args, Some(stdin), cancel, None)
+    }
+
+    fn run_streaming(
+        &self,
+        program: &str,
+        args: &[&str],
+        cancel: &CancellationToken,
+        on_line: &mut dyn FnMut(&str),
+    ) -> Result<CmdOutput> {
+        run_supervised(program, args, None, cancel, Some(on_line))
     }
 }
 
@@ -149,6 +175,7 @@ fn run_supervised(
     args: &[&str],
     stdin_data: Option<&[u8]>,
     cancel: &CancellationToken,
+    mut on_line: Option<&mut dyn FnMut(&str)>,
 ) -> Result<CmdOutput> {
     use std::os::unix::process::CommandExt;
 
@@ -177,11 +204,21 @@ fn run_supervised(
     }
 
     // Drain both pipes on their own threads so a chatty command cannot fill
-    // one and block while this thread watches the token.
-    let stdout = child.stdout.take().map(drain);
+    // one and block while this thread watches the token. A streamed stdout
+    // comes back line by line instead, so the callback runs on this thread.
+    let (lines_tx, lines) = std::sync::mpsc::channel();
+    let stdout = child.stdout.take().map(|pipe| match on_line {
+        Some(_) => drain_lines(pipe, lines_tx),
+        None => drain(pipe),
+    });
     let stderr = child.stderr.take().map(drain);
 
     let status = loop {
+        if let Some(on_line) = on_line.as_mut() {
+            for line in lines.try_iter() {
+                on_line(&line);
+            }
+        }
         if let Some(status) = child.try_wait().wrap_err("failed to wait on child")? {
             break status;
         }
@@ -199,8 +236,15 @@ fn run_supervised(
             .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
             .unwrap_or_default()
     };
+    let stdout = collect(stdout);
+    // Whatever arrived between the last poll and the exit.
+    if let Some(on_line) = on_line.as_mut() {
+        for line in lines.try_iter() {
+            on_line(&line);
+        }
+    }
     let result = CmdOutput {
-        stdout: collect(stdout),
+        stdout,
         stderr: collect(stderr),
         exit_code: status.code().unwrap_or(-1),
     };
@@ -213,6 +257,26 @@ fn drain<R: Read + Send + 'static>(mut reader: R) -> std::thread::JoinHandle<Vec
     std::thread::spawn(move || {
         let mut bytes = Vec::new();
         let _ = reader.read_to_end(&mut bytes);
+        bytes
+    })
+}
+
+/// Like `drain`, also sending each complete line as it is read.
+fn drain_lines<R: Read + Send + 'static>(
+    reader: R,
+    lines: std::sync::mpsc::Sender<String>,
+) -> std::thread::JoinHandle<Vec<u8>> {
+    use std::io::BufRead;
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let mut reader = std::io::BufReader::new(reader);
+        let mut line = Vec::new();
+        while matches!(reader.read_until(b'\n', &mut line), Ok(n) if n > 0) {
+            bytes.extend_from_slice(&line);
+            let text = String::from_utf8_lossy(&line);
+            let _ = lines.send(text.trim_end_matches(['\n', '\r']).to_string());
+            line.clear();
+        }
         bytes
     })
 }
@@ -279,6 +343,16 @@ impl CommandRunner for CancellableRunner {
     ) -> Result<CmdOutput> {
         self.inner
             .run_with_stdin_cancellable(program, args, stdin, cancel)
+    }
+
+    fn run_streaming(
+        &self,
+        program: &str,
+        args: &[&str],
+        cancel: &CancellationToken,
+        on_line: &mut dyn FnMut(&str),
+    ) -> Result<CmdOutput> {
+        self.inner.run_streaming(program, args, cancel, on_line)
     }
 }
 
@@ -531,6 +605,30 @@ mod supervised_tests {
             .unwrap();
         assert!(output.success());
         assert_eq!(output.stdout, "hello");
+    }
+
+    #[test]
+    fn streamed_lines_arrive_while_the_command_runs() {
+        let cancel = CancellationToken::new();
+        let mut seen: Vec<(String, Instant)> = Vec::new();
+        let started = Instant::now();
+        let output = RealRunner
+            .run_streaming(
+                "sh",
+                &["-c", "echo first; sleep 1; printf 'last'"],
+                &cancel,
+                &mut |line| seen.push((line.to_string(), Instant::now())),
+            )
+            .unwrap();
+
+        assert!(output.success());
+        assert_eq!(output.stdout, "first\nlast", "the full output is kept too");
+        let lines: Vec<&str> = seen.iter().map(|(line, _)| line.as_str()).collect();
+        assert_eq!(lines, ["first", "last"], "an unterminated last line counts");
+        assert!(
+            seen[0].1 - started < Duration::from_millis(800),
+            "the first line waited for the command to finish"
+        );
     }
 
     #[test]
