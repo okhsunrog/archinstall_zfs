@@ -458,7 +458,7 @@ fn build_system_items(c: &GlobalConfig) -> Vec<ConfigItem> {
                     .as_ref()
                     .map(|k| k.join(", "))
                     .unwrap_or_else(|| c.primary_kernel().to_string()),
-                c.zfs_module_mode
+                c.effective_zfs_module_mode()
             ),
             ItemType::Select,
         ),

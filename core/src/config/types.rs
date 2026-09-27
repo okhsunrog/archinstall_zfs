@@ -486,6 +486,16 @@ impl GlobalConfig {
         }
     }
 
+    /// The module mode the installation actually uses. A kernel with no
+    /// prebuilt module — every Debian kernel — gets DKMS whatever the
+    /// configuration asks for, and the wizards should say so.
+    pub fn effective_zfs_module_mode(&self) -> ZfsModuleMode {
+        match crate::kernel::get_kernel_info(self.distribution(), self.primary_kernel()) {
+            Some(info) if info.precompiled_package.is_none() => ZfsModuleMode::Dkms,
+            _ => self.zfs_module_mode,
+        }
+    }
+
     /// The kernel installed when the configuration names none.
     ///
     /// The distribution's first, because a kernel from another one does not
@@ -575,6 +585,19 @@ impl GlobalConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_kernel_without_a_prebuilt_module_is_shown_as_dkms() {
+        let arch = GlobalConfig::default();
+        assert_eq!(arch.effective_zfs_module_mode(), ZfsModuleMode::Precompiled);
+
+        let debian = GlobalConfig {
+            distribution: "debian".into(),
+            ..GlobalConfig::default()
+        };
+        assert_eq!(debian.zfs_module_mode, ZfsModuleMode::Precompiled);
+        assert_eq!(debian.effective_zfs_module_mode(), ZfsModuleMode::Dkms);
+    }
 
     #[test]
     fn test_default_config() {
