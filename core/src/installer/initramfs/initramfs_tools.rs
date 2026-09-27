@@ -17,7 +17,8 @@ use crate::system::cmd::{CommandRunner, check_exit, chroot_checked, chroot_cmd};
 const KEY_FILE: &str = "/etc/zfs/zroot.key";
 
 /// Copies the passphrase into the image, where `zfs-initramfs` loads it
-/// from the `file://` keylocation.
+/// from the `file://` keylocation. zfs-initramfs 2.4 carries `/etc/zfs` into
+/// the image itself; the hook keeps that from being something to rely on.
 const KEY_HOOK: &str = r#"#!/bin/sh
 # Written by archinstall_zfs: the pool's passphrase, for zfs load-key.
 PREREQ=""
@@ -26,7 +27,8 @@ case "$1" in
 prereqs) prereqs; exit 0 ;;
 esac
 . /usr/share/initramfs-tools/hook-functions
-copy_file key /etc/zfs/zroot.key
+# zfs-initramfs may have copied it already, which copy_file reports as 1.
+copy_file key /etc/zfs/zroot.key || [ $? -eq 1 ]
 "#;
 
 /// An image holding the passphrase must not be readable by everyone.
