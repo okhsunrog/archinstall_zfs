@@ -158,7 +158,37 @@ Exec = /usr/local/sbin/azfs-update-zbm
 Depends = zfsbootmenu
 "#;
 
-fn install_zbm_pacman_hook(target: &Path) -> Result<()> {
+/// Rebuild ZFSBootMenu after a kernel is installed. Debian runs these after
+/// the kernel's own hooks — DKMS and initramfs-tools — in name order, which
+/// the `zz-` prefix puts last. The kernel version it is handed is not needed:
+/// the image is built for whatever is newest in /boot.
+const ZBM_KERNEL_HOOK: &str = r#"#!/bin/sh
+# Written by archinstall_zfs: rebuild ZFSBootMenu for the new kernel.
+exec /usr/local/sbin/azfs-update-zbm
+"#;
+
+const ZBM_KERNEL_HOOK_PATH: &str = "etc/kernel/postinst.d/zz-azfs-update-zbm";
+
+/// The scripts that build and publish the image, and what runs them when
+/// the kernel changes: a pacman hook, or Debian's kernel hook directory.
+fn install_zbm_hooks(target: &Path, pacman: bool) -> Result<()> {
+    install_zbm_scripts(target)?;
+    if pacman {
+        let hooks_dir = target.join("etc/pacman.d/hooks");
+        fs::create_dir_all(&hooks_dir)?;
+        fs::write(hooks_dir.join("95-zfsbootmenu.hook"), ZBM_PACMAN_HOOK)?;
+        tracing::info!("installed ZBM pacman hook");
+    } else {
+        let hook = target.join(ZBM_KERNEL_HOOK_PATH);
+        fs::create_dir_all(hook.parent().unwrap())?;
+        fs::write(&hook, ZBM_KERNEL_HOOK)?;
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755))?;
+        tracing::info!("installed ZBM kernel hook");
+    }
+    Ok(())
+}
+
+fn install_zbm_scripts(target: &Path) -> Result<()> {
     for (path, contents) in [
         (
             "usr/local/libexec/azfs-install-zbm",
@@ -174,10 +204,6 @@ fn install_zbm_pacman_hook(target: &Path) -> Result<()> {
         fs::write(&path, contents)?;
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755))?;
     }
-    let hooks_dir = target.join("etc/pacman.d/hooks");
-    fs::create_dir_all(&hooks_dir)?;
-    fs::write(hooks_dir.join("95-zfsbootmenu.hook"), ZBM_PACMAN_HOOK)?;
-    tracing::info!("installed ZBM pacman hook");
     Ok(())
 }
 
@@ -212,8 +238,22 @@ pub async fn install_and_generate_zbm(
     // 1. Install ZFSBootMenu, from the distribution's repositories when it
     //    has it and from the AUR when it does not. Asking the AUR for a
     //    package the repositories already satisfy resolves to nothing to
-    //    build, and nothing gets installed at all.
-    if let Some(package) = distro.pacman().and_then(|p| p.zfsbootmenu_package) {
+    //    build, and nothing gets installed at all. Debian has neither, so
+    //    it builds the pinned release from source.
+    let pacman = distro.pacman().is_some();
+    if let Some(apt) = distro.apt() {
+        tracing::info!(
+            version = crate::zbm_source::RELEASE.version,
+            "building ZFSBootMenu from source"
+        );
+        let packages = apt.zfsbootmenu_build_packages;
+        let apt_target = crate::system::apt::AptTarget::new(runner.clone(), target);
+        let cancel_owned = cancel.clone();
+        tokio::task::spawn_blocking(move || apt_target.install(packages, &cancel_owned, None))
+            .await??;
+        crate::zbm_source::install(runner.clone(), target, &crate::zbm_source::RELEASE, cancel)
+            .await?;
+    } else if let Some(package) = distro.pacman().and_then(|p| p.zfsbootmenu_package) {
         tracing::info!(package, "installing ZFSBootMenu from the distribution");
         let target_owned = target.to_path_buf();
         let cancel_owned = cancel.clone();
@@ -240,7 +280,7 @@ pub async fn install_and_generate_zbm(
     let t = target.to_path_buf();
     tokio::task::spawn_blocking(move || -> Result<()> {
         write_zbm_config(&t, init_system)?;
-        install_zbm_pacman_hook(&t)?;
+        install_zbm_hooks(&t, pacman)?;
 
         tracing::info!("running generate-zbm to build EFI bundle");
         chroot_checked(
@@ -546,7 +586,8 @@ mod tests {
     #[test]
     fn test_install_zbm_pacman_hook() {
         let dir = tempfile::tempdir().unwrap();
-        install_zbm_pacman_hook(dir.path()).unwrap();
+        install_zbm_hooks(dir.path(), true).unwrap();
+        assert!(!dir.path().join(ZBM_KERNEL_HOOK_PATH).exists());
 
         let hook_path = dir.path().join("etc/pacman.d/hooks/95-zfsbootmenu.hook");
         assert!(hook_path.exists());
@@ -559,6 +600,27 @@ mod tests {
         assert!(content.contains("Type = Package"));
         assert!(content.contains("Target = zfsbootmenu"));
         assert!(content.contains("Target = zfs-utils"));
+    }
+
+    #[test]
+    fn debian_rebuilds_zbm_from_its_kernel_hooks() {
+        let dir = tempfile::tempdir().unwrap();
+        install_zbm_hooks(dir.path(), false).unwrap();
+
+        let hook = dir.path().join(ZBM_KERNEL_HOOK_PATH);
+        let content = fs::read_to_string(&hook).unwrap();
+        // azfs-update-zbm refuses arguments; the hook is handed two.
+        assert!(content.contains("exec /usr/local/sbin/azfs-update-zbm\n"));
+        assert_eq!(
+            fs::metadata(&hook).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        assert!(dir.path().join("usr/local/sbin/azfs-update-zbm").exists());
+        assert!(
+            !dir.path()
+                .join("etc/pacman.d/hooks/95-zfsbootmenu.hook")
+                .exists()
+        );
     }
 
     #[test]

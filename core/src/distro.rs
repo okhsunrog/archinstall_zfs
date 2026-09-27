@@ -204,6 +204,10 @@ pub struct Apt {
     pub keyring: &'static str,
     /// Source packages taken from a suite other than the release.
     pub pins: &'static [Pin],
+    /// What building and running ZFSBootMenu from source needs: its Perl
+    /// libraries, the tools the menu uses, and `dracut-core` for the image,
+    /// which unlike Debian's full dracut sits beside initramfs-tools.
+    pub zfsbootmenu_build_packages: &'static [&'static str],
 }
 
 /// Keeps a source package's binaries on one suite.
@@ -606,6 +610,17 @@ pub const DEBIAN: Distribution = Distribution {
             source_package: "zfs-linux",
             suite: "trixie-backports",
         }],
+        zfsbootmenu_build_packages: &[
+            "make",
+            "libsort-versions-perl",
+            "libboolean-perl",
+            "libyaml-pp-perl",
+            "fzf",
+            "mbuffer",
+            "kexec-tools",
+            "dracut-core",
+            "bsdextrautils",
+        ],
     }),
 };
 
