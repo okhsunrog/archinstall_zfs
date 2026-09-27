@@ -319,6 +319,9 @@ impl Installer {
         }
 
         locale::set_keyboard(&self.target, &self.config.keyboard_layout)?;
+        if self.distro.apt().is_some() {
+            locale::set_debian_keyboard(&self.target, &self.config.keyboard_layout)?;
+        }
         locale::set_x11_keyboard(&self.target, &self.config.keyboard_layout)?;
 
         if let Some(ref tz) = self.config.timezone {
