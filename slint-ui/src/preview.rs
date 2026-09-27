@@ -257,6 +257,39 @@ pub fn config(scene: Scene) -> GlobalConfig {
     if matches!(scene, Scene::Invalid) {
         return GlobalConfig::default();
     }
+    let config = arch_config(scene);
+    match std::env::var("AZFS_PREVIEW_DISTRIBUTION").as_deref() {
+        Ok("debian") => debian_config(config),
+        _ => config,
+    }
+}
+
+/// The same machine installing the minimal Debian system: its own kernel and
+/// initramfs generator, and nothing Debian cannot install yet.
+fn debian_config(config: GlobalConfig) -> GlobalConfig {
+    let debian = &archinstall_zfs_core::distro::DEBIAN;
+    GlobalConfig {
+        distribution: debian.name.into(),
+        init_system: debian.packages.default_init_system(),
+        kernels: None,
+        hostname: Some("debian-server".into()),
+        profile_selection: ProfileSelection::new("minimal"),
+        users: config.users.clone().map(|users| {
+            users
+                .into_iter()
+                .map(|user| UserConfig {
+                    shell: None,
+                    ..user
+                })
+                .collect()
+        }),
+        additional_packages: vec!["git".into(), "htop".into()],
+        extra_services: Vec::new(),
+        ..config
+    }
+}
+
+fn arch_config(scene: Scene) -> GlobalConfig {
     GlobalConfig {
         installation_mode: Some(match scene {
             Scene::NewPool => InstallationMode::NewPool,
