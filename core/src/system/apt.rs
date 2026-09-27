@@ -25,13 +25,16 @@ const PREFERENCES_PATH: &str = "etc/apt/preferences.d/archinstall-zfs";
 
 /// Options for every apt-get run. Configuration files a package ships are
 /// kept as the installer wrote them, and nothing waits for an answer.
+///
+/// dpkg keeps the pseudo-terminal apt gives it. Without one, and with the
+/// status stream on standard output, maintainer scripts that echo — the
+/// postinsts of ca-certificates and initramfs-tools among them — fail with
+/// EIO and leave the kernel unconfigured.
 const APT_OPTIONS: &[&str] = &[
     "-y",
     "-q",
     "-o",
     "APT::Status-Fd=1",
-    "-o",
-    "Dpkg::Use-Pty=0",
     "-o",
     "Dpkg::Options::=--force-confdef",
     "-o",
