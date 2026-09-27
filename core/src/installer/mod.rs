@@ -545,7 +545,11 @@ impl Installer {
                     &user.username,
                     user.password.as_deref(),
                     user.sudo,
-                    user.shell.as_deref(),
+                    // Debian's useradd defaults to /bin/sh; Arch's to bash,
+                    // which is what a user left to the default expects.
+                    user.shell
+                        .as_deref()
+                        .or(self.distro.apt().map(|_| "/bin/bash")),
                     user.groups.as_deref(),
                 )?;
                 if !user.ssh_authorized_keys.is_empty() {

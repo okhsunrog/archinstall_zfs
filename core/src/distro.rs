@@ -579,8 +579,6 @@ const DEBIAN_KERNELS: &[KernelInfo] = &[KernelInfo {
 }];
 
 /// Debian stable with OpenZFS from backports.
-///
-/// Not in [`ALL`] until the installer can complete a Debian installation.
 pub const DEBIAN: Distribution = Distribution {
     name: "debian",
     display_name: "Debian",
@@ -625,7 +623,7 @@ pub const DEBIAN: Distribution = Distribution {
 };
 
 /// Every distribution the installer knows.
-pub const ALL: &[Distribution] = &[ARCH, CACHYOS];
+pub const ALL: &[Distribution] = &[ARCH, CACHYOS, DEBIAN];
 
 /// Look a distribution up by the name a configuration file uses.
 pub fn get(name: &str) -> Option<&'static Distribution> {
@@ -656,7 +654,7 @@ mod tests {
     /// fall back on.
     #[test]
     fn every_distribution_offers_its_default_initramfs() {
-        for distro in ALL.iter().chain([&DEBIAN]) {
+        for distro in ALL {
             let init = distro.packages.default_init_system();
             assert!(
                 distro.packages.initramfs(init).is_some(),

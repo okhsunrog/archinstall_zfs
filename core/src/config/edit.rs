@@ -380,6 +380,29 @@ mod tests {
     }
 
     #[test]
+    fn changing_to_debian_takes_its_kernel_and_initramfs_generator() {
+        use crate::config::types::InitSystem;
+        let mut c = cfg();
+        c.init_system = InitSystem::Mkinitcpio;
+        let debian = crate::distro::ALL
+            .iter()
+            .position(|d| d.name == "debian")
+            .expect("debian is registered");
+
+        apply_choice(&mut c, ChoiceSetting::Distribution, debian);
+
+        assert_eq!(c.primary_kernel(), "linux-image-amd64");
+        assert_eq!(c.init_system, InitSystem::InitramfsTools);
+        let labels: Vec<&str> = c.init_system_choices().iter().map(|(_, l)| *l).collect();
+        assert_eq!(labels, ["initramfs-tools"]);
+
+        // Back on Arch, a generator Arch offers is kept.
+        c.init_system = InitSystem::InitramfsTools;
+        apply_choice(&mut c, ChoiceSetting::Distribution, 0);
+        assert_eq!(c.init_system, InitSystem::Dracut);
+    }
+
+    #[test]
     fn reselecting_the_same_distribution_keeps_the_kernel() {
         let mut c = cfg();
         c.kernels = Some(vec!["linux-zen".to_string()]);
