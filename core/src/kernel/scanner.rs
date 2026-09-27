@@ -45,6 +45,26 @@ impl CompatibilityResult {
 /// Queries all packages in a single alpm session to avoid DB lock contention,
 /// then runs DKMS range checks concurrently (HTTP requests).
 pub async fn scan_all_kernels(distro: &'static Distribution) -> Vec<CompatibilityResult> {
+    // The medium's databases are Arch's. A distribution installed with apt
+    // builds its module with DKMS against headers from its own archive, and
+    // the backports pin keeps the two releases matched, so there is nothing
+    // here to check it against.
+    if distro.pacman().is_none() {
+        return distro
+            .kernels
+            .iter()
+            .map(|info| CompatibilityResult {
+                kernel_name: info.name.to_string(),
+                kernel_version: None,
+                dkms_compatible: true,
+                dkms_warnings: Vec::new(),
+                precompiled_compatible: false,
+                precompiled_version: None,
+                precompiled_warnings: Vec::new(),
+            })
+            .collect();
+    }
+
     // Collect all packages we need to query across all kernels
     let mut all_pkg_names: Vec<&str> = vec!["zfs-dkms", "zfs-utils"];
     for info in distro.kernels {
@@ -446,6 +466,16 @@ fn strip_build_suffix(version: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn debian_kernels_are_offered_with_dkms_without_a_lookup() {
+        let results = scan_all_kernels(&crate::distro::DEBIAN).await;
+        assert_eq!(results.len(), crate::distro::DEBIAN.kernels.len());
+        for result in results {
+            assert_eq!(result.best_mode(), Some(ZfsModuleMode::Dkms));
+            assert!(result.dkms_warnings.is_empty());
+        }
+    }
     use crate::config::types::ZfsModuleMode;
 
     // ── Version parsing (matches Python TestVersionParsing) ─────
