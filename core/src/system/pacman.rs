@@ -24,7 +24,10 @@ pub fn add_repositories(
     distro: &Distribution,
     isa: IsaLevel,
 ) -> Result<()> {
-    let repositories = distro.repositories(isa);
+    let Some(pacman) = distro.pacman() else {
+        bail!("{} is not installed with pacman", distro.display_name);
+    };
+    let repositories = pacman.repositories(isa);
     if repositories.is_empty() {
         bail!(
             "{} has no repositories for this processor: its packages start at x86-64-v3",
@@ -38,7 +41,7 @@ pub fn add_repositories(
     };
 
     let mut content = std::fs::read_to_string(&pacman_conf)?;
-    if let Some(architectures) = distro.architectures(isa) {
+    if let Some(architectures) = pacman.architectures(isa) {
         content = set_option(&content, "Architecture", architectures);
     }
     for repo in repositories {
@@ -49,7 +52,7 @@ pub fn add_repositories(
     }
     std::fs::write(&pacman_conf, content)?;
 
-    init_keyring(runner, target, distro.keyring);
+    init_keyring(runner, target, pacman.keyring);
     for repo in repositories {
         trust_repository_keys(runner, target, repo);
     }

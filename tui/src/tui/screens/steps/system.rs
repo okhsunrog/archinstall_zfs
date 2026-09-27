@@ -21,7 +21,7 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
                     .as_ref()
                     .map(|k| k.join(", "))
                     .unwrap_or_else(|| config.primary_kernel().to_string()),
-                config.zfs_module_mode
+                config.effective_zfs_module_mode()
             ),
         ),
         MenuItem::text(

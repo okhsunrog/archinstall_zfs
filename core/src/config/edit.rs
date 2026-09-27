@@ -22,8 +22,8 @@ use std::path::Path;
 
 use super::choices::Choice;
 use super::types::{
-    AudioServer, CompressionAlgo, GlobalConfig, InitSystem, InstallationMode, ProfileSelection,
-    SeatAccess, SwapMode, ZfsEncryptionMode,
+    AudioServer, CompressionAlgo, GlobalConfig, InstallationMode, ProfileSelection, SeatAccess,
+    SwapMode, ZfsEncryptionMode,
 };
 
 /// Define a settings enum alongside the wire keys the interfaces use for it.
@@ -167,6 +167,11 @@ pub fn apply_choice(config: &mut GlobalConfig, setting: ChoiceSetting, index: us
                 // distribution's own default.
                 config.kernels = None;
             }
+            // Likewise the initramfs generator: Debian offers neither of
+            // Arch's, and Arch does not package Debian's.
+            if distro.packages.initramfs(config.init_system).is_none() {
+                config.init_system = distro.packages.default_init_system();
+            }
             config.distribution = distro.name.to_string();
         }
         ChoiceSetting::InstallationMode => {
@@ -208,8 +213,9 @@ pub fn apply_choice(config: &mut GlobalConfig, setting: ChoiceSetting, index: us
             }
         }
         ChoiceSetting::InitSystem => {
-            if let Some(init) = InitSystem::from_index(index) {
-                config.init_system = init;
+            // Offered per distribution, so positions come from its own list.
+            if let Some((init, _)) = config.init_system_choices().get(index) {
+                config.init_system = *init;
             }
         }
         ChoiceSetting::Audio => {
@@ -297,6 +303,20 @@ fn package_list(value: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn an_init_system_is_chosen_from_the_distribution_list() {
+        use crate::config::types::InitSystem;
+        let mut c = GlobalConfig::default();
+        let labels: Vec<&str> = c.init_system_choices().iter().map(|(_, l)| *l).collect();
+        assert_eq!(labels, ["dracut", "mkinitcpio"], "Arch lists its own two");
+
+        apply_choice(&mut c, ChoiceSetting::InitSystem, 1);
+        assert_eq!(c.init_system, InitSystem::Mkinitcpio);
+        // Past the end of Arch's list, where initramfs-tools would be.
+        apply_choice(&mut c, ChoiceSetting::InitSystem, 2);
+        assert_eq!(c.init_system, InitSystem::Mkinitcpio);
+    }
+
     fn cfg() -> GlobalConfig {
         GlobalConfig::default()
     }
@@ -357,6 +377,29 @@ mod tests {
             "linux-cachyos",
             "the new distribution's own default takes over"
         );
+    }
+
+    #[test]
+    fn changing_to_debian_takes_its_kernel_and_initramfs_generator() {
+        use crate::config::types::InitSystem;
+        let mut c = cfg();
+        c.init_system = InitSystem::Mkinitcpio;
+        let debian = crate::distro::ALL
+            .iter()
+            .position(|d| d.name == "debian")
+            .expect("debian is registered");
+
+        apply_choice(&mut c, ChoiceSetting::Distribution, debian);
+
+        assert_eq!(c.primary_kernel(), "linux-image-amd64");
+        assert_eq!(c.init_system, InitSystem::InitramfsTools);
+        let labels: Vec<&str> = c.init_system_choices().iter().map(|(_, l)| *l).collect();
+        assert_eq!(labels, ["initramfs-tools"]);
+
+        // Back on Arch, a generator Arch offers is kept.
+        c.init_system = InitSystem::InitramfsTools;
+        apply_choice(&mut c, ChoiceSetting::Distribution, 0);
+        assert_eq!(c.init_system, InitSystem::Dracut);
     }
 
     #[test]

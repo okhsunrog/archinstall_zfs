@@ -7,8 +7,9 @@
 //!
 //! A distribution is data, so a second one is an entry rather than a branch.
 
+use crate::config::types::InitSystem;
 use crate::kernel::KernelInfo;
-use crate::system::sysinfo::IsaLevel;
+use crate::system::sysinfo::{CpuVendor, IsaLevel};
 
 /// How much pacman verifies of what a repository serves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,6 +80,185 @@ pub struct Distribution {
     /// What a base installation starts from, before kernels, initramfs and
     /// microcode are added.
     pub base_packages: &'static [&'static str],
+    /// The kernels this distribution offers, and where each one's ZFS module
+    /// comes from.
+    pub kernels: &'static [KernelInfo],
+    /// What the installer asks for by role rather than by name.
+    pub packages: &'static SystemPackages,
+    /// The packaging the distribution is built on, which decides how
+    /// everything above is fetched and installed.
+    pub family: Family,
+}
+
+/// Packages the installer installs for what they do, under the names a
+/// distribution gives them.
+#[derive(Debug, Clone, Copy)]
+pub struct SystemPackages {
+    /// ZFS userland, shared by every kernel's module.
+    pub zfs_utils: &'static [&'static str],
+    /// The ZFS module built by DKMS against a kernel's headers.
+    pub zfs_dkms: &'static str,
+    pub network_manager: &'static [&'static str],
+    pub iwd: &'static [&'static str],
+    /// What reads `/etc/systemd/zram-generator.conf` and creates the device.
+    pub zram_generator: &'static [&'static str],
+    pub intel_microcode: &'static str,
+    pub amd_microcode: &'static str,
+    /// Each initramfs generator the distribution offers. `None` where it
+    /// does not offer that one.
+    pub dracut: Option<Initramfs>,
+    pub mkinitcpio: Option<Initramfs>,
+    pub initramfs_tools: Option<Initramfs>,
+}
+
+/// An initramfs generator and what lets it import the pool.
+#[derive(Debug, Clone, Copy)]
+pub struct Initramfs {
+    /// Installed with the base system, with the kernels.
+    pub generator: &'static [&'static str],
+    /// Installed with ZFS, after the module: Debian's integration packages
+    /// depend on `zfs-dkms`, and installed any earlier they would build the
+    /// module before the ZFS phase has set it up.
+    pub zfs: &'static [&'static str],
+}
+
+impl SystemPackages {
+    pub fn microcode(&self, vendor: CpuVendor) -> Option<&'static str> {
+        match vendor {
+            CpuVendor::Intel => Some(self.intel_microcode),
+            CpuVendor::Amd => Some(self.amd_microcode),
+            CpuVendor::Unknown => None,
+        }
+    }
+
+    /// What builds the initramfs for this choice, when the distribution
+    /// offers it.
+    pub fn initramfs(&self, init_system: InitSystem) -> Option<Initramfs> {
+        match init_system {
+            InitSystem::Dracut => self.dracut,
+            InitSystem::Mkinitcpio => self.mkinitcpio,
+            InitSystem::InitramfsTools => self.initramfs_tools,
+        }
+    }
+
+    /// The generator a configuration gets when the one it names is not
+    /// offered: the first the distribution has, in the order the wizard
+    /// lists them.
+    pub fn default_init_system(&self) -> InitSystem {
+        use crate::config::choices::Choice;
+        InitSystem::CHOICES
+            .iter()
+            .map(|(init, _)| *init)
+            .find(|init| self.initramfs(*init).is_some())
+            .unwrap_or_default()
+    }
+
+    /// Every name in the table, for the repository check.
+    pub fn all(&self) -> Vec<&'static str> {
+        let mut names = vec![self.zfs_dkms, self.intel_microcode, self.amd_microcode];
+        for set in [
+            self.zfs_utils,
+            self.network_manager,
+            self.iwd,
+            self.zram_generator,
+        ] {
+            names.extend_from_slice(set);
+        }
+        for initramfs in [self.dracut, self.mkinitcpio, self.initramfs_tools]
+            .into_iter()
+            .flatten()
+        {
+            names.extend_from_slice(initramfs.generator);
+            names.extend_from_slice(initramfs.zfs);
+        }
+        names
+    }
+}
+
+/// The packaging a distribution is built on.
+#[derive(Debug, Clone, Copy)]
+pub enum Family {
+    /// Arch and the distributions that extend its repositories.
+    Arch(Pacman),
+    /// Debian, bootstrapped with debootstrap and completed with apt.
+    Debian(Apt),
+}
+
+/// Where an apt-based distribution is fetched from.
+#[derive(Debug, Clone, Copy)]
+pub struct Apt {
+    /// The archive the release and its companion suites are served from.
+    pub mirror: &'static str,
+    /// The release debootstrap installs.
+    pub suite: &'static str,
+    /// Suites served from `mirror` next to the release: updates, backports.
+    pub companion_suites: &'static [&'static str],
+    /// Security updates live in an archive of their own.
+    pub security_mirror: &'static str,
+    pub security_suite: &'static str,
+    /// Every suite is written with these components. ZFS is in `contrib`,
+    /// because its licence keeps it out of `main`.
+    pub components: &'static [&'static str],
+    /// The keyring on the live medium the release is verified against, and
+    /// that the installed system keeps trusting.
+    pub keyring: &'static str,
+    /// Source packages taken from a suite other than the release.
+    pub pins: &'static [Pin],
+    /// What building and running ZFSBootMenu from source needs: its Perl
+    /// libraries, the tools the menu uses, and `dracut-core` for the image,
+    /// which unlike Debian's full dracut sits beside initramfs-tools.
+    pub zfsbootmenu_build_packages: &'static [&'static str],
+}
+
+/// Keeps a source package's binaries on one suite.
+///
+/// Pinning by source package rather than by binary is what keeps them in
+/// step: trixie-backports serves two OpenZFS branches at once, and
+/// `zfsutils-linux` from one breaks `zfs-dkms` from the other.
+#[derive(Debug, Clone, Copy)]
+pub struct Pin {
+    pub source_package: &'static str,
+    pub suite: &'static str,
+}
+
+impl Apt {
+    /// The installed system's `/etc/apt/sources.list.d/debian.sources`.
+    pub fn sources(&self) -> String {
+        let components = self.components.join(" ");
+        let mut suites = vec![self.suite];
+        suites.extend_from_slice(self.companion_suites);
+        format!(
+            "Types: deb\nURIs: {}\nSuites: {}\nComponents: {components}\nSigned-By: {}\n\n\
+             Types: deb\nURIs: {}\nSuites: {}\nComponents: {components}\nSigned-By: {}\n",
+            self.mirror,
+            suites.join(" "),
+            self.keyring,
+            self.security_mirror,
+            self.security_suite,
+            self.keyring,
+        )
+    }
+
+    /// The installed system's apt preferences for `pins`. Priority 990 is
+    /// what `apt-get -t` would give the suite, here limited to the pinned
+    /// packages and kept for later upgrades.
+    pub fn preferences(&self) -> String {
+        self.pins
+            .iter()
+            .map(|pin| {
+                format!(
+                    "Package: src:{}\nPin: release n={}\nPin-Priority: 990\n",
+                    pin.source_package, pin.suite
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+/// What a pacman-based distribution adds to Arch.
+#[derive(Debug, Clone, Copy)]
+pub struct Pacman {
     /// Repositories to add, in the order they should appear. Order matters:
     /// pacman prefers the first repository that offers a package.
     pub repositories: RepositorySelection,
@@ -93,9 +273,6 @@ pub struct Distribution {
     pub optimised_builds: bool,
     /// The keyring `pacman-key --populate` is given.
     pub keyring: &'static str,
-    /// The kernels this distribution offers, and where each one's ZFS module
-    /// comes from.
-    pub kernels: &'static [KernelInfo],
     /// The package providing ZFSBootMenu, when the distribution has one.
     /// `None` means building it from the AUR, which is what Arch needs.
     pub zfsbootmenu_package: Option<&'static str>,
@@ -117,6 +294,27 @@ const ARCHZFS: Repository = Repository {
         "DDF7DB817396A49B2A2723F7403BD972F75D9D76",
     ],
     signatures: Signatures::Never,
+};
+
+/// Arch's names, which CachyOS shares: it extends Arch's repositories rather
+/// than replacing them.
+const ARCH_PACKAGES: SystemPackages = SystemPackages {
+    zfs_utils: &["zfs-utils"],
+    zfs_dkms: "zfs-dkms",
+    network_manager: &["networkmanager"],
+    iwd: &["iwd"],
+    zram_generator: &["zram-generator"],
+    intel_microcode: "intel-ucode",
+    amd_microcode: "amd-ucode",
+    dracut: Some(Initramfs {
+        generator: &["dracut"],
+        zfs: &[],
+    }),
+    mkinitcpio: Some(Initramfs {
+        generator: &["mkinitcpio"],
+        zfs: &[],
+    }),
+    initramfs_tools: None,
 };
 
 /// Arch's own kernels, each with the archzfs module built for it.
@@ -157,14 +355,35 @@ pub const ARCH: Distribution = Distribution {
         "linux-firmware-marvell",
         "sof-firmware",
     ],
-    repositories: RepositorySelection::Fixed(&[ARCHZFS]),
-    optimised_builds: false,
-    keyring: "archlinux",
     kernels: ARCH_KERNELS,
-    zfsbootmenu_package: None,
+    packages: &ARCH_PACKAGES,
+    family: Family::Arch(Pacman {
+        repositories: RepositorySelection::Fixed(&[ARCHZFS]),
+        optimised_builds: false,
+        keyring: "archlinux",
+        zfsbootmenu_package: None,
+    }),
 };
 
 impl Distribution {
+    /// The pacman side of the distribution, when it has one.
+    pub fn pacman(&self) -> Option<&Pacman> {
+        match &self.family {
+            Family::Arch(pacman) => Some(pacman),
+            Family::Debian(_) => None,
+        }
+    }
+
+    /// The apt side of the distribution, when it has one.
+    pub fn apt(&self) -> Option<&Apt> {
+        match &self.family {
+            Family::Debian(apt) => Some(apt),
+            Family::Arch(_) => None,
+        }
+    }
+}
+
+impl Pacman {
     /// The architectures pacman should accept on this machine, when that
     /// needs saying at all.
     pub fn architectures(&self, isa: IsaLevel) -> Option<&'static str> {
@@ -315,20 +534,96 @@ pub const CACHYOS: Distribution = Distribution {
         // it (and lsb-release, issue) to CachyOS after every filesystem update.
         "cachyos-hooks",
     ],
-    repositories: RepositorySelection::ByIsaLevel {
-        v3: CACHYOS_V3,
-        v4: CACHYOS_V4,
-        znver4: CACHYOS_ZNVER4,
-    },
-    optimised_builds: true,
-    keyring: "archlinux",
     kernels: CACHYOS_KERNELS,
-    // Theirs is packaged, so there is nothing to build.
-    zfsbootmenu_package: Some("zfsbootmenu"),
+    packages: &ARCH_PACKAGES,
+    family: Family::Arch(Pacman {
+        repositories: RepositorySelection::ByIsaLevel {
+            v3: CACHYOS_V3,
+            v4: CACHYOS_V4,
+            znver4: CACHYOS_ZNVER4,
+        },
+        optimised_builds: true,
+        keyring: "archlinux",
+        // Theirs is packaged, so there is nothing to build.
+        zfsbootmenu_package: Some("zfsbootmenu"),
+    }),
+};
+
+/// Debian's names for the role packages. ZFS is DKMS-only: Debian ships no
+/// prebuilt module, and the kernels carry no ZFS of their own.
+///
+/// initramfs-tools is the only generator offered. Debian's dracut conflicts
+/// with it, and so does `zfs-dracut`, which depends on dracut; ZFSBootMenu
+/// is built with `dracut-core`, which conflicts with neither.
+const DEBIAN_PACKAGES: SystemPackages = SystemPackages {
+    zfs_utils: &["zfsutils-linux", "zfs-zed"],
+    zfs_dkms: "zfs-dkms",
+    network_manager: &["network-manager"],
+    iwd: &["iwd"],
+    zram_generator: &["systemd-zram-generator"],
+    intel_microcode: "intel-microcode",
+    amd_microcode: "amd64-microcode",
+    dracut: None,
+    mkinitcpio: None,
+    initramfs_tools: Some(Initramfs {
+        generator: &["initramfs-tools"],
+        zfs: &["zfs-initramfs"],
+    }),
+};
+
+const DEBIAN_KERNELS: &[KernelInfo] = &[KernelInfo {
+    name: "linux-image-amd64",
+    display_name: "Debian stable",
+    precompiled_package: None,
+    headers_package: "linux-headers-amd64",
+}];
+
+/// Debian stable with OpenZFS from backports.
+pub const DEBIAN: Distribution = Distribution {
+    name: "debian",
+    display_name: "Debian",
+    base_packages: &[
+        "locales",
+        "console-setup",
+        "keyboard-configuration",
+        "sudo",
+        "systemd-timesyncd",
+        "ca-certificates",
+        "dosfstools",
+        "efibootmgr",
+        "firmware-linux",
+        "firmware-sof-signed",
+    ],
+    kernels: DEBIAN_KERNELS,
+    packages: &DEBIAN_PACKAGES,
+    family: Family::Debian(Apt {
+        mirror: "http://deb.debian.org/debian",
+        suite: "trixie",
+        companion_suites: &["trixie-updates", "trixie-backports"],
+        security_mirror: "http://security.debian.org/debian-security",
+        security_suite: "trixie-security",
+        components: &["main", "contrib", "non-free-firmware"],
+        keyring: "/usr/share/keyrings/debian-archive-keyring.gpg",
+        pins: &[Pin {
+            source_package: "zfs-linux",
+            suite: "trixie-backports",
+        }],
+        zfsbootmenu_build_packages: &[
+            "make",
+            "libsort-versions-perl",
+            "libboolean-perl",
+            "libyaml-pp-perl",
+            "fzf",
+            "mbuffer",
+            "kexec-tools",
+            "dracut-core",
+            "bsdextrautils",
+        ],
+    }),
 };
 
 /// Every distribution the installer knows.
-pub const ALL: &[Distribution] = &[ARCH, CACHYOS];
+pub const ALL: &[Distribution] = &[ARCH, CACHYOS, DEBIAN];
 
 /// Look a distribution up by the name a configuration file uses.
 pub fn get(name: &str) -> Option<&'static Distribution> {
@@ -344,11 +639,79 @@ pub fn default() -> &'static Distribution {
 mod tests {
     use super::*;
 
+    fn pacman(distro: &'static Distribution) -> &'static Pacman {
+        distro.pacman().expect("a pacman-based distribution")
+    }
+
     #[test]
     fn distributions_are_found_by_name() {
         assert_eq!(get("arch").map(|d| d.display_name), Some("Arch Linux"));
         assert!(get("plan9").is_none());
         assert_eq!(default().name, "arch");
+    }
+
+    /// Whatever a configuration names, a distribution has a generator to
+    /// fall back on.
+    #[test]
+    fn every_distribution_offers_its_default_initramfs() {
+        for distro in ALL {
+            let init = distro.packages.default_init_system();
+            assert!(
+                distro.packages.initramfs(init).is_some(),
+                "{} cannot build {init}",
+                distro.name
+            );
+        }
+    }
+
+    #[test]
+    fn debian_is_installed_with_apt() {
+        assert!(DEBIAN.pacman().is_none());
+        assert!(DEBIAN.apt().is_some());
+        assert!(ARCH.apt().is_none());
+        assert!(DEBIAN.packages.initramfs(InitSystem::Dracut).is_none());
+        assert!(DEBIAN.packages.initramfs(InitSystem::Mkinitcpio).is_none());
+        assert_eq!(
+            DEBIAN.packages.default_init_system(),
+            InitSystem::InitramfsTools
+        );
+        assert_eq!(ARCH.packages.default_init_system(), InitSystem::Dracut);
+    }
+
+    #[test]
+    fn debian_sources_list_every_suite_with_zfs_reachable() {
+        let apt = DEBIAN.apt().unwrap();
+        let sources = apt.sources();
+
+        let stanzas: Vec<&str> = sources.split_inclusive("\n\n").collect();
+        assert_eq!(stanzas.len(), 2, "archive and security: {sources}");
+        assert!(stanzas[0].contains("Suites: trixie trixie-updates trixie-backports\n"));
+        assert!(stanzas[1].contains("URIs: http://security.debian.org/debian-security\n"));
+        assert!(stanzas[1].contains("Suites: trixie-security\n"));
+        for stanza in stanzas {
+            assert!(stanza.contains("Components: main contrib non-free-firmware\n"));
+            assert!(stanza.contains("Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg\n"));
+        }
+    }
+
+    #[test]
+    fn zfs_is_pinned_to_backports_by_source_package() {
+        assert_eq!(
+            DEBIAN.apt().unwrap().preferences(),
+            "Package: src:zfs-linux\nPin: release n=trixie-backports\nPin-Priority: 990\n"
+        );
+    }
+
+    #[test]
+    fn debian_zfs_module_is_always_built_with_dkms() {
+        use crate::config::types::ZfsModuleMode;
+        let kernel = DEBIAN.kernels[0].name;
+        for mode in [ZfsModuleMode::Precompiled, ZfsModuleMode::Dkms] {
+            assert_eq!(
+                crate::kernel::zfs_module_packages(&DEBIAN, kernel, mode),
+                ["zfs-dkms", "linux-headers-amd64"]
+            );
+        }
     }
 
     #[test]
@@ -364,9 +727,9 @@ mod tests {
 
     #[test]
     fn cachyos_serves_a_different_build_per_processor() {
-        let v3 = CACHYOS.repositories(IsaLevel::V3);
-        let v4 = CACHYOS.repositories(IsaLevel::V4);
-        let zen = CACHYOS.repositories(IsaLevel::Znver4);
+        let v3 = pacman(&CACHYOS).repositories(IsaLevel::V3);
+        let v4 = pacman(&CACHYOS).repositories(IsaLevel::V4);
+        let zen = pacman(&CACHYOS).repositories(IsaLevel::Znver4);
 
         assert!(v3.iter().any(|r| r.name == "cachyos-v3"));
         assert!(v4.iter().any(|r| r.name == "cachyos-v4"));
@@ -384,7 +747,7 @@ mod tests {
 
         // A processor below the baseline gets nothing, as with their own
         // tooling; add_repositories turns that into a refusal.
-        assert!(CACHYOS.repositories(IsaLevel::Baseline).is_empty());
+        assert!(pacman(&CACHYOS).repositories(IsaLevel::Baseline).is_empty());
     }
 
     /// The directory a repository is served from is the instruction set, not
@@ -417,22 +780,22 @@ mod tests {
         // Their packages carry x86_64_v3 and x86_64_v4; Zen 4 builds are
         // stamped x86_64_v4 like the rest of that baseline.
         assert_eq!(
-            CACHYOS.architectures(IsaLevel::V3),
+            pacman(&CACHYOS).architectures(IsaLevel::V3),
             Some("x86_64 x86_64_v3")
         );
         assert_eq!(
-            CACHYOS.architectures(IsaLevel::V4),
+            pacman(&CACHYOS).architectures(IsaLevel::V4),
             Some("x86_64 x86_64_v3 x86_64_v4")
         );
         assert_eq!(
-            CACHYOS.architectures(IsaLevel::Znver4),
-            CACHYOS.architectures(IsaLevel::V4)
+            pacman(&CACHYOS).architectures(IsaLevel::Znver4),
+            pacman(&CACHYOS).architectures(IsaLevel::V4)
         );
-        assert_eq!(CACHYOS.architectures(IsaLevel::Baseline), None);
+        assert_eq!(pacman(&CACHYOS).architectures(IsaLevel::Baseline), None);
 
         // A distribution without optimised builds says nothing about it.
         for isa in [IsaLevel::V3, IsaLevel::V4, IsaLevel::Znver4] {
-            assert_eq!(ARCH.architectures(isa), None);
+            assert_eq!(pacman(&ARCH).architectures(isa), None);
         }
     }
 
@@ -444,7 +807,7 @@ mod tests {
             IsaLevel::V4,
             IsaLevel::Znver4,
         ] {
-            assert_eq!(ARCH.repositories(isa).len(), 1);
+            assert_eq!(pacman(&ARCH).repositories(isa).len(), 1);
         }
     }
 

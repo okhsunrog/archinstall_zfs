@@ -20,8 +20,7 @@ pub fn set_locale(runner: &dyn CommandRunner, target: &Path, locale: &str) -> Re
     let locale_gen = target.join("etc/locale.gen");
     if locale_gen.exists() {
         let content = fs::read_to_string(&locale_gen)?;
-        let uncommented = content.replace(&format!("#{locale}"), locale);
-        fs::write(&locale_gen, uncommented)?;
+        fs::write(&locale_gen, uncomment_locale(&content, locale))?;
     }
 
     // Run locale-gen
@@ -36,6 +35,34 @@ pub fn set_locale(runner: &dyn CommandRunner, target: &Path, locale: &str) -> Re
     Ok(())
 }
 
+/// `locale.gen` with `locale`'s line enabled. Arch comments it out as
+/// `#en_US.UTF-8 UTF-8`, Debian as `# en_US.UTF-8 UTF-8`.
+fn uncomment_locale(content: &str, locale: &str) -> String {
+    let mut result: String = content
+        .lines()
+        .map(|line| {
+            let stripped = line.trim_start_matches('#').trim_start();
+            if stripped == locale { stripped } else { line }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if content.ends_with('\n') {
+        result.push('\n');
+    }
+    result
+}
+
+/// Debian reads the system locale from `/etc/default/locale` rather than
+/// `/etc/locale.conf`.
+pub fn set_default_locale(target: &Path, locale: &str) -> Result<()> {
+    let path = target.join("etc/default/locale");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let lang = locale.split_whitespace().next().unwrap_or(locale);
+    fs::write(&path, format!("LANG={lang}\n")).wrap_err("failed to write /etc/default/locale")
+}
+
 pub fn set_keyboard(target: &Path, layout: &str) -> Result<()> {
     let vconsole = target.join("etc/vconsole.conf");
     if let Some(parent) = vconsole.parent() {
@@ -43,6 +70,34 @@ pub fn set_keyboard(target: &Path, layout: &str) -> Result<()> {
     }
     fs::write(&vconsole, format!("KEYMAP={layout}\n")).wrap_err("failed to write vconsole.conf")?;
     tracing::info!(layout, "set keyboard layout");
+    Ok(())
+}
+
+/// Debian's console takes its layout from `/etc/default/keyboard`, which
+/// console-setup reads as an XKB layout; `vconsole.conf` names a kbd keymap
+/// Debian does not ship.
+///
+/// The configuration holds a kbd keymap name. Most of them are an XKB layout
+/// with a variant suffix (`de-latin1`); the British one is named differently.
+/// Keymaps with no XKB counterpart come through unchanged and leave the
+/// console on its default.
+pub fn set_debian_keyboard(target: &Path, keymap: &str) -> Result<()> {
+    let layout = match keymap.split('-').next().unwrap_or(keymap) {
+        "uk" => "gb",
+        layout => layout,
+    };
+    let path = target.join("etc/default/keyboard");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(
+        &path,
+        format!(
+            "XKBMODEL=\"pc105\"\nXKBLAYOUT=\"{layout}\"\nXKBVARIANT=\"\"\nXKBOPTIONS=\"\"\nBACKSPACE=\"guess\"\n"
+        ),
+    )
+    .wrap_err("failed to write /etc/default/keyboard")?;
+    tracing::info!(keymap, layout, "set Debian keyboard layout");
     Ok(())
 }
 
@@ -193,6 +248,53 @@ pub fn set_timezone(target: &Path, timezone: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_locale_is_enabled_however_the_distribution_comments_it_out() {
+        let arch = "#en_GB.UTF-8 UTF-8\n#en_US.UTF-8 UTF-8\n";
+        let debian = "# en_GB.UTF-8 UTF-8\n# en_US.UTF-8 UTF-8\n";
+
+        assert_eq!(
+            uncomment_locale(arch, "en_US.UTF-8 UTF-8"),
+            "#en_GB.UTF-8 UTF-8\nen_US.UTF-8 UTF-8\n"
+        );
+        assert_eq!(
+            uncomment_locale(debian, "en_US.UTF-8 UTF-8"),
+            "# en_GB.UTF-8 UTF-8\nen_US.UTF-8 UTF-8\n"
+        );
+        // A locale sharing a prefix is not the same locale.
+        assert_eq!(
+            uncomment_locale("# en_US.UTF-8 UTF-8\n", "en_US UTF-8"),
+            "# en_US.UTF-8 UTF-8\n"
+        );
+    }
+
+    #[test]
+    fn debian_keyboard_takes_the_xkb_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        let layout = |keymap: &str| {
+            set_debian_keyboard(dir.path(), keymap).unwrap();
+            fs::read_to_string(dir.path().join("etc/default/keyboard"))
+                .unwrap()
+                .lines()
+                .find_map(|l| l.strip_prefix("XKBLAYOUT="))
+                .unwrap()
+                .to_string()
+        };
+        assert_eq!(layout("us"), "\"us\"");
+        assert_eq!(layout("de-latin1"), "\"de\"");
+        assert_eq!(layout("uk"), "\"gb\"");
+    }
+
+    #[test]
+    fn debian_gets_its_default_locale_file() {
+        let dir = tempfile::tempdir().unwrap();
+        set_default_locale(dir.path(), "de_DE.UTF-8 UTF-8").unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.path().join("etc/default/locale")).unwrap(),
+            "LANG=de_DE.UTF-8\n"
+        );
+    }
 
     #[test]
     fn test_set_hostname() {

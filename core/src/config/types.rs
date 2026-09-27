@@ -36,6 +36,8 @@ pub enum InitSystem {
     #[default]
     Dracut,
     Mkinitcpio,
+    /// Debian's own generator.
+    InitramfsTools,
 }
 
 impl std::fmt::Display for InitSystem {
@@ -43,6 +45,7 @@ impl std::fmt::Display for InitSystem {
         match self {
             Self::Dracut => write!(f, "dracut"),
             Self::Mkinitcpio => write!(f, "mkinitcpio"),
+            Self::InitramfsTools => write!(f, "initramfs-tools"),
         }
     }
 }
@@ -432,6 +435,21 @@ impl GlobalConfig {
         })
     }
 
+    /// The initramfs generators this configuration's distribution offers, in
+    /// the order the wizards list them. Positions in this list are what the
+    /// wizards hand back for [`ChoiceSetting::InitSystem`].
+    ///
+    /// [`ChoiceSetting::InitSystem`]: crate::config::edit::ChoiceSetting::InitSystem
+    pub fn init_system_choices(&self) -> Vec<(InitSystem, &'static str)> {
+        use crate::config::choices::Choice;
+        let packages = self.distribution().packages;
+        InitSystem::CHOICES
+            .iter()
+            .copied()
+            .filter(|(init, _)| packages.initramfs(*init).is_some())
+            .collect()
+    }
+
     pub fn encryption_enabled(&self) -> bool {
         self.zfs_encryption_mode != ZfsEncryptionMode::None
     }
@@ -465,6 +483,16 @@ impl GlobalConfig {
         match &self.kernels {
             Some(k) if !k.is_empty() => k[0].as_str(),
             _ => self.default_kernel(),
+        }
+    }
+
+    /// The module mode the installation actually uses. A kernel with no
+    /// prebuilt module — every Debian kernel — gets DKMS whatever the
+    /// configuration asks for, and the wizards should say so.
+    pub fn effective_zfs_module_mode(&self) -> ZfsModuleMode {
+        match crate::kernel::get_kernel_info(self.distribution(), self.primary_kernel()) {
+            Some(info) if info.precompiled_package.is_none() => ZfsModuleMode::Dkms,
+            _ => self.zfs_module_mode,
         }
     }
 
@@ -557,6 +585,19 @@ impl GlobalConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_kernel_without_a_prebuilt_module_is_shown_as_dkms() {
+        let arch = GlobalConfig::default();
+        assert_eq!(arch.effective_zfs_module_mode(), ZfsModuleMode::Precompiled);
+
+        let debian = GlobalConfig {
+            distribution: "debian".into(),
+            ..GlobalConfig::default()
+        };
+        assert_eq!(debian.zfs_module_mode, ZfsModuleMode::Precompiled);
+        assert_eq!(debian.effective_zfs_module_mode(), ZfsModuleMode::Dkms);
+    }
 
     #[test]
     fn test_default_config() {

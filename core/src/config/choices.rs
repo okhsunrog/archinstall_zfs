@@ -100,8 +100,11 @@ impl Choice for SwapMode {
 }
 
 impl Choice for InitSystem {
-    const CHOICES: &'static [(Self, &'static str)] =
-        &[(Self::Dracut, "dracut"), (Self::Mkinitcpio, "mkinitcpio")];
+    const CHOICES: &'static [(Self, &'static str)] = &[
+        (Self::Dracut, "dracut"),
+        (Self::Mkinitcpio, "mkinitcpio"),
+        (Self::InitramfsTools, "initramfs-tools"),
+    ];
 }
 
 /// Optional settings are presented with an explicit "None" row first, so the
@@ -189,7 +192,11 @@ mod tests {
             SwapMode::ZswapPartition,
             SwapMode::ZswapPartitionEncrypted,
         ]);
-        assert_listed(&[InitSystem::Dracut, InitSystem::Mkinitcpio]);
+        assert_listed(&[
+            InitSystem::Dracut,
+            InitSystem::Mkinitcpio,
+            InitSystem::InitramfsTools,
+        ]);
         assert_listed(&[
             None,
             Some(AudioServer::Pipewire),

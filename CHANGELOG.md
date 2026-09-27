@@ -7,6 +7,14 @@ latest release with fresh packages and ZFS modules, so they are not listed here.
 
 ## [Unreleased]
 
+### Added
+
+- Debian 13 (trixie) can be chosen as the distribution: a minimal full-disk
+  system with OpenZFS from trixie-backports built by DKMS, an initramfs-tools
+  image and ZFSBootMenu built from source. Profiles other than Minimal, AUR
+  packages, audio, Bluetooth, graphics drivers and installing alongside another
+  system are not available for Debian yet.
+
 ## [0.5.1] - 2026-09-23
 
 ### Changed

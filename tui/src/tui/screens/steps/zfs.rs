@@ -1,7 +1,7 @@
 use archinstall_zfs_core::config::edit::{ChoiceSetting, DeviceSetting, TextSetting};
 use archinstall_zfs_core::config::types::{GlobalConfig, InstallationMode, ZfsEncryptionMode};
 
-use super::{MenuItem, MenuKind, choice_group};
+use super::{MenuItem, MenuKind, choice_group, radio_group};
 
 pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
     let mode = config.installation_mode;
@@ -73,10 +73,18 @@ pub fn items(config: &GlobalConfig) -> Vec<MenuItem> {
         ));
     }
 
-    items.extend(choice_group(
-        ChoiceSetting::InitSystem,
+    // Only the generators the distribution offers.
+    let init_choices = config.init_system_choices();
+    let labels: Vec<&'static str> = init_choices.iter().map(|(_, label)| *label).collect();
+    let current = init_choices
+        .iter()
+        .position(|(init, _)| *init == config.init_system)
+        .unwrap_or(0);
+    items.extend(radio_group(
+        ChoiceSetting::InitSystem.as_str(),
         "Init system",
-        config.init_system,
+        &labels,
+        current,
     ));
 
     items

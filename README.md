@@ -27,12 +27,17 @@
 
 Setting up ZFS on Arch involves kernel selection, ZFS module installation, bootloader configuration, and optional encryption. Archinstall-ZFS automates these steps with two UI options: a graphical installer (Slint, renders directly via Linux KMS) and a terminal UI (ratatui). It uses direct libalpm bindings for package management (no `pacman`/`pacstrap` shell calls), resolves AUR dependency chains via `raur`/`aur-depends`, and validates kernel/ZFS compatibility against OpenZFS release data.
 
+Besides Arch it installs CachyOS, and Debian 13 as a minimal system: Debian is
+bootstrapped with `debootstrap` and completed by apt inside the target, with
+OpenZFS from trixie-backports built by DKMS, an initramfs-tools image and
+ZFSBootMenu built from its release source.
+
 Key improvements over the Python version:
 
 - **No archinstall dependency** — fully standalone, no dependency on the official Arch installer framework or its Python ecosystem
 - **Single binary** with no Python/pip/venv dependencies
 - **Direct libalpm** for all package management with async parallel downloads and per-package progress
-- **No external package manager binaries** needed at runtime (no `pacman`, `pacstrap`, `yay`)
+- **No external package manager binaries** needed at runtime for Arch and CachyOS (no `pacman`, `pacstrap`, `yay`)
 - **Proper AUR dependency resolution** via `raur` + `aur-depends` crates
 - **Cancellable installation** with graceful cleanup
 - **Safe LinuxKMS demo** for real input, cursor, Wi-Fi, disk, and read-only ZFS testing

@@ -277,7 +277,13 @@ async fn install(
         let runner = runner.clone();
         let kernel = kernel.clone();
         let zfs_mode = config.zfs_module_mode;
-        let distro = config.distribution();
+        // The medium is Arch whatever it installs, so a distribution it
+        // cannot add repositories for gets ZFS from Arch's, built for the
+        // kernel the medium is running rather than the one being installed.
+        let (distro, kernel) = match config.distribution() {
+            distro if distro.pacman().is_some() => (distro, kernel),
+            _ => (&crate::distro::ARCH, running_kernel_package()),
+        };
         let cancel = cancel.clone();
         let download_config = download_config.clone();
         tokio::task::spawn_blocking(move || {
@@ -454,6 +460,10 @@ pub fn planned_repository_packages(config: &GlobalConfig) -> Vec<String> {
 /// requested package or group. Distributions with their own repositories
 /// are only warned about, since the live medium may not carry them.
 fn verify_repository_packages(config: &GlobalConfig) -> Result<()> {
+    // The medium's databases are Arch's; they say nothing about apt names.
+    if config.distribution().pacman().is_none() {
+        return Ok(());
+    }
     let names = planned_repository_packages(config);
     if names.is_empty() {
         return Ok(());
@@ -482,6 +492,20 @@ fn verify_repository_packages(config: &GlobalConfig) -> Result<()> {
     bail!(
         "These packages are not in any repository: {list}. Check the spelling, or add them as AUR packages, then start again."
     );
+}
+
+/// The package the running kernel came from, which Arch records next to its
+/// modules. The medium's own kernel when that cannot be read.
+fn running_kernel_package() -> String {
+    const MEDIUM_KERNEL: &str = "linux-lts";
+    let Ok(release) = std::fs::read_to_string("/proc/sys/kernel/osrelease") else {
+        return MEDIUM_KERNEL.to_string();
+    };
+    std::fs::read_to_string(format!("/usr/lib/modules/{}/pkgbase", release.trim()))
+        .map(|name| name.trim().to_string())
+        .ok()
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| MEDIUM_KERNEL.to_string())
 }
 
 fn ensure_not_cancelled(cancel: &CancellationToken) -> Result<()> {

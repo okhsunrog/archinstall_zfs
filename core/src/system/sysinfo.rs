@@ -24,16 +24,6 @@ pub enum CpuVendor {
     Unknown,
 }
 
-impl CpuVendor {
-    pub fn microcode_package(&self) -> Option<&'static str> {
-        match self {
-            Self::Intel => Some("intel-ucode"),
-            Self::Amd => Some("amd-ucode"),
-            Self::Unknown => None,
-        }
-    }
-}
-
 pub fn has_uefi() -> bool {
     std::path::Path::new("/sys/firmware/efi").exists()
 }
@@ -92,18 +82,6 @@ pub fn detect_storage_type(dev_path: &std::path::Path) -> StorageType {
         StorageType::SataSsd
     } else {
         StorageType::Hdd
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_cpu_vendor_microcode() {
-        assert_eq!(CpuVendor::Intel.microcode_package(), Some("intel-ucode"));
-        assert_eq!(CpuVendor::Amd.microcode_package(), Some("amd-ucode"));
-        assert_eq!(CpuVendor::Unknown.microcode_package(), None);
     }
 }
 

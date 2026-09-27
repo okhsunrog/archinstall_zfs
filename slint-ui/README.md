@@ -109,6 +109,14 @@ AZFS_PREVIEW_STORAGE=many uv run slint-ui/scripts/storage_review.py \
   --fixture many --output /tmp/azfs-storage-many
 ```
 
+`AZFS_PREVIEW_DISTRIBUTION=debian` switches the configured scenes to a minimal
+Debian installation, with Debian's kernel and initramfs generator:
+
+```sh
+AZFS_PREVIEW_DISTRIBUTION=debian uv run slint-ui/scripts/review.py \
+  --scenes zfs system desktop review --sizes 1920x1080@1 --output /tmp/azfs-ui-debian
+```
+
 `AZFS_PREVIEW_STORAGE` accepts `empty` (no disks), `many` (20 partitions per disk),
 and `missing` (unknown filesystems and labels). Pass the matching `--fixture`
 argument to the storage script: the flag selects assertions, and the environment
