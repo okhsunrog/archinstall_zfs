@@ -476,6 +476,12 @@ impl Installer {
             bail!("no ZFS module could be installed for any configured kernel ({detail})");
         }
 
+        // What lets the initramfs import the pool, now that the module it
+        // depends on is in place.
+        if let Some(initramfs) = self.distro.packages.initramfs(self.config.init_system) {
+            self.install_target_packages(initramfs.zfs)?;
+        }
+
         for (kernel, error) in failures {
             let install = match self.packages {
                 TargetPackages::Alpm(_) => format!("`pacman -S zfs-{kernel}` (or zfs-dkms)"),
@@ -503,6 +509,13 @@ impl Installer {
             InitSystem::Mkinitcpio => {
                 initramfs::mkinitcpio::configure(&self.target, encryption)?;
                 initramfs::mkinitcpio::generate(&*self.runner, &self.target, &kernels)?;
+            }
+            // Built for every kernel DKMS produced a module for, which it
+            // finds for itself: Debian's kernel package names say nothing
+            // about the versions installed.
+            InitSystem::InitramfsTools => {
+                initramfs::initramfs_tools::configure(&self.target, encryption)?;
+                initramfs::initramfs_tools::generate(&*self.runner, &self.target, encryption)?;
             }
         }
 

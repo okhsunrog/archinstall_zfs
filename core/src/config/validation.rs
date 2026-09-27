@@ -1,6 +1,7 @@
 use std::fmt;
 use std::path::PathBuf;
 
+use super::choices::Choice;
 use super::types::{GlobalConfig, InstallationMode, ZFS_PASSPHRASE_MIN_LENGTH, ZfsEncryptionMode};
 
 /// Something about the configuration that stops the installation.
@@ -285,10 +286,7 @@ impl GlobalConfig {
     ) -> Vec<ValidationError> {
         let mut unsupported = Vec::new();
         if distro.packages.initramfs(self.init_system).is_none() {
-            unsupported.push(match self.init_system {
-                crate::config::types::InitSystem::Dracut => "dracut",
-                crate::config::types::InitSystem::Mkinitcpio => "mkinitcpio",
-            });
+            unsupported.push(self.init_system.label());
         }
 
         // The first Debian installations are the minimal system that boots:
@@ -788,7 +786,10 @@ mod tests {
 
     #[test]
     fn debian_accepts_the_minimal_system_it_can_install() {
-        let c = valid_full_disk_config();
+        let c = GlobalConfig {
+            init_system: crate::config::types::InitSystem::InitramfsTools,
+            ..valid_full_disk_config()
+        };
         assert!(
             c.validate_distribution_support(&crate::distro::DEBIAN)
                 .is_empty()

@@ -412,7 +412,7 @@ fn build_zbm_cmdline(zswap_enabled: bool) -> String {
 /// to the dataset name for the kernel cmdline).
 fn rootprefix_for(init_system: InitSystem) -> &'static str {
     match init_system {
-        InitSystem::Dracut => "root=ZFS=",
+        InitSystem::Dracut | InitSystem::InitramfsTools => "root=ZFS=",
         InitSystem::Mkinitcpio => "zfs=",
     }
 }
@@ -540,6 +540,7 @@ mod tests {
     fn test_rootprefix_for() {
         assert_eq!(rootprefix_for(InitSystem::Dracut), "root=ZFS=");
         assert_eq!(rootprefix_for(InitSystem::Mkinitcpio), "zfs=");
+        assert_eq!(rootprefix_for(InitSystem::InitramfsTools), "root=ZFS=");
     }
 
     #[test]

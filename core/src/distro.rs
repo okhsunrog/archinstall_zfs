@@ -104,10 +104,22 @@ pub struct SystemPackages {
     pub zram_generator: &'static [&'static str],
     pub intel_microcode: &'static str,
     pub amd_microcode: &'static str,
-    /// Each initramfs generator together with its ZFS support. `None` where
-    /// the distribution does not offer that generator.
-    pub dracut: Option<&'static [&'static str]>,
-    pub mkinitcpio: Option<&'static [&'static str]>,
+    /// Each initramfs generator the distribution offers. `None` where it
+    /// does not offer that one.
+    pub dracut: Option<Initramfs>,
+    pub mkinitcpio: Option<Initramfs>,
+    pub initramfs_tools: Option<Initramfs>,
+}
+
+/// An initramfs generator and what lets it import the pool.
+#[derive(Debug, Clone, Copy)]
+pub struct Initramfs {
+    /// Installed with the base system, with the kernels.
+    pub generator: &'static [&'static str],
+    /// Installed with ZFS, after the module: Debian's integration packages
+    /// depend on `zfs-dkms`, and installed any earlier they would build the
+    /// module before the ZFS phase has set it up.
+    pub zfs: &'static [&'static str],
 }
 
 impl SystemPackages {
@@ -121,11 +133,24 @@ impl SystemPackages {
 
     /// What builds the initramfs for this choice, when the distribution
     /// offers it.
-    pub fn initramfs(&self, init_system: InitSystem) -> Option<&'static [&'static str]> {
+    pub fn initramfs(&self, init_system: InitSystem) -> Option<Initramfs> {
         match init_system {
             InitSystem::Dracut => self.dracut,
             InitSystem::Mkinitcpio => self.mkinitcpio,
+            InitSystem::InitramfsTools => self.initramfs_tools,
         }
+    }
+
+    /// The generator a configuration gets when the one it names is not
+    /// offered: the first the distribution has, in the order the wizard
+    /// lists them.
+    pub fn default_init_system(&self) -> InitSystem {
+        use crate::config::choices::Choice;
+        InitSystem::CHOICES
+            .iter()
+            .map(|(init, _)| *init)
+            .find(|init| self.initramfs(*init).is_some())
+            .unwrap_or_default()
     }
 
     /// Every name in the table, for the repository check.
@@ -139,8 +164,12 @@ impl SystemPackages {
         ] {
             names.extend_from_slice(set);
         }
-        for set in [self.dracut, self.mkinitcpio].into_iter().flatten() {
-            names.extend_from_slice(set);
+        for initramfs in [self.dracut, self.mkinitcpio, self.initramfs_tools]
+            .into_iter()
+            .flatten()
+        {
+            names.extend_from_slice(initramfs.generator);
+            names.extend_from_slice(initramfs.zfs);
         }
         names
     }
@@ -273,8 +302,15 @@ const ARCH_PACKAGES: SystemPackages = SystemPackages {
     zram_generator: &["zram-generator"],
     intel_microcode: "intel-ucode",
     amd_microcode: "amd-ucode",
-    dracut: Some(&["dracut"]),
-    mkinitcpio: Some(&["mkinitcpio"]),
+    dracut: Some(Initramfs {
+        generator: &["dracut"],
+        zfs: &[],
+    }),
+    mkinitcpio: Some(Initramfs {
+        generator: &["mkinitcpio"],
+        zfs: &[],
+    }),
+    initramfs_tools: None,
 };
 
 /// Arch's own kernels, each with the archzfs module built for it.
@@ -512,19 +548,23 @@ pub const CACHYOS: Distribution = Distribution {
 /// Debian's names for the role packages. ZFS is DKMS-only: Debian ships no
 /// prebuilt module, and the kernels carry no ZFS of their own.
 ///
-/// dracut's ZFS module goes in with the utilities rather than with dracut:
-/// `zfs-dracut` depends on `zfs-dkms`, and installed with the base system it
-/// would pull the module in before the ZFS phase has set it up.
+/// initramfs-tools is the only generator offered. Debian's dracut conflicts
+/// with it, and so does `zfs-dracut`, which depends on dracut; ZFSBootMenu
+/// is built with `dracut-core`, which conflicts with neither.
 const DEBIAN_PACKAGES: SystemPackages = SystemPackages {
-    zfs_utils: &["zfsutils-linux", "zfs-zed", "zfs-dracut"],
+    zfs_utils: &["zfsutils-linux", "zfs-zed"],
     zfs_dkms: "zfs-dkms",
     network_manager: &["network-manager"],
     iwd: &["iwd"],
     zram_generator: &["systemd-zram-generator"],
     intel_microcode: "intel-microcode",
     amd_microcode: "amd64-microcode",
-    dracut: Some(&["dracut"]),
+    dracut: None,
     mkinitcpio: None,
+    initramfs_tools: Some(Initramfs {
+        generator: &["initramfs-tools"],
+        zfs: &["zfs-initramfs"],
+    }),
 };
 
 const DEBIAN_KERNELS: &[KernelInfo] = &[KernelInfo {
@@ -597,14 +637,15 @@ mod tests {
         assert_eq!(default().name, "arch");
     }
 
-    /// A configuration that does not choose a generator gets the default one,
-    /// so every distribution has to be able to install it.
+    /// Whatever a configuration names, a distribution has a generator to
+    /// fall back on.
     #[test]
-    fn every_distribution_offers_the_default_initramfs() {
-        for distro in ALL {
+    fn every_distribution_offers_its_default_initramfs() {
+        for distro in ALL.iter().chain([&DEBIAN]) {
+            let init = distro.packages.default_init_system();
             assert!(
-                distro.packages.initramfs(InitSystem::default()).is_some(),
-                "{} cannot build the default initramfs",
+                distro.packages.initramfs(init).is_some(),
+                "{} cannot build {init}",
                 distro.name
             );
         }
@@ -615,8 +656,13 @@ mod tests {
         assert!(DEBIAN.pacman().is_none());
         assert!(DEBIAN.apt().is_some());
         assert!(ARCH.apt().is_none());
-        assert!(DEBIAN.packages.initramfs(InitSystem::default()).is_some());
+        assert!(DEBIAN.packages.initramfs(InitSystem::Dracut).is_none());
         assert!(DEBIAN.packages.initramfs(InitSystem::Mkinitcpio).is_none());
+        assert_eq!(
+            DEBIAN.packages.default_init_system(),
+            InitSystem::InitramfsTools
+        );
+        assert_eq!(ARCH.packages.default_init_system(), InitSystem::Dracut);
     }
 
     #[test]

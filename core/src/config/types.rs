@@ -36,6 +36,8 @@ pub enum InitSystem {
     #[default]
     Dracut,
     Mkinitcpio,
+    /// Debian's own generator.
+    InitramfsTools,
 }
 
 impl std::fmt::Display for InitSystem {
@@ -43,6 +45,7 @@ impl std::fmt::Display for InitSystem {
         match self {
             Self::Dracut => write!(f, "dracut"),
             Self::Mkinitcpio => write!(f, "mkinitcpio"),
+            Self::InitramfsTools => write!(f, "initramfs-tools"),
         }
     }
 }
@@ -430,6 +433,21 @@ impl GlobalConfig {
             );
             crate::distro::default()
         })
+    }
+
+    /// The initramfs generators this configuration's distribution offers, in
+    /// the order the wizards list them. Positions in this list are what the
+    /// wizards hand back for [`ChoiceSetting::InitSystem`].
+    ///
+    /// [`ChoiceSetting::InitSystem`]: crate::config::edit::ChoiceSetting::InitSystem
+    pub fn init_system_choices(&self) -> Vec<(InitSystem, &'static str)> {
+        use crate::config::choices::Choice;
+        let packages = self.distribution().packages;
+        InitSystem::CHOICES
+            .iter()
+            .copied()
+            .filter(|(init, _)| packages.initramfs(*init).is_some())
+            .collect()
     }
 
     pub fn encryption_enabled(&self) -> bool {

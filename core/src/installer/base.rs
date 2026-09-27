@@ -29,7 +29,7 @@ fn base_packages(config: &GlobalConfig) -> Result<Vec<&str>> {
             config.init_system
         );
     };
-    packages.extend_from_slice(initramfs);
+    packages.extend_from_slice(initramfs.generator);
 
     if let Some(ucode) = distro.packages.microcode(sysinfo::cpu_vendor()) {
         packages.push(ucode);

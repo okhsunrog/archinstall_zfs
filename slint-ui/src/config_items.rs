@@ -251,6 +251,35 @@ fn compact_choice<T: Choice>(
         ..Default::default()
     }
 }
+/// Like [`compact_choice`], listing only the generators the distribution
+/// offers; `apply_choice` reads positions from the same list.
+fn init_system_choice(c: &GlobalConfig) -> ConfigItem {
+    let choices = c.init_system_choices();
+    let index = choices
+        .iter()
+        .position(|(init, _)| *init == c.init_system)
+        .unwrap_or(0);
+    ConfigItem {
+        key: ChoiceSetting::InitSystem.as_str().into(),
+        label: "Initramfs generator".into(),
+        value: choices
+            .get(index)
+            .map(|(_, label)| *label)
+            .unwrap_or_default()
+            .into(),
+        choices: slint::ModelRc::new(slint::VecModel::from(
+            choices
+                .iter()
+                .map(|(_, label)| SharedString::from(*label))
+                .collect::<Vec<_>>(),
+        )),
+        choice_index: index as i32,
+        description: "Builds the early boot image used to load the system.".into(),
+        item_type: ItemType::CompactChoice,
+        ..Default::default()
+    }
+}
+
 fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     let mut items = vec![section_header("Pool and boot environment")];
     if c.installation_mode == Some(InstallationMode::ExistingPool) {
@@ -377,12 +406,7 @@ fn build_zfs_items(c: &GlobalConfig) -> Vec<ConfigItem> {
     );
     compression.advanced = true;
     items.push(compression);
-    let mut init = compact_choice(
-        ChoiceSetting::InitSystem,
-        "Initramfs generator",
-        c.init_system,
-        "Builds the early boot image used to load the system.",
-    );
+    let mut init = init_system_choice(c);
     init.advanced = true;
     items.push(init);
     items
