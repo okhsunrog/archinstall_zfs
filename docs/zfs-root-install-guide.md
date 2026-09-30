@@ -652,11 +652,21 @@ arch-chroot /mnt bash -c '
 '
 ```
 
-Arch's `dracut` package ships no pacman hooks, so the installer writes them —
+The installer writes its own pacman hooks —
 `/etc/pacman.d/hooks/90-dracut-install.hook` and `60-dracut-remove.hook`, driving
-`/usr/local/bin/dracut-{install,remove}.sh` — triggered on
-`usr/lib/modules/*/pkgbase`. Without these, a kernel upgrade would install new
-modules and leave a stale initramfs: an unbootable system on next reboot.
+`/usr/local/bin/dracut-{install,remove}.sh`. They share their names with the hooks
+Arch's `dracut` package ships, so they replace them: the packaged install script
+only acts on kernel targets and silently ignores its other triggers.
+
+* A kernel install or upgrade (`usr/lib/modules/*/pkgbase`) builds that kernel's
+  image. Without this, the new modules would sit next to a stale initramfs: an
+  unbootable system on next reboot.
+* Anything else that ends up inside an image — a ZFS module (`extramodules/zfs.ko*`
+  or a DKMS `dkms.conf`), dracut modules (including the ones `zfs-utils` ships),
+  early microcode and firmware, systemd, cryptsetup, lvm — rebuilds every image
+  that already exists. Otherwise, say, a microcode update would not load until
+  the next kernel upgrade. A kernel the installer left without an image, because
+  it has no ZFS module, does not gain one here.
 
 ### mkinitcpio (alternative)
 
