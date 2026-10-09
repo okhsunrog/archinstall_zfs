@@ -642,9 +642,6 @@ name = "bitflags"
 version = "2.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
-dependencies = [
- "serde_core",
-]
 
 [[package]]
 name = "block-buffer"
@@ -1070,7 +1067,7 @@ dependencies = [
 [[package]]
 name = "const-field-offset"
 version = "0.2.1"
-source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#e42407a5a6b77da77e0c9b1f86ed3adb16e6355e"
+source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#c359ce8d74a118ef91be045dafbd03924d2d713e"
 dependencies = [
  "const-field-offset-macro",
  "field-offset",
@@ -1079,7 +1076,7 @@ dependencies = [
 [[package]]
 name = "const-field-offset-macro"
 version = "0.2.1"
-source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#e42407a5a6b77da77e0c9b1f86ed3adb16e6355e"
+source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#c359ce8d74a118ef91be045dafbd03924d2d713e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2488,7 +2485,7 @@ dependencies = [
 [[package]]
 name = "i-slint-backend-linuxkms"
 version = "1.19.0"
-source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#e42407a5a6b77da77e0c9b1f86ed3adb16e6355e"
+source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#c359ce8d74a118ef91be045dafbd03924d2d713e"
 dependencies = [
  "calloop 0.14.4",
  "cfg_aliases",
@@ -2509,7 +2506,7 @@ dependencies = [
 [[package]]
 name = "i-slint-backend-selector"
 version = "1.19.0"
-source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#e42407a5a6b77da77e0c9b1f86ed3adb16e6355e"
+source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#c359ce8d74a118ef91be045dafbd03924d2d713e"
 dependencies = [
  "cfg_aliases",
  "i-slint-backend-linuxkms",
@@ -2525,7 +2522,7 @@ dependencies = [
 [[package]]
 name = "i-slint-backend-testing"
 version = "1.19.0"
-source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#e42407a5a6b77da77e0c9b1f86ed3adb16e6355e"
+source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#c359ce8d74a118ef91be045dafbd03924d2d713e"
 dependencies = [
  "cfg_aliases",
  "i-slint-common",
@@ -2537,7 +2534,7 @@ dependencies = [
 [[package]]
 name = "i-slint-backend-winit"
 version = "1.19.0"
-source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#e42407a5a6b77da77e0c9b1f86ed3adb16e6355e"
+source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#c359ce8d74a118ef91be045dafbd03924d2d713e"
 dependencies = [
  "arboard",
  "block2 0.6.2",
@@ -2574,7 +2571,7 @@ dependencies = [
 [[package]]
 name = "i-slint-common"
 version = "1.19.0"
-source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#e42407a5a6b77da77e0c9b1f86ed3adb16e6355e"
+source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#c359ce8d74a118ef91be045dafbd03924d2d713e"
 dependencies = [
  "derive_more",
  "fontique",
@@ -2582,6 +2579,7 @@ dependencies = [
  "icu_decimal",
  "icu_locale_core",
  "icu_provider",
+ "objc2 0.6.4",
  "pulldown-cmark",
  "resvg",
  "skrifa",
@@ -2590,7 +2588,7 @@ dependencies = [
 [[package]]
 name = "i-slint-compiler"
 version = "1.19.0"
-source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#e42407a5a6b77da77e0c9b1f86ed3adb16e6355e"
+source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#c359ce8d74a118ef91be045dafbd03924d2d713e"
 dependencies = [
  "annotate-snippets",
  "by_address",
@@ -2615,6 +2613,7 @@ dependencies = [
  "smol_str 0.3.6",
  "strum",
  "swash",
+ "syn 3.0.3",
  "typed-index-collections",
  "unicode-segmentation",
  "url",
@@ -2623,9 +2622,10 @@ dependencies = [
 [[package]]
 name = "i-slint-core"
 version = "1.19.0"
-source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#e42407a5a6b77da77e0c9b1f86ed3adb16e6355e"
+source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#c359ce8d74a118ef91be045dafbd03924d2d713e"
 dependencies = [
  "bitflags 2.13.1",
+ "bytemuck",
  "chrono",
  "clru",
  "const-field-offset",
@@ -2673,7 +2673,7 @@ dependencies = [
 [[package]]
 name = "i-slint-core-macros"
 version = "1.19.0"
-source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#e42407a5a6b77da77e0c9b1f86ed3adb16e6355e"
+source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#c359ce8d74a118ef91be045dafbd03924d2d713e"
 dependencies = [
  "quote",
  "serde_json",
@@ -2683,7 +2683,7 @@ dependencies = [
 [[package]]
 name = "i-slint-renderer-skia"
 version = "1.19.0"
-source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#e42407a5a6b77da77e0c9b1f86ed3adb16e6355e"
+source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#c359ce8d74a118ef91be045dafbd03924d2d713e"
 dependencies = [
  "bytemuck",
  "cfg_aliases",
@@ -2720,7 +2720,7 @@ dependencies = [
 [[package]]
 name = "i-slint-renderer-software"
 version = "1.19.0"
-source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#e42407a5a6b77da77e0c9b1f86ed3adb16e6355e"
+source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#c359ce8d74a118ef91be045dafbd03924d2d713e"
 dependencies = [
  "bytemuck",
  "clru",
@@ -3206,13 +3206,12 @@ dependencies = [
 
 [[package]]
 name = "keyboard-types"
-version = "0.7.0"
+version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b750dcadc39a09dbadd74e118f6dd6598df77fa01df0cfcdc52c28dece74528a"
+checksum = "0fbe853b403ae61a04233030ae8a79d94975281ed9770a1f9e246732b534b28d"
 dependencies = [
  "bitflags 2.13.1",
  "serde",
- "unicode-segmentation",
 ]
 
 [[package]]
@@ -3546,9 +3545,9 @@ dependencies = [
 
 [[package]]
 name = "muda"
-version = "0.19.3"
+version = "0.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1dd04e60bc0b07438a6771710ee1698f98f6ebbc7f89b61264af1563b8aeb878"
+checksum = "4340e89c178916e62879c5c36b7f699019369be413e496178a6983ce91b8bc03"
 dependencies = [
  "crossbeam-channel",
  "dpi",
@@ -3557,7 +3556,6 @@ dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
- "once_cell",
  "png",
  "thiserror 2.0.20",
  "windows-sys 0.61.2",
@@ -5615,7 +5613,7 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 [[package]]
 name = "slint"
 version = "1.19.0"
-source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#e42407a5a6b77da77e0c9b1f86ed3adb16e6355e"
+source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#c359ce8d74a118ef91be045dafbd03924d2d713e"
 dependencies = [
  "const-field-offset",
  "i-slint-backend-linuxkms",
@@ -5636,7 +5634,7 @@ dependencies = [
 [[package]]
 name = "slint-build"
 version = "1.19.0"
-source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#e42407a5a6b77da77e0c9b1f86ed3adb16e6355e"
+source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#c359ce8d74a118ef91be045dafbd03924d2d713e"
 dependencies = [
  "derive_more",
  "fontique",
@@ -5648,7 +5646,7 @@ dependencies = [
 [[package]]
 name = "slint-macros"
 version = "1.19.0"
-source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#e42407a5a6b77da77e0c9b1f86ed3adb16e6355e"
+source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#c359ce8d74a118ef91be045dafbd03924d2d713e"
 dependencies = [
  "i-slint-compiler",
  "proc-macro2",
@@ -6756,7 +6754,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "vtable"
 version = "0.5.0"
-source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#e42407a5a6b77da77e0c9b1f86ed3adb16e6355e"
+source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#c359ce8d74a118ef91be045dafbd03924d2d713e"
 dependencies = [
  "const-field-offset",
  "portable-atomic",
@@ -6767,7 +6765,7 @@ dependencies = [
 [[package]]
 name = "vtable-macro"
 version = "0.5.0"
-source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#e42407a5a6b77da77e0c9b1f86ed3adb16e6355e"
+source = "git+https://github.com/okhsunrog/slint.git?branch=feat%2Flinuxkms-integration#c359ce8d74a118ef91be045dafbd03924d2d713e"
 dependencies = [
  "proc-macro2",
  "quote",

@@ -106,14 +106,19 @@ curl -LO https://github.com/okhsunrog/archinstall_zfs/releases/latest/download/a
 curl -LO https://github.com/okhsunrog/archinstall_zfs/releases/latest/download/azfs
 chmod +x azfs-tui azfs
 
-# For the GUI, install runtime dependencies first:
-pacman -Sy libxkbcommon libinput freetype2 fontconfig ttf-dejavu
+# For the GUI, install runtime dependencies first
+# (seatd provides libseat, which the GUI takes the display and input through):
+pacman -Sy libxkbcommon libinput seatd freetype2 fontconfig ttf-dejavu
 
 # Run
 ./azfs  # or ./azfs-tui
 ```
 
 > Note: This path installs ZFS components during the run, so it usually takes longer than Option A.
+
+> Start the GUI from the console you logged in on, not over SSH: it takes the
+> screen and keyboard from that login session, and stops with "Error opening
+> session with libseat" without one. The terminal UI works over SSH.
 
 ### Silent mode (for automation)
 ```bash

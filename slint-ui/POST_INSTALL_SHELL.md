@@ -90,6 +90,13 @@ use the test executable printed by `cargo test --no-run`. Set
 `SLINT_MCP_PORT=9315` for GUI interaction and use actual console key events for
 password entry and shell commands. A fixture is provided in
 `scripts/shell-vm-fixture.sh`; it refuses disks without its dedicated test serial.
+`gen_iso/run-qemu.sh -T disk.qcow2` attaches a second disk with that serial.
+
+Start the test from the VT itself, with its output left on the terminal: the
+shell's prompt and output go to the test's stdout, so redirecting it to a file
+leaves the console blank. The GUI takes the seat through libseat, so the live
+system needs `seatd`, and the test has to run in the VT's login session rather
+than over SSH.
 
 Assert all of these, not only GUI screenshots:
 
