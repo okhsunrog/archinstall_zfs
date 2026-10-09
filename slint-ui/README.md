@@ -161,7 +161,8 @@ cannot run userspace cleanup.
 
 Slint is built from the `feat/linuxkms-integration` branch of the fork, with the
 exact revision recorded in `Cargo.lock`. On top of upstream it carries the
-cursor damage, scrolling and console keyboard changes that are still in review.
+console keyboard change that is still in review.
+Cursor damage fixes and wheel and touchpad scrolling support are now included upstream.
 
 The installer turns on tap-to-click and natural scrolling for every touchpad
 libinput reports, through Slint's libinput event hook. Mouse wheels keep the
