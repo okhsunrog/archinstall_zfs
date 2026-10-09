@@ -159,9 +159,9 @@ SIGINT, SIGTERM, SIGHUP, and SIGQUIT to the GUI. Run this before starting any th
 The supervisor must remain alive for crash recovery; SIGKILL of both processes
 cannot run userspace cleanup.
 
-Slint is built from the `feat/linuxkms-integration` branch of the fork, with the
+Slint is built from the `test/linuxkms-dumb-buffer-padding` branch of the fork, with the
 exact revision recorded in `Cargo.lock`. On top of upstream it carries the
-console keyboard change that is still in review.
+console keyboard change and the framebuffer allocation-padding fix that are still in review.
 Cursor damage fixes and wheel and touchpad scrolling support are now included upstream.
 
 The installer turns on tap-to-click and natural scrolling for every touchpad

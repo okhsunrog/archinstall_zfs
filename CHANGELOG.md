@@ -17,6 +17,8 @@ latest release with fresh packages and ZFS modules, so they are not listed here.
 
 ### Fixed
 
+- The graphical installer could fail to start on display modes such as 1912x1021
+  when the graphics driver added alignment padding to its framebuffer allocation.
 - Killing the graphical installer together with its supervisor left the console
   keyboard switched off; logind now restores it.
 
