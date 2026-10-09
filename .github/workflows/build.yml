@@ -3,6 +3,7 @@ name: Build
 on:
   push:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
 
   # Monthly automated builds (4th of each month at 4:30 AM UTC)
   schedule:
@@ -28,6 +29,7 @@ permissions:
 
 jobs:
   build:
+    if: github.event.action != 'labeled' || github.event.label.name == 'build-iso'
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/${{ github.repository }}/ci:latest
@@ -62,7 +64,13 @@ jobs:
 
   iso:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (github.event.inputs.build_iso == 'true' || github.event.inputs.create_release == 'true'))
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' &&
+        (github.event.inputs.build_iso == 'true' || github.event.inputs.create_release == 'true')) ||
+      (github.event_name == 'pull_request' &&
+        contains(github.event.pull_request.labels.*.name, 'build-iso'))
     runs-on: ubuntu-latest
     strategy:
       # The kernels build independently; one failing must not cancel the other.
@@ -106,13 +114,21 @@ jobs:
           sudo mkarchiso -v -w "gen_iso/workdir" -o gen_iso/out gen_iso/profile_rendered
         fi
 
+    - name: Generate ISO checksums
+      working-directory: gen_iso/out
+      run: sha256sum -- *.iso > SHA256SUMS
+
     # The release job downloads these by name: iso-linux and iso-linux-lts.
     - name: Upload ISO
       uses: actions/upload-artifact@v7
       with:
         name: iso-${{ matrix.kernel }}
-        path: gen_iso/out/*.iso
+        path: |
+          gen_iso/out/*.iso
+          gen_iso/out/SHA256SUMS
         if-no-files-found: error
+        compression-level: 0
+        retention-days: ${{ github.event_name == 'pull_request' && 7 || 0 }}
 
   release:
     needs: [build, iso]
