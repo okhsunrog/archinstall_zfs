@@ -111,6 +111,17 @@ installed hash and login ordering, and verify fallback still reaches the console
 
 ## ISO and USB delivery
 
+Add the `build-iso` label to a pull request to build test ISOs with the same
+LinuxKMS binaries and ISO profile as releases.
+The **Build** workflow uploads `iso-linux` and `iso-linux-lts`, each containing
+an ISO and `SHA256SUMS`, under the run's **Artifacts** section for seven days.
+These builds use the PR's merge commit with its base branch and do not publish
+a release.
+New commits rebuild both images while the label remains; remove and re-add
+the label to trigger another build without a commit.
+Removing the label prevents future automatic ISO builds but does not cancel a
+run already in progress.
+
 ```sh
 just iso-full --mode dkms --kernel linux
 ```
