@@ -159,9 +159,11 @@ SIGINT, SIGTERM, SIGHUP, and SIGQUIT to the GUI. Run this before starting any th
 The supervisor must remain alive for crash recovery; SIGKILL of both processes
 cannot run userspace cleanup.
 
-Slint is built from the `feat/linuxkms-integration` branch of the fork, with the
-exact revision recorded in `Cargo.lock`. On top of upstream it carries the
-cursor damage, scrolling and console keyboard changes that are still in review.
+Slint is built from `master` in the official `slint-ui/slint` repository, with
+the same revision pinned for the runtime and `slint-build` in `Cargo.lock`.
+The console keyboard and signal-restoration fixes, framebuffer allocation-padding
+fix, cursor damage fixes, and scrolling support are included upstream. The
+installer uses `backend-linuxkms-noseat`; it does not enable libseat.
 
 The installer turns on tap-to-click and natural scrolling for every touchpad
 libinput reports, through Slint's libinput event hook. Mouse wheels keep the
