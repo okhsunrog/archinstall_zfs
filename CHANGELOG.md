@@ -7,6 +7,12 @@ latest release with fresh packages and ZFS modules, so they are not listed here.
 
 ## [Unreleased]
 
+### Fixed
+
+- On dracut installs, the initramfs is rebuilt when ZFS modules, microcode,
+  firmware, dracut modules or systemd are updated, not only when the kernel is.
+  Before, those updates only reached the boot image with the next kernel update.
+
 ## [0.5.1] - 2026-09-23
 
 ### Changed

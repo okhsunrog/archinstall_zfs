@@ -14,11 +14,30 @@ compress="cat"
 omit_dracutmodules+=" network btrfs brltty plymouth "
 "#;
 
+/// Named like the hook the `dracut` package ships, so it replaces that one: the
+/// packaged script only acts on kernel targets and silently ignores its other
+/// triggers. The second trigger covers what goes into an image besides the
+/// kernel — ZFS modules (precompiled or DKMS, which is rebuilt by the earlier
+/// 70-dkms-install hook), dracut modules including the ones from `zfs-utils`,
+/// early microcode and firmware, systemd, cryptsetup and lvm.
 const DRACUT_INSTALL_HOOK: &str = r#"[Trigger]
 Type = Path
 Operation = Install
 Operation = Upgrade
 Target = usr/lib/modules/*/pkgbase
+
+[Trigger]
+Type = Path
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Target = usr/lib/modules/*/extramodules/zfs.ko*
+Target = usr/src/*/dkms.conf
+Target = usr/lib/dracut/*
+Target = usr/lib/firmware/*
+Target = usr/lib/systemd/systemd
+Target = usr/bin/cryptsetup
+Target = usr/bin/lvm
 
 [Action]
 Description = Updating linux initcpios (with dracut!)...
@@ -40,16 +59,35 @@ Exec = /usr/local/bin/dracut-remove.sh
 NeedsTargets
 "#;
 
+/// A kernel whose own package changed gets its image built. Any other target
+/// rebuilds every image that already exists: a kernel the installer left
+/// without one (no ZFS module, see [`generate`]) must not gain a boot entry.
 const DRACUT_INSTALL_SCRIPT: &str = r#"#!/usr/bin/env bash
+shopt -s nullglob
 args=('--force' '--no-hostonly-cmdline')
+declare -A kernels
+refresh=0
 while read -r line; do
     if [[ "$line" == 'usr/lib/modules/'+([^/])'/pkgbase' ]]; then
-        read -r pkgbase < "/${line}"
-        kver="${line#'usr/lib/modules/'}"
-        kver="${kver%'/pkgbase'}"
-        install -Dm0644 "/${line%'/pkgbase'}/vmlinuz" "/boot/vmlinuz-${pkgbase}"
-        dracut "${args[@]}" "/boot/initramfs-${pkgbase}.img" --kver "$kver"
+        kernels["$line"]=1
+    else
+        refresh=1
     fi
+done
+if (( refresh )); then
+    for marker in /usr/lib/modules/*/pkgbase; do
+        read -r pkgbase < "$marker"
+        if [[ -e "/boot/initramfs-${pkgbase}.img" ]]; then
+            kernels["${marker#/}"]=1
+        fi
+    done
+fi
+for line in "${!kernels[@]}"; do
+    read -r pkgbase < "/${line}"
+    kver="${line#'usr/lib/modules/'}"
+    kver="${kver%'/pkgbase'}"
+    install -Dm0644 "/${line%'/pkgbase'}/vmlinuz" "/boot/vmlinuz-${pkgbase}"
+    dracut "${args[@]}" "/boot/initramfs-${pkgbase}.img" --kver "$kver"
 done
 "#;
 
@@ -239,6 +277,26 @@ mod tests {
             fs::read_to_string(dir.path().join("usr/local/bin/dracut-install.sh")).unwrap();
         assert!(script.contains("vmlinuz"));
         assert!(script.contains("pkgbase"));
+    }
+
+    #[test]
+    fn install_hook_fires_for_everything_that_goes_into_the_image() {
+        // A ZFS module, microcode or systemd update without a kernel update
+        // otherwise leaves the old copy in the image until the next kernel.
+        for target in [
+            "usr/lib/modules/*/pkgbase",
+            "usr/lib/modules/*/extramodules/zfs.ko*",
+            "usr/src/*/dkms.conf",
+            "usr/lib/dracut/*",
+            "usr/lib/firmware/*",
+            "usr/lib/systemd/systemd",
+        ] {
+            assert!(
+                DRACUT_INSTALL_HOOK.contains(&format!("Target = {target}\n")),
+                "missing trigger {target}"
+            );
+        }
+        assert!(DRACUT_INSTALL_SCRIPT.contains("/boot/initramfs-${pkgbase}.img\" ]]"));
     }
 
     #[test]
