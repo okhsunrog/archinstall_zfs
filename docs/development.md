@@ -68,12 +68,13 @@ and accurate commands, not a new ISO. Shared UI controls need checks of their
 consumers, not just the page edited. A boot helper needs failure-path tests and
 a boot check, not only Rust tests. Do not treat ignored hardware tests as passed.
 
-## Slint fork and release builds
+## Slint dependency and release builds
 
-The GUI runtime and `slint-build` use the same Slint fork branch, currently
-`feat/linuxkms-integration`. Read their manifests and the git source revision
-in `Cargo.lock` before updating or diagnosing backend behavior. An upstream
-branch moving does not change the revision used by a locked build.
+The GUI runtime and `slint-build` use `master` from the official
+`https://github.com/slint-ui/slint.git` repository. Read their manifests and
+the git source revision in `Cargo.lock` before updating or diagnosing backend
+behavior. Upstream changes are picked up only when the lockfile is updated;
+locked builds use the recorded revision.
 
 Keep mock/MCP builds separate from production artifacts. Before distributing a
 binary, run `just cargo-build` with the default LinuxKMS/iwd features. Do not copy

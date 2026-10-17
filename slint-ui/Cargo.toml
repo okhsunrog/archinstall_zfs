@@ -49,7 +49,7 @@ input = { version = "0.10", default-features = false, optional = true }
 nix.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-slint = { git = "https://github.com/okhsunrog/slint.git", default-features = false, features = ["std", "compat-1-2"], version = "1.18.0", branch = "feat/linuxkms-integration" }
+slint = { git = "https://github.com/slint-ui/slint.git", default-features = false, features = ["std", "compat-1-2"], version = "1.19.0", branch = "master" }
 sublime_fuzzy.workspace = true
 tempfile = "3.27.0"
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
@@ -61,4 +61,4 @@ zfskit = "0.2.2"
 zxcvbn.workspace = true
 
 [build-dependencies]
-slint-build = { git = "https://github.com/okhsunrog/slint.git", version = "1.18.0", branch = "feat/linuxkms-integration" }
+slint-build = { git = "https://github.com/slint-ui/slint.git", version = "1.19.0", branch = "master" }

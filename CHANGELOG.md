@@ -7,11 +7,20 @@ latest release with fresh packages and ZFS modules, so they are not listed here.
 
 ## [Unreleased]
 
+### Changed
+
+- The graphical installer now uses upstream Slint master with the merged
+  console-input and framebuffer padding fixes.
+
 ### Fixed
 
 - On dracut installs, the initramfs is rebuilt when ZFS modules, microcode,
   firmware, dracut modules or systemd are updated, not only when the kernel is.
   Before, those updates only reached the boot image with the next kernel update.
+- The graphical installer could fail to start on display modes such as 1912x1021
+  when the graphics driver added alignment padding to its framebuffer allocation.
+- The graphical installer restores console keyboard input on termination signals.
+- Updated TLS and QUIC dependencies to include their latest security fixes.
 
 ## [0.5.1] - 2026-09-23
 
