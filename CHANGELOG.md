@@ -10,13 +10,16 @@ latest release with fresh packages and ZFS modules, so they are not listed here.
 ### Changed
 
 - Updated the graphical installer's Slint runtime to the latest upstream revision,
-  retaining the local console-input fix.
+  retaining the framebuffer padding fix and updated console-input restoration.
 - The graphical installer takes the screen and keyboard through libseat and
   logind. Start it from a console login rather than over SSH; on the official Arch
   ISO, install `seatd` along with its other runtime dependencies.
 
 ### Fixed
 
+- Updated TLS and QUIC dependencies to include their latest security fixes.
+- The graphical installer could fail to start on display modes such as 1912x1021
+  when the graphics driver added alignment padding to its framebuffer allocation.
 - Killing the graphical installer together with its supervisor left the console
   keyboard switched off; logind now restores it.
 
