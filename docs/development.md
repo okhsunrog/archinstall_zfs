@@ -71,7 +71,7 @@ a boot check, not only Rust tests. Do not treat ignored hardware tests as passed
 ## Slint fork and release builds
 
 The GUI runtime and `slint-build` use the same Slint fork branch, currently
-`test/linuxkms-dumb-buffer-padding`. Read their manifests and the git source revision
+`feat/linuxkms-integration`. Read their manifests and the git source revision
 in `Cargo.lock` before updating or diagnosing backend behavior. An upstream
 branch moving does not change the revision used by a locked build.
 
